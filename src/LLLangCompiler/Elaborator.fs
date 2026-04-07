@@ -250,9 +250,70 @@ let private checkDecls (m: LLModule) (env: TypeEnv) : LLError list =
     m.Decls
     |> List.collect (fun (decl, _isExported) -> checkDecl decl env)
 
+/// Recursively find all EMatch branch lists within an expression.
+/// Does NOT recurse into ELam (separate scope).
+let rec private collectMatches (expr: Expr) : (Pattern * Expr) list list =
+    match expr with
+    | EMatch(branches) ->
+        let nested = branches |> List.collect (fun (_, e) -> collectMatches e)
+        branches :: nested
+    | EApp(f, arg) ->
+        collectMatches f @ collectMatches arg
+    | EIf(cond, t, e) ->
+        collectMatches cond @ collectMatches t @ collectMatches e
+    | ELet(_, e, bodyOpt) ->
+        let bodyMatches =
+            match bodyOpt with
+            | Some body -> collectMatches body
+            | None -> []
+        collectMatches e @ bodyMatches
+    | EPipe(e, f) ->
+        collectMatches e @ collectMatches f
+    | EList(elems) | ETuple(elems) ->
+        elems |> List.collect collectMatches
+    | ETagged(e, _) -> collectMatches e
+    | ELam _ | ELit _ | EVar _ | ECon _ -> []
+
+/// Pass 3: exhaustiveness check for match expressions.
+/// For each DFn whose first parameter type is a named sum type,
+/// verify that every match in the body covers all constructors.
+let private exhaustivenessCheck (m: LLModule) (_env: TypeEnv) : LLError list =
+    // Build map: typeName → constructor name list
+    let typeToCtors =
+        m.Decls
+        |> List.choose (fun (decl, _) ->
+            match decl with
+            | DType(typeName, _, TBSum ctors) ->
+                Some (typeName, ctors |> List.map fst)
+            | _ -> None)
+        |> Map.ofList
+
+    [ for (decl, _) in m.Decls do
+        match decl with
+        | DFn(sigRecord, body) when not sigRecord.Params.IsEmpty ->
+            let (_, firstParamType) = sigRecord.Params[0]
+            match firstParamType with
+            | TyName typeName when Map.containsKey typeName typeToCtors ->
+                let requiredCtors = typeToCtors[typeName]
+                let matchBlocks = collectMatches body
+                for branches in matchBlocks do
+                    let coveredCtors =
+                        branches
+                        |> List.choose (fun (pat, _) ->
+                            match pat with
+                            | PCon(name, _) -> Some name
+                            | _ -> None)
+                    for c in requiredCtors do
+                        if not (List.contains c coveredCtors) then
+                            yield e003 0 0 typeName c
+            | _ -> ()
+        | _ -> () ]
+
 /// Elaborate an LLModule: build TypeEnv, check for errors.
 /// Returns Ok TypeEnv on success, Error errors on any violation.
 let elaborate (m: LLModule) : Result<TypeEnv, LLError list> =
     let env = collectDecls m
-    let errors = checkDecls m env
+    let checkErrors = checkDecls m env
+    let exhaustErrors = exhaustivenessCheck m env
+    let errors = checkErrors @ exhaustErrors
     if errors.IsEmpty then Ok env else Error errors

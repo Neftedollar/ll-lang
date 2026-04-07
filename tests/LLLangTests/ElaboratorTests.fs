@@ -129,3 +129,20 @@ let ``no error when correct tag applied`` () =
 let ``no error when TyVar param accepts anything`` () =
     let src = "module M\nfn double(x Int) = x\nlet y = double 5"
     Assert.Empty(elab src)
+
+// --- E003: Exhaustiveness ---
+
+[<Fact>]
+let ``E003 nonexhaustive match missing one branch`` () =
+    let src = "module M\ntype C = A | B\nfn f(x C) Int =\n  | A -> 1"
+    let errs = elab src
+    Assert.Contains(E003, errs |> List.map _.Code)
+
+[<Fact>]
+let ``no E003 when all constructors covered`` () =
+    let src = "module M\ntype C = A | B\nfn f(x C) Int =\n  | A -> 1\n  | B -> 2"
+    Assert.Empty(elab src)
+
+[<Fact>]
+let ``no E003 when type has no constructors`` () =
+    Assert.Empty(elab "module M\nlet x = 42")
