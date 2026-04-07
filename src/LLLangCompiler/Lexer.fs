@@ -125,7 +125,7 @@ let tokenize (source: string) : Result<Tok list, string> =
                 while pos < source.Length && Char.IsDigit(source[pos]) do advance()
                 result.Add({ Token = FloatLit (Double.Parse(source[start..pos-1])); Line = l; Col = c2 })
             else
-                result.Add({ Token = IntLit (Int64.Parse(source[start..pos-1])); Line = l; Col = c2 })
+                result.Add { Token = IntLit (Int64.Parse(source[start..pos-1])); Line = l; Col = c2 }
             scan()
         | c when Char.IsLetter c || c = '_' ->
             let l, c2 = line, col()
@@ -136,7 +136,7 @@ let tokenize (source: string) : Result<Tok list, string> =
                 match Map.tryFind s keywords with
                 | Some kw -> kw
                 | None -> if Char.IsUpper source[start] then TypeId s else Ident s
-            result.Add({ Token = tok; Line = l; Col = c2 })
+            result.Add { Token = tok; Line = l; Col = c2 }
             scan()
         | _ -> advance(); scan()
 
@@ -144,8 +144,8 @@ let tokenize (source: string) : Result<Tok list, string> =
         scan()
         while indentStack.Count > 1 do
             indentStack.Pop() |> ignore
-            result.Add({ Token = Dedent; Line = line; Col = 1 })
-        result.Add({ Token = Eof; Line = line; Col = col() })
+            result.Add { Token = Dedent; Line = line; Col = 1 }
+        result.Add { Token = Eof; Line = line; Col = col() }
         Ok (List.ofSeq result)
     with ex ->
         Error ex.Message

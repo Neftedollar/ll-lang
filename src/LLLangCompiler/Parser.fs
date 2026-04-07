@@ -203,6 +203,456 @@ let parseExpr (tokens: Tok list) : Result<Expr * Tok list, string> =
     | Error e -> Error e
     | Ok expr -> Ok (expr, ctx.Tokens |> Array.skip ctx.Pos |> Array.toList)
 
-/// Parse a full module. Stub — implemented in Task 7.
+// ---- Type expression parser -----------------------------------------
+
+let private parseTypeExpr (c: Ctx) : Result<TypeExpr, string> =
+    let rec parseBase () =
+        match curTok c with
+        | TypeId name -> advance c; Ok (TyName name)
+        | Ident name -> advance c; Ok (TyVar name)
+        | LParen ->
+            advance c
+            match parseTypeExprTop () with
+            | Error e -> Error e
+            | Ok te ->
+                match skip c RParen with
+                | Error e -> Error e
+                | Ok () -> Ok te
+        | t -> Error $"Expected type at {(cur c).Line}:{(cur c).Col}, got {t}"
+
+    and parseApp () =
+        match parseBase () with
+        | Error e -> Error e
+        | Ok ty ->
+            let mutable result = ty
+            let mutable cont = true
+            while cont && curTok c = LBrack do
+                let saved = c.Pos
+                advance c
+                match parseTypeExprTop () with
+                | Ok arg ->
+                    match skip c RBrack with
+                    | Ok () -> result <- TyApp(result, arg)
+                    | Error _ -> c.Pos <- saved; cont <- false
+                | Error _ -> c.Pos <- saved; cont <- false
+            Ok result
+
+    and parseTypeExprTop () =
+        match parseApp () with
+        | Error e -> Error e
+        | Ok left ->
+            if curTok c = Arrow then
+                advance c
+                match parseTypeExprTop () with
+                | Ok right -> Ok (TyFn(left, right))
+                | Error e -> Error e
+            else Ok left
+
+    parseTypeExprTop ()
+
+// ---- Pattern parser --------------------------------------------------
+
+let private parsePattern (c: Ctx) : Result<Pattern, string> =
+    let rec parsePat () =
+        match curTok c with
+        | Underscore -> advance c; Ok PWild
+        | Ident name -> advance c; Ok (PVar name)
+        | IntLit n -> advance c; Ok (PLit (LInt n))
+        | FloatLit f -> advance c; Ok (PLit (LFloat f))
+        | StrLit s -> advance c; Ok (PLit (LStr s))
+        | KwTrue -> advance c; Ok (PLit (LBool true))
+        | KwFalse -> advance c; Ok (PLit (LBool false))
+        | TypeId name ->
+            advance c
+            // collect subpatterns (atoms only, not constructors with args)
+            let args = ResizeArray<Pattern>()
+            let mutable cont = true
+            while cont do
+                match curTok c with
+                | Ident n -> args.Add(PVar n); advance c
+                | Underscore -> args.Add(PWild); advance c
+                | IntLit n -> args.Add(PLit (LInt n)); advance c
+                | FloatLit f -> args.Add(PLit (LFloat f)); advance c
+                | StrLit s -> args.Add(PLit (LStr s)); advance c
+                | KwTrue -> args.Add(PLit (LBool true)); advance c
+                | KwFalse -> args.Add(PLit (LBool false)); advance c
+                | LParen ->
+                    advance c
+                    match parsePat () with
+                    | Ok p ->
+                        match skip c RParen with
+                        | Ok () -> args.Add(p)
+                        | Error _ -> cont <- false
+                    | Error _ -> cont <- false
+                | _ -> cont <- false
+            Ok (PCon(name, List.ofSeq args))
+        | LParen ->
+            advance c
+            match parsePat () with
+            | Error e -> Error e
+            | Ok p ->
+                match skip c RParen with
+                | Error e -> Error e
+                | Ok () -> Ok p
+        | t -> Error $"Expected pattern, got {t}"
+    parsePat ()
+
+// ---- Match expression parser ----------------------------------------
+
+let private parseMatchBranches (c: Ctx) : Result<Expr, string> =
+    // We're inside an indented block already (or at top-level of fn body with |)
+    let branches = ResizeArray<Pattern * Expr>()
+    let mutable cont = true
+    while cont && curTok c = Bar do
+        advance c  // consume |
+        match parsePattern c with
+        | Error e -> Error e |> ignore; cont <- false
+        | Ok pat ->
+            match skip c Arrow with
+            | Error e -> Error e |> ignore; cont <- false
+            | Ok () ->
+                match parseExprInner c with
+                | Error e -> Error e |> ignore; cont <- false
+                | Ok expr ->
+                    branches.Add((pat, expr))
+                    skipNewlines c
+    if branches.Count > 0 then Ok (EMatch (List.ofSeq branches))
+    else Error "Expected match branches"
+
+// ---- Declaration parser ---------------------------------------------
+
+let private parseParam (c: Ctx) : Result<Param, string> =
+    match skip c LParen with
+    | Error e -> Error e
+    | Ok () ->
+        match curTok c with
+        | Ident name ->
+            advance c
+            match parseTypeExpr c with
+            | Error e -> Error e
+            | Ok ty ->
+                match skip c RParen with
+                | Error e -> Error e
+                | Ok () -> Ok (name, ty)
+        | t -> Error $"Expected param name, got {t}"
+
+let private parseConstraint (c: Ctx) : Result<Constraint, string> =
+    match skip c LBrack with
+    | Error e -> Error e
+    | Ok () ->
+        match curTok c with
+        | Ident v ->
+            advance c
+            match skip c Colon with
+            | Error e -> Error e
+            | Ok () ->
+                match curTok c with
+                | TypeId name ->
+                    advance c
+                    match skip c RBrack with
+                    | Error e -> Error e
+                    | Ok () -> Ok (v, name)
+                | t -> Error $"Expected trait name in constraint, got {t}"
+        | t -> Error $"Expected type var in constraint, got {t}"
+
+let private parseFnSig (c: Ctx) : Result<FnSig, string> =
+    match curTok c with
+    | Ident name | TypeId name ->
+        advance c
+        let constraints = ResizeArray<Constraint>()
+        let mutable cont = true
+        while cont && curTok c = LBrack do
+            let saved = c.Pos
+            match parseConstraint c with
+            | Ok cn -> constraints.Add(cn)
+            | Error _ -> c.Pos <- saved; cont <- false
+        let parms = ResizeArray<Param>()
+        while curTok c = LParen do
+            let saved = c.Pos
+            match parseParam c with
+            | Ok p -> parms.Add(p)
+            | Error _ -> c.Pos <- saved
+        let retType =
+            match curTok c with
+            | TypeId _ | Ident _ | LParen ->
+                let saved = c.Pos
+                match parseTypeExpr c with
+                | Ok te -> Some te
+                | Error _ -> c.Pos <- saved; None
+            | _ -> None
+        Ok { Name = name; Constraints = List.ofSeq constraints; Params = List.ofSeq parms; ReturnType = retType }
+    | t -> Error $"Expected function name, got {t}"
+
+let private parseFnBody (c: Ctx) : Result<Expr, string> =
+    // fn body: either direct expr, or indented block, or match branches starting with |
+    skipNewlines c
+    match curTok c with
+    | Bar ->
+        // Pattern match branches at top level of fn
+        parseMatchBranches c
+    | Indent ->
+        advance c  // consume INDENT
+        skipNewlines c
+        let result =
+            match curTok c with
+            | Bar -> parseMatchBranches c
+            | _ -> parseExprInner c
+        skipNewlines c
+        skip c Dedent |> ignore
+        result
+    | _ -> parseExprInner c
+
+let private parseTypeBody (c: Ctx) : Result<TypeBody, string> =
+    match curTok c with
+    | TypeId _ ->
+        // Sum type: Ctor1 args | Ctor2 args | ...
+        let ctors = ResizeArray<TypeIdent * TypeExpr list>()
+        let mutable cont = true
+        while cont do
+            match curTok c with
+            | TypeId name ->
+                advance c
+                let args = ResizeArray<TypeExpr>()
+                let mutable argCont = true
+                while argCont do
+                    match curTok c with
+                    | TypeId _ | Ident _ | LParen ->
+                        let saved = c.Pos
+                        match parseTypeExpr c with
+                        | Ok te -> args.Add(te)
+                        | Error _ -> c.Pos <- saved; argCont <- false
+                    | _ -> argCont <- false
+                ctors.Add((name, List.ofSeq args))
+                if curTok c = Bar then advance c
+                else cont <- false
+            | _ -> cont <- false
+        if ctors.Count > 0 then Ok (TBSum (List.ofSeq ctors))
+        else Error "Expected type body"
+    | Ident fieldName ->
+        // Could be record (field Type, field Type) or wrapped/newtype
+        let saved = c.Pos
+        advance c
+        match curTok c with
+        | TypeId _ | Ident _ | LParen ->
+            // Looks like a record field: name Type
+            match parseTypeExpr c with
+            | Ok ty ->
+                let fields = ResizeArray<Ident * TypeExpr>()
+                fields.Add((fieldName, ty))
+                while curTok c = Comma do
+                    advance c
+                    match curTok c with
+                    | Ident fn ->
+                        advance c
+                        match parseTypeExpr c with
+                        | Ok ft -> fields.Add((fn, ft))
+                        | Error _ -> ()
+                    | _ -> ()
+                Ok (TBRecord (List.ofSeq fields))
+            | Error _ ->
+                c.Pos <- saved
+                match parseTypeExpr c with
+                | Ok te -> Ok (TBWrapped te)
+                | Error e -> Error e
+        | _ ->
+            c.Pos <- saved
+            match parseTypeExpr c with
+            | Ok te -> Ok (TBWrapped te)
+            | Error e -> Error e
+    | _ ->
+        match parseTypeExpr c with
+        | Ok te -> Ok (TBWrapped te)
+        | Error e -> Error e
+
+let private parseDecl (c: Ctx) : Result<Decl, string> =
+    skipNewlines c
+    match curTok c with
+    | KwFn ->
+        advance c
+        match parseFnSig c with
+        | Error e -> Error e
+        | Ok sig' ->
+            match skip c Eq with
+            | Error e -> Error e
+            | Ok () ->
+                match parseFnBody c with
+                | Ok expr -> Ok (DFn(sig', expr))
+                | Error e -> Error e
+    | KwLet ->
+        advance c
+        match curTok c with
+        | Ident name ->
+            advance c
+            match skip c Eq with
+            | Error e -> Error e
+            | Ok () ->
+                match parseExprInner c with
+                | Ok expr -> Ok (DLet(name, expr))
+                | Error e -> Error e
+        | t -> Error $"Expected identifier after 'let', got {t}"
+    | KwType ->
+        advance c
+        match curTok c with
+        | TypeId name ->
+            advance c
+            let parms = ResizeArray<TypeParam>()
+            let mutable cont = true
+            while cont do
+                match curTok c with
+                | Ident p -> parms.Add(TPBare p); advance c
+                | LBrack ->
+                    let saved = c.Pos
+                    advance c
+                    match curTok c with
+                    | Ident p ->
+                        advance c
+                        if curTok c = RBrack then
+                            advance c
+                            parms.Add(TPPhantom p)
+                        else
+                            c.Pos <- saved; cont <- false
+                    | _ -> c.Pos <- saved; cont <- false
+                | _ -> cont <- false
+            match skip c Eq with
+            | Error e -> Error e
+            | Ok () ->
+                match parseTypeBody c with
+                | Ok body -> Ok (DType(name, List.ofSeq parms, body))
+                | Error e -> Error e
+        | t -> Error $"Expected type name, got {t}"
+    | KwTag ->
+        advance c
+        match curTok c with
+        | TypeId name -> advance c; Ok (DTag name)
+        | Ident name -> advance c; Ok (DTag name)  // tag m, tag s (lowercase)
+        | t -> Error $"Expected tag name, got {t}"
+    | KwUnit ->
+        advance c
+        match curTok c with
+        | TypeId name -> advance c; Ok (DUnit name)
+        | Ident name -> advance c; Ok (DUnit name)
+        | t -> Error $"Expected unit name, got {t}"
+    | KwTrait ->
+        advance c
+        match curTok c with
+        | TypeId name ->
+            advance c
+            let tvars = ResizeArray<Ident>()
+            let mutable cont = true
+            while cont do
+                match curTok c with
+                | Ident v -> tvars.Add(v); advance c
+                | _ -> cont <- false
+            match skip c Eq with
+            | Error e -> Error e
+            | Ok () ->
+                skipNewlines c
+                match skip c Indent with
+                | Error e -> Error e
+                | Ok () ->
+                    let sigs = ResizeArray<FnSig>()
+                    skipNewlines c
+                    while curTok c <> Dedent && curTok c <> Eof do
+                        skipNewlines c
+                        if curTok c = Dedent || curTok c = Eof then ()
+                        else
+                            match skip c KwFn with
+                            | Error _ -> ()
+                            | Ok () ->
+                                match parseFnSig c with
+                                | Ok s -> sigs.Add(s)
+                                | Error _ -> ()
+                        skipNewlines c
+                    skip c Dedent |> ignore
+                    Ok (DTrait(name, List.ofSeq tvars, List.ofSeq sigs))
+        | t -> Error $"Expected trait name, got {t}"
+    | KwImpl ->
+        advance c
+        match curTok c with
+        | TypeId traitName ->
+            advance c
+            match curTok c with
+            | TypeId typeName ->
+                advance c
+                match skip c Eq with
+                | Error e -> Error e
+                | Ok () ->
+                    skipNewlines c
+                    match skip c Indent with
+                    | Error e -> Error e
+                    | Ok () ->
+                        let impls = ResizeArray<FnSig * Expr>()
+                        skipNewlines c
+                        while curTok c <> Dedent && curTok c <> Eof do
+                            skipNewlines c
+                            if curTok c = Dedent || curTok c = Eof then ()
+                            else
+                                match skip c KwFn with
+                                | Error _ -> advance c  // skip bad token
+                                | Ok () ->
+                                    match parseFnSig c with
+                                    | Error _ -> ()
+                                    | Ok sig' ->
+                                        match skip c Eq with
+                                        | Error _ -> ()
+                                        | Ok () ->
+                                            match parseFnBody c with
+                                            | Ok expr -> impls.Add((sig', expr))
+                                            | Error _ -> ()
+                            skipNewlines c
+                        skip c Dedent |> ignore
+                        Ok (DImpl(traitName, typeName, List.ofSeq impls))
+            | t -> Error $"Expected type name in impl, got {t}"
+        | t -> Error $"Expected trait name in impl, got {t}"
+    | t -> Error $"Unexpected token {t} at {(cur c).Line}:{(cur c).Col}"
+
+// ---- Module parser --------------------------------------------------
+
+/// Parse a full ll-lang module from a token list.
 let parseModule (tokens: Tok list) : Result<LLModule, string> =
-    Error "parseModule not yet implemented"
+    let c = { Tokens = Array.ofList tokens; Pos = 0 }
+    skipNewlines c
+    match skip c KwModule with
+    | Error e -> Error e
+    | Ok () ->
+        let path = ResizeArray<string>()
+        let mutable cont = true
+        while cont do
+            match curTok c with
+            | TypeId seg -> path.Add(seg); advance c
+            | Ident seg -> path.Add(seg); advance c
+            | _ -> cont <- false
+            if cont then
+                if curTok c = Dot then advance c
+                else cont <- false
+        skipNewlines c
+        let imports = ResizeArray<string list>()
+        while curTok c = KwImport do
+            advance c
+            let parts = ResizeArray<string>()
+            let mutable ic = true
+            while ic do
+                match curTok c with
+                | TypeId seg -> parts.Add(seg); advance c
+                | Ident seg -> parts.Add(seg); advance c
+                | _ -> ic <- false
+                if ic then
+                    if curTok c = Dot then advance c
+                    else ic <- false
+            imports.Add(List.ofSeq parts)
+            skipNewlines c
+        let decls = ResizeArray<Decl * bool>()
+        while curTok c <> Eof do
+            skipNewlines c
+            if curTok c = Eof then ()
+            else
+                let exported = curTok c = KwExport
+                if exported then advance c
+                match parseDecl c with
+                | Ok d -> decls.Add((d, exported)); skipNewlines c
+                | Error _ -> advance c  // skip on error to continue
+        Ok {
+            Path = List.ofSeq path
+            Imports = List.ofSeq imports
+            Decls = List.ofSeq decls
+        }

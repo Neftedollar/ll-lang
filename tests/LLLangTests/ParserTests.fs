@@ -112,3 +112,128 @@ let ``parse tagged literal: "id"[UserId]`` () =
 [<Fact>]
 let ``parse addition`` () =
     Assert.Equal(EApp(EApp(EVar "+", EVar "a"), EVar "b"), parseExprStr "a + b")
+
+// --- Declaration tests ---
+
+[<Fact>]
+let ``parse simple fn declaration`` () =
+    let src = "module M\nfn double(x Int) = x"
+    let m = parseModuleStr src
+    Assert.Equal(1, m.Decls.Length)
+    match fst m.Decls[0] with
+    | DFn(sig', _) -> Assert.Equal("double", sig'.Name)
+    | d -> failwith $"Expected DFn, got {d}"
+
+[<Fact>]
+let ``parse fn with two params`` () =
+    let src = "module M\nfn add(a Int)(b Int) = a"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(sig', _) -> Assert.Equal(2, sig'.Params.Length)
+    | d -> failwith $"Expected DFn, got {d}"
+
+[<Fact>]
+let ``parse top-level let`` () =
+    let src = "module M\nlet pi = 3.14"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DLet("pi", ELit (LFloat _)) -> ()
+    | d -> failwith $"Expected DLet pi, got {d}"
+
+[<Fact>]
+let ``parse sum type`` () =
+    let src = "module M\ntype Shape = Circle Float | Empty"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DType("Shape", [], TBSum ctors) -> Assert.Equal(2, ctors.Length)
+    | d -> failwith $"Expected DType Shape, got {d}"
+
+[<Fact>]
+let ``parse tag declaration`` () =
+    let src = "module M\ntag UserId"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DTag "UserId" -> ()
+    | d -> failwith $"Expected DTag UserId, got {d}"
+
+[<Fact>]
+let ``parse import`` () =
+    let src = "module M\nimport Std.List"
+    let m = parseModuleStr src
+    Assert.Equal<string list list>([["Std"; "List"]], m.Imports)
+
+[<Fact>]
+let ``parse module path`` () =
+    let src = "module Examples.Basics"
+    let m = parseModuleStr src
+    Assert.Equal<string list>(["Examples"; "Basics"], m.Path)
+
+// --- Integration: valid example corpus ---
+
+let private readExample name =
+    let path = System.IO.Path.Combine(__SOURCE_DIRECTORY__, "../../spec/examples/valid", name)
+    System.IO.File.ReadAllText(path)
+
+[<Fact>]
+let ``parse 01-basics.lll`` () =
+    let src = readExample "01-basics.lll"
+    let result = tokenize src |> Result.bind parseModule
+    match result with
+    | Ok _ -> ()
+    | Error e -> failwith $"Failed to parse 01-basics.lll: {e}"
+
+[<Fact>]
+let ``parse 02-adts.lll`` () =
+    let src = readExample "02-adts.lll"
+    let result = tokenize src |> Result.bind parseModule
+    match result with
+    | Ok _ -> ()
+    | Error e -> failwith $"Failed to parse 02-adts.lll: {e}"
+
+[<Fact>]
+let ``parse 03-tags.lll`` () =
+    let src = readExample "03-tags.lll"
+    let result = tokenize src |> Result.bind parseModule
+    match result with
+    | Ok _ -> ()
+    | Error e -> failwith $"Failed to parse 03-tags.lll: {e}"
+
+[<Fact>]
+let ``parse 04-traits.lll`` () =
+    let src = readExample "04-traits.lll"
+    let result = tokenize src |> Result.bind parseModule
+    match result with
+    | Ok _ -> ()
+    | Error e -> failwith $"Failed to parse 04-traits.lll: {e}"
+
+[<Fact>]
+let ``parse 05-modules.lll`` () =
+    let src = readExample "05-modules.lll"
+    let result = tokenize src |> Result.bind parseModule
+    match result with
+    | Ok _ -> ()
+    | Error e -> failwith $"Failed to parse 05-modules.lll: {e}"
+
+// --- Integration: invalid examples must PARSE but type-check fails ---
+// (At this stage we only have a parser, not a type checker.
+//  Invalid examples are syntactically valid, so they should parse without error.)
+
+let private readInvalidExample name =
+    let path = System.IO.Path.Combine(__SOURCE_DIRECTORY__, "../../spec/examples/invalid", name)
+    System.IO.File.ReadAllText(path)
+
+[<Fact>]
+let ``E001 parses (type error detected later)`` () =
+    let src = readInvalidExample "E001-type-mismatch.lll"
+    let result = tokenize src |> Result.bind parseModule
+    match result with
+    | Ok _ -> ()
+    | Error e -> failwith $"E001 should parse cleanly (type error, not syntax): {e}"
+
+[<Fact>]
+let ``E002 parses (unbound var detected later)`` () =
+    let src = readInvalidExample "E002-unbound-var.lll"
+    let result = tokenize src |> Result.bind parseModule
+    match result with
+    | Ok _ -> ()
+    | Error e -> failwith $"E002 should parse cleanly: {e}"
