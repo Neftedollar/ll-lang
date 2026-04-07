@@ -1,0 +1,57 @@
+(* ============================================================
+   ll-lang Grammar — EBNF Reference
+   File extension: .lll
+   Encoding: UTF-8, ASCII-only operators
+   Indentation: significant (2 or 4 spaces, consistent per file)
+   Comments: -- to end of line
+   ============================================================ *)
+
+(* --- Whitespace & Comments ---------------------------------- *)
+WS      ::= (' ' | '\t')+
+NEWLINE ::= '\n' | '\r\n'
+COMMENT ::= '--' [^\n]*
+INDENT  ::= synthetic token — emitted when indentation increases
+DEDENT  ::= synthetic token — emitted when indentation decreases
+
+(* --- Keywords ----------------------------------------------- *)
+KW ::= "fn" | "let" | "type" | "tag" | "unit"
+     | "trait" | "impl" | "import" | "export" | "module"
+     | "if" | "then" | "else" | "true" | "false"
+
+(* --- Identifiers -------------------------------------------- *)
+(* value identifiers: lowercase start *)
+IDENT  ::= [a-z_][a-zA-Z0-9_]*
+
+(* type/constructor/module identifiers: uppercase start *)
+TYPEID ::= [A-Z][a-zA-Z0-9_]*
+
+(* --- Literals ----------------------------------------------- *)
+INT_LIT   ::= [0-9]+
+FLOAT_LIT ::= [0-9]+ '.' [0-9]+
+STR_LIT   ::= '"' ( [^"\\] | '\\' . )* '"'
+BOOL_LIT  ::= "true" | "false"
+
+(* --- Operators & Punctuation -------------------------------- *)
+OP_PIPE    ::= "->"
+OP_LAMBDA  ::= "\"
+OP_DOT     ::= "."
+OP_COMMA   ::= ","
+OP_COLON   ::= ":"
+OP_EQ      ::= "="
+OP_ARROW   ::= "->"       (* same as pipe — context disambiguates *)
+OP_BAR     ::= "|"
+OP_LBRACK  ::= "["
+OP_RBRACK  ::= "]"
+OP_LPAREN  ::= "("
+OP_RPAREN  ::= ")"
+OP_PLUS    ::= "+"
+OP_MINUS   ::= "-"
+OP_STAR    ::= "*"
+OP_SLASH   ::= "/"
+OP_CARET   ::= "^"
+OP_LT      ::= "<"
+OP_GT      ::= ">"
+OP_LE      ::= "<="
+OP_GE      ::= ">="
+OP_EQ2     ::= "=="
+OP_NEQ     ::= "!="
