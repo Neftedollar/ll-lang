@@ -105,6 +105,51 @@ let private collectDecls (m: LLModule) : TypeEnv =
 
     env
 
+/// Normalize a type annotation that the parser may represent as either
+/// TyApp(base, TyName tag) or TyTagged(base, UName tag).
+/// Returns Some(base, tagName) if the type is a tagged/app form, else None.
+let private asTagged (ty: TypeExpr) : (TypeExpr * string) option =
+    match ty with
+    | TyTagged(base', UName tag) -> Some(base', tag)
+    | TyApp(base', TyName tag)   -> Some(base', tag)
+    | TyApp(base', TyVar tag)    -> Some(base', tag)
+    | _                          -> None
+
+/// Structural equality for types. TyVar matches anything (wildcard).
+/// Treats TyApp(b, TyName t) and TyTagged(b, UName t) as equivalent.
+let rec private tyEqual (a: TypeExpr) (b: TypeExpr) : bool =
+    match a, b with
+    | TyVar _, _          -> true
+    | _, TyVar _          -> true
+    | TyName x, TyName y  -> x = y
+    | TyTagged(b1, u1), TyTagged(b2, u2) -> tyEqual b1 b2 && u1 = u2
+    | TyFn(a1, r1), TyFn(a2, r2)         -> tyEqual a1 a2 && tyEqual r1 r2
+    | _ ->
+        // Normalize both sides and compare
+        match asTagged a, asTagged b with
+        | Some(ba, ta), Some(bb, tb) -> tyEqual ba bb && ta = tb
+        | _ -> false
+
+/// Extract the base type from a tagged/app type (or return the type itself).
+let private baseOf (ty: TypeExpr) : TypeExpr =
+    match asTagged ty with
+    | Some(base', _) -> base'
+    | None           -> ty
+
+/// Classify the mismatch between paramType and argType into E001/E004/E005.
+let private classifyMismatch (paramType: TypeExpr) (argType: TypeExpr) line col : LLError =
+    match asTagged paramType, asTagged argType with
+    | Some(pBase, pTag), Some(aBase, aTag) when tyEqual pBase aBase && pTag <> aTag ->
+        // Same base type, different unit/tag annotation
+        match pBase with
+        | TyName "Float" | TyName "Int" -> e004 line col argType paramType
+        | _                              -> e001 line col argType paramType
+    | Some(pBase, _), None when tyEqual argType pBase ->
+        // arg has the right base type but is missing the tag
+        e005 line col paramType argType
+    | _ ->
+        e001 line col argType paramType
+
 /// Pass 2: type-check an expression, accumulating errors.
 /// Returns (inferred type, errors). Does NOT throw — errors are collected.
 let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
@@ -129,10 +174,18 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
         | None    -> (TyVar "?", [e002 0 0 c])
 
     | EApp(f, arg) ->
-        // In Task 3, just propagate errors; type-checking EApp comes in Task 4
-        let (_, fe) = typeOf f env
-        let (_, ae) = typeOf arg env
-        (TyVar "?", fe @ ae)
+        let (fType, fe) = typeOf f env
+        let (argType, ae) = typeOf arg env
+        let allErrors = fe @ ae
+        match fType with
+        | TyFn(paramType, returnType) ->
+            if tyEqual argType paramType then
+                (returnType, allErrors)
+            else
+                let err = classifyMismatch paramType argType 0 0
+                (returnType, allErrors @ [err])
+        | _ ->
+            (TyVar "?", allErrors)
 
     | ELam(_, _) -> (TyVar "?", [])
 

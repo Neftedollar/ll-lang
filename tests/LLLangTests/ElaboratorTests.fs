@@ -98,3 +98,34 @@ let ``no E002 for fn calling another declared fn`` () =
 [<Fact>]
 let ``valid module has no errors`` () =
     Assert.Empty(elab "module M\nfn f(x Int) Int = x")
+
+// --- E001/E004/E005: Application type checking ---
+
+[<Fact>]
+let ``E001 type mismatch Int where Str expected`` () =
+    let src = "module M\nfn f(x Str) Str = x\nlet bad = f 42"
+    let errs = elab src
+    Assert.Contains(E001, errs |> List.map _.Code)
+
+[<Fact>]
+let ``E004 unit mismatch Float[kg] where Float[m] expected`` () =
+    // mk_kg returns Float[kg]; f expects Float[m] — unit mismatch → E004
+    let src = "module M\nunit m\nunit kg\nfn mk_kg(x Float) Float[kg] = x\nfn f(x Float[m]) Float = x\nlet bad = f (mk_kg 1.0)"
+    let errs = elab src
+    Assert.Contains(E004, errs |> List.map _.Code)
+
+[<Fact>]
+let ``E005 tag violation untagged Str where Str[UserId] expected`` () =
+    let src = "module M\ntag UserId\nfn f(x Str[UserId]) Str = x\nlet bad = f \"raw\""
+    let errs = elab src
+    Assert.Contains(E005, errs |> List.map _.Code)
+
+[<Fact>]
+let ``no error when correct tag applied`` () =
+    let src = "module M\ntag UserId\nfn f(x Str[UserId]) Str = x\nlet ok = f \"id\"[UserId]"
+    Assert.Empty(elab src)
+
+[<Fact>]
+let ``no error when TyVar param accepts anything`` () =
+    let src = "module M\nfn double(x Int) = x\nlet y = double 5"
+    Assert.Empty(elab src)
