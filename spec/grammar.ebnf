@@ -14,9 +14,9 @@ INDENT  ::= synthetic token — emitted when indentation increases
 DEDENT  ::= synthetic token — emitted when indentation decreases
 
 (* --- Keywords ----------------------------------------------- *)
-KW ::= "fn" | "let" | "type" | "tag" | "unit"
+KW ::= "fn" | "let" | "in" | "type" | "tag" | "unit"
      | "trait" | "impl" | "import" | "export" | "module"
-     | "if" | "then" | "else" | "true" | "false"
+     | "match" | "if" | "then" | "else" | "true" | "false"
 
 (* --- Identifiers -------------------------------------------- *)
 (* value identifiers: lowercase start *)
@@ -74,7 +74,7 @@ pipe-expr ::= arith-expr (OP_PIPE arith-expr)*
 (* arithmetic: standard precedence *)
 arith-expr  ::= cmp-expr ((OP_PLUS | OP_MINUS) cmp-expr)*
 cmp-expr    ::= app-expr ((OP_LT | OP_GT | OP_LE | OP_GE | OP_EQ2 | OP_NEQ) app-expr)*
-app-expr    ::= atom (OP_LPAREN expr OP_RPAREN)*   (* curried application *)
+app-expr    ::= atom atom*                         (* juxtaposition = curried application *)
 atom        ::= tagged-lit
               | literal
               | IDENT
@@ -92,8 +92,9 @@ tagged-lit  ::= atom OP_LBRACK TYPEID OP_RBRACK
 list-lit    ::= OP_LBRACK expr* OP_RBRACK          (* space-separated elements *)
 tuple-lit   ::= expr OP_COMMA expr (OP_COMMA expr)* (* comma = tuple *)
 
-(* let binding *)
-let-expr    ::= "let" IDENT "=" expr
+(* let binding — "in" form for local scope; bare form for top-level or do-notation style *)
+let-expr    ::= "let" IDENT "=" expr "in" expr
+              | "let" IDENT "=" expr
 
 (* lambda *)
 lambda-expr ::= OP_LAMBDA IDENT+ OP_DOT expr
@@ -131,21 +132,28 @@ unit-expr ::= TYPEID                             (* m, s, kg *)
    ============================================================ *)
 
 decl ::= fn-decl
+       | let-decl
        | type-decl
        | tag-decl
        | unit-decl
        | trait-decl
        | impl-decl
 
+(* --- let (top-level) --------------------------------------- *)
+let-decl ::= "let" IDENT "=" expr
+
 (* --- fn ---------------------------------------------------- *)
-fn-decl ::= "fn" IDENT constraint* param+ type-expr? "=" expr
-          | "fn" IDENT constraint* param+ type-expr? "=" NEWLINE INDENT expr DEDENT
+fn-decl ::= "fn" IDENT constraint* param* type-expr? "=" expr
+          | "fn" IDENT constraint* param* type-expr? "=" NEWLINE INDENT expr DEDENT
 
 param      ::= OP_LPAREN IDENT type-expr OP_RPAREN    (* typed param *)
 constraint ::= OP_LBRACK IDENT ":" TYPEID OP_RBRACK   (* [F: Functor] *)
 
 (* --- type -------------------------------------------------- *)
-type-decl ::= "type" TYPEID type-var* "=" type-body
+(* type vars: either bare (type Maybe A) or bracketed phantom (type Email[state]) *)
+type-decl ::= "type" TYPEID type-param* "=" type-body
+type-param ::= IDENT                                  (* bare type variable: A, E *)
+             | OP_LBRACK IDENT OP_RBRACK              (* phantom bracket param: [state] *)
 type-var  ::= IDENT
 type-body ::= sum-type | record-type | wrapped-type
 
@@ -178,3 +186,19 @@ module ::= "module" module-path NEWLINE
 module-path  ::= TYPEID (OP_DOT TYPEID)*
 import-decl  ::= "import" module-path
 export-decl  ::= "export" decl
+
+(* ============================================================
+   Implementation notes for Phase 2 (Lexer/Parser in F#)
+   ============================================================
+   1. INDENT/DEDENT are synthetic — emit from whitespace changes, not literal tokens.
+   2. "->" is used for pipe (expr), type arrow (type-expr), and match branch.
+      Disambiguation: in expr context, "->" is pipe only between app-exprs;
+      type arrow appears only in type-expr; match arrow follows a pattern.
+   3. "[" disambiguation: list literal has space-separated exprs;
+      tag application has exactly one TYPEID followed by "]";
+      parametric type has one type-expr.
+      Lookahead: if next token after "[" is TYPEID and then "]", it's a tag.
+   4. "," is tuple-forming only in expr context; record fields use "," in type-decl.
+   5. Keywords are reserved — cannot be used as IDENT or TYPEID.
+   6. "\" begins a lambda expression. Followed by one or more IDENT, then ".", then expr.
+   ============================================================ *)
