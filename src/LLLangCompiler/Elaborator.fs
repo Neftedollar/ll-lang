@@ -85,12 +85,27 @@ let private collectDecls (m: LLModule) : TypeEnv =
             | Some ty -> env <- Map.add name ty env
             | None    -> ()
 
-        | DType(typeName, _typeParams, TBSum ctors) ->
+        | DType(typeName, typeParams, TBSum ctors) ->
+            // Collect declared type parameter names so we can treat them as TyVar
+            let tpNames =
+                typeParams
+                |> List.choose (fun tp ->
+                    match tp with
+                    | TPBare n | TPPhantom n -> Some n)
+                |> Set.ofList
+            // Replace TyName x with TyVar x when x is a declared type parameter
+            let rec subst (ty: TypeExpr) =
+                match ty with
+                | TyName n when Set.contains n tpNames -> TyVar n
+                | TyApp(a, b) -> TyApp(subst a, subst b)
+                | TyFn(a, b)  -> TyFn(subst a, subst b)
+                | TyTagged(a, u) -> TyTagged(subst a, u)
+                | other -> other
             for (ctorName, argTypes) in ctors do
                 let ty =
                     match argTypes with
                     | [] -> TyName typeName
-                    | _  -> buildFnType argTypes (TyName typeName)
+                    | _  -> buildFnType (argTypes |> List.map subst) (TyName typeName)
                 env <- Map.add ctorName ty env
 
         | DImpl(_traitName, implType, fns) ->
@@ -205,9 +220,19 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
         | None -> (eTy, eErrs)
 
     | EMatch(branches) ->
+        // Collect all variable names bound by a pattern
+        let rec patVars (pat: Pattern) : string list =
+            match pat with
+            | PVar n -> [n]
+            | PCon(_, pats) -> pats |> List.collect patVars
+            | PLit _ | PWild -> []
         let errs =
             branches
-            |> List.collect (fun (_, branchExpr) -> snd (typeOf branchExpr env))
+            |> List.collect (fun (pat, branchExpr) ->
+                let localEnv =
+                    patVars pat
+                    |> List.fold (fun acc n -> Map.add n (TyVar "?") acc) env
+                snd (typeOf branchExpr localEnv))
         (TyVar "?", errs)
 
     | EPipe(e, f) ->

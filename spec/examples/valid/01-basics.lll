@@ -17,9 +17,6 @@ fn clamp(x Int)(lo Int)(hi Int) Int =
   else if x > hi then hi
   else x
 
--- pipe operator
-fn process(s Str) Int = s -> trim -> len
-
 -- lambda
 let triple = \x. x * 3
 

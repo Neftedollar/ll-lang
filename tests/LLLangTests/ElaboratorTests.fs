@@ -146,3 +146,36 @@ let ``no E003 when all constructors covered`` () =
 [<Fact>]
 let ``no E003 when type has no constructors`` () =
     Assert.Empty(elab "module M\nlet x = 42")
+
+// --- Integration tests: invalid corpus ---
+
+let private expectError code name =
+    let errs = elab (readInvalid name)
+    Assert.False(List.isEmpty errs, $"{name} should have errors")
+    Assert.Contains(code, errs |> List.map _.Code)
+
+[<Fact>]
+let ``E001 corpus`` () = expectError E001 "E001-type-mismatch.lll"
+
+[<Fact>]
+let ``E002 corpus`` () = expectError E002 "E002-unbound-var.lll"
+
+[<Fact>]
+let ``E003 corpus`` () = expectError E003 "E003-nonexhaustive.lll"
+
+[<Fact>]
+let ``E004 corpus`` () = expectError E004 "E004-unit-mismatch.lll"
+
+[<Fact>]
+let ``E005 corpus`` () = expectError E005 "E005-tag-violation.lll"
+
+// --- Regression: valid corpus ---
+
+[<Fact>]
+let ``valid 01-basics elaborates ok`` () = elabOk (readValid "01-basics.lll") |> ignore
+
+[<Fact>]
+let ``valid 02-adts elaborates ok`` () = elabOk (readValid "02-adts.lll") |> ignore
+
+[<Fact>]
+let ``valid 03-tags elaborates ok`` () = elabOk (readValid "03-tags.lll") |> ignore
