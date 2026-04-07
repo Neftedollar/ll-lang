@@ -99,3 +99,61 @@ let ``function declaration tokenized`` () =
         Ident "a"; Plus; Ident "b"
     ]
     Assert.Equal<Token list>(expected, toks src)
+
+// --- INDENT/DEDENT tests ---
+
+/// Helper: return ALL token types including Newline/Indent/Dedent, filter only Eof.
+let allToks src =
+    match tokenize src with
+    | Ok ts -> ts |> List.map _.Token |> List.filter ((<>) Eof)
+    | Error e -> failwith e
+
+[<Fact>]
+let ``indented block: INDENT after = newline`` () =
+    let src = "fn f =\n  42"
+    let ts = allToks src
+    Assert.Contains(Indent, ts)
+    Assert.Contains(Dedent, ts)
+
+[<Fact>]
+let ``INDENT appears before first indented token`` () =
+    let src = "fn f =\n  42"
+    let ts = allToks src
+    let indentIdx = ts |> List.findIndex ((=) Indent)
+    let intIdx = ts |> List.findIndex ((=) (IntLit 42L))
+    Assert.True(indentIdx < intIdx, "Indent must precede the indented token")
+
+[<Fact>]
+let ``DEDENT appears after indented block ends`` () =
+    let src = "fn f =\n  42\nfn g = 1"
+    let ts = allToks src
+    Assert.Contains(Dedent, ts)
+
+[<Fact>]
+let ``nested indent: two levels`` () =
+    let src = "fn f =\n  fn g =\n    42"
+    let ts = allToks src
+    let indentCount = ts |> List.filter ((=) Indent) |> List.length
+    let dedentCount = ts |> List.filter ((=) Dedent) |> List.length
+    Assert.Equal(2, indentCount)
+    Assert.Equal(2, dedentCount)
+
+[<Fact>]
+let ``blank lines do not affect indentation`` () =
+    let src = "fn f =\n\n  42"
+    let ts = allToks src
+    Assert.Contains(Indent, ts)
+
+[<Fact>]
+let ``comment-only line does not affect indentation`` () =
+    let src = "fn f =\n  -- comment\n  42"
+    let ts = allToks src
+    let indentCount = ts |> List.filter ((=) Indent) |> List.length
+    Assert.Equal(1, indentCount)
+
+[<Fact>]
+let ``match branches generate INDENT and DEDENT`` () =
+    let src = "fn area s =\n  | Circle r -> r\n  | Empty -> 0"
+    let ts = allToks src
+    Assert.Contains(Indent, ts)
+    Assert.Contains(Dedent, ts)
