@@ -17,5 +17,6 @@
   <ItemGroup>
     <Compile Include="LexerTests.fs" />
     <Compile Include="ParserTests.fs" />
+    <Compile Include="ElaboratorTests.fs" />
   </ItemGroup>
 </Project>

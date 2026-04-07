@@ -1,0 +1,32 @@
+module LLLang.Tests.ElaboratorTests
+
+open System.IO
+open Xunit
+open LLLang.Lexer
+open LLLang.Parser
+open LLLang.AST
+open LLLang.Elaborator
+
+/// Lex + parse + elaborate. Returns error list (empty = clean).
+let elab src =
+    match tokenize src |> Result.bind parseModule with
+    | Error e -> failwith $"parse: {e}"
+    | Ok m ->
+        match elaborate m with
+        | Ok _ -> []
+        | Error errs -> errs
+
+/// Lex + parse + elaborate. Returns TypeEnv or fails.
+let elabOk src =
+    match tokenize src |> Result.bind parseModule with
+    | Error e -> failwith $"parse: {e}"
+    | Ok m ->
+        match elaborate m with
+        | Ok env -> env
+        | Error errs -> failwith $"unexpected errors: {errs}"
+
+let private readValid name =
+    File.ReadAllText(Path.Combine(__SOURCE_DIRECTORY__, "../../spec/examples/valid", name))
+
+let private readInvalid name =
+    File.ReadAllText(Path.Combine(__SOURCE_DIRECTORY__, "../../spec/examples/invalid", name))
