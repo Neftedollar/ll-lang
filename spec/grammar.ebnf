@@ -55,3 +55,55 @@ OP_LE      ::= "<="
 OP_GE      ::= ">="
 OP_EQ2     ::= "=="
 OP_NEQ     ::= "!="
+
+(* ============================================================
+   Expressions
+   ============================================================ *)
+
+expr ::= let-expr
+       | lambda-expr
+       | if-expr
+       | match-expr
+       | pipe-expr
+       | arith-expr
+
+(* pipe: left-associative, lowest precedence after if/match *)
+pipe-expr ::= arith-expr (OP_PIPE arith-expr)*
+
+(* arithmetic: standard precedence *)
+arith-expr  ::= cmp-expr ((OP_PLUS | OP_MINUS) cmp-expr)*
+cmp-expr    ::= app-expr ((OP_LT | OP_GT | OP_LE | OP_GE | OP_EQ2 | OP_NEQ) app-expr)*
+app-expr    ::= atom (OP_LPAREN expr OP_RPAREN)*   (* curried application *)
+atom        ::= tagged-lit
+              | literal
+              | IDENT
+              | list-lit
+              | tuple-lit
+              | OP_LPAREN expr OP_RPAREN            (* grouping — human mode *)
+
+(* literals *)
+literal     ::= INT_LIT | FLOAT_LIT | STR_LIT | BOOL_LIT
+
+(* tagged literal: value[Tag] *)
+tagged-lit  ::= atom OP_LBRACK TYPEID OP_RBRACK
+
+(* collections *)
+list-lit    ::= OP_LBRACK expr* OP_RBRACK          (* space-separated elements *)
+tuple-lit   ::= expr OP_COMMA expr (OP_COMMA expr)* (* comma = tuple *)
+
+(* let binding *)
+let-expr    ::= "let" IDENT "=" expr
+
+(* lambda *)
+lambda-expr ::= OP_LAMBDA IDENT+ OP_DOT expr
+
+(* conditional *)
+if-expr     ::= "if" expr "then" expr "else" expr
+
+(* pattern match: each branch on own line, indented *)
+match-expr  ::= INDENT (OP_BAR pattern OP_ARROW expr NEWLINE)+ DEDENT
+
+pattern     ::= TYPEID pattern*    (* constructor pattern *)
+              | IDENT               (* variable binding *)
+              | literal             (* literal match *)
+              | OP_UNDERSCORE       (* wildcard *)
