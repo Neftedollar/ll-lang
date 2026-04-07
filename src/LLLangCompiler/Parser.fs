@@ -50,9 +50,10 @@ let rec private parseAtom (c: Ctx) : Result<Expr, string> =
         advance c
         skipNewlines c
         let elems = ResizeArray<Expr>()
-        while curTok c <> RBrack && curTok c <> Eof do
-            match parseExprInner c with
-            | Error _ -> ()   // stop on error
+        let mutable lstCont = true
+        while lstCont && curTok c <> RBrack && curTok c <> Eof do
+            match parseTagged c with
+            | Error _ -> lstCont <- false
             | Ok e -> elems.Add(e); skipNewlines c
         match skip c RBrack with
         | Error e -> Error e
@@ -95,8 +96,26 @@ and private parseApp (c: Ctx) : Result<Expr, string> =
             | _ -> cont <- false
         Ok result
 
-and private parseArith (c: Ctx) : Result<Expr, string> =
+and private parseMul (c: Ctx) : Result<Expr, string> =
     match parseApp c with
+    | Error e -> Error e
+    | Ok left ->
+        let mutable result = left
+        let mutable cont = true
+        while cont do
+            match curTok c with
+            | Star | Slash as op ->
+                advance c
+                match parseApp c with
+                | Ok right ->
+                    let opName = if op = Star then "*" else "/"
+                    result <- EApp(EApp(EVar opName, result), right)
+                | Error _ -> cont <- false
+            | _ -> cont <- false
+        Ok result
+
+and private parseAdd (c: Ctx) : Result<Expr, string> =
+    match parseMul c with
     | Error e -> Error e
     | Ok left ->
         let mutable result = left
@@ -105,21 +124,25 @@ and private parseArith (c: Ctx) : Result<Expr, string> =
             match curTok c with
             | Plus | Minus as op ->
                 advance c
-                match parseApp c with
+                match parseMul c with
                 | Ok right ->
                     let opName = if op = Plus then "+" else "-"
                     result <- EApp(EApp(EVar opName, result), right)
                 | Error _ -> cont <- false
-            | Star | Slash as op ->
-                advance c
-                match parseApp c with
-                | Ok right ->
-                    let opName = if op = Star then "*" else "/"
-                    result <- EApp(EApp(EVar opName, result), right)
-                | Error _ -> cont <- false
+            | _ -> cont <- false
+        Ok result
+
+and private parseCmp (c: Ctx) : Result<Expr, string> =
+    match parseAdd c with
+    | Error e -> Error e
+    | Ok left ->
+        let mutable result = left
+        let mutable cont = true
+        while cont do
+            match curTok c with
             | Lt | Gt | Le | Ge | EqEq | Neq as op ->
                 advance c
-                match parseApp c with
+                match parseAdd c with
                 | Ok right ->
                     let opName =
                         match op with
@@ -131,13 +154,13 @@ and private parseArith (c: Ctx) : Result<Expr, string> =
         Ok result
 
 and private parsePipe (c: Ctx) : Result<Expr, string> =
-    match parseArith c with
+    match parseCmp c with
     | Error e -> Error e
     | Ok left ->
         let mutable result = left
         while curTok c = Arrow do
             advance c
-            match parseArith c with
+            match parseCmp c with
             | Ok right -> result <- EPipe(result, right)
             | Error _ -> ()
         Ok result
@@ -341,7 +364,7 @@ let private parseConstraint (c: Ctx) : Result<Constraint, string> =
     | Error e -> Error e
     | Ok () ->
         match curTok c with
-        | Ident v ->
+        | Ident v | TypeId v ->
             advance c
             match skip c Colon with
             | Error e -> Error e
@@ -499,12 +522,12 @@ let private parseDecl (c: Ctx) : Result<Decl, string> =
             let mutable cont = true
             while cont do
                 match curTok c with
-                | Ident p -> parms.Add(TPBare p); advance c
+                | Ident p | TypeId p -> parms.Add(TPBare p); advance c
                 | LBrack ->
                     let saved = c.Pos
                     advance c
                     match curTok c with
-                    | Ident p ->
+                    | Ident p | TypeId p ->
                         advance c
                         if curTok c = RBrack then
                             advance c
@@ -541,7 +564,7 @@ let private parseDecl (c: Ctx) : Result<Decl, string> =
             let mutable cont = true
             while cont do
                 match curTok c with
-                | Ident v -> tvars.Add(v); advance c
+                | Ident v | TypeId v -> tvars.Add(v); advance c
                 | _ -> cont <- false
             match skip c Eq with
             | Error e -> Error e

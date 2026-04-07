@@ -237,3 +237,19 @@ let ``E002 parses (unbound var detected later)`` () =
     match result with
     | Ok _ -> ()
     | Error e -> failwith $"E002 should parse cleanly: {e}"
+
+// --- Regression tests for parser bug fixes ---
+
+[<Fact>]
+let ``list literal: three elements are separate atoms`` () =
+    // [1 2 3] should be EList [ELit 1; ELit 2; ELit 3], not a one-element list with EApp
+    match parseExprStr "[1 2 3]" with
+    | EList elems -> Assert.Equal(3, elems.Length)
+    | e -> failwith $"Expected EList with 3 elems, got {e}"
+
+[<Fact>]
+let ``arithmetic precedence: mul binds tighter than add`` () =
+    // a + b * c should be a + (b * c), i.e. EApp(EApp("+", a), EApp(EApp("*", b), c))
+    match parseExprStr "a + b * c" with
+    | EApp(EApp(EVar "+", EVar "a"), EApp(EApp(EVar "*", EVar "b"), EVar "c")) -> ()
+    | e -> failwith $"Wrong precedence: {e}"
