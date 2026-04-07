@@ -43,7 +43,70 @@ let private builtinEnv : TypeEnv =
     |> List.map (fun op -> op, TyFn(TyVar "a", TyFn(TyVar "a", TyVar "a")))
     |> Map.ofList
 
+/// Build a right-associative chain of TyFn from a list of parameter types plus a return type.
+/// e.g. [T1; T2] ret  →  TyFn(T1, TyFn(T2, ret))
+let private buildFnType (paramTypes: TypeExpr list) (ret: TypeExpr) : TypeExpr =
+    List.foldBack (fun t acc -> TyFn(t, acc)) paramTypes ret
+
+/// Pass 1: collect all declared names → types into TypeEnv.
+let private collectDecls (m: LLModule) : TypeEnv =
+    let mutable env = builtinEnv
+
+    let addFnSig (sigRecord: FnSig) (nameSuffix: string option) =
+        let name =
+            match nameSuffix with
+            | None -> sigRecord.Name
+            | Some suffix -> sigRecord.Name + "_" + suffix
+        let ret = sigRecord.ReturnType |> Option.defaultValue (TyVar "?")
+        let ty =
+            match sigRecord.Params with
+            | [] -> TyVar "?"
+            | ps ->
+                let paramTypes = ps |> List.map snd
+                buildFnType paramTypes ret
+        env <- Map.add name ty env
+
+    for (decl, _isExported) in m.Decls do
+        match decl with
+        | DFn(sigRecord, _body) ->
+            addFnSig sigRecord None
+
+        | DLet(name, expr) ->
+            let tyOpt =
+                match expr with
+                | ELit(LInt _)   -> Some (TyName "Int")
+                | ELit(LFloat _) -> Some (TyName "Float")
+                | ELit(LStr _)   -> Some (TyName "Str")
+                | ETagged(ELit(LInt _),   tag) -> Some (TyTagged(TyName "Int",   UName tag))
+                | ETagged(ELit(LFloat _), tag) -> Some (TyTagged(TyName "Float", UName tag))
+                | ETagged(ELit(LStr _),   tag) -> Some (TyTagged(TyName "Str",   UName tag))
+                | _ -> None
+            match tyOpt with
+            | Some ty -> env <- Map.add name ty env
+            | None    -> ()
+
+        | DType(typeName, _typeParams, TBSum ctors) ->
+            for (ctorName, argTypes) in ctors do
+                let ty =
+                    match argTypes with
+                    | [] -> TyName typeName
+                    | _  -> buildFnType argTypes (TyName typeName)
+                env <- Map.add ctorName ty env
+
+        | DImpl(_traitName, implType, fns) ->
+            for (sigRecord, _body) in fns do
+                addFnSig sigRecord (Some implType)
+
+        | DTag _
+        | DUnit _
+        | DTrait _
+        | DType(_, _, TBRecord _)
+        | DType(_, _, TBWrapped _) -> ()
+
+    env
+
 /// Elaborate an LLModule: build TypeEnv, check for errors.
 /// Returns Ok TypeEnv on success, Error errors on any violation.
 let elaborate (m: LLModule) : Result<TypeEnv, LLError list> =
-    Ok Map.empty   // stub — replaced task by task
+    let env = collectDecls m
+    Ok env   // check/exhaustive will be added in subsequent tasks

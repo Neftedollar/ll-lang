@@ -30,3 +30,47 @@ let private readValid name =
 
 let private readInvalid name =
     File.ReadAllText(Path.Combine(__SOURCE_DIRECTORY__, "../../spec/examples/invalid", name))
+
+// --- Pass 1: TypeEnv collection ---
+
+[<Fact>]
+let ``TypeEnv contains declared single-param fn`` () =
+    let env = elabOk "module M\nfn f(x Int) Int = x"
+    Assert.True(Map.containsKey "f" env)
+    Assert.Equal(TyFn(TyName "Int", TyName "Int"), env["f"])
+
+[<Fact>]
+let ``TypeEnv contains declared multi-param fn`` () =
+    let env = elabOk "module M\nfn add(x Int)(y Int) Int = x"
+    Assert.Equal(TyFn(TyName "Int", TyFn(TyName "Int", TyName "Int")), env["add"])
+
+[<Fact>]
+let ``TypeEnv fn with no return type uses TyVar unknown`` () =
+    let env = elabOk "module M\nfn double(x Int) = x"
+    Assert.Equal(TyFn(TyName "Int", TyVar "?"), env["double"])
+
+[<Fact>]
+let ``TypeEnv contains let binding with int literal`` () =
+    let env = elabOk "module M\nlet x = 42"
+    Assert.Equal(TyName "Int", env["x"])
+
+[<Fact>]
+let ``TypeEnv contains let binding with float literal`` () =
+    let env = elabOk "module M\nlet pi = 3.14"
+    Assert.Equal(TyName "Float", env["pi"])
+
+[<Fact>]
+let ``TypeEnv contains let binding with str literal`` () =
+    let env = elabOk "module M\nlet s = \"hello\""
+    Assert.Equal(TyName "Str", env["s"])
+
+[<Fact>]
+let ``TypeEnv contains type constructors`` () =
+    let env = elabOk "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    Assert.Equal(TyFn(TyName "Float", TyName "Shape"), env["Circle"])
+    Assert.Equal(TyFn(TyName "Float", TyFn(TyName "Float", TyName "Shape")), env["Rect"])
+    Assert.Equal(TyName "Shape", env["Empty"])
+
+[<Fact>]
+let ``TypeEnv tag and unit declarations produce no errors`` () =
+    Assert.Empty(elab "module M\ntag UserId\nunit m")
