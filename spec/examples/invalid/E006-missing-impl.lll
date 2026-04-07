@@ -1,0 +1,12 @@
+-- expect: E006
+module Invalid.E006
+
+trait Functor F =
+  fn map(f A->B)(fa F[A]) F[B]
+
+type Box A = Box A
+
+-- no impl Functor Box defined
+fn doubled[F: Functor](xs F[Int]) F[Int] = map (\x. x * 2) xs
+
+let bad = doubled (Box 5)

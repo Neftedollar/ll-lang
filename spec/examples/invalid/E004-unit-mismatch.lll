@@ -1,0 +1,9 @@
+-- expect: E004
+module Invalid.E004
+
+unit m
+unit kg
+
+fn main = speed 5.0[kg] 2.0[m]
+
+fn speed(d Float[m])(t Float[kg]) = d / t

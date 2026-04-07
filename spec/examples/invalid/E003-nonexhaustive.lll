@@ -1,0 +1,9 @@
+-- expect: E003
+module Invalid.E003
+
+type Shape = Circle Float | Rect Float Float | Empty
+
+-- missing Empty branch
+fn area(s Shape) Float =
+  | Circle r -> 3.14159 * r * r
+  | Rect w h -> w * h

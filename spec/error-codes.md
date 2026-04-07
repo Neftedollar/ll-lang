@@ -1,0 +1,58 @@
+# ll-lang Error Codes
+
+Errors are emitted in two formats:
+
+**Compact (default):**  `EXXX line:col ErrorName details hint:fix`
+**Human (--human):**    multi-line with explanation
+
+## Codes
+
+### E001 TypeMismatch
+Expected type A, got type B at a usage site.
+
+Compact: `E001 12:5 TypeMismatch expected:UserId got:Int hint:wrap:UserId`
+
+### E002 UnboundVar
+Identifier not found in scope.
+
+Compact: `E002 5:3 UnboundVar name:foo`
+
+### E003 NonExhaustiveMatch
+Pattern match does not cover all constructors of a sum type.
+
+Compact: `E003 8:1 NonExhaustiveMatch type:Shape missing:Empty`
+
+### E004 UnitMismatch
+Incompatible units in arithmetic or argument position.
+
+Compact: `E004 15:10 UnitMismatch expected:Float[m] got:Float[kg]`
+
+### E005 TagViolation
+Untagged value passed where tagged value expected.
+
+Compact: `E005 7:8 TagViolation expected:Str[UserId] got:Str`
+
+### E006 MissingImpl
+No `impl TraitName TypeName` found for a constrained type variable.
+
+Compact: `E006 20:1 MissingImpl trait:Functor type:MyType`
+
+### E007 PlatformMismatch
+A platform-specific module imported but the compile target doesn't support it.
+
+Compact: `E007 2:1 PlatformMismatch module:Platform.DotNet.ASP target:python`
+
+### E008 InfiniteType
+Type unification would produce an infinite type (occurs-check failure).
+
+Compact: `E008 3:1 InfiniteType var:a cycle:a=List[a]`
+
+## Invalid example convention
+
+Every file in `spec/examples/invalid/` declares its expected error on line 1:
+
+```
+-- expect: E001
+```
+
+The test runner asserts the compiler emits exactly the declared error code.
