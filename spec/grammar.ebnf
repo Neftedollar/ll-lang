@@ -107,3 +107,73 @@ pattern     ::= TYPEID pattern*    (* constructor pattern *)
               | IDENT               (* variable binding *)
               | literal             (* literal match *)
               | OP_UNDERSCORE       (* wildcard *)
+
+(* ============================================================
+   Types
+   ============================================================ *)
+
+type-expr ::= fn-type
+fn-type   ::= app-type (OP_ARROW fn-type)*      (* right-associative *)
+app-type  ::= base-type (OP_LBRACK type-expr OP_RBRACK)*   (* parametric *)
+base-type ::= TYPEID                             (* Int, Str, Maybe, etc *)
+            | IDENT                              (* type variable: a, b *)
+            | OP_LPAREN type-expr OP_RPAREN
+
+(* unit algebra applied as tag on numeric types *)
+unit-expr ::= TYPEID                             (* m, s, kg *)
+            | unit-expr OP_STAR unit-expr
+            | unit-expr OP_SLASH unit-expr
+            | unit-expr OP_CARET INT_LIT
+
+(* ============================================================
+   Declarations
+   ============================================================ *)
+
+decl ::= fn-decl
+       | type-decl
+       | tag-decl
+       | unit-decl
+       | trait-decl
+       | impl-decl
+
+(* --- fn ---------------------------------------------------- *)
+fn-decl ::= "fn" IDENT constraint* param+ type-expr? "=" expr
+          | "fn" IDENT constraint* param+ type-expr? "=" NEWLINE INDENT expr DEDENT
+
+param      ::= OP_LPAREN IDENT type-expr OP_RPAREN    (* typed param *)
+constraint ::= OP_LBRACK IDENT ":" TYPEID OP_RBRACK   (* [F: Functor] *)
+
+(* --- type -------------------------------------------------- *)
+type-decl ::= "type" TYPEID type-var* "=" type-body
+type-var  ::= IDENT
+type-body ::= sum-type | record-type | wrapped-type
+
+sum-type     ::= constructor (OP_BAR constructor)*
+constructor  ::= TYPEID type-expr*
+
+record-type  ::= field (OP_COMMA field)*
+field        ::= IDENT type-expr
+
+wrapped-type ::= type-expr          (* newtype via tag *)
+
+(* --- tag & unit -------------------------------------------- *)
+tag-decl  ::= "tag" TYPEID
+unit-decl ::= "unit" TYPEID
+
+(* --- trait ------------------------------------------------- *)
+trait-decl ::= "trait" TYPEID type-var+ "=" NEWLINE INDENT fn-sig+ DEDENT
+fn-sig     ::= "fn" IDENT param+ type-expr
+
+(* --- impl -------------------------------------------------- *)
+impl-decl ::= "impl" TYPEID TYPEID "=" NEWLINE INDENT fn-decl+ DEDENT
+
+(* ============================================================
+   Module
+   ============================================================ *)
+
+module ::= "module" module-path NEWLINE
+           (import-decl | export-decl | decl)*
+
+module-path  ::= TYPEID (OP_DOT TYPEID)*
+import-decl  ::= "import" module-path
+export-decl  ::= "export" decl
