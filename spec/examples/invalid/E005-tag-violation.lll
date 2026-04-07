@@ -1,0 +1,9 @@
+-- expect: E005
+module Invalid.E005
+
+tag UserId
+
+fn getUser(id Str[UserId]) Str = id
+
+-- passing untagged Str where Str[UserId] required
+let bad = getUser "raw-string"

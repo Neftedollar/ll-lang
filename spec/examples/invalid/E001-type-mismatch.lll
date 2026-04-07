@@ -1,0 +1,9 @@
+-- expect: E001
+module Invalid.E001
+
+tag UserId
+
+fn getUser(id Str[UserId]) Str = id
+
+-- passing plain Str where Str[UserId] expected
+let bad = getUser "raw-id"
