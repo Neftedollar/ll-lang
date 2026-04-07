@@ -74,3 +74,27 @@ let ``TypeEnv contains type constructors`` () =
 [<Fact>]
 let ``TypeEnv tag and unit declarations produce no errors`` () =
     Assert.Empty(elab "module M\ntag UserId\nunit m")
+
+// --- E002: Unbound variable / constructor ---
+
+[<Fact>]
+let ``E002 unbound var in fn body`` () =
+    let errs = elab "module M\nfn f = undefinedVar"
+    Assert.Contains(E002, errs |> List.map _.Code)
+
+[<Fact>]
+let ``E002 unbound constructor`` () =
+    let errs = elab "module M\nfn f = UnknownCon"
+    Assert.Contains(E002, errs |> List.map _.Code)
+
+[<Fact>]
+let ``no E002 for declared fn param in body`` () =
+    Assert.Empty(elab "module M\nfn f(x Int) Int = x")
+
+[<Fact>]
+let ``no E002 for fn calling another declared fn`` () =
+    Assert.Empty(elab "module M\nfn double(x Int) = x\nfn quad(x Int) = double x")
+
+[<Fact>]
+let ``valid module has no errors`` () =
+    Assert.Empty(elab "module M\nfn f(x Int) Int = x")

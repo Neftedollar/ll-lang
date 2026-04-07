@@ -105,8 +105,101 @@ let private collectDecls (m: LLModule) : TypeEnv =
 
     env
 
+/// Pass 2: type-check an expression, accumulating errors.
+/// Returns (inferred type, errors). Does NOT throw — errors are collected.
+let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
+    match expr with
+    | ELit(LInt _)   -> (TyName "Int",   [])
+    | ELit(LFloat _) -> (TyName "Float", [])
+    | ELit(LStr _)   -> (TyName "Str",   [])
+    | ELit(LBool _)  -> (TyName "Bool",  [])
+
+    | ETagged(e, tag) ->
+        let (innerType, errs) = typeOf e env
+        (TyTagged(innerType, UName tag), errs)
+
+    | EVar x ->
+        match Map.tryFind x env with
+        | Some ty -> (ty, [])
+        | None    -> (TyVar "?", [e002 0 0 x])
+
+    | ECon c ->
+        match Map.tryFind c env with
+        | Some ty -> (ty, [])
+        | None    -> (TyVar "?", [e002 0 0 c])
+
+    | EApp(f, arg) ->
+        // In Task 3, just propagate errors; type-checking EApp comes in Task 4
+        let (_, fe) = typeOf f env
+        let (_, ae) = typeOf arg env
+        (TyVar "?", fe @ ae)
+
+    | ELam(_, _) -> (TyVar "?", [])
+
+    | EIf(cond, t, e) ->
+        let (_, ce) = typeOf cond env
+        let (_, te) = typeOf t env
+        let (_, ee) = typeOf e env
+        (TyVar "?", ce @ te @ ee)
+
+    | ELet(x, e, bodyOpt) ->
+        let (eTy, eErrs) = typeOf e env
+        let env' = Map.add x eTy env
+        match bodyOpt with
+        | Some body ->
+            let (bTy, bErrs) = typeOf body env'
+            (bTy, eErrs @ bErrs)
+        | None -> (eTy, eErrs)
+
+    | EMatch(branches) ->
+        let errs =
+            branches
+            |> List.collect (fun (_, branchExpr) -> snd (typeOf branchExpr env))
+        (TyVar "?", errs)
+
+    | EPipe(e, f) ->
+        let (_, ee) = typeOf e env
+        let (_, fe) = typeOf f env
+        (TyVar "?", ee @ fe)
+
+    | EList(elems) ->
+        let errs = elems |> List.collect (fun el -> snd (typeOf el env))
+        (TyVar "?", errs)
+
+    | ETuple(elems) ->
+        let errs = elems |> List.collect (fun el -> snd (typeOf el env))
+        (TyVar "?", errs)
+
+/// Check a single declaration for errors, given the already-built TypeEnv.
+let private checkDecl (decl: Decl) (env: TypeEnv) : LLError list =
+    match decl with
+    | DFn(sigRecord, body) ->
+        // Extend env with the function's own parameters
+        let localEnv =
+            sigRecord.Params
+            |> List.fold (fun acc (paramName, paramType) -> Map.add paramName paramType acc) env
+        snd (typeOf body localEnv)
+
+    | DLet(_, expr) ->
+        snd (typeOf expr env)
+
+    | DImpl(_, _, fns) ->
+        fns |> List.collect (fun (sigRecord, body) ->
+            let localEnv =
+                sigRecord.Params
+                |> List.fold (fun acc (paramName, paramType) -> Map.add paramName paramType acc) env
+            snd (typeOf body localEnv))
+
+    | DType _ | DTag _ | DUnit _ | DTrait _ -> []
+
+/// Check all declarations in a module, accumulating errors.
+let private checkDecls (m: LLModule) (env: TypeEnv) : LLError list =
+    m.Decls
+    |> List.collect (fun (decl, _isExported) -> checkDecl decl env)
+
 /// Elaborate an LLModule: build TypeEnv, check for errors.
 /// Returns Ok TypeEnv on success, Error errors on any violation.
 let elaborate (m: LLModule) : Result<TypeEnv, LLError list> =
     let env = collectDecls m
-    Ok env   // check/exhaustive will be added in subsequent tasks
+    let errors = checkDecls m env
+    if errors.IsEmpty then Ok env else Error errors
