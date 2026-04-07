@@ -10,5 +10,6 @@
     <Compile Include="Lexer.fs" />
     <Compile Include="AST.fs" />
     <Compile Include="Parser.fs" />
+    <Compile Include="Elaborator.fs" />
   </ItemGroup>
 </Project>

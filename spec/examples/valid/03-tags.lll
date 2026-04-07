@@ -1,5 +1,8 @@
 module Examples.Tags
 
+type Maybe A = Some A | None
+type Result A E = Ok A | Err E
+
 -- declare tags
 tag UserId
 tag Email
@@ -9,8 +12,6 @@ tag kg
 
 -- tagged values
 let uid = "user-42"[UserId]
-let dist = 5.0[m]
-let time = 2.0[s]
 
 -- functions with tagged params
 fn getUser(id Str[UserId]) Maybe[Str] = Some "alice"
@@ -27,5 +28,5 @@ tag Raw
 type Email[state] = Str
 
 fn validate(s Str) Result[Email[Validated] Str] =
-  if len s > 0 then Ok s
+  if s != "" then Ok s
   else Err "empty"

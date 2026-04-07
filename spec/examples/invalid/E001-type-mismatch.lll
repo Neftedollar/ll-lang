@@ -1,9 +1,6 @@
 -- expect: E001
 module Invalid.E001
 
-tag UserId
+fn greet(name Str) Str = name
 
-fn getUser(id Str[UserId]) Str = id
-
--- passing plain Str where Str[UserId] expected
-let bad = getUser "raw-id"
+let bad = greet 42
