@@ -54,8 +54,11 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
-    // Phase 7.5a extends the driver to also cover `let` decls at module
-    // level and `match`-with-explicit-scrutinee inside `fn` bodies:
+    // Phase 7.5b extends the Phase 7.5a driver with two more fn-body
+    // expression forms: `let name = e1 in e2` chains and `\x. body`
+    // lambdas. The driver now covers module-level `let` decls, match in
+    // fn bodies, plus the new `shift` (let-in chain) and `applyDouble`
+    // (lambda applied to argument) fn decls:
     //   "module Examples.Bigger\n
     //    type Maybe A = Some A | None\n
     //    type Color = Red | Green | Blue\n
@@ -63,12 +66,15 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
     //    let zero = 0\n
     //    fn double(x Int) Int = x * 2\n
     //    fn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\n
-    //    fn pickColor(x Int) Color = if x then Red else Green"
+    //    fn pickColor(x Int) Color = if x then Red else Green\n
+    //    fn shift(x Int) Int = let y = x + 1 in y * 2\n
+    //    fn applyDouble(x Int) Int = (\\y. y * 2) x"
     // and pretty-prints the whole module deterministically: the module
     // header on its own line, each type/let/fn decl normalised to the form
     // used by 12/13/14 (ctor args in parens; fn params space-separated;
     // body expressions fully parenthesised; let decls as `let name = expr`;
-    // match in expression position as `(match scrut with | p -> e | ...)`).
+    // match in expression position as `(match scrut with | p -> e | ...)`;
+    // let-in chains as `(let name = e1 in e2)`; lambdas as `(fun x -> e)`).
     let expected =
         [ "module Examples.Bigger"
           "type Maybe (A) = Some(A) | None"
@@ -77,7 +83,9 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
           "let zero = 0"
           "fn double (x: Int) -> Int = (x * 2)"
           "fn classify (x: Int) -> Int = (match x with | 0 -> 0 | _ -> 1)"
-          "fn pickColor (x: Int) -> Color = (if x then Red else Green)" ]
+          "fn pickColor (x: Int) -> Color = (if x then Red else Green)"
+          "fn shift (x: Int) -> Int = (let y = (x + 1) in (y * 2))"
+          "fn applyDouble (x: Int) -> Int = ((fun y -> (y * 2)) x)" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),
