@@ -994,3 +994,96 @@ literals + cons patterns from 7.5c). Phase 7.5 backlog, remaining 3 of
 
 Next tick: **Phase 7.5d** — pick another two or three items from the
 remaining backlog and ship them the same way.
+
+### 2026-04 — Phase 7.5d: tagged literals + parametric ctor args (DONE)
+
+Fourth sub-tick of Phase 7.5. Extends
+[`spec/examples/valid/15-moduleparser-real.lll`](../../spec/examples/valid/15-moduleparser-real.lll)
+**in place** (no sibling file) with two more items from the Phase 7.5
+backlog:
+
+1. **Tagged literal expressions.** `parseAtom` gains two new 4-token
+   cons-pattern arms that run BEFORE the plain 1-token `EInt` / `EStr`
+   arms:
+   ```
+   | TInt n :: TLBrack :: TUpper ty :: TRBrack :: rest -> (ETagged (EInt n) ty, rest)
+   | TStr s :: TLBrack :: TUpper ty :: TRBrack :: rest -> (ETagged (EStr s) ty, rest)
+   ```
+   Dispatching inline in parseAtom (instead of a separate
+   `maybeTagged` post-pass) sidesteps a lingering issue with multi-arg
+   helper fns in the host parser's clause form. Mirrors the host
+   compiler's Phase 7.2.2 rule: only `EInt` and `EStr` literal atoms
+   can take a `[Tag]` suffix — other atom shapes (var refs, parens)
+   never try to match the `[Tag]` tail so a stray bracket stays on the
+   token stream and would later error out. The pretty printer renders
+   `ETagged e t` as `(<show e>[<t>])`.
+2. **Parametric ctor args in type decls.** `parseTypeArgs` now
+   delegates to a new `parseOneTypeArg` helper, which after matching a
+   `TUpper` head calls `parseBrackArgs` to collect zero or more
+   `[typeArg]` bracket groups. Multiple groups (`Result[A][E]`) flatten
+   into one `TAApp head args` ctor with a multi-element arg list;
+   nested bracket-form args (`Foo[Bar[Baz]]`) recurse via
+   `parseOneTypeArg` on the inner slot. A bare `TUpper` with no
+   trailing bracket group stays as `TAVar` / `TACon` exactly like
+   earlier slices. Picked the bracket form `Maybe[Int]` over the
+   juxtaposition form `(Maybe Int)` because bracket delimiters need
+   no lookahead.
+
+AST additions: `Expr` gains `ETagged Expr Str`; `TypeArg` gains
+`TAApp Str List[TypeArg]`. The pretty printer grows a `showBrackArgs`
+helper that folds a `List[TypeArg]` into `[a1][a2]...`, used from the
+new `TAApp head args -> strConcat head (showBrackArgs args)` arm in
+`showTypeArg`.
+
+Lexer: no changes. `TLBrack` / `TRBrack` / `TUpper` were already lexed
+in Phase 7.5c (for `[]` / `h :: t` patterns). Bracket-form type
+applications and tagged literals reuse the same three tokens — the
+parser's dispatch context disambiguates.
+
+The driver now parses two new decls on top of the Phase 7.5c baseline:
+
+```
+type Container = MkBox Maybe[Int]
+let uid = "user-42"[UserId]
+```
+
+and prints
+
+```
+type Container = MkBox(Maybe[Int])
+let uid = ("user-42"[UserId])
+```
+
+Fourteen pretty-printed lines total now — module header, three type
+decls, three module-level `let` decls (one carrying a tagged string
+literal), seven fn decls. The `UserId` tag doesn't need to be declared
+anywhere in the module: the in-ll-lang parser does no name resolution,
+it just builds an AST and pretty-prints it. The parametric ctor arg
+lands inside `MkBox(...)` because the outer `showArgs` wraps the
+ctor-arg list in `(...)` regardless of which `TypeArg` ctor produced
+the rendered string.
+
+File size: 793 → 866 lines. Test count unchanged at 384 (the two
+existing ModuleParserTests absorbed the extended driver — the runtime
+E2E test got an updated `expected` list with two more lines, the
+inference round-trip re-reads straight from disk).
+
+Phase 7.5 progress: 8 of 9 items done (module-level let decls + match
+in fn body from 7.5a, lambdas + let-in chains from 7.5b, string
+literals + cons patterns from 7.5c, tagged literals + parametric ctor
+args from 7.5d). Phase 7.5 backlog, remaining 1 of 9 items, carrying
+the rest of the multi-line-and-module-forms umbrella as a single
+follow-up tick:
+
+- **Multi-line surface forms + module-level forms**: multi-line fn
+  bodies with layout-sensitive parsing, multi-line type declarations
+  (`type T =\n | A\n | B`), and the remaining module-level decls
+  `tag Name`, `trait ... with ...`, `impl Trait for Type = ...`,
+  `import Foo.Bar`, `export ...`. List-literal `[a b c]` expression
+  atoms and tuple `(a, b)` patterns tag along under the same umbrella
+  since the cons-only subset already shipped in 7.5c.
+
+Next tick: **Phase 7.5e** — close out Phase 7.5 by shipping whatever
+the remaining backlog item resolves to (likely multi-line fn bodies +
+the cluster of `tag` / `trait` / `impl` / `import` / `export` module-
+level decls in one sweep).
