@@ -33,6 +33,7 @@ let rec private parseAtom (c: Ctx) : Result<Expr, string> =
     | IntLit n -> advance c; Ok (ELit (LInt n))
     | FloatLit f -> advance c; Ok (ELit (LFloat f))
     | StrLit s -> advance c; Ok (ELit (LStr s))
+    | CharLit ch -> advance c; Ok (ELit (LChar ch))
     | KwTrue -> advance c; Ok (ELit (LBool true))
     | KwFalse -> advance c; Ok (ELit (LBool false))
     | Ident name -> advance c; Ok (EVar name)
@@ -88,7 +89,7 @@ and private parseApp (c: Ctx) : Result<Expr, string> =
         while cont do
             skipNewlines c
             match curTok c with
-            | IntLit _ | FloatLit _ | StrLit _ | KwTrue | KwFalse
+            | IntLit _ | FloatLit _ | StrLit _ | CharLit _ | KwTrue | KwFalse
             | Ident _ | TypeId _ | LParen | LBrack ->
                 match parseTagged c with
                 | Ok arg -> result <- EApp(result, arg)
@@ -283,6 +284,7 @@ let private parsePattern (c: Ctx) : Result<Pattern, string> =
         | IntLit n -> advance c; Ok (PLit (LInt n))
         | FloatLit f -> advance c; Ok (PLit (LFloat f))
         | StrLit s -> advance c; Ok (PLit (LStr s))
+        | CharLit ch -> advance c; Ok (PLit (LChar ch))
         | KwTrue -> advance c; Ok (PLit (LBool true))
         | KwFalse -> advance c; Ok (PLit (LBool false))
         | TypeId name ->
@@ -297,6 +299,7 @@ let private parsePattern (c: Ctx) : Result<Pattern, string> =
                 | IntLit n -> args.Add(PLit (LInt n)); advance c
                 | FloatLit f -> args.Add(PLit (LFloat f)); advance c
                 | StrLit s -> args.Add(PLit (LStr s)); advance c
+                | CharLit ch -> args.Add(PLit (LChar ch)); advance c
                 | KwTrue -> args.Add(PLit (LBool true)); advance c
                 | KwFalse -> args.Add(PLit (LBool false)); advance c
                 | LParen ->

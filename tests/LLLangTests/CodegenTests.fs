@@ -83,6 +83,22 @@ let ``TELit bool true emits true`` () =
     Assert.Contains("true", codegenSrc "module M\nlet x = true")
 
 [<Fact>]
+let ``TELit char emits F# char literal`` () =
+    Assert.Contains("'a'", codegenSrc "module M\nlet c = 'a'")
+
+[<Fact>]
+let ``TELit char newline escape`` () =
+    Assert.Contains("'\\n'", codegenSrc "module M\nlet c = '\\n'")
+
+[<Fact>]
+let ``TELit char backslash escape`` () =
+    Assert.Contains("'\\\\'", codegenSrc "module M\nlet c = '\\\\'")
+
+[<Fact>]
+let ``TELit char single quote escape`` () =
+    Assert.Contains("'\\''", codegenSrc "module M\nlet c = '\\''")
+
+[<Fact>]
 let ``TEApp binary add emits infix`` () =
     let fs = codegenSrc "module M\nfn add(a Int)(b Int) Int = a + b"
     Assert.Contains("let add a b =", fs)

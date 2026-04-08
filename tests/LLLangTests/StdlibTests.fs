@@ -243,6 +243,11 @@ let ``charIsDigit returns Bool`` () =
     Assert.Equal(TyName "Bool", (Map.find "b" tm.Env).Body)
 
 [<Fact>]
+let ``charIsDigit with char literal infers Bool`` () =
+    let tm = inferOk "module M\nlet b = charIsDigit '5'"
+    Assert.Equal(TyName "Bool", (Map.find "b" tm.Env).Body)
+
+[<Fact>]
 let ``charIsAlpha returns Bool`` () =
     let tm = inferOk "module M\nlet b = charIsAlpha (intToChar 65)"
     Assert.Equal(TyName "Bool", (Map.find "b" tm.Env).Body)

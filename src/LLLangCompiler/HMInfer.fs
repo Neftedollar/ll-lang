@@ -108,6 +108,7 @@ let private litTy = function
     | LFloat _ -> TyName "Float"
     | LStr _  -> TyName "Str"
     | LBool _ -> TyName "Bool"
+    | LChar _ -> TyName "Char"
 
 // ---- Algorithm W ---------------------------------------------------------
 

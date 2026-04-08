@@ -56,6 +56,44 @@ let ``string literal`` () =
 let ``string with escape`` () =
     Assert.Equal<Token list>([StrLit "a\nb"], toks "\"a\\nb\"")
 
+// --- Char literals (Phase 6.7) ---
+
+[<Fact>]
+let ``char literal: plain a`` () =
+    Assert.Equal<Token list>([CharLit 'a'], toks "'a'")
+
+[<Fact>]
+let ``char literal: uppercase A`` () =
+    Assert.Equal<Token list>([CharLit 'A'], toks "'A'")
+
+[<Fact>]
+let ``char literal: digit`` () =
+    Assert.Equal<Token list>([CharLit '0'], toks "'0'")
+
+[<Fact>]
+let ``char literal: paren`` () =
+    Assert.Equal<Token list>([CharLit '('], toks "'('")
+
+[<Fact>]
+let ``char literal: space`` () =
+    Assert.Equal<Token list>([CharLit ' '], toks "' '")
+
+[<Fact>]
+let ``char literal: escape newline`` () =
+    Assert.Equal<Token list>([CharLit '\n'], toks "'\\n'")
+
+[<Fact>]
+let ``char literal: escape tab`` () =
+    Assert.Equal<Token list>([CharLit '\t'], toks "'\\t'")
+
+[<Fact>]
+let ``char literal: escape backslash`` () =
+    Assert.Equal<Token list>([CharLit '\\'], toks "'\\\\'")
+
+[<Fact>]
+let ``char literal: escape single quote`` () =
+    Assert.Equal<Token list>([CharLit '\''], toks "'\\''")
+
 [<Fact>]
 let ``bool true and false`` () =
     Assert.Equal<Token list>([KwTrue; KwFalse], toks "true false")

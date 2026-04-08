@@ -25,6 +25,7 @@ type Literal =
     | LFloat of float
     | LStr of string
     | LBool of bool
+    | LChar of char
 
 // ---- Patterns -------------------------------------------------------
 

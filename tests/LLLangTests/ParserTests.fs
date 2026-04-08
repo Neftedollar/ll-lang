@@ -42,6 +42,22 @@ let ``parse string literal`` () =
 let ``parse bool true`` () =
     Assert.Equal(ELit (LBool true), parseExprStr "true")
 
+[<Fact>]
+let ``parse char literal`` () =
+    Assert.Equal(ELit (LChar 'a'), parseExprStr "'a'")
+
+[<Fact>]
+let ``parse char escape newline`` () =
+    Assert.Equal(ELit (LChar '\n'), parseExprStr "'\\n'")
+
+[<Fact>]
+let ``parse top-level let with char literal`` () =
+    let src = "module M\nlet c = 'a'"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DLet("c", ELit (LChar 'a')) -> ()
+    | d -> failwith $"Expected DLet c = 'a', got {d}"
+
 // --- Variables and Constructors ---
 
 [<Fact>]

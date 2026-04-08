@@ -62,6 +62,17 @@ let private emitLit (l: Literal) : string =
         let escaped = s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t")
         "\"" + escaped + "\""
     | LBool b  -> if b then "true" else "false"
+    | LChar ch ->
+        let escaped =
+            match ch with
+            | '\\' -> "\\\\"
+            | '\'' -> "\\'"
+            | '\n' -> "\\n"
+            | '\t' -> "\\t"
+            | '\r' -> "\\r"
+            | '\000' -> "\\000"
+            | c -> string c
+        "'" + escaped + "'"
 
 // ---- Binary operator mapping -------------------------------------------------
 

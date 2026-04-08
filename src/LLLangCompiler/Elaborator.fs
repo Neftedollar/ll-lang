@@ -188,6 +188,7 @@ let private collectDecls (m: LLModule) : TypeEnv =
                 | ELit(LInt _)   -> TyName "Int"
                 | ELit(LFloat _) -> TyName "Float"
                 | ELit(LStr _)   -> TyName "Str"
+                | ELit(LChar _)  -> TyName "Char"
                 | ETagged(ELit(LInt _),   tag) -> TyTagged(TyName "Int",   UName tag)
                 | ETagged(ELit(LFloat _), tag) -> TyTagged(TyName "Float", UName tag)
                 | ETagged(ELit(LStr _),   tag) -> TyTagged(TyName "Str",   UName tag)
@@ -299,6 +300,7 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
     | ELit(LFloat _) -> (TyName "Float", [])
     | ELit(LStr _)   -> (TyName "Str",   [])
     | ELit(LBool _)  -> (TyName "Bool",  [])
+    | ELit(LChar _)  -> (TyName "Char",  [])
 
     | ETagged(e, tag) ->
         let (innerType, errs) = typeOf e env

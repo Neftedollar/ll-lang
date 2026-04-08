@@ -234,6 +234,11 @@ let ``infer bool literal`` () =
     Assert.Equal(TyName "Bool", (schemeOf tm "b").Body)
 
 [<Fact>]
+let ``infer char literal`` () =
+    let tm = inferOk "module M\nlet c = 'a'"
+    Assert.Equal(TyName "Char", (schemeOf tm "c").Body)
+
+[<Fact>]
 let ``infer fn with declared params and elided return`` () =
     let tm = inferOk "module M\nfn inc(x Int) = x + 1"
     let sch = schemeOf tm "inc"

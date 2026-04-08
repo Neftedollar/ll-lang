@@ -116,6 +116,37 @@ let tokenize (source: string) : Result<Tok list, string> =
             result.Add({ Token = StrLit (sb.ToString()); Line = l; Col = c })
             if not closed then failwith $"Unterminated string literal at {l}:{c}"
             scan()
+        | '\'' ->
+            let l, c = line, col()
+            advance()  // consume opening '
+            if pos >= source.Length then
+                failwith $"Unterminated char literal at {l}:{c}"
+            let ch =
+                if source[pos] = '\\' then
+                    advance()
+                    if pos >= source.Length then
+                        failwith $"Unterminated char escape at {l}:{c}"
+                    let esc =
+                        match source[pos] with
+                        | 'n' -> '\n'
+                        | 't' -> '\t'
+                        | 'r' -> '\r'
+                        | '\\' -> '\\'
+                        | '\'' -> '\''
+                        | '"' -> '"'
+                        | '0' -> '\000'
+                        | other -> failwith $"Invalid char escape '\\{other}' at {l}:{c}"
+                    advance()
+                    esc
+                else
+                    let c2 = source[pos]
+                    advance()
+                    c2
+            if pos >= source.Length || source[pos] <> '\'' then
+                failwith $"Unterminated char literal at {l}:{c}"
+            advance()  // consume closing '
+            result.Add({ Token = CharLit ch; Line = l; Col = c })
+            scan()
         | c when Char.IsDigit c ->
             let l, c2 = line, col()
             let start = pos

@@ -13,6 +13,7 @@ type Token =
     | IntLit of int64
     | FloatLit of float
     | StrLit of string
+    | CharLit of char
     // Operators
     | Arrow                 // ->
     | Backslash             // \
