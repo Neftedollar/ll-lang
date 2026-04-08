@@ -44,7 +44,7 @@ let ``18-hminfer-real.lll parses, elaborates, and infers without errors`` () =
             | Ok tm -> Assert.NotNull(tm.Env)
 
 [<Fact>]
-let ``18-hminfer-real.lll runs and emits all five unify result lines`` () =
+let ``18-hminfer-real.lll runs and emits unify + inferExpr result lines`` () =
     let lllPath =
         Path.Combine(
             __SOURCE_DIRECTORY__,
@@ -61,25 +61,31 @@ let ``18-hminfer-real.lll runs and emits all five unify result lines`` () =
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
-    // The hardcoded test plan in `main`:
-    //   t1: unify Int Int                    -> ok
-    //   t2: unify Int Str                    -> mismatch
-    //   t3: unify a Int                      -> ok bound a
-    //   t4: unify (Int -> Str) (Int -> Str)  -> ok
-    //   t5: unify (Int -> Str) (Int -> Bool) -> mismatch
-    //
-    // The file's runTest helper renders each case as
-    //   "t<N> unify <showType t1> <showType t2> <result tail>"
-    // where the result tail is "ok" / "ok bound <key>" / "mismatch".
-    // Note: the test driver passes `runTest "t5" intToBoolFn intToStrFn`
-    // (Bool first, Str second) so the rendered line reads
-    // "t5 unify (Int -> Bool) (Int -> Str) mismatch".
+    // Phase 7.7a covered the unify tests t1-t5. Phase 7.7b extends `main`
+    // with inference tests t6-t10 that exercise `inferExpr` against
+    // literal / addition / var-in-env / application-in-env / app-mismatch
+    // expression shapes:
+    //   t1: unify Int Int                          -> ok
+    //   t2: unify Int Str                          -> mismatch
+    //   t3: unify a Int                            -> ok bound a
+    //   t4: unify (Int -> Str) (Int -> Str)        -> ok
+    //   t5: unify (Int -> Str) (Int -> Bool)       -> mismatch
+    //   t6: infer (EInt 42)                        -> Int
+    //   t7: infer (EAdd 1 2)                       -> Int
+    //   t8: infer (EVar "x") {x: Int}              -> Int
+    //   t9: infer (EApp double (EInt 5))           -> Int
+    //   t10: infer (EApp double (EStr "x"))        -> ERROR (unify fail)
     let expected =
         [ "t1 unify Int Int ok"
           "t2 unify Int Str mismatch"
           "t3 unify a Int ok bound a"
           "t4 unify (Int -> Str) (Int -> Str) ok"
-          "t5 unify (Int -> Bool) (Int -> Str) mismatch" ]
+          "t5 unify (Int -> Bool) (Int -> Str) mismatch"
+          "t6 infer 42 : Int"
+          "t7 infer (1 + 2) : Int"
+          "t8 infer x in env : Int"
+          "t9 infer (double 5) in env : Int"
+          "t10 infer (double \"x\") in env : ERROR" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),
