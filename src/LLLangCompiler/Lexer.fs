@@ -87,6 +87,7 @@ let tokenize (source: string) : Result<Tok list, string> =
         | '=' -> add Eq; advance(); scan()
         | ',' -> add Comma; advance(); scan()
         | '.' -> add Dot; advance(); scan()
+        | ':' when peek() = ':' -> let t = mk ColonColon in advance(); advance(); result.Add(t); scan()
         | ':' -> add Colon; advance(); scan()
         | '|' -> add Bar; advance(); scan()
         | '[' -> add LBrack; advance(); scan()

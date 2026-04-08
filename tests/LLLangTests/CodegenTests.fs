@@ -171,6 +171,20 @@ let ``PTuple pattern with wildcard emits (a, _)`` () =
     let fs = codegenSrc src
     Assert.Contains("| (a, _) ->", fs)
 
+// --- Phase 7.1.5: cons patterns + cons expressions ---
+
+[<Fact>]
+let ``PCons pattern emits F# (h :: t)`` () =
+    let src = "module M\nfn first(xs) =\n  | h :: t -> h"
+    let fs = codegenSrc src
+    Assert.Contains("(h :: t)", fs)
+
+[<Fact>]
+let ``ECons expression emits F# (h :: t)`` () =
+    let src = "module M\nlet xs = 1 :: [2 3]"
+    let fs = codegenSrc src
+    Assert.Contains("(1L :: ", fs)
+
 // ---------- Task 5: top-level module emission ----------
 
 [<Fact>]
@@ -346,3 +360,50 @@ let ``hello world runs via lllc run and prints Hello ll-lang!`` () =
     proc.WaitForExit()
     Assert.True(stdout.Contains("Hello, ll-lang!"),
                 $"Expected stdout to contain 'Hello, ll-lang!'. stdout={stdout} stderr={stderr}")
+
+// --- Phase 7.1.5: runtime — cons via lllc run ---
+
+/// Compile and run an inline ll-lang module via the lllc tool. Returns stdout.
+let private runLLLangSrc (src: string) : string =
+    let tmpDir = System.IO.Path.GetTempPath()
+    let lllPath = System.IO.Path.Combine(tmpDir, $"test_{System.Guid.NewGuid()}.lll")
+    System.IO.File.WriteAllText(lllPath, src)
+    try
+        let llcDll =
+            System.IO.Path.Combine(
+                __SOURCE_DIRECTORY__,
+                "../../src/LLLangTool/bin/Debug/net10.0/lllc.dll")
+        let psi = System.Diagnostics.ProcessStartInfo("dotnet", $"\"{llcDll}\" run \"{lllPath}\"")
+        psi.RedirectStandardOutput <- true
+        psi.RedirectStandardError  <- true
+        psi.UseShellExecute        <- false
+        use proc = System.Diagnostics.Process.Start(psi)
+        let stdout = proc.StandardOutput.ReadToEnd()
+        let stderr = proc.StandardError.ReadToEnd()
+        proc.WaitForExit()
+        if proc.ExitCode <> 0 then
+            failwith $"lllc run failed: stderr={stderr}, stdout={stdout}"
+        stdout
+    finally
+        try System.IO.File.Delete(lllPath) with _ -> ()
+
+[<Fact>]
+let ``runtime: cons pattern in fn match returns head`` () =
+    let src =
+        "module Tmp.ConsHead\n" +
+        "fn first(xs List[Int]) Int =\n" +
+        "  | h :: _ -> h\n" +
+        "  | _ -> 0\n" +
+        "fn main() = printfn (intToStr (first [1 2 3]))"
+    let stdout = runLLLangSrc src
+    Assert.Contains("1", stdout)
+
+[<Fact>]
+let ``runtime: cons expression builds list matched by literal`` () =
+    let src =
+        "module Tmp.ConsBuild\n" +
+        "fn main() =\n" +
+        "  let xs = 1 :: 2 :: 3 :: [4 5] in\n" +
+        "  printfn (intToStr (listLen xs))"
+    let stdout = runLLLangSrc src
+    Assert.Contains("5", stdout)

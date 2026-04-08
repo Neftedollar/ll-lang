@@ -93,6 +93,7 @@ let rec private emitPattern (p: Pattern) : string =
     | PCon(c, [p]) -> safeIdent c + " " + emitPattern p
     | PCon(c, ps)  -> safeIdent c + "(" + (ps |> List.map emitPattern |> String.concat ", ") + ")"
     | PTuple ps    -> "(" + (ps |> List.map emitPattern |> String.concat ", ") + ")"
+    | PCons(h, t)  -> "(" + emitPattern h + " :: " + emitPattern t + ")"
 
 // ---- Expression emission -----------------------------------------------------
 
@@ -148,13 +149,16 @@ and private emitExpr (indent: int) (te: TypedExpr) : string =
             |> String.concat "\n"
         "(match " + emitExpr indent scrut + " with\n" + brsStr + ")"
 
+    | TECons(h, t) ->
+        "(" + emitExpr indent h + " :: " + emitExpr indent t + ")"
+
 // ---- Recursion detection -----------------------------------------------------
 
 let private containsVar (name: string) (te: TypedExpr) : bool =
     let rec walk e =
         match e.Expr with
         | TEVar x when x = name -> true
-        | TEApp(a, b) | TEPipe(a, b) -> walk a || walk b
+        | TEApp(a, b) | TEPipe(a, b) | TECons(a, b) -> walk a || walk b
         | TELam(_, body) | TETagged(body, _) -> walk body
         | TELet(_, _, e1, e2) -> walk e1 || (e2 |> Option.exists walk)
         | TEIf(c, t, el) -> walk c || walk t || walk el

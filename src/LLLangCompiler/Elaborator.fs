@@ -354,6 +354,7 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
             | PVar n -> [n]
             | PCon(_, pats) -> pats |> List.collect patVars
             | PTuple pats -> pats |> List.collect patVars
+            | PCons(h, t) -> patVars h @ patVars t
             | PLit _ | PWild -> []
         let errs =
             branches
@@ -363,6 +364,11 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
                     |> List.fold (fun acc n -> Map.add n (TyVar "?") acc) env
                 snd (typeOf branchExpr localEnv))
         (TyVar "?", errs)
+
+    | ECons(h, t) ->
+        let (_, hErrs) = typeOf h env
+        let (_, tErrs) = typeOf t env
+        (TyVar "?", hErrs @ tErrs)
 
     | EPipe(e, f) ->
         let (_, ee) = typeOf e env
@@ -425,6 +431,7 @@ let rec private collectMatches (expr: Expr) : (Pattern * Expr) list list =
         collectMatches e @ collectMatches f
     | EList(elems) | ETuple(elems) ->
         elems |> List.collect collectMatches
+    | ECons(h, t) -> collectMatches h @ collectMatches t
     | ETagged(e, _) -> collectMatches e
     | ELam _ | ELit _ | EVar _ | ECon _ -> []
 
@@ -459,7 +466,7 @@ let private exhaustivenessCheck (m: LLModule) (_env: TypeEnv) : LLError list =
                         branches
                         |> List.exists (fun (pat, _) ->
                             match pat with
-                            | PWild | PVar _ | PTuple _ -> true
+                            | PWild | PVar _ | PTuple _ | PCons _ -> true
                             | _ -> false)
                     if not hasCatchAll then
                         let coveredCtors =

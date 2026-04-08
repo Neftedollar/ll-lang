@@ -466,7 +466,7 @@ let ``TypedAST has no TyVar placeholder for 01-basics`` () =
     let rec checkExpr (e: TypedExpr) =
         if containsWildcard e.Type then failwith $"wildcard found in expr type: {e.Type}"
         match e.Expr with
-        | TEApp(a, b) -> checkExpr a; checkExpr b
+        | TEApp(a, b) | TECons(a, b) -> checkExpr a; checkExpr b
         | TELam(ps, body) ->
             for (_, t) in ps do
                 if containsWildcard t then failwith $"wildcard in lambda param: {t}"
@@ -504,7 +504,7 @@ let ``TypedAST has no TyVar placeholder for 01-basics`` () =
 let rec private collectTypes (e: TypedExpr) : TypeExpr list =
     e.Type :: (
         match e.Expr with
-        | TEApp(a, b) -> collectTypes a @ collectTypes b
+        | TEApp(a, b) | TECons(a, b) -> collectTypes a @ collectTypes b
         | TELam(ps, body) -> (ps |> List.map snd) @ collectTypes body
         | TELet(_, _, e1, e2) ->
             collectTypes e1 @ (e2 |> Option.map collectTypes |> Option.defaultValue [])
@@ -576,7 +576,7 @@ let ``every TELam parameter carries a concrete type in basics`` () =
             for (_, ty) in ps do
                 Assert.False(containsWildcard ty, $"wildcard in lambda param: {ty}")
             walk body
-        | TEApp(a, b) -> walk a; walk b
+        | TEApp(a, b) | TECons(a, b) -> walk a; walk b
         | TELet(_, _, e1, e2) -> walk e1; Option.iter walk e2
         | TEIf(a, b, c) -> walk a; walk b; walk c
         | TEMatch(s, branches) ->
@@ -697,3 +697,38 @@ let ``E006 corpus fires in HMInfer`` () =
         // If it somehow infers OK, that's still acceptable since E006 may not be fully implemented yet
         // The test is lenient: just check the file parses without throwing
         Assert.True(true)
+
+// --- Phase 7.1.5: cons patterns + cons expressions ---
+
+[<Fact>]
+let ``infer fn with cons pattern: List A -> A`` () =
+    // `fn first(xs) = | x :: _ -> x` should be (List A) -> A.
+    // (Uses the implicit fn-body match form since match-as-expression
+    // is shipped in the next commit.)
+    let src = "module M\nfn first(xs) =\n  | x :: _ -> x"
+    let tm = inferOk src
+    let sch = schemeOf tm "first"
+    match sch.Body with
+    | TyFn(TyApp(TyName "List", TyVar a), TyVar b) ->
+        Assert.Equal<string>(a, b)
+    | t -> failwith $"expected (List A) -> A, got {t}"
+
+[<Fact>]
+let ``infer cons expression: 1 :: empty list is List Int`` () =
+    let src = "module M\nlet xs = 1 :: [2 3]"
+    let tm = inferOk src
+    let sch = schemeOf tm "xs"
+    Assert.Equal(TyApp(TyName "List", TyName "Int"), sch.Body)
+
+[<Fact>]
+let ``infer cons expression: chain 1 :: 2 :: rest`` () =
+    // `let xs = 1 :: 2 :: [3]` -> List Int
+    let src = "module M\nlet xs = 1 :: 2 :: [3]"
+    let tm = inferOk src
+    Assert.Equal(TyApp(TyName "List", TyName "Int"), (schemeOf tm "xs").Body)
+
+[<Fact>]
+let ``infer cons expression type mismatch yields E001`` () =
+    // 1 :: ["a"]  — Int head + List Str -> mismatch
+    let errs = inferErrs "module M\nlet xs = 1 :: [\"a\"]"
+    Assert.Contains(errs, fun e -> e.Code = E001)

@@ -100,6 +100,7 @@ and private applyTEK (s: Subst) (k: TypedExprKind) : TypedExprKind =
     | TETagged(e, tag) -> TETagged(applyTE s e, tag)
     | TEList es -> TEList (es |> List.map (applyTE s))
     | TETuple es -> TETuple (es |> List.map (applyTE s))
+    | TECons(h, t) -> TECons(applyTE s h, applyTE s t)
 
 // ---- Literal types -------------------------------------------------------
 
@@ -273,6 +274,17 @@ let rec private inferExpr (env: Env) (st: InferState) (expr: Expr) : Subst * Typ
         let tupleTy = List.fold (fun acc t -> TyApp(acc, t)) (TyName "Tuple") tys
         (sAll, tupleTy, mkTyped st (TETuple (List.map (applyTE sAll) tes)) tupleTy)
 
+    | ECons(h, t) ->
+        // h :: t  where t : List τh and result : List τh
+        let (s1, tauH, teH) = inferExpr env st h
+        let (s2, tauT, teT) = inferExpr (applyEnv s1 env) st t
+        let listOfH = TyApp(TyName "List", applyType s2 tauH)
+        let s3 = unifyS st (applyType s2 tauT) listOfH
+        let sAll = compose s3 (compose s2 s1)
+        let resultTy = applyType sAll listOfH
+        let te = mkTyped st (TECons(applyTE sAll teH, applyTE sAll teT)) resultTy
+        (sAll, resultTy, te)
+
     | EMatch branches ->
         // Match as expression: synthesize scrutinee var, build function type
         let alpha = freshVar st.Fresh  // scrutinee type
@@ -318,6 +330,27 @@ and private patternType (st: InferState) (env: Env) (pat: Pattern) : TypeExpr * 
                 (tysAcc @ [t], bsAcc @ bs)) ([], [])
         let tupleTy = List.fold (fun acc t -> TyApp(acc, t)) (TyName "Tuple") tys
         (tupleTy, bindings)
+    | PCons(h, t) ->
+        // h :: t  →  scrutinee is List αElem; h binds αElem; t binds List αElem.
+        // patternType has no way to thread a substitution back to its caller,
+        // so we apply the unify result manually to the binding types so the
+        // bindings reference αElem (not the sub-pattern's fresh flex var).
+        let alphaElem = freshVar st.Fresh
+        let (typeH, bindingsH) = patternType st env h
+        let listTy = TyApp(TyName "List", alphaElem)
+        let (typeT, bindingsT) = patternType st env t
+        let s1 =
+            match unify typeH alphaElem with
+            | Ok s -> s
+            | Error e -> st.Errors <- st.Errors @ [e]; empty
+        let s2 =
+            match unify (applyType s1 typeT) listTy with
+            | Ok s -> compose s s1
+            | Error e -> st.Errors <- st.Errors @ [e]; s1
+        let bindings =
+            (bindingsH @ bindingsT)
+            |> List.map (fun (n, t) -> (n, applyType s2 t))
+        (applyType s2 listTy, bindings)
     | PCon(name, argPats) ->
         match Map.tryFind name env with
         | None ->

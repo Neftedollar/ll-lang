@@ -39,6 +39,7 @@ and TypedExprKind =
     | TETagged of TypedExpr * TypeIdent
     | TEList of TypedExpr list
     | TETuple of TypedExpr list
+    | TECons of TypedExpr * TypedExpr
 
 /// Typed function signature
 type TypedFnSig = {

@@ -136,8 +136,23 @@ and private parseAdd (c: Ctx) : Result<Expr, string> =
             | _ -> cont <- false
         Ok result
 
-and private parseCmp (c: Ctx) : Result<Expr, string> =
+and private parseCons (c: Ctx) : Result<Expr, string> =
+    // Right-associative cons. `1 :: 2 :: xs` -> ECons(1, ECons(2, xs)).
+    // Precedence sits between `==` (parseCmp) and `+` (parseAdd):
+    //   a == 1 :: rest        -> a == (1 :: rest)
+    //   1 + 2 :: xs           -> (1 + 2) :: xs
     match parseAdd c with
+    | Error e -> Error e
+    | Ok left ->
+        if curTok c = ColonColon then
+            advance c
+            match parseCons c with
+            | Ok right -> Ok (ECons(left, right))
+            | Error e -> Error e
+        else Ok left
+
+and private parseCmp (c: Ctx) : Result<Expr, string> =
+    match parseCons c with
     | Error e -> Error e
     | Ok left ->
         let mutable result = left
@@ -146,7 +161,7 @@ and private parseCmp (c: Ctx) : Result<Expr, string> =
             match curTok c with
             | Lt | Gt | Le | Ge | EqEq | Neq as op ->
                 advance c
-                match parseAdd c with
+                match parseCons c with
                 | Ok right ->
                     let opName =
                         match op with
@@ -272,6 +287,87 @@ and private parseBlockExpr (c: Ctx) : Result<Expr, string> =
                 | Error e -> Error e
         | _ -> Ok expr
 
+// ---- Pattern parser --------------------------------------------------
+// In the same `let rec` group as parseExprInner so the `match`-expression
+// branch of parseExprInner can call parsePattern, and so PCons-recursive
+// pattern parsing can recurse into parsePatternInner.
+
+and private parsePattern (c: Ctx) : Result<Pattern, string> =
+    parsePatCons c
+
+and private parsePatCons (c: Ctx) : Result<Pattern, string> =
+    // Right-associative cons. `a :: b :: rest` -> PCons(a, PCons(b, rest)).
+    // Cons is the lowest-precedence pattern form, so a constructor like
+    // `Some x` still parses as PCon-with-args before the `::` layer.
+    match parsePatAtom c with
+    | Error e -> Error e
+    | Ok lhs ->
+        if curTok c = ColonColon then
+            advance c
+            match parsePatCons c with
+            | Ok rhs -> Ok (PCons(lhs, rhs))
+            | Error e -> Error e
+        else Ok lhs
+
+and private parsePatAtom (c: Ctx) : Result<Pattern, string> =
+    match curTok c with
+    | Underscore -> advance c; Ok PWild
+    | Ident name -> advance c; Ok (PVar name)
+    | IntLit n -> advance c; Ok (PLit (LInt n))
+    | FloatLit f -> advance c; Ok (PLit (LFloat f))
+    | StrLit s -> advance c; Ok (PLit (LStr s))
+    | CharLit ch -> advance c; Ok (PLit (LChar ch))
+    | KwTrue -> advance c; Ok (PLit (LBool true))
+    | KwFalse -> advance c; Ok (PLit (LBool false))
+    | TypeId name ->
+        advance c
+        // collect subpatterns (atoms only, not constructors with args)
+        let args = ResizeArray<Pattern>()
+        let mutable cont = true
+        while cont do
+            match curTok c with
+            | Ident n -> args.Add(PVar n); advance c
+            | Underscore -> args.Add(PWild); advance c
+            | IntLit n -> args.Add(PLit (LInt n)); advance c
+            | FloatLit f -> args.Add(PLit (LFloat f)); advance c
+            | StrLit s -> args.Add(PLit (LStr s)); advance c
+            | CharLit ch -> args.Add(PLit (LChar ch)); advance c
+            | KwTrue -> args.Add(PLit (LBool true)); advance c
+            | KwFalse -> args.Add(PLit (LBool false)); advance c
+            | LParen ->
+                advance c
+                match parsePatCons c with
+                | Ok p ->
+                    match skip c RParen with
+                    | Ok () -> args.Add(p)
+                    | Error _ -> cont <- false
+                | Error _ -> cont <- false
+            | _ -> cont <- false
+        Ok (PCon(name, List.ofSeq args))
+    | LParen ->
+        advance c
+        match parsePatCons c with
+        | Error e -> Error e
+        | Ok p ->
+            // If the next token is a comma, parse a tuple pattern: (p, p2, ..., pN)
+            if curTok c = Comma then
+                let elems = ResizeArray<Pattern>()
+                elems.Add(p)
+                let mutable cont = true
+                while cont && curTok c = Comma do
+                    advance c  // consume comma
+                    match parsePatCons c with
+                    | Ok pi -> elems.Add(pi)
+                    | Error _ -> cont <- false
+                match skip c RParen with
+                | Error e -> Error e
+                | Ok () -> Ok (PTuple (List.ofSeq elems))
+            else
+                match skip c RParen with
+                | Error e -> Error e
+                | Ok () -> Ok p
+    | t -> Error $"Expected pattern, got {t}"
+
 /// Parse an expression from a token list. Returns (expr, remaining tokens).
 let parseExpr (tokens: Tok list) : Result<Expr * Tok list, string> =
     let ctx = { Tokens = Array.ofList tokens; Pos = 0 }
@@ -325,69 +421,6 @@ let private parseTypeExpr (c: Ctx) : Result<TypeExpr, string> =
             else Ok left
 
     parseTypeExprTop ()
-
-// ---- Pattern parser --------------------------------------------------
-
-let private parsePattern (c: Ctx) : Result<Pattern, string> =
-    let rec parsePat () =
-        match curTok c with
-        | Underscore -> advance c; Ok PWild
-        | Ident name -> advance c; Ok (PVar name)
-        | IntLit n -> advance c; Ok (PLit (LInt n))
-        | FloatLit f -> advance c; Ok (PLit (LFloat f))
-        | StrLit s -> advance c; Ok (PLit (LStr s))
-        | CharLit ch -> advance c; Ok (PLit (LChar ch))
-        | KwTrue -> advance c; Ok (PLit (LBool true))
-        | KwFalse -> advance c; Ok (PLit (LBool false))
-        | TypeId name ->
-            advance c
-            // collect subpatterns (atoms only, not constructors with args)
-            let args = ResizeArray<Pattern>()
-            let mutable cont = true
-            while cont do
-                match curTok c with
-                | Ident n -> args.Add(PVar n); advance c
-                | Underscore -> args.Add(PWild); advance c
-                | IntLit n -> args.Add(PLit (LInt n)); advance c
-                | FloatLit f -> args.Add(PLit (LFloat f)); advance c
-                | StrLit s -> args.Add(PLit (LStr s)); advance c
-                | CharLit ch -> args.Add(PLit (LChar ch)); advance c
-                | KwTrue -> args.Add(PLit (LBool true)); advance c
-                | KwFalse -> args.Add(PLit (LBool false)); advance c
-                | LParen ->
-                    advance c
-                    match parsePat () with
-                    | Ok p ->
-                        match skip c RParen with
-                        | Ok () -> args.Add(p)
-                        | Error _ -> cont <- false
-                    | Error _ -> cont <- false
-                | _ -> cont <- false
-            Ok (PCon(name, List.ofSeq args))
-        | LParen ->
-            advance c
-            match parsePat () with
-            | Error e -> Error e
-            | Ok p ->
-                // If the next token is a comma, parse a tuple pattern: (p, p2, ..., pN)
-                if curTok c = Comma then
-                    let elems = ResizeArray<Pattern>()
-                    elems.Add(p)
-                    let mutable cont = true
-                    while cont && curTok c = Comma do
-                        advance c  // consume comma
-                        match parsePat () with
-                        | Ok pi -> elems.Add(pi)
-                        | Error _ -> cont <- false
-                    match skip c RParen with
-                    | Error e -> Error e
-                    | Ok () -> Ok (PTuple (List.ofSeq elems))
-                else
-                    match skip c RParen with
-                    | Error e -> Error e
-                    | Ok () -> Ok p
-        | t -> Error $"Expected pattern, got {t}"
-    parsePat ()
 
 // ---- Match expression parser ----------------------------------------
 

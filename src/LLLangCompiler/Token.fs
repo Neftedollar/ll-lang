@@ -20,6 +20,7 @@ type Token =
     | Dot                   // .
     | Comma                 // ,
     | Colon                 // :
+    | ColonColon            // ::
     | Eq                    // =
     | Bar                   // |
     | LBrack                // [

@@ -360,3 +360,57 @@ let ``parse single-parenthesised pattern stays as pattern (no PTuple)`` () =
     match fst m.Decls[0] with
     | DFn(_, EMatch [(PVar "a", EVar "a")]) -> ()
     | d -> failwith $"Expected DFn with match on PVar a, got {d}"
+
+// --- Phase 7.1.5: cons patterns ---
+
+[<Fact>]
+let ``parse cons pattern: h :: t`` () =
+    let src = "module M\nfn first(xs) =\n  | h :: t -> h"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(_, EMatch [(PCons(PVar "h", PVar "t"), EVar "h")]) -> ()
+    | d -> failwith $"Expected DFn with match on PCons(h, t), got {d}"
+
+[<Fact>]
+let ``parse cons pattern: a :: b :: rest is right-associative`` () =
+    let src = "module M\nfn f(xs) =\n  | a :: b :: rest -> a"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(_, EMatch [(PCons(PVar "a", PCons(PVar "b", PVar "rest")), EVar "a")]) -> ()
+    | d -> failwith $"Expected nested PCons, got {d}"
+
+[<Fact>]
+let ``parse cons pattern with wildcard tail`` () =
+    let src = "module M\nfn first(xs) =\n  | x :: _ -> x"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(_, EMatch [(PCons(PVar "x", PWild), EVar "x")]) -> ()
+    | d -> failwith $"Expected DFn with PCons(x, _), got {d}"
+
+// --- Phase 7.1.5: cons expressions ---
+
+[<Fact>]
+let ``parse cons expression: 1 :: rest`` () =
+    match parseExprStr "1 :: rest" with
+    | ECons(ELit (LInt 1L), EVar "rest") -> ()
+    | e -> failwith $"Expected ECons(1, rest), got {e}"
+
+[<Fact>]
+let ``parse cons expression: 1 :: 2 :: xs is right-associative`` () =
+    match parseExprStr "1 :: 2 :: xs" with
+    | ECons(ELit (LInt 1L), ECons(ELit (LInt 2L), EVar "xs")) -> ()
+    | e -> failwith $"Expected nested ECons, got {e}"
+
+[<Fact>]
+let ``parse cons expression with let: let xs = 1 :: 2 :: rest`` () =
+    match parseExprStr "let xs = 1 :: 2 :: rest" with
+    | ELet("xs", ECons(ELit (LInt 1L), ECons(ELit (LInt 2L), EVar "rest")), None) -> ()
+    | e -> failwith $"Expected ELet xs = ECons-chain, got {e}"
+
+[<Fact>]
+let ``parse cons precedence: a + 1 :: rest is (a + 1) :: rest`` () =
+    // + binds tighter than ::
+    match parseExprStr "a + 1 :: rest" with
+    | ECons(EApp(EApp(EVar "+", EVar "a"), ELit (LInt 1L)), EVar "rest") -> ()
+    | e -> failwith $"Expected ECons((a+1), rest), got {e}"
+

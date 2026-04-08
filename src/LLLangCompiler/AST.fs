@@ -35,6 +35,7 @@ type Pattern =
     | PLit of Literal                         // 42, "hello", true
     | PWild                                   // _
     | PTuple of Pattern list                  // (p1, p2, ..., pN)
+    | PCons of Pattern * Pattern              // head :: tail (list cons)
 
 // ---- Expressions ----------------------------------------------------
 
@@ -51,6 +52,7 @@ type Expr =
     | ETagged of Expr * TypeIdent             // e[Tag]
     | EList of Expr list                      // [e e e]
     | ETuple of Expr list                     // e, e, e (2+ elements)
+    | ECons of Expr * Expr                    // head :: tail (list cons)
 
 // ---- Declarations ---------------------------------------------------
 
