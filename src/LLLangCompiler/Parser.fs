@@ -100,8 +100,21 @@ let rec private parseAtom (c: Ctx) : Result<Expr, string> =
         skipNewlines c
         let elems = ResizeArray<Expr>()
         let mutable lstCont = true
+        // Phase 7.3b bug 1: an element that STARTS with a TypeId (a
+        // constructor) is parsed via `parseApp` so juxtaposition-application
+        // lands in the list literal directly — `[TNum 42]` becomes
+        // EList [EApp(TNum, 42)] (one element), not EList [TNum; 42] (two
+        // elements). Lowercase-atom / literal-starting elements still fall
+        // back to `parseTagged`, so `[1 2 3]` keeps its three-element shape
+        // and `[tok]` remains single-atom. This makes `[TNum 42]` a one-element
+        // list — users wanting multiple ctor elements must use listAppend /
+        // cons rather than whitespace-separate them.
         while lstCont && curTok c <> RBrack && curTok c <> Eof do
-            match parseTagged c with
+            let parseElem =
+                match curTok c with
+                | TypeId _ -> parseApp
+                | _ -> parseTagged
+            match parseElem c with
             | Error _ -> lstCont <- false
             | Ok e -> elems.Add(e); skipNewlines c
         match skip c RBrack with

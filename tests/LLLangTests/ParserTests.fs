@@ -649,3 +649,55 @@ let ``parse fn call with tuple argument: f (1, 2)`` () =
     | EApp(EVar "f", ETuple [ELit (LInt 1L); ELit (LInt 2L)]) -> ()
     | e -> failwith $"Expected EApp(f, ETuple [1; 2]), got {e}"
 
+// --- Phase 7.3b-fixes bug 1: juxtaposition-application inside list literals ---
+//
+// Disambiguation rule: a list-literal element is parsed via `parseApp` ONLY
+// when its first atom is a TypeId (constructor). Otherwise (lowercase ident,
+// literal, paren group, etc.) it falls back to `parseTagged`, which stops at
+// a single atom. This preserves `[1 2 3]` as a three-element int list, while
+// letting `[TNum 42]` be a single-element list with a ctor applied to 42.
+// Multiple ctors separated by whitespace are NOT supported (`[Tag1 Tag2]`
+// reads as a single application). Users wanting multiple ctor elements must
+// wrap each one: `[(Tag1) (Tag2)]` — but that still applies. Use listAppend.
+
+[<Fact>]
+let ``list literal with ctor + arg: [TNum 42] is single-element list`` () =
+    match parseExprStr "[TNum 42]" with
+    | EList [EApp(ECon "TNum", ELit (LInt 42L))] -> ()
+    | e -> failwith $"Expected EList [EApp(TNum, 42)], got {e}"
+
+[<Fact>]
+let ``list literal with ctor + paren arg: [TNum (parseIntStr s)]`` () =
+    match parseExprStr "[TNum (parseIntStr s)]" with
+    | EList [EApp(ECon "TNum", EApp(EVar "parseIntStr", EVar "s"))] -> ()
+    | e -> failwith $"Expected EList [EApp(TNum, EApp(parseIntStr, s))], got {e}"
+
+[<Fact>]
+let ``list literal regression: [1 2 3] stays three elements`` () =
+    // Non-TypeId start → parseTagged per element → three separate ints.
+    match parseExprStr "[1 2 3]" with
+    | EList [ELit (LInt 1L); ELit (LInt 2L); ELit (LInt 3L)] -> ()
+    | e -> failwith $"Expected EList [1; 2; 3], got {e}"
+
+[<Fact>]
+let ``list literal regression: [] stays empty`` () =
+    match parseExprStr "[]" with
+    | EList [] -> ()
+    | e -> failwith $"Expected EList [], got {e}"
+
+[<Fact>]
+let ``list literal regression: [TFoo] stays single bare ctor element`` () =
+    // Single TypeId with nothing after it is still a one-element list.
+    match parseExprStr "[TFoo]" with
+    | EList [ECon "TFoo"] -> ()
+    | e -> failwith $"Expected EList [TFoo], got {e}"
+
+[<Fact>]
+let ``list literal: cons of ctor-app as head element`` () =
+    // `[TNum 42]` passed as arg to listAppend — integration with outer app.
+    match parseExprStr "listAppend [TNum 42] xs" with
+    | EApp(
+        EApp(EVar "listAppend", EList [EApp(ECon "TNum", ELit (LInt 42L))]),
+        EVar "xs") -> ()
+    | e -> failwith $"Expected listAppend [TNum 42] xs, got {e}"
+
