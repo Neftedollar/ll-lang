@@ -37,6 +37,7 @@ let rec private emitType (t: TypeExpr) : string =
     | TyName "Str"   -> "string"
     | TyName "Bool"  -> "bool"
     | TyName "Unit"  -> "unit"
+    | TyName "Char"  -> "char"
     | TyName x when isTypeParamName x -> "'" + x
     | TyName x       -> x
     | TyVar v        -> "'" + v
@@ -231,7 +232,25 @@ let strLen (s: string) : int64 = int64 s.Length
 let strConcat (a: string) (b: string) = a + b
 let strTrim (s: string) = s.Trim()
 let strContains (needle: string) (haystack: string) = haystack.Contains(needle: string)
-let print (s: string) = System.Console.Write(s)"""
+let print (s: string) = System.Console.Write(s)
+let strChars (s: string) = s |> Seq.toList
+let charToInt (c: char) = int64 (int c)
+let intToChar (n: int64) = char (int n)
+let intToStr (n: int64) = string n
+let strSlice (s: string) (start: int64) (len: int64) = s.Substring(int start, int len)
+let strIndexOf (needle: string) (haystack: string) : int64 = int64 (haystack.IndexOf(needle: string))
+let strSplit (sep: string) (s: string) = s.Split([| sep |], System.StringSplitOptions.None) |> Array.toList
+let strFromChars (cs: char list) = System.String(cs |> List.toArray)
+let strReverse (s: string) = System.String(s.ToCharArray() |> Array.rev)
+let charIsDigit (c: char) = System.Char.IsDigit(c)
+let charIsAlpha (c: char) = System.Char.IsLetter(c)
+let charIsSpace (c: char) = System.Char.IsWhiteSpace(c)
+let readFile (path: string) = System.IO.File.ReadAllText(path: string)
+let writeFile (path: string) (contents: string) = System.IO.File.WriteAllText(path, contents)
+let fileExists (path: string) = System.IO.File.Exists(path: string)
+let exit (code: int64) : unit = System.Environment.Exit(int code)
+let listConcat (xss: 'a list list) = List.concat xss
+let listIsEmpty (xs: 'a list) = List.isEmpty xs"""
 
 /// Maybe-dependent prelude block — emitted only when user declares `type Maybe`.
 let private fsharpPreludeMaybe : string = """let listHead xs = match xs with [] -> None | x :: _ -> Some x
@@ -242,7 +261,9 @@ let maybeWithDefault d m = match m with Some x -> x | None -> d
 let strToInt (s: string) =
     match System.Int64.TryParse(s: string) with
     | true, n -> Some n
-    | false, _ -> None"""
+    | false, _ -> None
+let listAt (xs: 'a list) (i: int64) =
+    if int i < 0 || int i >= List.length xs then None else Some (List.item (int i) xs)"""
 
 /// Result-dependent prelude block — emitted only when user declares `type Result`.
 let private fsharpPreludeResult : string = """let resultMap f r = match r with Ok x -> Ok (f x) | Err e -> Err e
