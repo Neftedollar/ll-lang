@@ -29,5 +29,6 @@
     <Compile Include="TypeParserTests.fs" />
     <Compile Include="FnParserTests.fs" />
     <Compile Include="ExprParserTests.fs" />
+    <Compile Include="ModuleParserTests.fs" />
   </ItemGroup>
 </Project>
