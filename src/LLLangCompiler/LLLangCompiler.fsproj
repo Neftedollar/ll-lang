@@ -14,5 +14,7 @@
     <Compile Include="Types.fs" />
     <Compile Include="TypedAST.fs" />
     <Compile Include="HMInfer.fs" />
+    <Compile Include="Codegen.fs" />
+    <Compile Include="Compiler.fs" />
   </ItemGroup>
 </Project>

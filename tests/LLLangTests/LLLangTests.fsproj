@@ -19,5 +19,6 @@
     <Compile Include="ParserTests.fs" />
     <Compile Include="ElaboratorTests.fs" />
     <Compile Include="HMInferTests.fs" />
+    <Compile Include="CodegenTests.fs" />
   </ItemGroup>
 </Project>
