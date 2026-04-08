@@ -369,9 +369,23 @@ let private parsePattern (c: Ctx) : Result<Pattern, string> =
             match parsePat () with
             | Error e -> Error e
             | Ok p ->
-                match skip c RParen with
-                | Error e -> Error e
-                | Ok () -> Ok p
+                // If the next token is a comma, parse a tuple pattern: (p, p2, ..., pN)
+                if curTok c = Comma then
+                    let elems = ResizeArray<Pattern>()
+                    elems.Add(p)
+                    let mutable cont = true
+                    while cont && curTok c = Comma do
+                        advance c  // consume comma
+                        match parsePat () with
+                        | Ok pi -> elems.Add(pi)
+                        | Error _ -> cont <- false
+                    match skip c RParen with
+                    | Error e -> Error e
+                    | Ok () -> Ok (PTuple (List.ofSeq elems))
+                else
+                    match skip c RParen with
+                    | Error e -> Error e
+                    | Ok () -> Ok p
         | t -> Error $"Expected pattern, got {t}"
     parsePat ()
 

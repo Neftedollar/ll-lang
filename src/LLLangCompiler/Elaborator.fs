@@ -353,6 +353,7 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
             match pat with
             | PVar n -> [n]
             | PCon(_, pats) -> pats |> List.collect patVars
+            | PTuple pats -> pats |> List.collect patVars
             | PLit _ | PWild -> []
         let errs =
             branches
@@ -450,14 +451,15 @@ let private exhaustivenessCheck (m: LLModule) (_env: TypeEnv) : LLError list =
                 let requiredCtors = typeToCtors[typeName]
                 let matchBlocks = collectMatches body
                 for branches in matchBlocks do
-                    // A PWild or PVar branch is a catch-all: exhaustiveness
-                    // is trivially satisfied regardless of which constructors
-                    // appear in the other branches.
+                    // A PWild / PVar / PTuple branch is a catch-all relative
+                    // to a sum type: tuples are product types, not sum types,
+                    // so a PTuple pattern cannot discriminate constructors and
+                    // must be treated as a catch-all for exhaustiveness.
                     let hasCatchAll =
                         branches
                         |> List.exists (fun (pat, _) ->
                             match pat with
-                            | PWild | PVar _ -> true
+                            | PWild | PVar _ | PTuple _ -> true
                             | _ -> false)
                     if not hasCatchAll then
                         let coveredCtors =

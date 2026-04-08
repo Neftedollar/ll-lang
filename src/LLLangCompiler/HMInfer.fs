@@ -307,6 +307,17 @@ and private patternType (st: InferState) (env: Env) (pat: Pattern) : TypeExpr * 
         (alpha, [])
     | PLit lit ->
         (litTy lit, [])
+    | PTuple subPats ->
+        // Recursively type each subpattern, collect bindings, and build the
+        // same tuple encoding used by inferExpr ETuple:
+        //   TyApp(TyApp(TyName "Tuple", t1), t2) ... for N elements.
+        let (tys, bindings) =
+            subPats
+            |> List.map (patternType st env)
+            |> List.fold (fun (tysAcc, bsAcc) (t, bs) ->
+                (tysAcc @ [t], bsAcc @ bs)) ([], [])
+        let tupleTy = List.fold (fun acc t -> TyApp(acc, t)) (TyName "Tuple") tys
+        (tupleTy, bindings)
     | PCon(name, argPats) ->
         match Map.tryFind name env with
         | None ->

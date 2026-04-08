@@ -179,6 +179,15 @@ let ``E003 still fires for truly nonexhaustive match without catch-all`` () =
     let errs = elab src
     Assert.Contains(E003, errs |> List.map _.Code)
 
+[<Fact>]
+let ``no E003 for PTuple pattern: tuples are not sum types`` () =
+    // A single PTuple branch is a catch-all structurally.
+    let src =
+        "module M\n" +
+        "fn fst(p) =\n" +
+        "  | (a, b) -> a"
+    Assert.Empty(elab src |> List.filter (fun e -> e.Code = E003))
+
 // --- Integration tests: invalid corpus ---
 
 let private expectError code name =

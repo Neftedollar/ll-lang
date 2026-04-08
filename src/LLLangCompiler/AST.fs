@@ -34,6 +34,7 @@ type Pattern =
     | PCon of TypeIdent * Pattern list        // Constructor p1 p2
     | PLit of Literal                         // 42, "hello", true
     | PWild                                   // _
+    | PTuple of Pattern list                  // (p1, p2, ..., pN)
 
 // ---- Expressions ----------------------------------------------------
 

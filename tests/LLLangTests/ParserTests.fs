@@ -324,3 +324,39 @@ let ``module-level multiple lets still parse as siblings`` () =
     match fst m.Decls[1] with
     | DLet("b", ELit(LInt 2L)) -> ()
     | d -> failwith $"Expected DLet b = 2, got {d}"
+
+// --- Phase 6.8: tuple patterns ---
+
+[<Fact>]
+let ``parse tuple pattern: (a, b)`` () =
+    // match p with | (a, b) -> a
+    let src = "module M\nfn fst(p) =\n  | (a, b) -> a"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(_, EMatch [(PTuple [PVar "a"; PVar "b"], EVar "a")]) -> ()
+    | d -> failwith $"Expected DFn with match on PTuple [a; b], got {d}"
+
+[<Fact>]
+let ``parse tuple pattern: (a, _)`` () =
+    let src = "module M\nfn fst(p) =\n  | (a, _) -> a"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(_, EMatch [(PTuple [PVar "a"; PWild], EVar "a")]) -> ()
+    | d -> failwith $"Expected DFn with match on PTuple [a; _], got {d}"
+
+[<Fact>]
+let ``parse tuple pattern: (a, b, c) three elements`` () =
+    let src = "module M\nfn f(p) =\n  | (a, b, c) -> a"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(_, EMatch [(PTuple [PVar "a"; PVar "b"; PVar "c"], EVar "a")]) -> ()
+    | d -> failwith $"Expected DFn with match on PTuple with 3 vars, got {d}"
+
+[<Fact>]
+let ``parse single-parenthesised pattern stays as pattern (no PTuple)`` () =
+    // (a) is NOT a tuple, it's just a in parens
+    let src = "module M\nfn id2(p) =\n  | (a) -> a"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(_, EMatch [(PVar "a", EVar "a")]) -> ()
+    | d -> failwith $"Expected DFn with match on PVar a, got {d}"

@@ -92,6 +92,7 @@ let rec private emitPattern (p: Pattern) : string =
     | PCon(c, [])  -> safeIdent c
     | PCon(c, [p]) -> safeIdent c + " " + emitPattern p
     | PCon(c, ps)  -> safeIdent c + "(" + (ps |> List.map emitPattern |> String.concat ", ") + ")"
+    | PTuple ps    -> "(" + (ps |> List.map emitPattern |> String.concat ", ") + ")"
 
 // ---- Expression emission -----------------------------------------------------
 
