@@ -164,3 +164,40 @@ let ``fn main gets EntryPoint attribute`` () =
 [<Fact>]
 let ``non-main fn does not get EntryPoint`` () =
     Assert.DoesNotContain("[<EntryPoint>]", codegenSrc "module M\nfn add(a Int)(b Int) Int = a + b")
+
+// ---------- Task 6: compiler pipeline ----------
+
+[<Fact>]
+let ``compile returns Ok for valid source`` () =
+    match LLLang.Compiler.compile "module M\nlet x = 42" with
+    | Ok fs -> Assert.NotEmpty(fs)
+    | Error es -> Assert.Fail($"Expected Ok but got Error: {es}")
+
+[<Fact>]
+let ``compile returns Error for invalid source`` () =
+    match LLLang.Compiler.compile "module M\nlet x = undefinedVariable" with
+    | Ok _ -> Assert.Fail("Expected Error but got Ok")
+    | Error es -> Assert.NotEmpty(es)
+
+[<Fact>]
+let ``compile produces module header in output`` () =
+    match LLLang.Compiler.compile "module Examples.Hello\nlet x = 1" with
+    | Ok fs -> Assert.Contains("module Examples.Hello", fs)
+    | Error es -> Assert.Fail($"Expected Ok but got Error: {es}")
+
+[<Fact>]
+let ``compile hello.lll returns Ok`` () =
+    let src = readValid "hello.lll"
+    match LLLang.Compiler.compile src with
+    | Ok fs ->
+        Assert.Contains("module Examples.Hello", fs)
+        Assert.Contains("[<EntryPoint>]", fs)
+        Assert.Contains("let main", fs)
+    | Error es -> Assert.Fail($"Expected Ok but got Error: {es}")
+
+[<Fact>]
+let ``compile hello.lll output contains printfn call`` () =
+    let src = readValid "hello.lll"
+    match LLLang.Compiler.compile src with
+    | Ok fs -> Assert.Contains("printfn", fs)
+    | Error es -> Assert.Fail($"Expected Ok but got Error: {es}")

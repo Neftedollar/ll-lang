@@ -43,7 +43,11 @@ let private builtinEnv : TypeEnv =
     let cmpOps   = [ "=="; "!="; "<"; ">"; "<="; ">=" ]
     let arith = arithOps |> List.map (fun op -> op, TyFn(TyVar "a", TyFn(TyVar "a", TyVar "a")))
     let cmp   = cmpOps   |> List.map (fun op -> op, TyFn(TyVar "a", TyFn(TyVar "a", TyName "Bool")))
-    Map.ofList (arith @ cmp)
+    // IO builtins (emitted verbatim in codegen).
+    let io = [
+        "printfn", TyFn(TyName "Str", TyName "Unit")
+    ]
+    Map.ofList (arith @ cmp @ io)
 
 /// Build a right-associative chain of TyFn from a list of parameter types plus a return type.
 /// e.g. [T1; T2] ret  →  TyFn(T1, TyFn(T2, ret))

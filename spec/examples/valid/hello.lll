@@ -1,0 +1,3 @@
+module Examples.Hello
+
+fn main() = printfn "Hello, ll-lang!"
