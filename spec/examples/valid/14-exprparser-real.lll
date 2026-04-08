@@ -1,0 +1,425 @@
+module Examples.ExprParser
+
+-- Phase 7.3c: a real recursive-descent **full expression** parser written in
+-- ll-lang itself. Fifth self-hosting milestone after 09-lexer-real.lll,
+-- 11-parser-real.lll, 12-typeparser-real.lll, and 13-fnparser-real.lll.
+--
+-- Scope (this slice):
+--   * literals: int, string
+--   * variable references (lower ident)
+--   * parenthesised exprs
+--   * curried application via juxtaposition (`f x y`)
+--   * binary `+ - * /` with classical precedence
+--   * `let x = e1 in e2`         (single-line)
+--   * `if c then a else b`
+--   * `match e with | pat -> body | pat -> body ...`
+--     where `pat` is `int-lit | lower-var | _` — no cons, no ctor patterns
+--   * lambda `\x. body` (single param; nest for multi-arg)
+--
+-- Out of scope: tags, list literals, tuples, cons patterns, constructor
+-- patterns, multi-arg lambdas, type annotations, pipes, multi-line lets.
+--
+-- The pretty-printer normalises each input expression into an unambiguous,
+-- fully-parenthesised shape so the runtime test can string-match the output.
+
+type Maybe A = Some A | None
+
+type Token =
+  | TKwLet
+  | TKwIn
+  | TKwIf
+  | TKwThen
+  | TKwElse
+  | TKwMatch
+  | TKwWith
+  | TLower Str
+  | TInt Int
+  | TStr Str
+  | TLParen
+  | TRParen
+  | TEq
+  | TBackslash
+  | TDot
+  | TBar
+  | TArrow
+  | TUnder
+  | TPlus
+  | TMinus
+  | TStar
+  | TSlash
+  | TEnd
+
+type Pat =
+  | PLitInt Int
+  | PLitStr Str
+  | PVar Str
+  | PWild
+
+-- Match arms are stored as two parallel lists inside EMatch: the Nth
+-- pattern pairs with the Nth body. This avoids a mutually-recursive
+-- `type MatchArm = MkArm Pat Expr` which the current codegen cannot emit
+-- (types are lowered flat, no `type ... and ...` grouping). The
+-- invariant `length pats == length bodies` is maintained by construction
+-- — every `parseArm` call appends to both lists together.
+type Expr =
+  | EInt Int
+  | EStr Str
+  | EVar Str
+  | EAdd Expr Expr
+  | ESub Expr Expr
+  | EMul Expr Expr
+  | EDiv Expr Expr
+  | EApp Expr Expr
+  | ELam Str Expr
+  | ELet Str Expr Expr
+  | EIf Expr Expr Expr
+  | EMatch Expr List[Pat] List[Expr]
+
+-- ---------- Char predicates ---------------------------------------------
+
+fn isUpperChar(c Char) Bool =
+  let n = charToInt c in
+  if n < 65 then false
+  else if n > 90 then false
+  else true
+
+fn isLowerChar(c Char) Bool =
+  let n = charToInt c in
+  if n < 97 then false
+  else if n > 122 then false
+  else true
+
+fn isIdStart(c Char) Bool =
+  if isUpperChar c then true else isLowerChar c
+
+fn isIdCont(c Char) Bool =
+  if isIdStart c then true else charIsDigit c
+
+-- ---------- Lexer --------------------------------------------------------
+
+-- Greedy take/drop while predicate, shared shape with earlier milestones.
+fn takeWhilePred(p)(cs List[Char]) List[Char] =
+  | c :: rest -> if p c then listAppend [c] (takeWhilePred p rest) else []
+  | _ -> []
+
+fn dropWhilePred(p)(cs List[Char]) List[Char] =
+  | c :: rest -> if p c then dropWhilePred p rest else cs
+  | _ -> []
+
+-- Unwrap Maybe Int from strToInt; the lexer only calls this on all-digit
+-- strings, so the None branch is defensive.
+fn parseIntStr(s Str) Int =
+  match strToInt s with
+    | Some n -> n
+    | None -> 0
+
+-- Classify an identifier string. Keywords map to their TKw* tokens;
+-- everything else becomes a TLower (we never emit TUpper in this slice
+-- because constructor patterns are out of scope).
+fn classifyIdent(s Str) Token =
+  match s with
+    | "let" -> TKwLet
+    | "in" -> TKwIn
+    | "if" -> TKwIf
+    | "then" -> TKwThen
+    | "else" -> TKwElse
+    | "match" -> TKwMatch
+    | "with" -> TKwWith
+    | _ -> TLower s
+
+fn lexId(cs List[Char]) List[Token] =
+  let idChars = takeWhilePred isIdCont cs in
+  let leftover = dropWhilePred isIdCont cs in
+  let tok = classifyIdent (strFromChars idChars) in
+  listAppend [tok] (lexChars leftover)
+
+fn lexNum(cs List[Char]) List[Token] =
+  let digits = takeWhilePred charIsDigit cs in
+  let leftover = dropWhilePred charIsDigit cs in
+  listAppend [TInt (parseIntStr (strFromChars digits))] (lexChars leftover)
+
+-- Collect a string literal: we've already consumed the opening `"`, now
+-- greedily take chars until the closing `"`. Returns (body-chars, leftover).
+fn takeStrBody(cs List[Char]) =
+  | c :: rest ->
+    if c == '"' then ([], rest)
+    else
+      let (body, leftover) = takeStrBody rest in
+      (c :: body, leftover)
+  | _ -> ([], [])
+
+fn lexStr(cs List[Char]) List[Token] =
+  let (body, leftover) = takeStrBody cs in
+  listAppend [TStr (strFromChars body)] (lexChars leftover)
+
+-- Handle `-` or `->`: peek at the next char to decide which token to emit.
+fn lexMinusOrArrow(cs List[Char]) List[Token] =
+  | c :: rest ->
+    if c == '>' then listAppend [TArrow] (lexChars rest)
+    else listAppend [TMinus] (lexChars cs)
+  | _ -> [TMinus]
+
+fn lexChars(cs List[Char]) List[Token] =
+  | c :: rest ->
+    if charIsSpace c then lexChars rest
+    else if isIdStart c then lexId cs
+    else if charIsDigit c then lexNum cs
+    else if c == '"' then lexStr rest
+    else if c == '(' then listAppend [TLParen] (lexChars rest)
+    else if c == ')' then listAppend [TRParen] (lexChars rest)
+    else if c == '=' then listAppend [TEq] (lexChars rest)
+    else if c == '\\' then listAppend [TBackslash] (lexChars rest)
+    else if c == '.' then listAppend [TDot] (lexChars rest)
+    else if c == '|' then listAppend [TBar] (lexChars rest)
+    else if c == '_' then listAppend [TUnder] (lexChars rest)
+    else if c == '+' then listAppend [TPlus] (lexChars rest)
+    else if c == '-' then lexMinusOrArrow rest
+    else if c == '*' then listAppend [TStar] (lexChars rest)
+    else if c == '/' then listAppend [TSlash] (lexChars rest)
+    else lexChars rest
+  | _ -> [TEnd]
+
+fn tokenize(src Str) List[Token] = lexChars (strChars src)
+
+-- ---------- Recursive-descent parser ------------------------------------
+
+-- Decide whether a token can start an atom. parseApp uses this to know
+-- when to stop collecting arguments in a juxtaposition chain.
+fn isAtomStart(t Token) Bool =
+  | TInt _ -> true
+  | TStr _ -> true
+  | TLower _ -> true
+  | TLParen -> true
+  | _ -> false
+
+-- Top-level expression dispatcher. Looks at the first token to pick
+-- between the special forms (let / if / match / lambda) and the
+-- arithmetic / application layer.
+fn parseExpr(toks List[Token]) =
+  | TKwLet :: rest -> parseLet rest
+  | TKwIf :: rest -> parseIf rest
+  | TKwMatch :: rest -> parseMatch rest
+  | TBackslash :: rest -> parseLam rest
+  | _ -> parseAddSub toks
+
+-- `let x = e1 in e2`
+fn parseLet(toks List[Token]) =
+  | TLower name :: TEq :: rest ->
+    let (e1, rest2) = parseExpr rest in
+    let rest3 = match rest2 with
+      | TKwIn :: r -> r
+      | _ -> rest2
+    in
+    let (e2, rest4) = parseExpr rest3 in
+    (ELet name e1 e2, rest4)
+  | _ -> (EInt 0, toks)
+
+-- `if c then a else b`
+fn parseIf(toks List[Token]) =
+  let (c, rest) = parseExpr toks in
+  let rest2 = match rest with
+    | TKwThen :: r -> r
+    | _ -> rest
+  in
+  let (a, rest3) = parseExpr rest2 in
+  let rest4 = match rest3 with
+    | TKwElse :: r -> r
+    | _ -> rest3
+  in
+  let (b, rest5) = parseExpr rest4 in
+  (EIf c a b, rest5)
+
+-- `match e with | pat -> body | pat -> body ...`. Returns EMatch wrapping
+-- the scrutinee plus two parallel lists (pats, bodies) pulled out of the
+-- arm loop below. The two lists stay in lockstep because `parseArms`
+-- cons'es onto them in the same recursive step.
+fn parseMatch(toks List[Token]) =
+  let (scrut, rest) = parseExpr toks in
+  let rest2 = match rest with
+    | TKwWith :: r -> r
+    | _ -> rest
+  in
+  let (armLists, rest3) = parseArms rest2 in
+  let (pats, bodies) = armLists in
+  (EMatch scrut pats bodies, rest3)
+
+-- Collect arms while the next token is `|`. Returns `((pats, bodies), rest)`
+-- — arms are accumulated as two parallel lists nested inside the outer
+-- tuple so the whole result is still a 2-tuple of (result, leftover),
+-- matching the shape every other parse function uses.
+fn parseArms(toks List[Token]) =
+  | TBar :: _ ->
+    let (armPair, rest) = parseArm toks in
+    let (p, b) = armPair in
+    let (moreLists, rest2) = parseArms rest in
+    let (ps, bs) = moreLists in
+    ((p :: ps, b :: bs), rest2)
+  | _ -> (([], []), toks)
+
+-- Single arm. Assumes the leading `|` is still on the front. Returns
+-- `((pat, body), leftover)` so the caller can destructure cleanly.
+fn parseArm(toks List[Token]) =
+  | TBar :: rest ->
+    let (p, rest2) = parsePat rest in
+    let rest3 = match rest2 with
+      | TArrow :: r -> r
+      | _ -> rest2
+    in
+    let (body, rest4) = parseArmBody rest3 in
+    ((p, body), rest4)
+  | _ -> ((PWild, EInt 0), toks)
+
+-- Arm bodies stop at the next `|` (start of sibling arm) or at TEnd. To
+-- avoid accidentally grabbing a trailing `| ...` as part of the body, we
+-- parse an `AddSub`-level expression rather than a full `parseExpr`. This
+-- is safe because match bodies in this slice never themselves contain
+-- bare `let`/`if`/`match`/`\` — the driver inputs are intentionally simple.
+fn parseArmBody(toks List[Token]) = parseAddSub toks
+
+-- Pattern: int literal, string literal, variable, or wildcard. Constructor
+-- and cons patterns are out of scope for this slice.
+fn parsePat(toks List[Token]) =
+  | TInt n :: rest -> (PLitInt n, rest)
+  | TStr s :: rest -> (PLitStr s, rest)
+  | TUnder :: rest -> (PWild, rest)
+  | TLower s :: rest -> (PVar s, rest)
+  | _ -> (PWild, toks)
+
+-- Lambda: `\x. body`. Single-param only; nest `\` for multi-arg.
+fn parseLam(toks List[Token]) =
+  | TLower name :: TDot :: rest ->
+    let (body, rest2) = parseExpr rest in
+    (ELam name body, rest2)
+  | _ -> (EInt 0, toks)
+
+-- ---------- Arithmetic precedence layers --------------------------------
+
+fn parseAddSub(toks List[Token]) =
+  let (e, rest) = parseMulDiv toks in
+  parseAddSubTail e rest
+
+fn parseAddSubTail(lhs Expr)(toks List[Token]) =
+  | TPlus :: rest ->
+    let (r, rest2) = parseMulDiv rest in
+    parseAddSubTail (EAdd lhs r) rest2
+  | TMinus :: rest ->
+    let (r, rest2) = parseMulDiv rest in
+    parseAddSubTail (ESub lhs r) rest2
+  | _ -> (lhs, toks)
+
+fn parseMulDiv(toks List[Token]) =
+  let (e, rest) = parseApp toks in
+  parseMulDivTail e rest
+
+fn parseMulDivTail(lhs Expr)(toks List[Token]) =
+  | TStar :: rest ->
+    let (r, rest2) = parseApp rest in
+    parseMulDivTail (EMul lhs r) rest2
+  | TSlash :: rest ->
+    let (r, rest2) = parseApp rest in
+    parseMulDivTail (EDiv lhs r) rest2
+  | _ -> (lhs, toks)
+
+-- Application layer: juxtaposition is left-associative. Collect arguments
+-- while the head token is an atom-starter.
+fn parseApp(toks List[Token]) =
+  let (e, rest) = parseAtom toks in
+  parseAppTail e rest
+
+fn parseAppTail(lhs Expr)(toks List[Token]) =
+  match toks with
+    | t :: _ ->
+      if isAtomStart t then
+        let (arg, rest) = parseAtom toks in
+        parseAppTail (EApp lhs arg) rest
+      else (lhs, toks)
+    | _ -> (lhs, toks)
+
+-- Atom: int, string, variable, parenthesised expr. Everything else falls
+-- through to a dummy `EInt 0` so the parser can keep moving on malformed
+-- input; the driver only feeds well-formed expressions.
+fn parseAtom(toks List[Token]) =
+  | TInt n :: rest -> (EInt n, rest)
+  | TStr s :: rest -> (EStr s, rest)
+  | TLower s :: rest -> (EVar s, rest)
+  | TLParen :: rest ->
+    let (e, rest2) = parseExpr rest in
+    match rest2 with
+      | TRParen :: rest3 -> (e, rest3)
+      | _ -> (e, rest2)
+  | _ -> (EInt 0, toks)
+
+-- ---------- Pretty printer ----------------------------------------------
+
+fn showPat(p Pat) Str =
+  | PLitInt n -> intToStr n
+  | PLitStr s -> strConcat (strConcat "\"" s) "\""
+  | PVar s -> s
+  | PWild -> "_"
+
+-- Render a single arm given its pattern and body. Helper for showArmsAt.
+fn showArm(p Pat)(body Expr) Str =
+  strConcat (strConcat (strConcat "| " (showPat p)) " -> ") (showExpr body)
+
+-- Recursively walk the two parallel lists to produce ` | pat -> body`
+-- joined with single spaces. The two lists are always the same length
+-- (invariant maintained by parseArms), so the cons-pattern pair works.
+fn showArms(pats List[Pat])(bodies List[Expr]) Str =
+  match pats with
+    | p :: ps ->
+      match bodies with
+        | b :: bs ->
+          let head = showArm p b in
+          let tail = showArms ps bs in
+          if strLen tail == 0 then head
+          else strConcat (strConcat head " ") tail
+        | _ -> ""
+    | _ -> ""
+
+-- Every non-leaf form prints fully parenthesised so precedence and
+-- associativity are visually unambiguous. Leaves print bare.
+fn showExpr(e Expr) Str =
+  | EInt n -> intToStr n
+  | EStr s -> strConcat (strConcat "\"" s) "\""
+  | EVar s -> s
+  | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " + ") (showExpr r)) ")"
+  | ESub l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " - ") (showExpr r)) ")"
+  | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " * ") (showExpr r)) ")"
+  | EDiv l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " / ") (showExpr r)) ")"
+  | EApp f x -> strConcat (strConcat (strConcat (strConcat "(" (showExpr f)) " ") (showExpr x)) ")"
+  | ELam n body -> strConcat (strConcat (strConcat (strConcat "(fun " n) " -> ") (showExpr body)) ")"
+  | ELet n e1 e2 ->
+    let p1 = strConcat (strConcat "(let " n) " = " in
+    let p2 = strConcat (strConcat p1 (showExpr e1)) " in " in
+    strConcat (strConcat p2 (showExpr e2)) ")"
+  | EIf c a b ->
+    let p1 = strConcat "(if " (showExpr c) in
+    let p2 = strConcat (strConcat p1 " then ") (showExpr a) in
+    strConcat (strConcat (strConcat p2 " else ") (showExpr b)) ")"
+  | EMatch scrut pats bodies ->
+    let head = strConcat (strConcat "(match " (showExpr scrut)) " with " in
+    strConcat (strConcat head (showArms pats bodies)) ")"
+
+-- ---------- Driver -------------------------------------------------------
+
+-- Lex, parse, and show a single input line.
+fn runOne(src Str) Str =
+  let toks = tokenize src in
+  let (e, _) = parseExpr toks in
+  showExpr e
+
+-- Join lines with newlines, skipping the empty accumulator prefix.
+fn joinLines(xs List[Str]) Str =
+  listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n") s) "" xs
+
+fn runAll(inputs List[Str]) Str =
+  joinLines (listMap runOne inputs)
+
+fn main() =
+  let i1 = "let x = 1 in (x + 2)" in
+  let i2 = "if x then 1 else 2" in
+  let i3 = "match x with | 0 -> \"zero\" | _ -> \"other\"" in
+  let i4 = "\\y. (y + 1)" in
+  let i5 = "f x y" in
+  let inputs = [i1 i2 i3 i4 i5] in
+  printfn (runAll inputs)
