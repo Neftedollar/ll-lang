@@ -201,3 +201,34 @@ let ``compile hello.lll output contains printfn call`` () =
     match LLLang.Compiler.compile src with
     | Ok fs -> Assert.Contains("printfn", fs)
     | Error es -> Assert.Fail($"Expected Ok but got Error: {es}")
+
+// ---------- Task 7: CLI tool ----------
+
+[<Fact>]
+let ``llc build writes .fs file next to source`` () =
+    // Arrange: write a temp .lll file
+    let tmpDir = System.IO.Path.GetTempPath()
+    let lllPath = System.IO.Path.Combine(tmpDir, "test_cli.lll")
+    let fsPath  = System.IO.Path.Combine(tmpDir, "test_cli.fs")
+    System.IO.File.WriteAllText(lllPath, "module Tmp.Test\nlet x = 99")
+    if System.IO.File.Exists(fsPath) then System.IO.File.Delete(fsPath)
+
+    // Act: run llc build via dotnet against the built DLL
+    let llcDll =
+        System.IO.Path.Combine(
+            __SOURCE_DIRECTORY__,
+            "../../src/LLLangTool/bin/Debug/net10.0/llc.dll")
+    let psi = System.Diagnostics.ProcessStartInfo("dotnet", $"\"{llcDll}\" build \"{lllPath}\"")
+    psi.RedirectStandardOutput <- true
+    psi.RedirectStandardError  <- true
+    psi.UseShellExecute        <- false
+    use proc = System.Diagnostics.Process.Start(psi)
+    proc.WaitForExit()
+
+    // Assert
+    let stdout = proc.StandardOutput.ReadToEnd()
+    let stderr = proc.StandardError.ReadToEnd()
+    Assert.Equal(0, proc.ExitCode)
+    Assert.True(System.IO.File.Exists(fsPath), $"Expected {fsPath} to exist. stdout={stdout} stderr={stderr}")
+    let content = System.IO.File.ReadAllText(fsPath)
+    Assert.Contains("module Tmp.Test", content)

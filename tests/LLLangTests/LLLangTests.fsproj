@@ -13,6 +13,9 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\LLLangCompiler\LLLangCompiler.fsproj" />
+    <ProjectReference Include="..\..\src\LLLangTool\LLLangTool.fsproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="LexerTests.fs" />
