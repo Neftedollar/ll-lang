@@ -19,7 +19,7 @@ Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting 
 
 ## Status
 
-Working end-to-end compiler with a **389-test** suite, written in F# / .NET 10. All 7 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins).
+Working end-to-end compiler with a **392-test** suite, written in F# / .NET 10. All 7 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins).
 
 **Bootstrap progress (Phase 7 — ll-lang hosting itself):**
 
@@ -32,8 +32,9 @@ Working end-to-end compiler with a **389-test** suite, written in F# / .NET 10. 
 | Expression parser | let / if / match / lambda / app | ✅ | [`14-exprparser-real.lll`](spec/examples/valid/14-exprparser-real.lll) |
 | **Full module parser** | **all of the above, in one program** | ✅ | [`15-moduleparser-real.lll`](spec/examples/valid/15-moduleparser-real.lll) |
 | Elaborator — name res + exhaustiveness | collect + check passes, E002 unbound-var, E003 non-exhaustive match | ✅ | [`16-elaborator-real.lll`](spec/examples/valid/16-elaborator-real.lll) |
+| **Parser + Elaborator pipeline** | **lex → parse → elaborate in one ll-lang program** | ✅ | [`17-pipeline-real.lll`](spec/examples/valid/17-pipeline-real.lll) |
 
-The module parser (979 lines of ll-lang) consumes `module M \n import ... \n tag ... \n type ... \n let ... \n fn ... = ...` and pretty-prints a `List[Decl]` AST — **real proof that ll-lang can express its own front-end**. The elaborator slice (512 lines) walks a hardcoded `List[Decl]` AST with a two-pass `collectDecls` → `checkDecls` pipeline plus an exhaustiveness pass, and emits `E002 UnboundVar <name>` for every free variable and `E003 NonExhaustiveMatch <type> missing <ctor>` for every clause-sugar match that doesn't cover its sum type — mirroring the F# host elaborator's name-resolution + constructor-coverage semantics.
+The module parser (979 lines of ll-lang) consumes `module M \n import ... \n tag ... \n type ... \n let ... \n fn ... = ...` and pretty-prints a `List[Decl]` AST — **real proof that ll-lang can express its own front-end**. The elaborator slice (512 lines) walks a hardcoded `List[Decl]` AST with a two-pass `collectDecls` → `checkDecls` pipeline plus an exhaustiveness pass, and emits `E002 UnboundVar <name>` for every free variable and `E003 NonExhaustiveMatch <type> missing <ctor>` for every clause-sugar match that doesn't cover its sum type — mirroring the F# host elaborator's name-resolution + constructor-coverage semantics. The pipeline slice (~1500 lines) stitches the two halves into one program: a source string goes in, `tokenize` + `parseModule` + `elaborate` runs back-to-back, and the resulting error list is printed. **Showcase milestone** — first time two compiler layers authored in ll-lang share a single AST and run back-to-back on a real source string.
 
 Still to come: elaborator, HM-inference, and codegen rewrites in ll-lang, then bootstrap fixpoint (compiler₀ compiles compiler.lll → compiler₁; compiler₁ compiles compiler.lll → compiler₂ == compiler₁).
 
@@ -47,6 +48,7 @@ Still to come: elaborator, HM-inference, and codegen rewrites in ll-lang, then b
 | 6 | Stdlib (~50 builtins) | ✅ |
 | **7.1 – 7.5** | **ll-lang front-end in ll-lang** (lexer + 4 parser slices + full module parser, 979 lines) | ✅ |
 | **7.6a + 7.6b** | **Elaborator slices A + B in ll-lang** (name resolution + E002 unbound-var; constructor-coverage exhaustiveness + E003 non-exhaustive match, 512 lines) | ✅ |
+| **7.6 integration** | **Parser + elaborator pipeline in one ll-lang program** (`17-pipeline-real.lll`, ~1500 lines) | ✅ |
 | 7.6+ | E001 type checking, multi-line bodies, `trait`/`impl`, codegen-in-ll-lang | 🚧 |
 | 7.8 | Bootstrap fixpoint | ⏳ |
 
@@ -58,7 +60,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 389 tests
+dotnet test    # 392 tests
 ```
 
 ### Run your first program
@@ -239,7 +241,7 @@ src/LLLangCompiler/        — compiler library (F#)
   Codegen.fs               — F# source emitter
   Compiler.fs              — end-to-end pipeline entry point
 src/LLLangTool/            — `lllc` CLI (build / run)
-tests/LLLangTests/         — xUnit test suite (386 tests)
+tests/LLLangTests/         — xUnit test suite (392 tests)
 ```
 
 ## Roadmap

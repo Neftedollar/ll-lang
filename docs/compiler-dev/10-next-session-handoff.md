@@ -7,11 +7,11 @@ session to pick up without replaying history.
 
 - **main** is at a clean commit, everything pushed to
   `github.com/Neftedollar/ll-lang`.
-- **389 xUnit tests** pass (`dotnet test` from repo root).
+- **392 xUnit tests** pass (`dotnet test` from repo root).
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b done.**
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration done.**
   ll-lang now hosts a real lexer (`09-lexer-real.lll`), a real
   recursive-descent arithmetic parser (`11-parser-real.lll`), a real
   type-declaration parser (`12-typeparser-real.lll`), a real
@@ -129,6 +129,27 @@ session to pick up without replaying history.
   `shapeBad(s Shape) = | Circle -> 1 | Rect -> 2` fires one E003
   for the missing `Empty` ctor; `add` / `useCtor` / `shapeGood`
   / `shapeWild` and the non-fn decls all elaborate cleanly).
+- **Phase 7.6 integration done** — the parser from
+  `15-moduleparser-real.lll` and the elaborator passes from
+  `16-elaborator-real.lll` now live in a single program:
+  [`17-pipeline-real.lll`](../../spec/examples/valid/17-pipeline-real.lll)
+  (~1500 lines). Source string -> tokenize -> parseModule ->
+  elaborate -> error list -> stdout. The elaborator half was
+  adapted to walk 15's richer `Decl` / `Expr` / `Pat` / `Param` /
+  `FnDecl` / `LetDecl` / `TypeDecl` AST (16's minimal local AST
+  was dropped). Showcase milestone: first time two compiler
+  layers authored in ll-lang share a single AST and run back-to-
+  back. Deliberately narrow cut — 15's `Pat` has no `PCon`, so
+  matches over sum types report every constructor as missing.
+- `lllc run spec/examples/valid/17-pipeline-real.lll` prints
+  ```
+  E002 UnboundVar undefinedName
+  E003 NonExhaustiveMatch Shape missing Circle
+  E003 NonExhaustiveMatch Shape missing Rect
+  ```
+  (hardcoded source: `module M\ntype Shape = Circle | Rect\nfn
+  good(x Int) Int = x + 1\nfn bad(x Int) Int = undefinedName\nfn
+  shapeBad(s Shape) Int = match s with | 0 -> 1`).
 
 ## Immediate next task
 

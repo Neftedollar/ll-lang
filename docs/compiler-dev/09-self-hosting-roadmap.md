@@ -1367,3 +1367,84 @@ through fn param collection via pair-shaped param lists, add a
 `typeOf` walker, and flag every `EApp` whose argument's inferred
 type doesn't match the function's parameter type. Keep scope
 minimal — no inference, just checking against explicit annotations.
+
+### 2026-04 — Phase 7.6 integration: parser + elaborator pipeline (DONE)
+
+Third tick of Phase 7.6. **Showcase milestone** — the first time two
+compiler layers authored in ll-lang share a single AST and run
+back-to-back on a real source string. New file:
+[`17-pipeline-real.lll`](../../spec/examples/valid/17-pipeline-real.lll)
+(~1500 lines). Copies the full module parser from
+`15-moduleparser-real.lll` verbatim (lexer + recursive-descent
+parser + `List[Decl]` AST) and grafts the elaborator passes from
+`16-elaborator-real.lll` on top — adapted to walk 15's richer
+`Decl` / `Expr` / `Pat` / `Param` / `FnDecl` / `LetDecl` / `TypeDecl`
+shapes instead of 16's minimal local AST.
+
+The `main` driver hardcodes a small ll-lang source, runs
+`tokenize` -> `parseModule` -> `elaborate`, and prints the resulting
+error list:
+
+```
+module M
+type Shape = Circle | Rect
+fn good(x Int) Int = x + 1
+fn bad(x Int) Int = undefinedName
+fn shapeBad(s Shape) Int = match s with | 0 -> 1
+```
+
+produces:
+
+```
+E002 UnboundVar undefinedName
+E003 NonExhaustiveMatch Shape missing Circle
+E003 NonExhaustiveMatch Shape missing Rect
+```
+
+**Adaptation notes**:
+
+* `checkExpr` handles every 15 `Expr` variant: `EInt` / `EStr` /
+  `EVar` (the only leaf that resolves names) / `ETagged` / all four
+  arithmetic arms / `EApp` / `ELam` / `ELetIn` / `EIf` / `EMatch`.
+* `collectDecl` / `checkDecl` / `exhaustivenessDecl` unwrap 15's
+  `DType TypeDecl` / `DFn FnDecl` / `DLet LetDecl` / `DTag Str` /
+  `DImport Str` / `DExport Decl` variants. `DExport inner` recurses
+  into the inner decl so an exported fn still registers its top-
+  level name AND gets its body walked.
+* `DImport` contributes nothing to the env in this slice — real
+  module resolution is a much later phase. `DLet`'s RHS is walked
+  now (16 skipped it).
+* Small wrapper functions (`fnName`, `letName`, `typeDeclCtors`,
+  `paramName`, `paramNames`, `typeRefName`, `paramTypeName`,
+  `checkFnBody`, `checkLetBody`, `exhaustivenessFn`) destructure
+  each inner type one level at a time. This works around the host
+  codegen's current limitation around nested constructor patterns
+  (`PCon(c, [p])` emits `ctor p` without wrapping the inner
+  pattern in parens, which F# rejects when `p` is itself a
+  multi-arg ctor pattern like `MkFn n ps ty b`). Avoiding nested
+  patterns via thin helpers is cleaner than touching `Codegen.fs`.
+* 15's `Pat` has no `PCon` (named constructor patterns are a later
+  slice), so `coveredCtors` is the constant empty list — a match
+  over a declared sum type with no catch-all arm reports every
+  constructor as missing. Deliberately narrow: the integration's
+  goal is proving the pipeline plumbing, not full coverage analysis.
+
+**Deliberately out of scope** (same as 7.6b, plus):
+
+1. **Realistic corpus of test inputs** — only one hardcoded source
+   in `main`. A broader integration would scan multiple `.lll`
+   files through the same pipeline.
+2. **Error formatting with source positions** — still bare `E002` /
+   `E003` codes without `line:col` prefixes.
+3. **Reading a file at runtime** — source is still a string literal
+   in `main`. File-reading builtins (`fileRead`, etc.) would let
+   the pipeline read real `.lll` files, but aren't wired yet.
+
+Tests: 392 (+3 vs 389). New `PipelineRealTests.fs` adds an
+inference round-trip fact and a runtime E2E fact; a new row in
+`HMInferTests.fs`'s `valid corpus infers ok` theory brings the
+inference smoke coverage to three self-host files (15 / 16 / 17).
+
+Next tick: **Phase 7.6c** — E001 type mismatch in ll-lang, OR
+jump ahead to **Phase 7.7** — start porting H-M inference into
+ll-lang itself.
