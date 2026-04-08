@@ -150,7 +150,7 @@ Source (.lll)
 
 ## Status
 
-**Phases 1–6 complete + Phase 7.1/7.2/7.3a/7.3b (real lexer, real recursive-descent expression parser, real type-declaration parser, AND real fn-declaration parser, all written in ll-lang itself, with surface tuple literals so parsers can return `(parsed, rest)` directly). 365 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, `let (a, b) = ...` destructuring, multi-line sum types, mutually recursive top-level functions, a real arithmetic parser (`(1 + (2 * 3))` precedence verified), a real type-declaration parser (four `type` decls round-trip through tokenize → parse → pretty-print), and a real fn-declaration parser (four `fn` decls with curried typed params and optional return types round-trip through tokenize → parse → pretty-print) — see `spec/examples/valid/09-lexer-real.lll`, `11-parser-real.lll`, `12-typeparser-real.lll`, and `13-fnparser-real.lll`.**
+**Phases 1–6 complete + Phase 7.1/7.2/7.3a/7.3b (real lexer, real recursive-descent expression parser, real type-declaration parser, AND real fn-declaration parser, all written in ll-lang itself, with surface tuple literals so parsers can return `(parsed, rest)` directly). 378 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, `let (a, b) = ...` destructuring, multi-line sum types, mutually recursive top-level functions, a real arithmetic parser (`(1 + (2 * 3))` precedence verified), a real type-declaration parser (four `type` decls round-trip through tokenize → parse → pretty-print), and a real fn-declaration parser (four `fn` decls with curried typed params and optional return types round-trip through tokenize → parse → pretty-print) — see `spec/examples/valid/09-lexer-real.lll`, `11-parser-real.lll`, `12-typeparser-real.lll`, and `13-fnparser-real.lll`.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -174,7 +174,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 365 tests
+dotnet test    # 378 tests
 ```
 
 ### Run your first program
@@ -217,7 +217,7 @@ src/LLLangCompiler/        — compiler library (F#)
   Codegen.fs               — F# source emitter
   Compiler.fs              — end-to-end pipeline entry point
 src/LLLangTool/            — `lllc` CLI (build / run)
-tests/LLLangTests/         — xUnit test suite (365 tests)
+tests/LLLangTests/         — xUnit test suite (378 tests)
 ```
 
 ## Roadmap
