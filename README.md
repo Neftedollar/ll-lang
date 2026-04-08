@@ -145,7 +145,7 @@ Source (.lll)
   Codegen        — emits idiomatic F# source
     │
     ▼
-  dotnet fsi     — runs the result (via `llc run`)
+  dotnet fsi     — runs the result (via `lllc run`)
 ```
 
 ## Status
@@ -158,7 +158,7 @@ Source (.lll)
 | 2 | Lexer + Parser | ✅ Done |
 | 3 | Elaborator — name resolution, tag/unit checks, exhaustiveness | ✅ Done |
 | 4 | Hindley-Milner inference + TypedAST + trait dispatch | ✅ Done |
-| 5 | F# source codegen + `llc` CLI (`build` / `run`) | ✅ Done |
+| 5 | F# source codegen + `lllc` CLI (`build` / `run`) | ✅ Done |
 | 6 | Standard library — List, Maybe, Result, Str, Math, IO builtins | ✅ Done |
 | 7 | Self-hosting bootstrap | Planned |
 
@@ -189,8 +189,8 @@ dotnet run --project src/LLLangTool -- run hello.lll
 ### CLI
 
 ```
-llc build <file.lll>   # elaborate + infer + emit <file>.fs
-llc run <file.lll>     # build + execute via dotnet fsi
+lllc build <file.lll>   # elaborate + infer + emit <file>.fs
+lllc run <file.lll>     # build + execute via dotnet fsi
 ```
 
 ## Project Structure
@@ -212,7 +212,7 @@ src/LLLangCompiler/        — compiler library (F#)
   HMInfer.fs               — Algorithm W, unification (E008), trait dispatch (E006)
   Codegen.fs               — F# source emitter
   Compiler.fs              — end-to-end pipeline entry point
-src/LLLangTool/            — `llc` CLI (build / run)
+src/LLLangTool/            — `lllc` CLI (build / run)
 tests/LLLangTests/         — xUnit test suite (191 tests)
 ```
 

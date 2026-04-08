@@ -25,7 +25,7 @@ let private cmdBuild (path: string) : int =
             1
     with
     | ex ->
-        eprintfn "llc: %s" ex.Message
+        eprintfn "lllc: %s" ex.Message
         1
 
 /// Run: compile file.lll → temp .fsx → dotnet fsi. Returns exit code.
@@ -62,7 +62,7 @@ let private cmdRun (path: string) : int =
             1
     with
     | ex ->
-        eprintfn "llc: %s" ex.Message
+        eprintfn "lllc: %s" ex.Message
         1
 
 [<EntryPoint>]
@@ -71,5 +71,5 @@ let main (argv: string[]) : int =
     | [| "build"; path |] -> cmdBuild path
     | [| "run"; path |] -> cmdRun path
     | _ ->
-        eprintfn "Usage: llc <build|run> <file.lll>"
+        eprintfn "Usage: lllc <build|run> <file.lll>"
         1

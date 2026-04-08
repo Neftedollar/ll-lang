@@ -25,8 +25,8 @@ returns `Result<_, LLError list>`.
    Codegen.emit            F# source string
         │
         ▼
-  .fs file  →  dotnet fsi  (llc run)
-           →  dotnet build (llc build)
+  .fs file  →  dotnet fsi  (lllc run)
+           →  dotnet build (lllc build)
 ```
 
 The entry point `Compiler.compile : string -> Result<string, LLError list>`
@@ -136,7 +136,7 @@ short-circuits with `Error`.
 
 ### `src/LLLangTool/Program.fs` — CLI
 
-The `llc` driver. Two commands:
+The `lllc` driver. Two commands:
 
 - `build <file.lll>` — writes `<file>.fs` next to input.
 - `run <file.lll>` — writes a temp `.fsx` (stripping `module` and

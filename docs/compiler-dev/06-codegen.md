@@ -231,10 +231,10 @@ let private safeIdent (s: string) =
 So a ll-lang function called `function` would emit as `` ``function`` ``
 in the output — the F# compiler accepts it.
 
-## `llc run` and `dotnet fsi` quirks
+## `lllc run` and `dotnet fsi` quirks
 
 F# interactive (`dotnet fsi`) does not honor `[<EntryPoint>]` or
-module headers in script mode. `llc run` works around this by
+module headers in script mode. `lllc run` works around this by
 post-processing the emitted source:
 
 ```fsharp
@@ -250,7 +250,7 @@ let withInvoke = stripped + "\nmain [||] |> exit\n"
 It drops the `module` line and the `[<EntryPoint>]` attribute, then
 appends an explicit `main [||] |> exit` call so the main function
 actually runs. This is invisible to users but important if you're
-debugging why `llc run` produces different behavior than `llc build`
+debugging why `lllc run` produces different behavior than `lllc build`
 followed by `dotnet fsc`.
 
 ## Known gaps

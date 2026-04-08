@@ -51,17 +51,17 @@ Expected output:
 Hello, ll-lang!
 ```
 
-## The `llc` alias
+## The `lllc` alias
 
-The project does not install `llc` to PATH. For convenience, alias it:
+The project does not install `lllc` to PATH. For convenience, alias it:
 
 ```bash
-alias llc='dotnet run --project /path/to/ll-lang/src/LLLangTool --'
+alias lllc='dotnet run --project /path/to/ll-lang/src/LLLangTool --'
 ```
 
 Then the rest of this guide can be followed literally:
 
 ```bash
-llc run hello.lll
-llc build hello.lll    # produces hello.fs
+lllc run hello.lll
+lllc build hello.lll    # produces hello.fs
 ```

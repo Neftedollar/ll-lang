@@ -1,18 +1,18 @@
-# The `llc` CLI
+# The `lllc` CLI
 
-`llc` (the `LLLangTool` project) is a thin driver around the compiler library.
+`lllc` (the `LLLangTool` project) is a thin driver around the compiler library.
 It exposes two commands: `build` and `run`.
 
 ```
-Usage: llc <build|run> <file.lll>
+Usage: lllc <build|run> <file.lll>
 ```
 
 Anything else prints the usage and exits with code 1.
 
-## `llc build`
+## `lllc build`
 
 ```bash
-llc build hello.lll
+lllc build hello.lll
 ```
 
 Behavior:
@@ -46,10 +46,10 @@ let square x =
 
 Note: integer literals emit as `int64` (`2L` not `2`).
 
-## `llc run`
+## `lllc run`
 
 ```bash
-llc run hello.lll
+lllc run hello.lll
 ```
 
 Behavior:
@@ -71,7 +71,7 @@ fn main() = printfn "Hello, ll-lang!"
 ```
 
 ```bash
-llc run examples/hello.lll
+lllc run examples/hello.lll
 # Hello, ll-lang!
 ```
 
@@ -90,7 +90,7 @@ fn area(s Shape) Float =
   | Empty -> 0.0
 ```
 
-`llc build` writes `foo.fs`:
+`lllc build` writes `foo.fs`:
 
 ```fsharp
 module Demo.Foo
@@ -113,9 +113,9 @@ bindings with mangled names like `Maybe_map`.
 
 ## Troubleshooting
 
-### `llc: <exception>`
+### `lllc: <exception>`
 
-A bare `llc: <message>` on stderr means the driver caught an exception —
+A bare `lllc: <message>` on stderr means the driver caught an exception —
 usually a missing file or a permission error. Check the file path.
 
 ### Parse or infer errors
@@ -132,9 +132,9 @@ tracking is partial. The error name and types are always reliable.
 
 ### `dotnet fsi` is slow
 
-`llc run` starts a fresh F# interactive session each time. Cold-start is
+`lllc run` starts a fresh F# interactive session each time. Cold-start is
 typically 2 to 5 seconds on a modern machine. For fast iteration, use
-`llc build` to get the `.fs` file and compile it as part of a regular
+`lllc build` to get the `.fs` file and compile it as part of a regular
 `dotnet build` project.
 
 ### Nullness warnings on build
@@ -146,7 +146,7 @@ nullable types. They are harmless and do not affect execution.
 
 ## Invoking via `dotnet run`
 
-If you have not set up the `llc` alias (see
+If you have not set up the `lllc` alias (see
 [01-installation](01-installation.md)), every command becomes:
 
 ```bash
@@ -154,5 +154,5 @@ dotnet run --project src/LLLangTool -- build hello.lll
 dotnet run --project src/LLLangTool -- run hello.lll
 ```
 
-The `--` separator passes the following arguments to `llc` rather than
+The `--` separator passes the following arguments to `lllc` rather than
 consuming them as `dotnet run` flags.

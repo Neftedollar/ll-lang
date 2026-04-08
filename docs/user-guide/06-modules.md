@@ -63,7 +63,7 @@ pieces are not yet implemented:
   without error, but the referenced names (`head`, `map`, `fromMaybe`, ...)
   are not in scope and will produce `E002 UnboundVar` if used. Corpus file
   `05-modules.lll` parses but uses names that would fail inference at runtime.
-- **No multi-file compilation**. Each invocation of `llc build` or `llc run`
+- **No multi-file compilation**. Each invocation of `lllc build` or `lllc run`
   operates on a single `.lll` file. Cross-file symbol resolution is a
   planned Phase 6 feature.
 - **No `Platform.*` modules**. The design spec reserves `Platform.IO`,

@@ -205,7 +205,7 @@ let ``compile hello.lll output contains printfn call`` () =
 // ---------- Task 7: CLI tool ----------
 
 [<Fact>]
-let ``llc build writes .fs file next to source`` () =
+let ``lllc build writes .fs file next to source`` () =
     // Arrange: write a temp .lll file
     let tmpDir = System.IO.Path.GetTempPath()
     let lllPath = System.IO.Path.Combine(tmpDir, "test_cli.lll")
@@ -213,11 +213,11 @@ let ``llc build writes .fs file next to source`` () =
     System.IO.File.WriteAllText(lllPath, "module Tmp.Test\nlet x = 99")
     if System.IO.File.Exists(fsPath) then System.IO.File.Delete(fsPath)
 
-    // Act: run llc build via dotnet against the built DLL
+    // Act: run lllc build via dotnet against the built DLL
     let llcDll =
         System.IO.Path.Combine(
             __SOURCE_DIRECTORY__,
-            "../../src/LLLangTool/bin/Debug/net10.0/llc.dll")
+            "../../src/LLLangTool/bin/Debug/net10.0/lllc.dll")
     let psi = System.Diagnostics.ProcessStartInfo("dotnet", $"\"{llcDll}\" build \"{lllPath}\"")
     psi.RedirectStandardOutput <- true
     psi.RedirectStandardError  <- true
@@ -297,7 +297,7 @@ let ``all valid corpus files produce non-empty output with module header`` (file
     | Error es -> Assert.Fail($"{filename} failed: {es}")
 
 [<Fact>]
-let ``hello world runs via llc run and prints Hello ll-lang!`` () =
+let ``hello world runs via lllc run and prints Hello ll-lang!`` () =
     let lllPath =
         System.IO.Path.Combine(
             __SOURCE_DIRECTORY__,
@@ -305,7 +305,7 @@ let ``hello world runs via llc run and prints Hello ll-lang!`` () =
     let llcDll =
         System.IO.Path.Combine(
             __SOURCE_DIRECTORY__,
-            "../../src/LLLangTool/bin/Debug/net10.0/llc.dll")
+            "../../src/LLLangTool/bin/Debug/net10.0/lllc.dll")
     let psi = System.Diagnostics.ProcessStartInfo("dotnet", $"\"{llcDll}\" run \"{lllPath}\"")
     psi.RedirectStandardOutput <- true
     psi.RedirectStandardError  <- true

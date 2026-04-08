@@ -325,7 +325,7 @@ let private runLll (relPath: string) : string * string =
     let llcDll =
         System.IO.Path.Combine(
             __SOURCE_DIRECTORY__,
-            "../../src/LLLangTool/bin/Debug/net10.0/llc.dll")
+            "../../src/LLLangTool/bin/Debug/net10.0/lllc.dll")
     let psi = System.Diagnostics.ProcessStartInfo("dotnet", $"\"{llcDll}\" run \"{lllPath}\"")
     psi.RedirectStandardOutput <- true
     psi.RedirectStandardError  <- true

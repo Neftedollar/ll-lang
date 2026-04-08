@@ -54,7 +54,7 @@ The examples do double duty as grammar and as reminders of common idioms.
 The compiler is deterministic and fast. The LLM's loop should be:
 
 1. Generate `.lll` code.
-2. `llc build file.lll` (or `llc run` if the goal includes execution).
+2. `lllc build file.lll` (or `lllc run` if the goal includes execution).
 3. On error: parse the compact error message (one line per error), apply
    a targeted fix, retry.
 4. On success: ship.
@@ -142,7 +142,7 @@ Rough shape of an agent loop, in shell pseudocode:
 ```bash
 while true; do
   llm generate > prog.lll
-  if llc build prog.lll 2> errors.txt; then
+  if lllc build prog.lll 2> errors.txt; then
     echo "shipped"
     break
   else
@@ -151,7 +151,7 @@ while true; do
 done
 ```
 
-Because `llc build` is pure (no side effects beyond writing `prog.fs`),
+Because `lllc build` is pure (no side effects beyond writing `prog.fs`),
 you can run it thousands of times safely.
 
 ## Prefer small files, flat structure

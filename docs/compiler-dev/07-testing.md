@@ -134,7 +134,7 @@ actually fires.
 
 1. Create `spec/examples/valid/NN-feature.lll` with a short module
    demonstrating the feature.
-2. Verify it compiles with `llc build`:
+2. Verify it compiles with `lllc build`:
    ```bash
    dotnet run --project src/LLLangTool -- build spec/examples/valid/NN-feature.lll
    ```

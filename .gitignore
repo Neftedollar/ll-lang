@@ -6,5 +6,5 @@ obj/
 # unrelated sibling MCP project
 my-mcps/
 
-# generated F# from `llc build` next to .lll sources
+# generated F# from `lllc build` next to .lll sources
 spec/examples/**/*.fs

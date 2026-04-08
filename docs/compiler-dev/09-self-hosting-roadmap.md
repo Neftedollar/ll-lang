@@ -174,7 +174,7 @@ explicitly.
 
 ```bash
 # build compiler₁ via F# bootstrap
-llc-bootstrap build compiler.lll
+lllc-bootstrap build compiler.lll
 fsc compiler.fs -o compiler1.exe
 
 # use compiler₁ to build compiler₂

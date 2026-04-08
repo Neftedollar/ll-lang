@@ -16,7 +16,7 @@ source, which is then built or executed on .NET 10.
 5. [Traits](05-traits.md) — declarations, impls, dispatch
 6. [Modules](06-modules.md) — module headers, imports, current limitations
 7. [Error codes](07-error-codes.md) — E001..E008 catalog with reproducible examples
-8. [CLI](08-cli.md) — `llc build`, `llc run`, emitted `.fs` files
+8. [CLI](08-cli.md) — `lllc build`, `lllc run`, emitted `.fs` files
 9. [LLM prompting](09-llm-prompting.md) — short guide on prompting an LLM to write ll-lang
 
 ## Status

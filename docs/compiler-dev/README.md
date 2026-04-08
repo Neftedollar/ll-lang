@@ -40,7 +40,7 @@ ll-lang/
 │   │   ├── Codegen.fs            F# source emitter
 │   │   ├── Compiler.fs           pipeline entry point
 │   │   └── LLLangCompiler.fsproj
-│   └── LLLangTool/               llc CLI (build/run commands)
+│   └── LLLangTool/               lllc CLI (build/run commands)
 │       ├── Program.fs
 │       └── LLLangTool.fsproj
 ├── tests/
