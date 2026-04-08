@@ -54,17 +54,19 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
-    // Phase 7.5c extends the Phase 7.5b driver with two more forms from
-    // the Phase 7.5 backlog: **string literals** in fn-body expressions
-    // (`EStr`) and **cons / nil patterns** in match arms (`PNil` for
-    // `[]`, `PCons h t` for `h :: t`). The driver now also contains a
-    // `greet` fn whose body is a bare string literal and a `classifyXs`
-    // fn whose match arms exercise the new `[]` and `h :: t` patterns:
+    // Phase 7.5d extends the Phase 7.5c driver with two more forms from
+    // the Phase 7.5 backlog: **tagged literals** in expression position
+    // (`ETagged`, surface `"user-42"[UserId]`) and **parametric ctor
+    // args** in type decls (bracket form `Maybe[Int]` rendered as the
+    // new `TAApp` TypeArg ctor). The driver gains a `type Container =
+    // MkBox Maybe[Int]` decl and a `let uid = "user-42"[UserId]` decl:
     //   "module Examples.Bigger\n
     //    type Maybe A = Some A | None\n
     //    type Color = Red | Green | Blue\n
+    //    type Container = MkBox Maybe[Int]\n
     //    let answer = 42\n
     //    let zero = 0\n
+    //    let uid = \"user-42\"[UserId]\n
     //    fn double(x Int) Int = x * 2\n
     //    fn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\n
     //    fn pickColor(x Int) Color = if x then Red else Green\n
@@ -79,13 +81,16 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
     // match in expression position as `(match scrut with | p -> e | ...)`;
     // let-in chains as `(let name = e1 in e2)`; lambdas as `(fun x -> e)`;
     // string literals rendered with surrounding quotes as `"<s>"`; nil
-    // patterns as `[]`; cons patterns as `(h :: t)`).
+    // patterns as `[]`; cons patterns as `(h :: t)`; tagged literals as
+    // `(<lit>[Tag])`; parametric ctor args as `<Head>[<arg>]`).
     let expected =
         [ "module Examples.Bigger"
           "type Maybe (A) = Some(A) | None"
           "type Color = Red | Green | Blue"
+          "type Container = MkBox(Maybe[Int])"
           "let answer = 42"
           "let zero = 0"
+          "let uid = (\"user-42\"[UserId])"
           "fn double (x: Int) -> Int = (x * 2)"
           "fn classify (x: Int) -> Int = (match x with | 0 -> 0 | _ -> 1)"
           "fn pickColor (x: Int) -> Color = (if x then Red else Green)"
