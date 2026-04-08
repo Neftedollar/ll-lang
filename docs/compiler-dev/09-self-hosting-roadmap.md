@@ -273,4 +273,75 @@ Things this surfaced as language gaps for Phase 7.2+:
    normalised newlines and re-indent each `let` body from a known
    anchor.
 
-These gaps drive the Phase 7.2 work plan.
+These gaps drove the Phase 7.1.5 and 7.1.6 work plans (below).
+
+### 2026-04 — Phase 7.1.5: cons patterns + match-as-expression (DONE)
+
+Closed gaps #1 and #3 from the Phase 7.1 list:
+
+1. `::` cons was added in both pattern and expression position. Right-
+   associative (`1 :: 2 :: rest` → `ECons(1, ECons(2, rest))`). Parser
+   precedence sits between `==` and `+` (so `1 + 2 :: xs` = `(1+2) :: xs`
+   and `a == 1 :: rest` = `a == (1 :: rest)`). Codegen emits native F#
+   `::` — no transformation. HMInfer.patternType for PCons threads the
+   element-var unification back into bindings so `match xs with | x :: _
+   -> x` infers to `(List A) -> A` correctly.
+2. `match <expr> with | p -> e | ...` as a value-position expression
+   landed as the additive `EMatchOf` variant — the existing implicit-
+   scrutinee `EMatch` form used by fn bodies is untouched. Codegen emits
+   single-line `(match scrut with | p1 -> e1 | p2 -> e2)` to dodge F#
+   offside rule issues. Branch type-mismatch correctly yields E001.
+
+Along with the features, `09-lexer-real.lll` was rewritten to use
+`c :: rest` patterns directly and to inline keyword classification via
+`match s with | "let" -> TLet | ... | _ -> TIdent s`, dropping the
+`unwrapCharOrSpace` / `unwrapTailOrEmpty` / `headChar` / `tailChars`
+helpers. Token output unchanged.
+
+Test count: 284 → 307.
+
+### 2026-04 — Phase 7.1.6: parser prep (DONE)
+
+Closed gaps #4 and the multi-line-sum issue:
+
+1. **`let` pattern destructuring**: `let (a, b) = pair`, `let h :: t =
+   xs`, `let _ = sideEffect` all work in both top-level `DLet` position
+   and expression-level `ELet`. Implemented via additive AST variants
+   (`DLetPat of Pattern * Expr`, `ELetPat of Pattern * Expr * Expr
+   option`) so existing `PVar x` fast paths stay untouched. Codegen
+   emits native F# `let (a, b) = expr` reusing the existing
+   `emitPattern`.
+2. **Multi-line sum type declarations**: `type T =\n  | A\n  | B\n  | C`
+   now parses to the same `TBSum` AST as the single-line form. Enables
+   compact multi-constructor types like the Phase 7.2 parser AST.
+
+Added corpus example `spec/examples/valid/10-multiline-sum.lll`.
+
+Test count: 307 → 325.
+
+Remaining gaps after 7.1.6 (drive Phase 7.2 parser work):
+
+- **No surface tuple-literal expressions**: `(a, b)` as an expression
+  doesn't build an `ETuple`. `ETuple` is only inhabited by fn-parameter
+  destructuring. Workaround for parser authors: use a named two-field
+  ADT variant like `type Parsed = MkParsed Expr (List Token)` and
+  destructure via `match | MkParsed e rest -> ...`.
+- **`atom[TypeId]` ambiguity**: still unfixed. Parenthesize around
+  bracketed lists when applying to a function.
+- **Codegen indentation under deep nesting**: still a lurking hazard;
+  the workaround remains "split into top-level helpers".
+
+### 2026-04 — Phase 7.2: arithmetic expression parser (IN PROGRESS)
+
+A WIP `11-parser-real.lll` was drafted (164 lines, recursive-descent
+arithmetic parser with `MkParsed` ADT wrapper) but hit an `E003
+NonExhaustiveMatch` in the elaborator's exhaustiveness pass — the match
+arms covering sub-patterns of `Expr` aren't being recognized as
+exhaustive. The draft is preserved at `/tmp/11-parser-real-wip.lll` for
+the next session. Likely root cause: the match arms destructure on
+constructor-pattern shapes that the exhaustiveness check conservatively
+flags as incomplete even when they actually cover every variant via
+mutually-exclusive guards. Debug path for next session: reproduce with
+a minimal test, trace through `exhaustivenessCheck` in
+`Elaborator.fs`, decide whether to relax the check or restructure the
+parser to satisfy it.

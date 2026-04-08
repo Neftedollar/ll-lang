@@ -44,7 +44,7 @@ ll-lang/
 │       ├── Program.fs
 │       └── LLLangTool.fsproj
 ├── tests/
-│   └── LLLangTests/              xUnit suite (191 tests)
+│   └── LLLangTests/              xUnit suite (325 tests)
 │       ├── LexerTests.fs
 │       ├── ParserTests.fs
 │       ├── ElaboratorTests.fs
@@ -58,7 +58,7 @@ ll-lang/
 
 ```bash
 dotnet build                      # all three projects
-dotnet test                       # run xUnit suite (191 tests)
+dotnet test                       # run xUnit suite (325 tests)
 ```
 
 The compiler library targets `net10.0` with `LangVersion=preview` and has

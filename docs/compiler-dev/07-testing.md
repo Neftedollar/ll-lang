@@ -2,7 +2,7 @@
 
 Project: `tests/LLLangTests/LLLangTests.fsproj` — xUnit 2.6.3.
 
-191 tests across five files, each file corresponding to one compiler
+325 tests across five files, each file corresponding to one compiler
 pass:
 
 | File                   | Lines | Covers                                   |
@@ -189,5 +189,5 @@ assertion explicitly.
 ## CI
 
 `.github/workflows/build.yml` (referenced in the README badge) runs
-`dotnet build` followed by `dotnet test`. All 191 tests must pass on
+`dotnet build` followed by `dotnet test`. All 325 tests must pass on
 merges to `main`.

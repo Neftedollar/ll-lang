@@ -59,13 +59,16 @@ bindings and `type` declarations inside that module.
 The module system is parsed and tracked through the typed AST, but several
 pieces are not yet implemented:
 
-- **No standard library**. `import Std.List`, `import Std.Maybe`, etc. parse
-  without error, but the referenced names (`head`, `map`, `fromMaybe`, ...)
-  are not in scope and will produce `E002 UnboundVar` if used. Corpus file
-  `05-modules.lll` parses but uses names that would fail inference at runtime.
+- **Implicit prelude instead of `import`**. A built-in prelude is injected
+  into every module via the elaborator's `builtinEnv`. It exposes ~50
+  stdlib functions (`listMap`, `listFold`, `strLen`, `strChars`,
+  `charIsDigit`, `readFile`, `exit`, ...) and the F# runtime bindings are
+  emitted as a header block in every generated `.fs` file. Writing
+  `import Std.List` still parses without error but is a no-op — the
+  names are already in scope.
 - **No multi-file compilation**. Each invocation of `lllc build` or `lllc run`
   operates on a single `.lll` file. Cross-file symbol resolution is a
-  planned Phase 6 feature.
+  planned future feature.
 - **No `Platform.*` modules**. The design spec reserves `Platform.IO`,
   `Platform.DotNet.ASP`, etc. None are implemented; `E007 PlatformMismatch`
   is reserved in the error table but never emitted.
@@ -74,11 +77,17 @@ pieces are not yet implemented:
 
 ## Practical advice
 
-Until the module system is fleshed out:
+Until multi-file modules land:
 
 - Put everything you need in a single `.lll` file.
-- Define helpers locally rather than relying on `Std.*`.
-- Only `printfn` is available as a pre-declared IO builtin (see the
-  `fn main()` example in [01-installation](01-installation.md)).
+- The implicit prelude (`listMap`, `strLen`, `printfn`, `readFile`, ...) is
+  available without any `import` statement. See
+  [07-error-codes.md](07-error-codes.md) and the corpus examples for the
+  full set.
+- Types like `Maybe` and `Result` are NOT built-in — you must declare them
+  locally in any file that uses `listHead`, `strToInt`, or `resultMap`:
+  `type Maybe A = Some A | None`, `type Result A E = Ok A | Err E`. The
+  codegen prelude emits the Maybe/Result-dependent runtime helpers only
+  when your file declares these types.
 
 A self-contained file is the safest shape to ship today.

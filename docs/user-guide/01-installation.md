@@ -27,7 +27,7 @@ Optional: run the test suite.
 dotnet test
 ```
 
-191 tests should pass.
+325 tests should pass.
 
 ## Hello, ll-lang
 
