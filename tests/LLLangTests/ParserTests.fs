@@ -123,6 +123,49 @@ let ``parse let with in`` () =
 let ``parse tagged literal: "id"[UserId]`` () =
     Assert.Equal(ETagged(ELit (LStr "user-42"), "UserId"), parseExprStr "\"user-42\"[UserId]")
 
+[<Fact>]
+let ``parse tagged literal: 5.0[m] (lowercase tag on float literal)`` () =
+    Assert.Equal(ETagged(ELit (LFloat 5.0), "m"), parseExprStr "5.0[m]")
+
+[<Fact>]
+let ``parse tagged literal: 42[Years] (TypeId tag on int literal)`` () =
+    Assert.Equal(ETagged(ELit (LInt 42L), "Years"), parseExprStr "42[Years]")
+
+// --- Phase 7.2.2: atom[Tag] vs list-literal disambiguation ---
+//
+// `[X]` is consumed as a tag suffix only when the preceding atom is a literal
+// (`ELit _`). For Var / Con / App results the `[X]` is left for the outer
+// `parseApp` so it becomes a fresh list-literal argument. This unblocks
+// idiomatic application like `cons TPlus [TMinus]` without parens.
+
+[<Fact>]
+let ``parse cons TPlus [TMinus] as application with list-literal arg`` () =
+    // `cons TPlus [TMinus]` -> EApp(EApp(cons, TPlus), [TMinus])
+    let expected =
+        EApp(
+            EApp(EVar "cons", ECon "TPlus"),
+            EList [ECon "TMinus"])
+    Assert.Equal(expected, parseExprStr "cons TPlus [TMinus]")
+
+[<Fact>]
+let ``parse f [TFoo] as application with single-element list arg`` () =
+    let expected = EApp(EVar "f", EList [ECon "TFoo"])
+    Assert.Equal(expected, parseExprStr "f [TFoo]")
+
+[<Fact>]
+let ``parse f x [1 2 3] as application with three-element list arg`` () =
+    let expected =
+        EApp(
+            EApp(EVar "f", EVar "x"),
+            EList [ELit (LInt 1L); ELit (LInt 2L); ELit (LInt 3L)])
+    Assert.Equal(expected, parseExprStr "f x [1 2 3]")
+
+[<Fact>]
+let ``parse Some [TFoo] as constructor application with list arg`` () =
+    // `Some [TFoo]` -> EApp(Some, [TFoo]) (Some is a Con; no tag suffix)
+    let expected = EApp(ECon "Some", EList [ECon "TFoo"])
+    Assert.Equal(expected, parseExprStr "Some [TFoo]")
+
 // --- Arithmetic ---
 
 [<Fact>]

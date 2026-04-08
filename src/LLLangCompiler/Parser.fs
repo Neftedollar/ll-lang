@@ -113,12 +113,24 @@ and private parseTagged (c: Ctx) : Result<Expr, string> =
     match parseAtom c with
     | Error e -> Error e
     | Ok atom ->
-        // Check for tag: atom[TypeId]
-        if curTok c = LBrack then
+        // Phase 7.2.2: `[X]` is consumed as a tag suffix only when the
+        // preceding atom is a literal (`ELit _`). For Var / Con / App / List
+        // results the `[X]` is left for the outer `parseApp` so it becomes a
+        // fresh list-literal argument. This unblocks idiomatic application
+        // like `cons TPlus [TMinus]` (would otherwise parse as
+        // `cons (ETagged TPlus "TMinus")`) or `listAppend [TFoo] xs` without
+        // forcing helper wrappers like the old `pre` function in
+        // 09-lexer-real.lll.
+        //
+        // The tag name itself can be either an Ident (lowercase, e.g. `m`,
+        // `s`, `kg`) or a TypeId (uppercase, e.g. `UserId`). Both forms are
+        // declared the same way via `tag <name>` at the top level.
+        match atom with
+        | ELit _ when curTok c = LBrack ->
             let saved = c.Pos
             advance c
             match curTok c with
-            | TypeId name ->
+            | Ident name | TypeId name ->
                 advance c
                 match skip c RBrack with
                 | Ok () -> Ok (ETagged(atom, name))
@@ -126,7 +138,7 @@ and private parseTagged (c: Ctx) : Result<Expr, string> =
             | _ ->
                 c.Pos <- saved
                 Ok atom
-        else Ok atom
+        | _ -> Ok atom
 
 and private parseApp (c: Ctx) : Result<Expr, string> =
     match parseTagged c with

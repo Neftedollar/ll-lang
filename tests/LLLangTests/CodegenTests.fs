@@ -505,6 +505,26 @@ let ``runtime: tuple literal + destructure end-to-end prints first elem`` () =
     let stdout = runLLLangSrc src
     Assert.Contains("1", stdout)
 
+// --- Phase 7.2.2: atom[Tag] vs list-literal disambiguation ---
+//
+// Pre-fix the parser ate the `[TMinus]` after `cons TPlus` as a tag suffix
+// on the constructor `TPlus`, producing `cons (ETagged TPlus "TMinus")`. The
+// fix gates `ETagged` to literal atoms only, so a bracketed Con / Var / App
+// becomes a fresh list-literal argument. End-to-end exercise: build, infer,
+// codegen, run, observe the printed list length.
+
+[<Fact>]
+let ``runtime: cons CON [LIT] passes a single-element list as a fresh arg`` () =
+    let src =
+        "module Tmp.TagAmbig\n" +
+        "type Token = TPlus | TMinus\n" +
+        "fn cons2(t Token)(ts List[Token]) List[Token] = t :: ts\n" +
+        "fn main() =\n" +
+        "  let xs = cons2 TPlus [TMinus] in\n" +
+        "  printfn (intToStr (listLen xs))"
+    let stdout = runLLLangSrc src
+    Assert.Contains("2", stdout)
+
 // --- Phase 7.1.6: multi-line sum type runtime ---
 
 [<Fact>]
