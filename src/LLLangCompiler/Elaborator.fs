@@ -367,11 +367,82 @@ let private exhaustivenessCheck (m: LLModule) (_env: TypeEnv) : LLError list =
             | _ -> ()
         | _ -> () ]
 
+// ---- Tag rewrite pass -------------------------------------------------
+//
+// The parser cannot tell `Float[m]` (tagged type, `m` is a unit tag) from
+// `Maybe[A]` (type application, `A` is a type parameter), so it emits every
+// `T[X]` as `TyApp(T, TyVar X)`. After we know the set of declared tag
+// names from `tag m` / `tag s` declarations, we rewrite occurrences of
+// `TyApp(T, TyVar t)` / `TyApp(T, TyName t)` into `TyTagged(T, UName t)`
+// whenever `t` is a declared tag. We rewrite types inside function
+// signatures (params + return), variant constructor argument types and
+// `let` type annotations. Composite unit algebra (`Float[m/s]`) is NOT
+// modelled here — a return type like `d / t` stays as whatever the H-M
+// pass infers (typically a fresh flex var); this is a known limitation.
+
+/// Collect all tag names declared in the module (from `tag X` / `tag x`).
+let private collectTagNames (m: LLModule) : Set<string> =
+    m.Decls
+    |> List.choose (fun (decl, _) ->
+        match decl with
+        | DTag name -> Some name
+        | _ -> None)
+    |> Set.ofList
+
+/// Rewrite a single type expression: `TyApp(base, TyVar t)` or
+/// `TyApp(base, TyName t)` becomes `TyTagged(base, UName t)` when `t` is
+/// a known tag name. Applied structurally.
+let rec private rewriteTyWithTags (tags: Set<string>) (ty: TypeExpr) : TypeExpr =
+    match ty with
+    | TyApp(b, TyVar t) when Set.contains t tags ->
+        TyTagged(rewriteTyWithTags tags b, UName t)
+    | TyApp(b, TyName t) when Set.contains t tags ->
+        TyTagged(rewriteTyWithTags tags b, UName t)
+    | TyApp(a, b) -> TyApp(rewriteTyWithTags tags a, rewriteTyWithTags tags b)
+    | TyFn(a, b) -> TyFn(rewriteTyWithTags tags a, rewriteTyWithTags tags b)
+    | TyTagged(a, u) -> TyTagged(rewriteTyWithTags tags a, u)
+    | TyName _ | TyVar _ -> ty
+
+/// Rewrite tag-named TyApp occurrences in a function signature's parameter
+/// and return types.
+let private rewriteFnSigTags (tags: Set<string>) (s: FnSig) : FnSig =
+    { s with
+        Params = s.Params |> List.map (fun (n, t) -> n, rewriteTyWithTags tags t)
+        ReturnType = s.ReturnType |> Option.map (rewriteTyWithTags tags) }
+
+/// Rewrite a full module, replacing tag-named TyApp with TyTagged in all
+/// function signatures (including trait + impl), variant constructor args,
+/// and record / wrapped type bodies.
+let rewriteTagsInModule (m: LLModule) : LLModule =
+    let tags = collectTagNames m
+    if Set.isEmpty tags then m
+    else
+        let rewriteBody = function
+            | TBSum ctors ->
+                TBSum (ctors |> List.map (fun (n, args) ->
+                    n, args |> List.map (rewriteTyWithTags tags)))
+            | TBRecord fields ->
+                TBRecord (fields |> List.map (fun (n, t) -> n, rewriteTyWithTags tags t))
+            | TBWrapped t -> TBWrapped (rewriteTyWithTags tags t)
+        let rewriteDecl = function
+            | DFn(s, body) -> DFn(rewriteFnSigTags tags s, body)
+            | DType(name, ps, body) -> DType(name, ps, rewriteBody body)
+            | DTrait(name, vars, sigs) ->
+                DTrait(name, vars, sigs |> List.map (rewriteFnSigTags tags))
+            | DImpl(tr, ty, fns) ->
+                DImpl(tr, ty,
+                    fns |> List.map (fun (s, e) -> rewriteFnSigTags tags s, e))
+            | other -> other
+        { m with Decls = m.Decls |> List.map (fun (d, exp) -> rewriteDecl d, exp) }
+
 /// Elaborate an LLModule: build TypeEnv, check for errors.
-/// Returns Ok TypeEnv on success, Error errors on any violation.
-let elaborate (m: LLModule) : Result<TypeEnv, LLError list> =
-    let env = collectDecls m
-    let checkErrors = checkDecls m env
-    let exhaustErrors = exhaustivenessCheck m env
+/// Returns Ok (rewrittenModule, TypeEnv) on success, Error errors on any violation.
+/// The rewritten module has all `TyApp(T, TyVar t)` (where `t` is a declared tag)
+/// normalised to `TyTagged(T, UName t)` so HMInfer sees correct types.
+let elaborate (m: LLModule) : Result<LLModule * TypeEnv, LLError list> =
+    let m' = rewriteTagsInModule m
+    let env = collectDecls m'
+    let checkErrors = checkDecls m' env
+    let exhaustErrors = exhaustivenessCheck m' env
     let errors = checkErrors @ exhaustErrors
-    if errors.IsEmpty then Ok env else Error errors
+    if errors.IsEmpty then Ok (m', env) else Error errors

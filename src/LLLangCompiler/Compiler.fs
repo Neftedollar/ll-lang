@@ -19,7 +19,7 @@ let compile (src: string) : Result<string, LLError list> =
         | Ok m ->
             match elaborate m with
             | Error es -> Error es
-            | Ok env ->
-                match infer m env with
+            | Ok (m', env) ->
+                match infer m' env with
                 | Error es -> Error es
                 | Ok tm -> Ok (emit tm)

@@ -18,7 +18,7 @@ let private inferSrc (src: string) : Result<TypedModule, LLError list> =
     | Ok m ->
         match elaborate m with
         | Error es -> failwith $"elaborator: {es}"
-        | Ok env -> infer m env
+        | Ok (m', env) -> infer m' env
 
 let private inferOk (src: string) : TypedModule =
     match inferSrc src with
@@ -504,12 +504,26 @@ let rec private containsWildcard (ty: TypeExpr) : bool =
 [<Theory>]
 [<InlineData("01-basics.lll")>]
 [<InlineData("02-adts.lll")>]
-// 03-tags.lll fails inference: unit arithmetic (d / t produces Float[m/s]) is not yet supported;
-// the infer step unifies rigid vars m and s from the speed function, yielding E001.
+[<InlineData("03-tags.lll")>]
 // 04-traits.lll and 05-modules.lll fail elaboration (unbound map/head from missing imports/impls).
 let ``valid corpus infers ok`` (name: string) =
     let tm = inferOk (readValid name)
     Assert.NotNull(tm.Env)
+
+[<Fact>]
+let ``speed param types are TyTagged Float m and TyTagged Float s`` () =
+    let src =
+        "module M\n" +
+        "tag m\n" +
+        "tag s\n" +
+        "fn speed(d Float[m])(t Float[s]) = d\n"
+    let tm = inferOk src
+    let sch = schemeOf tm "speed"
+    // Expect fn body: TyFn(TyTagged(Float, m), TyFn(TyTagged(Float, s), _))
+    match sch.Body with
+    | TyFn(TyTagged(TyName "Float", UName "m"),
+           TyFn(TyTagged(TyName "Float", UName "s"), _)) -> ()
+    | other -> failwithf "speed scheme body not tagged as expected: %A" other
 
 [<Fact>]
 let ``typed AST has no TyVar wildcard for basics and adts`` () =
@@ -560,7 +574,7 @@ let private tryInferSrc (src: string) : Result<TypedModule, LLError list> =
     | Ok m ->
         match elaborate m with
         | Error es -> Error es
-        | Ok env -> infer m env
+        | Ok (m', env) -> infer m' env
 
 let private functorMaybeModule =
     "module M\n" +

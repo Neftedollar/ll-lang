@@ -22,7 +22,7 @@ let elabOk src =
     | Error e -> failwith $"parse: {e}"
     | Ok m ->
         match elaborate m with
-        | Ok env -> env
+        | Ok (_, env) -> env
         | Error errs -> failwith $"unexpected errors: {errs}"
 
 let private readValid name =

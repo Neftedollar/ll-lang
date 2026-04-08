@@ -144,15 +144,58 @@ let rec private inferExpr (env: Env) (st: InferState) (expr: Expr) : Subst * Typ
         (s, ty, mkTyped st (TETagged(te, tag)) ty)
 
     | EApp(f, a) ->
-        let (s1, tauF, teF) = inferExpr env st f
-        let env1 = applyEnv s1 env
-        let (s2, tauA, teA) = inferExpr env1 st a
-        let beta = freshVar st.Fresh
-        let s3 = unifyS st (applyType s2 tauF) (TyFn(tauA, beta))
-        let sAll = compose s3 (compose s2 s1)
-        let retTy = applyType sAll beta
-        let te = mkTyped st (TEApp(applyTE sAll teF, applyTE sAll teA)) retTy
-        (sAll, retTy, te)
+        // Special case: arithmetic operator on two tagged-numeric operands.
+        //
+        // `d / t` where `d : Float[m]` and `t : Float[s]` would normally fail
+        // because `(/) : ∀a. a -> a -> a` forces both operands to the same
+        // type. Composite unit algebra (`Float[m/s]`) is not yet implemented;
+        // we leave the result type as a fresh flex var. This keeps inference
+        // live for code that mixes units in arithmetic (see 03-tags.lll).
+        let isArithOp name = name = "+" || name = "-" || name = "*" || name = "/"
+        let isTaggedNumeric ty =
+            match ty with
+            | TyTagged(TyName "Float", _) | TyTagged(TyName "Int", _) -> true
+            | _ -> false
+        match expr with
+        | EApp(EApp(EVar op, lhs), rhs) when isArithOp op ->
+            let (s1, tauL, teL) = inferExpr env st lhs
+            let (s2, tauR, teR) = inferExpr (applyEnv s1 env) st rhs
+            let tauLApplied = applyType s2 tauL
+            let tauRApplied = applyType s2 tauR
+            if isTaggedNumeric tauLApplied && isTaggedNumeric tauRApplied then
+                // Don't unify operand types; return a fresh flex var.
+                let beta = freshVar st.Fresh
+                let sAll = compose s2 s1
+                let opSch =
+                    match Map.tryFind op env with
+                    | Some s -> s
+                    | None -> mono (TyFn(tauLApplied, TyFn(tauRApplied, beta)))
+                let opTy = instantiate st.Fresh opSch
+                let opTE = mkTyped st (TEVar op) opTy
+                let innerApp = mkTyped st (TEApp(opTE, applyTE sAll teL)) (TyFn(tauRApplied, beta))
+                let outerApp = mkTyped st (TEApp(innerApp, applyTE sAll teR)) beta
+                (sAll, beta, outerApp)
+            else
+                // Fall through to default EApp handling.
+                let (s1, tauF, teF) = inferExpr env st f
+                let env1 = applyEnv s1 env
+                let (s2, tauA, teA) = inferExpr env1 st a
+                let beta = freshVar st.Fresh
+                let s3 = unifyS st (applyType s2 tauF) (TyFn(tauA, beta))
+                let sAll = compose s3 (compose s2 s1)
+                let retTy = applyType sAll beta
+                let te = mkTyped st (TEApp(applyTE sAll teF, applyTE sAll teA)) retTy
+                (sAll, retTy, te)
+        | _ ->
+            let (s1, tauF, teF) = inferExpr env st f
+            let env1 = applyEnv s1 env
+            let (s2, tauA, teA) = inferExpr env1 st a
+            let beta = freshVar st.Fresh
+            let s3 = unifyS st (applyType s2 tauF) (TyFn(tauA, beta))
+            let sAll = compose s3 (compose s2 s1)
+            let retTy = applyType sAll beta
+            let te = mkTyped st (TEApp(applyTE sAll teF, applyTE sAll teA)) retTy
+            (sAll, retTy, te)
 
     | ELam(ps, body) ->
         // Each param gets a fresh flex var
