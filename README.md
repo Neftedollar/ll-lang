@@ -150,7 +150,7 @@ Source (.lll)
 
 ## Status
 
-**Phases 1–5 complete. 191 tests passing. Working end-to-end compiler.**
+**Phases 1–6 complete. 219 tests passing. Working end-to-end compiler with stdlib.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -159,7 +159,7 @@ Source (.lll)
 | 3 | Elaborator — name resolution, tag/unit checks, exhaustiveness | ✅ Done |
 | 4 | Hindley-Milner inference + TypedAST + trait dispatch | ✅ Done |
 | 5 | F# source codegen + `llc` CLI (`build` / `run`) | ✅ Done |
-| 6 | Standard library expansion | Planned |
+| 6 | Standard library — List, Maybe, Result, Str, Math, IO builtins | ✅ Done |
 | 7 | Self-hosting bootstrap | Planned |
 
 ## Getting Started
@@ -170,7 +170,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 191 tests
+dotnet test    # 219 tests
 ```
 
 ### Run your first program
