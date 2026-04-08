@@ -803,7 +803,8 @@ let private parseFnSig (c: Ctx) : Result<FnSig, string> =
             | Error _ -> c.Pos <- saved; cont <- false
         let parms = ResizeArray<Param>()
         let mutable paramCont = true
-        while paramCont && curTok c = LParen do
+        let mutable paramErr : string option = None
+        while paramCont && paramErr.IsNone && curTok c = LParen do
             let saved = c.Pos
             // Handle empty parens `()` as "no params" marker (e.g. `fn main()`).
             advance c
@@ -811,19 +812,49 @@ let private parseFnSig (c: Ctx) : Result<FnSig, string> =
                 advance c
                 // `()` group contributes zero params; continue loop to allow mixing.
             else
+                // Phase 7.5d bugfix: committed-param detection. After
+                // advancing past `(`, decide whether this group is
+                // definitely a named param (committed) or could still be a
+                // parenthesised return type (non-committed, so a parse
+                // failure should just stop the param loop, not kill the
+                // whole decl).
+                //
+                // A parenthesised return type must START with something a
+                // return type can start with: `TypeId` (e.g. `(Int)`) or
+                // nested `LParen` (e.g. `((Int))`). Anything else — in
+                // particular any KEYWORD like `KwTag` for `(tag Int)` —
+                // can only be a broken named param, and we propagate the
+                // `parseParam` error upward. The old behaviour silently
+                // rewound and abandoned the param loop, leaving the `(`
+                // in the stream so the outer `skip c Eq` failed with a
+                // confusing `Expected Eq, got LParen`. Combined with the
+                // parseModule swallow (also fixed in Phase 7.5d), that
+                // stranded the whole fn decl and cascaded into cryptic
+                // `E002 UnboundVar` at every call site. Lowercase `Ident`
+                // is always a committed param too — `parseParam` handles
+                // both `(name Type)` and the untyped `(name)` shape.
+                let committed =
+                    match curTok c with
+                    | TypeId _ | LParen | RParen -> false
+                    | _ -> true   // Ident + any keyword + anything else
                 c.Pos <- saved
                 match parseParam c with
                 | Ok p -> parms.Add(p)
-                | Error _ -> c.Pos <- saved; paramCont <- false
-        let retType =
-            match curTok c with
-            | TypeId _ | Ident _ | LParen ->
-                let saved = c.Pos
-                match parseTypeExpr c with
-                | Ok te -> Some te
-                | Error _ -> c.Pos <- saved; None
-            | _ -> None
-        Ok { Name = name; Constraints = List.ofSeq constraints; Params = List.ofSeq parms; ReturnType = retType }
+                | Error e ->
+                    if committed then paramErr <- Some e
+                    else c.Pos <- saved; paramCont <- false
+        match paramErr with
+        | Some e -> Error e
+        | None ->
+            let retType =
+                match curTok c with
+                | TypeId _ | Ident _ | LParen ->
+                    let saved = c.Pos
+                    match parseTypeExpr c with
+                    | Ok te -> Some te
+                    | Error _ -> c.Pos <- saved; None
+                | _ -> None
+            Ok { Name = name; Constraints = List.ofSeq constraints; Params = List.ofSeq parms; ReturnType = retType }
     | t -> Error $"Expected function name, got {t}"
 
 let private parseFnBody (c: Ctx) : Result<Expr, string> =

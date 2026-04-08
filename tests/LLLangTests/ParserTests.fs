@@ -830,4 +830,33 @@ let ``bug1: clause-form arm with keyword binder 'tag' surfaces as parse error no
         // silently and let `showExpr` become an UnboundVar downstream.
         Assert.Contains("KwTag", msg)
 
-
+[<Fact>]
+let ``bug2: curried multi-arg fn with keyword param name surfaces as parse error pointing at the keyword`` () =
+    // Sibling of bug1. `tag` is a keyword, so `parseParam` rejects it
+    // inside `(tag Int)`. The old `parseFnSig` param loop silently
+    // rewound, stopped collecting params, and left `(tag Int)...` in
+    // the token stream; the outer `skip c Eq` then failed with the
+    // confusing `Expected Eq, got LParen`, which `parseModuleCtx`
+    // swallowed (see bug1's fix), so every call site cascaded into
+    // `E002 UnboundVar`. Fixed by teaching `parseFnSig` to treat any
+    // non-return-type-starting token inside `(...)` as a committed
+    // param and propagate the `parseParam` error upward, so the user
+    // sees `Expected param name, got KwTag` pointing directly at the
+    // offender.
+    let src =
+        "module M\n" +
+        "fn helper(tag Int)(x Int) Int = tag + x\n" +
+        "fn main() =\n" +
+        "  let r = helper 1 2 in\n" +
+        "  printfn (intToStr r)"
+    let toks =
+        match tokenize src with
+        | Ok ts -> ts
+        | Error e -> failwith $"Lex error: {e}"
+    match parseModule toks with
+    | Ok _ -> failwith "Expected parseModule to fail on `tag` param name, got Ok"
+    | Error msg ->
+        // The error must name `KwTag` — the actual offending token —
+        // not the downstream `LParen`/`Eq` confusion the old swallow
+        // produced.
+        Assert.Contains("KwTag", msg)
