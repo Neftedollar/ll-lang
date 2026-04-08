@@ -1,0 +1,287 @@
+module Examples.HMInferReal
+
+-- Phase 7.7a: the first slice of **Hindley-Milner inference written in
+-- ll-lang itself**. After Phase 7.6 closed out the front-end half of
+-- self-hosting (lex / parse / elaborate, all in ll-lang), this file
+-- starts the H-M middle: a minimal `TypeExpr`, an association-list
+-- `Subst`, and a position-agnostic `unify` mirroring the F# host's
+-- `HMInfer.unify` in `src/LLLangCompiler/HMInfer.fs` line 63 area.
+--
+-- Scope ("slice A" — keep tight):
+--   * `TypeExpr` = TyName / TyVar / TyFn (no `TyApp`, no `TyTagged`).
+--   * `Subst` as two parallel lists `List[Str]` + `List[TypeExpr]`.
+--     Tuples-in-list have surface-syntax friction in ll-lang, so two
+--     parallel lists is the cleanest fit (same trick as
+--     `16-elaborator-real.lll` for `EMatch` arms).
+--   * `Maybe[Subst]` for the unify result. `None` = mismatch, `Some s`
+--     = success. No `Result[Subst, LLError]` yet — error codes /
+--     positions land in a later slice once `inferExpr` needs them.
+--   * `applyType` walks `TyVar v -> lookup, TyFn a b -> recurse,
+--     TyName _ -> as-is`. **No occurs check** — Phase 7.7b.
+--   * No `composeSubst`: this slice's `unify TyFn TyFn` arm reuses
+--     the head subst directly without composing the tail. Composition
+--     only matters once the inferred type contains chains across
+--     multiple binders, which only `inferExpr` (Phase 7.7b) needs.
+--   * **No `inferExpr`** — proving `unify` works is the tighter slice.
+--     The full algorithm-W loop with env / fresh / state threading
+--     is Phase 7.7b. The `Expr` type and a hint at the algorithm-W
+--     entry stub exist in the doc strings only.
+--
+-- Out of scope (later slices in the Phase 7.7 umbrella):
+--   * Let-generalization, polymorphism, type schemes
+--   * `ELam` / `EIf` / `EMatch` / `ELet` / `EApp` inference
+--   * Trait dispatch
+--   * Occurs check (`OccursCheck` E008) — Phase 7.7b
+--   * Tagged types (`TyTagged`) and unit-mismatch errors
+--   * Record types
+--
+-- Hardcoded test plan in `main`:
+--   t1: unify Int Int                    -> ok
+--   t2: unify Int Str                    -> mismatch
+--   t3: unify a Int                      -> ok bound a
+--   t4: unify (Int -> Str) (Int -> Str)  -> ok
+--   t5: unify (Int -> Str) (Int -> Bool) -> mismatch
+--
+-- Expected stdout (one line per test, joined into a single `printfn`
+-- call because `fn main` has a single expression body and ll-lang has
+-- no statement-sequence syntax — see the `joinLines` helper):
+--   t1 unify Int Int ok
+--   t2 unify Int Str mismatch
+--   t3 unify a Int ok bound a
+--   t4 unify (Int -> Str) (Int -> Str) ok
+--   t5 unify (Int -> Str) (Int -> Bool) mismatch
+
+-- ---------- Maybe -------------------------------------------------------
+
+-- Local `Maybe` so the codegen prelude wires the Maybe-dependent helpers
+-- (`listHead` / `listTail` / `maybeMap` / ...). This file uses
+-- `Some` / `None` directly for the `unify` result, not via stdlib.
+type Maybe A = Some A | None
+
+-- ---------- TypeExpr ----------------------------------------------------
+
+-- Minimal type-expression AST. Mirrors the F# host's
+-- `LLLang.AST.TypeExpr` minus `TyApp` and `TyTagged`.
+--   * `TyName n`  — concrete nominal type: `TyName "Int"`,
+--     `TyName "Str"`, `TyName "Bool"`. The host distinguishes
+--     `TyName` from `TyVar` by the leading character; here we just
+--     rely on the constructor tag.
+--   * `TyVar v`   — type variable. The host uses `$0`, `$1`, ... for
+--     flexible (unification) vars and bare lowercase letters for rigid
+--     vars. This slice doesn't distinguish flex vs rigid — every
+--     `TyVar` is treated as flexible / bindable.
+--   * `TyFn a r`  — arrow type. Right-associative in surface syntax;
+--     this AST is just two pointers, no associativity to worry about.
+type TypeExpr =
+  | TyName Str
+  | TyVar Str
+  | TyFn TypeExpr TypeExpr
+
+-- ---------- Expr (placeholder for Phase 7.7b) ---------------------------
+
+-- The expression AST that the next slice's `inferExpr` will walk.
+-- Listed here as a doc-only stub so the file can be diffed against the
+-- F# host side-by-side in 7.7b. `inferExpr env e` will then return
+-- `(TypeExpr, Subst)` (or `Result[(TypeExpr, Subst), LLError]` once
+-- errors land).
+--
+-- type Expr =
+--   | EInt Int
+--   | EStr Str
+--   | EBool Bool
+--   | EVar Str
+--   | EAdd Expr Expr
+--   | EApp Expr Expr
+
+-- ---------- Subst -------------------------------------------------------
+
+-- Substitution as two parallel lists: `keys` is a `List[Str]` of var
+-- names, `vals` is a `List[TypeExpr]` of the types they bind to. Looked
+-- up by linear scan in `lookupSubst`. Same parallel-list trick as
+-- `16-elaborator-real.lll`'s `EMatch` arms — sidesteps the codegen
+-- limitation that prevents tuples in `List[(Str, TypeExpr)]`.
+type Subst = MkSubst List[Str] List[TypeExpr]
+
+-- Zero-arg fns in ll-lang require a dummy parameter at the call site
+-- (see `16-elaborator-real.lll` line 426 area for the same trick).
+-- Pass any `Int` — it's ignored.
+fn emptySubst(u Int) Subst = MkSubst [] []
+
+fn singletonSubst(name Str)(t TypeExpr) Subst =
+  MkSubst [name] [t]
+
+-- Linear lookup over the parallel key/val lists. Walks both in lockstep
+-- and returns `Some t` when the head key matches `name`, else recurses
+-- into the tails. Returns `None` when either list is empty.
+fn lookupSubst(s Subst)(name Str) Maybe[TypeExpr] =
+  match s with
+    | MkSubst keys vals ->
+      lookupSubstLists keys vals name
+
+fn lookupSubstLists(keys List[Str])(vals List[TypeExpr])(name Str) Maybe[TypeExpr] =
+  match keys with
+    | k :: ks ->
+      match vals with
+        | v :: vs ->
+          if k == name then Some v
+          else lookupSubstLists ks vs name
+        | _ -> None
+    | _ -> None
+
+-- Walk a `TypeExpr` replacing every `TyVar v` whose name is bound in
+-- `s` with the bound type. `TyName` is left as-is; `TyFn` recurses into
+-- both children. Mirrors the F# host's `Types.applyType` in
+-- `src/LLLangCompiler/Types.fs` line 26 area, minus the chain-following
+-- recursive call (single-level lookup is enough for this slice because
+-- the only binder we ever produce is `var -> non-var` from
+-- `singletonSubst`).
+fn applyType(s Subst)(t TypeExpr) TypeExpr =
+  match t with
+    | TyName _ -> t
+    | TyVar v ->
+      match lookupSubst s v with
+        | Some bound -> bound
+        | None -> t
+    | TyFn a r -> TyFn (applyType s a) (applyType s r)
+
+-- ---------- Unify -------------------------------------------------------
+
+-- Position-agnostic unifier returning `Maybe[Subst]`. `None` is a
+-- mismatch (the F# host's `e001 TypeMismatch`); `Some s` is the
+-- principal substitution. Cases mirror the F# host's `unify` arm-by-arm:
+--
+--   * `TyName a` vs `TyName b`     — Ok empty if equal, else None
+--   * `TyVar a`  vs `TyVar b`      — Ok empty if same name, else bind
+--                                    `a := TyVar b`
+--   * `TyVar a`  vs t (non-var)    — Ok (a := t)
+--   * t (non-var) vs `TyVar b`     — symmetric: Ok (b := t)
+--   * `TyFn a1 r1` vs `TyFn a2 r2` — unify args, then unify results
+--                                    under that subst, return the head
+--                                    subst (no full compose — see
+--                                    header)
+--   * anything else                — None
+--
+-- Deliberately no occurs check. Phase 7.7b will add it; for the
+-- five hardcoded test cases below it never fires.
+--
+-- Implementation note: ll-lang's match indentation rules make
+-- multi-level nested `match t1 with | ... -> match t2 with | ...`
+-- ambiguous (the inner match's last arm bleeds into the outer one).
+-- Each `t1` arm is split into its own helper to keep matches one
+-- level deep.
+fn unify(t1 TypeExpr)(t2 TypeExpr) Maybe[Subst] =
+  match t1 with
+    | TyName a -> unifyName a t2
+    | TyVar a -> unifyVar a t2
+    | TyFn a1 r1 -> unifyFn a1 r1 t2
+
+-- `TyName a` vs t2: equal name -> empty subst, var on the right -> bind,
+-- anything else -> mismatch. The first-arg type carries just the name
+-- string so callers don't reconstruct `TyName a` for the bind case.
+fn unifyName(a Str)(t2 TypeExpr) Maybe[Subst] =
+  match t2 with
+    | TyName b -> if a == b then Some (emptySubst 0) else None
+    | TyVar v -> Some (singletonSubst v (TyName a))
+    | _ -> None
+
+-- `TyVar a` vs t2: same var name -> empty subst, anything else -> bind
+-- `a := t2`. The "anything else" arm covers `TyVar b` (different name),
+-- `TyName _`, and `TyFn _ _`. No occurs check yet.
+fn unifyVar(a Str)(t2 TypeExpr) Maybe[Subst] =
+  match t2 with
+    | TyVar b -> if a == b then Some (emptySubst 0) else Some (singletonSubst a t2)
+    | _ -> Some (singletonSubst a t2)
+
+-- `TyFn a1 r1` vs t2: only succeeds against another `TyFn`. Unifies
+-- arg types first, applies the resulting subst to both result types,
+-- then unifies the substituted results. The returned subst is the head
+-- subst (no compose) — sufficient for this slice's tests because none
+-- of them produce a non-empty arg subst that the result subst would
+-- need to be threaded through.
+fn unifyFn(a1 TypeExpr)(r1 TypeExpr)(t2 TypeExpr) Maybe[Subst] =
+  match t2 with
+    | TyFn a2 r2 ->
+      match unify a1 a2 with
+        | Some s1 ->
+          let r1b = applyType s1 r1 in
+          let r2b = applyType s1 r2 in
+          unifyResults s1 r1b r2b
+        | _ -> None
+    | _ -> None
+
+-- Helper to keep `unifyFn`'s nested `match unify ... with | Some s1 ->
+-- match unify r1b r2b with | Some _ ->` from going three matches deep.
+-- Returns `Some s1` if the result types unify (regardless of what the
+-- result-side subst is — we don't compose in this slice), else `None`.
+fn unifyResults(s1 Subst)(r1b TypeExpr)(r2b TypeExpr) Maybe[Subst] =
+  match unify r1b r2b with
+    | Some _ -> Some s1
+    | _ -> None
+
+-- ---------- Pretty-printers ---------------------------------------------
+
+-- Render a TypeExpr in a readable surface form. `TyVar v` prints the
+-- raw name (`a`, `b`, `$0`); `TyName n` prints the name; `TyFn a r`
+-- prints `(a -> r)` with explicit parens (no precedence handling
+-- needed at this scale).
+fn showType(t TypeExpr) Str =
+  match t with
+    | TyName n -> n
+    | TyVar v -> v
+    | TyFn a r ->
+      let inner = strConcat (strConcat (showType a) " -> ") (showType r) in
+      strConcat (strConcat "(" inner) ")"
+
+-- Return the first key in a `Subst` (for the `t3` "ok bound a" line).
+-- Returns the empty string if the subst is empty — the test cases that
+-- print this never bind more than one var, so a one-key peek is enough.
+fn substFirstKey(s Subst) Str =
+  match s with
+    | MkSubst keys _ ->
+      match keys with
+        | k :: _ -> k
+        | _ -> ""
+
+-- ---------- Test driver -------------------------------------------------
+
+-- Run a single labelled `unify` test and produce one stdout line. The
+-- label is the test number, the two types are stringified, and the
+-- result tail is one of:
+--   * "ok"            — unify returned `Some s` and `s` is empty
+--   * "ok bound <k>"  — unify returned `Some s` with `s` non-empty
+--   * "mismatch"      — unify returned `None`
+fn runTest(label Str)(t1 TypeExpr)(t2 TypeExpr) Str =
+  let header = strConcat (strConcat (strConcat (strConcat label " unify ") (showType t1)) " ") (showType t2) in
+  match unify t1 t2 with
+    | Some s ->
+      let key = substFirstKey s in
+      if strLen key == 0 then strConcat header " ok"
+      else strConcat (strConcat header " ok bound ") key
+    | _ -> strConcat header " mismatch"
+
+-- Join a list of strings with newline separators. Used to fold the five
+-- test result lines into a single `printfn` argument because ll-lang's
+-- `fn main = body` body is a single expression — there's no statement
+-- sequencing.
+fn joinLines(xs List[Str]) Str =
+  listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n") s) "" xs
+
+-- ---------- main --------------------------------------------------------
+
+fn main() =
+  -- Concrete leaf types reused across the cases.
+  let tyInt = TyName "Int" in
+  let tyStr = TyName "Str" in
+  let tyBool = TyName "Bool" in
+  let tyVarA = TyVar "a" in
+  let intToStrFn = TyFn tyInt tyStr in
+  let intToStrFn2 = TyFn tyInt tyStr in
+  let intToBoolFn = TyFn tyInt tyBool in
+  -- Five hardcoded unify cases — see header for full plan.
+  let line1 = runTest "t1" tyInt tyInt in
+  let line2 = runTest "t2" tyInt tyStr in
+  let line3 = runTest "t3" tyVarA tyInt in
+  let line4 = runTest "t4" intToStrFn intToStrFn2 in
+  let line5 = runTest "t5" intToBoolFn intToStrFn in
+  let lines = [line1 line2 line3 line4 line5] in
+  printfn (joinLines lines)
