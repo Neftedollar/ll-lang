@@ -112,11 +112,13 @@ fn lexId(cs List[Char]) List[Token] =
   let tok = classifyIdent (strFromChars idChars) in
   listAppend [tok] (lexChars leftover)
 
+-- Phase 7.3b-fixes bug 1: `[TNum (...)]` is now a single-element list with
+-- the ctor already applied, so the `let tok = ... in` helper has been
+-- inlined into the final listAppend call.
 fn lexNum(cs List[Char]) List[Token] =
   let digits = takeWhilePred charIsDigit cs in
   let leftover = dropWhilePred charIsDigit cs in
-  let tok = TNum (parseIntStr (strFromChars digits)) in
-  listAppend [tok] (lexChars leftover)
+  listAppend [TNum (parseIntStr (strFromChars digits))] (lexChars leftover)
 
 fn lexChars(cs List[Char]) List[Token] =
   | c :: rest ->

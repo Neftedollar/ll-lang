@@ -46,11 +46,13 @@ fn lexId(cs List[Char]) List[Token] =
   listAppend [tok] (lexChars leftover)
 
 -- Lex a multi-digit integer (already verified the head char is a digit).
+-- Phase 7.3b-fixes bug 1: `[TInt (...)]` is now a single-element list with
+-- the ctor already applied, so the `let tok = ... in` helper has been
+-- inlined into the final listAppend call.
 fn lexNum(cs List[Char]) List[Token] =
   let digits = takeWhilePred charIsDigit cs in
   let leftover = dropWhilePred charIsDigit cs in
-  let tok = TInt (strFromChars digits) in
-  listAppend [tok] (lexChars leftover)
+  listAppend [TInt (strFromChars digits)] (lexChars leftover)
 
 -- Lex a single-char operator / punctuation token via inline match.
 fn lexOp(c Char)(rest List[Char]) List[Token] =
