@@ -15,8 +15,8 @@ module Examples.RealParser
 -- Things this exercises that 09-lexer-real did not:
 --   1. Mutually recursive parseExpr / parseExprTail / parseTerm / parseTermTail
 --      / parseFactor — a real 5-way mutual recursion group.
---   2. Constructor-pattern destructuring via `let MkParsed e rest = ...`
---      (first real use of let-pat with a user ADT ctor).
+--   2. Tuple-literal return values + destructuring via `let (e, rest) = ...`
+--      (the natural shape now that surface tuple literals exist).
 --   3. Maybe unwrap for `strToInt` via match-as-expression inside a `let`.
 --   4. Recursive AST walks (show) alongside recursive input walks (parse).
 
@@ -39,26 +39,16 @@ type Expr =
   | EMul Expr Expr
   | EDiv Expr Expr
 
--- ll-lang has no surface tuple literal, so we carry (Expr, List[Token])
--- through the parser as a dedicated ADT.
-type Parsed =
-  | MkParsed Expr List[Token]
-
 -- ---------- Mini-lexer ---------------------------------------------------
 
--- Collect a run of digit chars. Returns (digits, leftover) packaged as a
--- Parsed-like pair via a dedicated ADT so we don't need tuples here either.
-type DigitRun =
-  | MkDigitRun List[Char] List[Char]
-
-fn takeDigits(cs List[Char]) DigitRun =
+-- Collect a run of digit chars. Returns (digits, leftover) as a tuple.
+fn takeDigits(cs List[Char]) =
   | c :: rest ->
     if charIsDigit c then
-      let inner = takeDigits rest in
-      match inner with
-        | MkDigitRun ds leftover -> MkDigitRun (c :: ds) leftover
-    else MkDigitRun [] cs
-  | _ -> MkDigitRun [] []
+      let (ds, leftover) = takeDigits rest in
+      (c :: ds, leftover)
+    else ([], cs)
+  | _ -> ([], [])
 
 -- Unwrap `strToInt` Maybe into a raw Int; a malformed digit run falls back
 -- to 0. The lexer only calls this on strings that are already all-digits,
@@ -76,11 +66,9 @@ fn lexChars(cs List[Char]) List[Token] =
   | c :: rest ->
     if charIsSpace c then lexChars rest
     else if charIsDigit c then
-      let run = takeDigits cs in
-      match run with
-        | MkDigitRun ds leftover ->
-          let n = parseIntStr (strFromChars ds) in
-          consTok (TNum n) (lexChars leftover)
+      let (ds, leftover) = takeDigits cs in
+      let n = parseIntStr (strFromChars ds) in
+      consTok (TNum n) (lexChars leftover)
     else if c == '+' then consTok TPlus (lexChars rest)
     else if c == '-' then consTok TMinus (lexChars rest)
     else if c == '*' then consTok TStar (lexChars rest)
@@ -94,53 +82,45 @@ fn tokenize(src Str) List[Token] = lexChars (strChars src)
 
 -- ---------- Recursive-descent parser ------------------------------------
 
--- Five mutually recursive fns. Each has an explicit return type so the
--- inferencer does not need to guess around the `let rec ... and ...` group.
--- Left-associative binary operators are expressed via tail helpers that
--- take the already-parsed left-hand side as their first curried argument.
+-- Five mutually recursive fns. Each returns a (Expr, List[Token]) tuple
+-- — the parsed sub-expression and the remaining input. Left-associative
+-- binary operators are expressed via tail helpers that take the
+-- already-parsed left-hand side as their first curried argument.
 
-fn parseExpr(toks List[Token]) Parsed =
-  let lhs = parseTerm toks in
-  match lhs with
-    | MkParsed e rest -> parseExprTail e rest
+fn parseExpr(toks List[Token]) =
+  let (e, rest) = parseTerm toks in
+  parseExprTail e rest
 
-fn parseExprTail(lhs Expr)(toks List[Token]) Parsed =
+fn parseExprTail(lhs Expr)(toks List[Token]) =
   | TPlus :: rest ->
-    let rhs = parseTerm rest in
-    match rhs with
-      | MkParsed r rest2 -> parseExprTail (EAdd lhs r) rest2
+    let (r, rest2) = parseTerm rest in
+    parseExprTail (EAdd lhs r) rest2
   | TMinus :: rest ->
-    let rhs = parseTerm rest in
-    match rhs with
-      | MkParsed r rest2 -> parseExprTail (ESub lhs r) rest2
-  | _ -> MkParsed lhs toks
+    let (r, rest2) = parseTerm rest in
+    parseExprTail (ESub lhs r) rest2
+  | _ -> (lhs, toks)
 
-fn parseTerm(toks List[Token]) Parsed =
-  let lhs = parseFactor toks in
-  match lhs with
-    | MkParsed e rest -> parseTermTail e rest
+fn parseTerm(toks List[Token]) =
+  let (e, rest) = parseFactor toks in
+  parseTermTail e rest
 
-fn parseTermTail(lhs Expr)(toks List[Token]) Parsed =
+fn parseTermTail(lhs Expr)(toks List[Token]) =
   | TStar :: rest ->
-    let rhs = parseFactor rest in
-    match rhs with
-      | MkParsed r rest2 -> parseTermTail (EMul lhs r) rest2
+    let (r, rest2) = parseFactor rest in
+    parseTermTail (EMul lhs r) rest2
   | TSlash :: rest ->
-    let rhs = parseFactor rest in
-    match rhs with
-      | MkParsed r rest2 -> parseTermTail (EDiv lhs r) rest2
-  | _ -> MkParsed lhs toks
+    let (r, rest2) = parseFactor rest in
+    parseTermTail (EDiv lhs r) rest2
+  | _ -> (lhs, toks)
 
-fn parseFactor(toks List[Token]) Parsed =
-  | TNum n :: rest -> MkParsed (ENum n) rest
+fn parseFactor(toks List[Token]) =
+  | TNum n :: rest -> (ENum n, rest)
   | TLParen :: rest ->
-    let inner = parseExpr rest in
-    match inner with
-      | MkParsed e rest2 ->
-        match rest2 with
-          | TRParen :: rest3 -> MkParsed e rest3
-          | _ -> MkParsed e rest2
-  | _ -> MkParsed (ENum 0) toks
+    let (e, rest2) = parseExpr rest in
+    match rest2 with
+      | TRParen :: rest3 -> (e, rest3)
+      | _ -> (e, rest2)
+  | _ -> (ENum 0, toks)
 
 -- ---------- Pretty printer ----------------------------------------------
 
@@ -159,6 +139,5 @@ fn show(e Expr) Str =
 
 fn main() =
   let toks = tokenize "1 + 2 * 3" in
-  let parsed = parseExpr toks in
-  match parsed with
-    | MkParsed e _ -> printfn (show e)
+  let (e, _) = parseExpr toks in
+  printfn (show e)
