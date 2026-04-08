@@ -33,7 +33,7 @@ Working end-to-end compiler with a **395-test** suite, written in F# / .NET 10. 
 | **Full module parser** | **all of the above, in one program** | ✅ | [`15-moduleparser-real.lll`](spec/examples/valid/15-moduleparser-real.lll) |
 | Elaborator — name res + exhaustiveness | collect + check passes, E002 unbound-var, E003 non-exhaustive match | ✅ | [`16-elaborator-real.lll`](spec/examples/valid/16-elaborator-real.lll) |
 | **Parser + Elaborator pipeline** | **lex → parse → elaborate in one ll-lang program** | ✅ | [`17-pipeline-real.lll`](spec/examples/valid/17-pipeline-real.lll) |
-| HM inference (unify) | `TypeExpr` AST + `Subst` + `unify` mirroring `HMInfer.unify` | ✅ | [`18-hminfer-real.lll`](spec/examples/valid/18-hminfer-real.lll) |
+| HM inference (unify + inferExpr) | `TypeExpr` AST + `Subst` + `unify` + `Env` + `freshVar` + toy `inferExpr` over literal / var / EAdd / EApp | ✅ | [`18-hminfer-real.lll`](spec/examples/valid/18-hminfer-real.lll) |
 
 The module parser (979 lines of ll-lang) consumes `module M \n import ... \n tag ... \n type ... \n let ... \n fn ... = ...` and pretty-prints a `List[Decl]` AST — **real proof that ll-lang can express its own front-end**. The elaborator slice (512 lines) walks a hardcoded `List[Decl]` AST with a two-pass `collectDecls` → `checkDecls` pipeline plus an exhaustiveness pass, and emits `E002 UnboundVar <name>` for every free variable and `E003 NonExhaustiveMatch <type> missing <ctor>` for every clause-sugar match that doesn't cover its sum type — mirroring the F# host elaborator's name-resolution + constructor-coverage semantics. The pipeline slice (~1500 lines) stitches the two halves into one program: a source string goes in, `tokenize` + `parseModule` + `elaborate` runs back-to-back, and the resulting error list is printed. **Showcase milestone** — first time two compiler layers authored in ll-lang share a single AST and run back-to-back on a real source string.
 
@@ -50,8 +50,8 @@ Still to come: elaborator, HM-inference, and codegen rewrites in ll-lang, then b
 | **7.1 – 7.5** | **ll-lang front-end in ll-lang** (lexer + 4 parser slices + full module parser, 979 lines) | ✅ |
 | **7.6a + 7.6b** | **Elaborator slices A + B in ll-lang** (name resolution + E002 unbound-var; constructor-coverage exhaustiveness + E003 non-exhaustive match, 512 lines) | ✅ |
 | **7.6 integration** | **Parser + elaborator pipeline in one ll-lang program** (`17-pipeline-real.lll`, ~1500 lines) | ✅ |
-| **7.7a** | **HM inference slice A in ll-lang** (`TypeExpr`, `Subst`, `unify`, `18-hminfer-real.lll`, 287 lines) | ✅ |
-| 7.6+ / 7.7+ | E001 type checking, `inferExpr`, multi-line bodies, `trait`/`impl`, codegen-in-ll-lang | 🚧 |
+| **7.7a + 7.7b** | **HM inference slices A + B in ll-lang** (`TypeExpr`, `Subst`, `unify`; `Env`, `freshVar`, `composeSubst`, `Expr`, `inferExpr` over literal / var / EAdd / EApp; `18-hminfer-real.lll`, 490 lines) | ✅ |
+| 7.6+ / 7.7+ | E001 type checking, let-generalization, occurs check, multi-line bodies, `trait`/`impl`, codegen-in-ll-lang | 🚧 |
 | 7.8 | Bootstrap fixpoint | ⏳ |
 
 ## Getting Started

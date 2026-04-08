@@ -1558,3 +1558,127 @@ Next tick: **Phase 7.7b** — extend `18-hminfer-real.lll` with `Env`,
 fresh-var counter, occurs check, `composeSubst`, the documented
 `Expr` AST, and a toy `inferExpr` covering literal / var / EAdd /
 EApp arms.
+
+### 2026-04 — Phase 7.7b: HM inference slice B — Env + fresh vars + inferExpr (DONE)
+
+Second tick of **Phase 7.7**. Extends
+[`18-hminfer-real.lll`](../../spec/examples/valid/18-hminfer-real.lll)
+in place from 287 to 490 lines (+203). Phase 7.7a shipped the `unify`
+spine; this slice adds the algorithm-W loop shape so the file can
+infer literal / variable / addition / application expression types
+end-to-end.
+
+**New shape (on top of Phase 7.7a)**:
+
+```lll
+type Env = MkEnv List[Str] List[TypeExpr]    -- parallel-list like Subst
+
+type Expr =
+  | EInt Int
+  | EStr Str
+  | EBool Bool
+  | EVar Str
+  | EAdd Expr Expr
+  | EApp Expr Expr
+
+type InferResult = MkInferResult TypeExpr Subst Int
+
+fn freshVar(n Int) = (TyVar (strConcat "$" (intToStr n)), n + 1)
+
+fn composeSubst(s1 Subst)(s2 Subst) Subst    -- dumb list-concat compose
+
+fn inferExpr(env Env)(n Int)(e Expr) InferResult
+```
+
+`inferExpr`'s arms mirror (a tiny slice of) the F# host's
+`HMInfer.inferExpr` in `src/LLLangCompiler/HMInfer.fs` line 172 area:
+
+* `EInt _`  / `EStr _` / `EBool _` — literal types, empty subst, n unchanged
+* `EVar name` — env lookup; miss returns `TyName "ERROR"` sentinel
+  (this slice skips real `E002 UnboundVar` reporting — sentinel is
+  enough for the deterministic test output)
+* `EAdd l r` — infer both children, unify both with `TyName "Int"`,
+  return `TyName "Int"` under the composed subst (ERROR on either
+  unify failure)
+* `EApp f a` — infer both children, allocate a fresh `β`, unify
+  `applyType s_a τf` against `TyFn(τa, β)`, return `applyType s β`
+  under the composed subst (ERROR on unify failure)
+
+Each arm is split into its own helper (`inferVar` / `inferAdd` /
+`inferAddR` / `inferAddUnify` / `inferAddUnify2` / `inferApp` /
+`inferAppArg` / `inferAppFresh`) to keep `match` nesting one level
+deep — same trick as Phase 7.7a's `unify` spine, for the same
+indentation-ambiguity reason.
+
+The `main` driver appends five hardcoded `inferExpr` cases to the
+existing five `unify` cases:
+
+```
+t6 infer 42 : Int
+t7 infer (1 + 2) : Int
+t8 infer x in env : Int
+t9 infer (double 5) in env : Int
+t10 infer (double "x") in env : ERROR
+```
+
+t8 / t9 / t10 use a pre-populated env (`{x : Int}` and
+`{double : Int -> Int}`). t10 intentionally exercises the ERROR
+path — unifying `TyFn Int Int` against `TyFn Str β` fails at the
+argument position.
+
+**Implementation notes**:
+
+* `composeSubst` is deliberately dumb — just `listAppend` the two
+  parallel-list substs head-to-tail. No "apply s1 to s2's vals"
+  step, which is safe only for monomorphic types (no chained
+  bindings). Proper compose lands once polymorphism / let-
+  generalization does in 7.7c.
+* `unifyResults` changed: now threads the result-side subst back
+  into the head subst via `composeSubst`, so bindings emitted while
+  unifying `TyFn` result types survive. Phase 7.7a discarded them;
+  they only mattered once `inferExpr` asked for `applyType s β` on
+  the fresh var after an `EApp`. The five Phase 7.7a `unify` tests
+  are unaffected because their result substs are all empty.
+* `freshVar` is purely functional: takes `Int`, returns `(TyVar "$n",
+  n + 1)` via a literal tuple. The F# host uses a mutable ref cell;
+  threading the counter explicitly is verbose but matches the rest
+  of this file's pure style.
+* `InferResult` is a three-field ADT (`MkInferResult TypeExpr Subst
+  Int`) so `inferExpr` can return type + subst + new fresh counter
+  without tuple-in-tuple gymnastics that currently have codegen
+  friction.
+* Env is `MkEnv List[Str] List[TypeExpr]` — identical shape to
+  `Subst`, and `envLookup` / `envLookupLists` / `envExtend` read
+  identically to `lookupSubst` / `lookupSubstLists`. A future slice
+  could factor them into a shared helper but for now duplication
+  is cheaper than the abstraction.
+
+**Deliberately still out of scope** (carved out for Phase 7.7c):
+
+1. **Let-generalization, polymorphism, type schemes** — no
+   `generalize` / `instantiate`, no type schemes. The stdlib's
+   `List[A]` / `Maybe[A]` / `Result[A, E]` rely on all three.
+2. **Occurs check (`e008`)** — `unify` still happily binds
+   `a := TyFn(a, b)`. The five new inference tests don't trigger
+   it; 7.7c adds the check.
+3. **`ELam` / `ELet` / `EIf` / `EMatch` inference** — those need
+   polymorphism + pattern-type checking, both blocked on 7.7c.
+4. **Real error reporting** — `inferExpr` returns `TyName "ERROR"`
+   sentinel instead of `Result[TypeExpr, LLError]`. The F# host's
+   `E001..E008` machinery doesn't land in the ll-lang mirror until
+   `Result`-threading is on the table.
+5. **Applying s1 to s2 in compose** — the current compose is pure
+   list-concat. Fine for mono types; broken for chains.
+6. **Wiring into `17-pipeline-real.lll`** — the HM inference slice
+   stays standalone for now. Phase 7.8+ integrates it alongside the
+   parser + elaborator pipeline.
+
+Tests: 395 (unchanged vs 7.7a). The runtime E2E fact in
+`HMInferRealTests.fs` updated to assert all ten lines appear in
+stdout; the inference round-trip fact still passes unchanged (the
+new types and helpers all infer cleanly through the host compiler).
+
+Next tick: **Phase 7.7c** — add let-generalization, `Result`-based
+error reporting, and the occurs check (`e008`). After 7.7c the HM
+spine is feature-complete enough to host `ELet` / `ELam` in later
+slices.
