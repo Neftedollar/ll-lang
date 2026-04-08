@@ -2,9 +2,92 @@
 
 [![Build & Test](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml/badge.svg)](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml)
 
-> A statically typed functional language designed for LLM code generation. Token-efficient syntax — compiled = works.
+> **A statically-typed functional language designed for LLM code generation.** Token-efficient syntax, compiled = works, and errors formatted for LLMs to read directly.
 
-## The Problem
+```
+module Hello
+
+fn main() = printfn "Hello, ll-lang!"
+```
+
+```
+$ lllc run hello.lll
+Hello, ll-lang!
+```
+
+Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting Started](#getting-started).
+
+## Status
+
+Working end-to-end compiler with a **386-test** suite, written in F# / .NET 10. All 7 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins).
+
+**Bootstrap progress (Phase 7 — ll-lang hosting itself):**
+
+| Artifact | Shape | Status | Source |
+|---|---|---|---|
+| Lexer | multi-char idents, keywords, ops | ✅ | [`09-lexer-real.lll`](spec/examples/valid/09-lexer-real.lll) |
+| Arithmetic parser | `+ - * /`, precedence, parens | ✅ | [`11-parser-real.lll`](spec/examples/valid/11-parser-real.lll) |
+| Type-decl parser | sum types, type params | ✅ | [`12-typeparser-real.lll`](spec/examples/valid/12-typeparser-real.lll) |
+| Fn-decl parser | curried params, return types | ✅ | [`13-fnparser-real.lll`](spec/examples/valid/13-fnparser-real.lll) |
+| Expression parser | let / if / match / lambda / app | ✅ | [`14-exprparser-real.lll`](spec/examples/valid/14-exprparser-real.lll) |
+| **Full module parser** | **all of the above, in one program** | ✅ | [`15-moduleparser-real.lll`](spec/examples/valid/15-moduleparser-real.lll) |
+
+The module parser (979 lines of ll-lang) consumes `module M \n import ... \n tag ... \n type ... \n let ... \n fn ... = ...` and pretty-prints a `List[Decl]` AST — **real proof that ll-lang can express its own front-end**.
+
+Still to come: elaborator, HM-inference, and codegen rewrites in ll-lang, then bootstrap fixpoint (compiler₀ compiles compiler.lll → compiler₁; compiler₁ compiles compiler.lll → compiler₂ == compiler₁).
+
+| Phase | Description | Status |
+|---|---|---|
+| 1 | Spec (grammar + corpus) | ✅ |
+| 2 | Lexer + Parser | ✅ |
+| 3 | Elaborator (exhaustiveness, tag/unit checks) | ✅ |
+| 4 | Hindley-Milner + TypedAST + trait dispatch | ✅ |
+| 5 | F# codegen + `lllc` CLI | ✅ |
+| 6 | Stdlib (~50 builtins) | ✅ |
+| **7.1 – 7.5** | **ll-lang front-end in ll-lang** (lexer + 4 parser slices + full module parser, 979 lines) | ✅ |
+| 7.6+ | Multi-line bodies, `trait`/`impl` parsing, elaborator-in-ll-lang, codegen-in-ll-lang | 🚧 |
+| 7.8 | Bootstrap fixpoint | ⏳ |
+
+## Getting Started
+
+Requires [.NET 10](https://dotnet.microsoft.com/download).
+
+```bash
+git clone https://github.com/Neftedollar/ll-lang.git
+cd ll-lang
+dotnet build
+dotnet test    # 386 tests
+```
+
+### Run your first program
+
+```bash
+cat > hello.lll <<'EOF'
+module Hello
+
+fn main() = printfn "Hello, ll-lang!"
+EOF
+
+dotnet run --project src/LLLangTool -- run hello.lll
+# → Hello, ll-lang!
+```
+
+### See ll-lang parse itself
+
+```bash
+dotnet run --project src/LLLangTool -- run spec/examples/valid/15-moduleparser-real.lll
+```
+
+This runs a 979-line ll-lang program that tokenizes, parses, and pretty-prints a whole ll-lang module — written entirely in ll-lang itself.
+
+### CLI
+
+```
+lllc build <file.lll>   # elaborate + infer + emit <file>.fs
+lllc run <file.lll>     # build + execute via dotnet fsi
+```
+
+## Problem
 
 LLMs writing code in mainstream languages face two compounding problems: verbose syntax wastes tokens on ceremony rather than logic, and type errors only surface at runtime — after execution, often after damage is done. An LLM generating Python or TypeScript gets no signal that a tagged `UserId` string was passed where an `Email` is expected until the server blows up.
 
@@ -119,89 +202,19 @@ All compiler errors are short, structured, and machine-readable — designed so 
 | `E004` | Unit mismatch | `E004 20:9 UnitMismatch Float[m] Float[s]` |
 | `E005` | Tag violation | `E005 7:14 TagViolation Str[Email] Str[UserId]` |
 
-Format: `EXXX line:col ErrorKind details`
-
-No stack traces. No paragraphs. One line per error, parseable by regex.
+Format: `EXXX line:col ErrorKind details`. No stack traces, no paragraphs, one line per error, parseable by regex.
 
 ## Compiler Pipeline
 
 ```
 Source (.lll)
-    │
-    ▼
-  Lexer          — tokenizes with synthetic INDENT/DEDENT
-    │
-    ▼
-  Parser         — produces AST
-    │
-    ▼
-  Elaborator     — resolves names, checks tags, validates exhaustiveness
-    │
-    ▼
-  HMInfer        — Algorithm W, let-generalization, trait dispatch (E006),
-                   occurs check (E008), unit algebra preservation
-    │
-    ▼
-  Codegen        — emits idiomatic F# source
-    │
-    ▼
-  dotnet fsi     — runs the result (via `lllc run`)
-```
-
-## Status
-
-**Phases 1–6 complete + Phase 7.1/7.2/7.3a/7.3b/7.3c/7.4/7.5a/7.5b/7.5c/7.5d/7.5e (real lexer, real recursive-descent arithmetic parser, real type-declaration parser, real fn-declaration parser, real full-expression parser, real full-module parser, AND — as of Phase 7.5a/7.5b/7.5c/7.5d/7.5e — module-level `let` decls, `match`-with-explicit-scrutinee, `let-in` chains, `\x. body` lambdas, string literals, `[]` / `h :: t` cons patterns in match arms, **tagged literals** in expression position (`"x"[UserId]`), **parametric ctor args** in type decls (`Maybe[Int]`), and **`tag` / `import` / `export` module-level decls** inside the same file — eleven ll-lang-in-ll-lang self-hosting slices, culminating in a single file that consumes a whole `module M\n import ...\n tag ...\n type ...\n let ...\n export fn ...\n fn ... = ...` source and emits a `List[Decl]` AST). 386 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, `let (a, b) = ...` destructuring, multi-line sum types, mutually recursive top-level functions, a real arithmetic parser (`(1 + (2 * 3))` precedence verified), a real type-declaration parser (four `type` decls round-trip through tokenize → parse → pretty-print), a real fn-declaration parser (four `fn` decls with curried typed params and optional return types round-trip through tokenize → parse → pretty-print), a real full-expression parser covering `let-in` / `if-then-else` / `match` / lambdas / curried application on top of the arithmetic subset (five expression kinds round-trip to fully-parenthesised pretty form), and a real full-module parser that stitches lexer + type-decl + fn-decl + expression parsers into one program and pretty-prints a whole module (module header + two type decls + two module-level `let` decls + seven `fn` decls with int-literal, arithmetic, match-with-scrutinee, `if-then-else`, let-in chain, lambda-application, string-literal, and cons-pattern bodies) — see `spec/examples/valid/09-lexer-real.lll`, `11-parser-real.lll`, `12-typeparser-real.lll`, `13-fnparser-real.lll`, `14-exprparser-real.lll`, and `15-moduleparser-real.lll`.**
-
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 1 | Spec — grammar, type rules, example corpus | ✅ Done |
-| 2 | Lexer + Parser | ✅ Done |
-| 3 | Elaborator — name resolution, tag/unit checks, exhaustiveness | ✅ Done |
-| 4 | Hindley-Milner inference + TypedAST + trait dispatch | ✅ Done |
-| 5 | F# source codegen + `lllc` CLI (`build` / `run`) | ✅ Done |
-| 6 | Standard library — List, Maybe, Result, Str, Math, IO builtins | ✅ Done |
-| 7.1 | Real lexer in ll-lang — `09-lexer-real.lll` | ✅ Done |
-| 7.2 | Recursive-descent expression parser in ll-lang — `11-parser-real.lll` | ✅ Done |
-| 7.3a | Type-declaration parser in ll-lang — `12-typeparser-real.lll` | ✅ Done |
-| 7.3b | Fn-declaration parser in ll-lang — `13-fnparser-real.lll` | ✅ Done |
-| 7.3c | Full expression parser in ll-lang — `14-exprparser-real.lll` | ✅ Done |
-| 7.4 | Full ll-lang module parser in ll-lang — `15-moduleparser-real.lll` | ✅ Done |
-| 7.5a | Module-level `let` decls + `match` in fn bodies in `15-moduleparser-real.lll` | ✅ Done |
-| 7.5b | `let-in` chains + `\x. body` lambdas in fn bodies in `15-moduleparser-real.lll` | ✅ Done |
-| 7.5c | String literals + `[]` / `h :: t` cons patterns in match arms in `15-moduleparser-real.lll` | ✅ Done |
-| 7.5d | Tagged literals (`"x"[UserId]`) + parametric ctor args (`Maybe[Int]`) in `15-moduleparser-real.lll` | ✅ Done |
-| 7.5e | `tag Name` + `import Foo.Bar` + `export` modifier decls in `15-moduleparser-real.lll` (closes Phase 7.5, 9/9) | ✅ Done |
-| 7.6+ | Remaining extensions (multi-line fn bodies, list / tuple patterns, multi-line type decls, `trait` / `impl` module-level decls), then elaborator and codegen in ll-lang | Planned |
-
-## Getting Started
-
-Requires [.NET 10](https://dotnet.microsoft.com/download).
-
-```bash
-git clone https://github.com/Neftedollar/ll-lang.git
-cd ll-lang
-dotnet build
-dotnet test    # 386 tests
-```
-
-### Run your first program
-
-```bash
-cat > hello.lll <<'EOF'
-module Hello
-
-fn main() = printfn "Hello, ll-lang!"
-EOF
-
-dotnet run --project src/LLLangTool -- run hello.lll
-# → Hello, ll-lang!
-```
-
-### CLI
-
-```
-lllc build <file.lll>   # elaborate + infer + emit <file>.fs
-lllc run <file.lll>     # build + execute via dotnet fsi
+    ▼  Lexer       — tokenizes with synthetic INDENT/DEDENT
+    ▼  Parser      — produces AST
+    ▼  Elaborator  — name resolution, tag checks, exhaustiveness
+    ▼  HMInfer     — Algorithm W, let-generalization, trait dispatch (E006),
+                     occurs check (E008), unit algebra preservation
+    ▼  Codegen     — emits idiomatic F# source
+    ▼  dotnet fsi  — runs the result (via `lllc run`)
 ```
 
 ## Project Structure
@@ -229,8 +242,10 @@ tests/LLLangTests/         — xUnit test suite (386 tests)
 
 ## Roadmap
 
-- **Phase 7** — Self-hosting: rewrite the ll-lang compiler in ll-lang itself. All five front-end slices now live in ll-lang itself (lexer `09-lexer-real.lll`, arithmetic parser `11-parser-real.lll`, type-decl parser `12-typeparser-real.lll`, fn-decl parser `13-fnparser-real.lll`, full-expression parser `14-exprparser-real.lll`), and Phase 7.4 ties them into a single **full module parser** (`15-moduleparser-real.lll`) that consumes a whole `module M\n type ...\n fn ... = ...` source end-to-end. **Phase 7.5a** extended 15 with module-level `let` decls and `match`-with-explicit-scrutinee inside `fn` bodies; **Phase 7.5b** added `let-in` chains and `\x. body` lambdas; **Phase 7.5c** added string literals in fn bodies and `[]` / `h :: t` cons patterns in match arms; **Phase 7.5d** added tagged literals (`"x"[UserId]`) in expression position and bracket-form parametric ctor args (`Maybe[Int]`) in type decls; **Phase 7.5e** closed out Phase 7.5 (9/9) with three module-level decl forms — bare `tag Name`, dotted `import Foo.Bar`, and the `export` modifier prefix on any existing decl. **Phase 7.6** is next — the heavier remaining items (multi-line fn bodies, multi-line type decls, list / tuple patterns, `trait` / `impl` module-level decls) before the elaborator and codegen get their ll-lang rewrites.
-- **Multi-target** — TypeScript / Python / JVM / LLVM backends after self-hosting
+- **Phase 7.6** — heavier front-end slices in ll-lang: multi-line fn bodies, multi-line type decls, list / tuple patterns, `trait` / `impl` module-level decls.
+- **Phase 7.7** — elaborator and H-M inference rewritten in ll-lang.
+- **Phase 7.8** — codegen in ll-lang, then bootstrap fixpoint (compiler₁ == compiler₂).
+- **Multi-target backends** — TypeScript / Python / JVM / LLVM after self-hosting lands.
 
 ## Design Philosophy
 
