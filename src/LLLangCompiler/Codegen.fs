@@ -233,6 +233,7 @@ let strConcat (a: string) (b: string) = a + b
 let strTrim (s: string) = s.Trim()
 let strContains (needle: string) (haystack: string) = haystack.Contains(needle: string)
 let print (s: string) = System.Console.Write(s)
+let printfn (s: string) = System.Console.WriteLine(s)
 let strChars (s: string) = s |> Seq.toList
 let charToInt (c: char) = int64 (int c)
 let intToChar (n: int64) = char (int n)
