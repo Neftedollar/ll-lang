@@ -8,6 +8,7 @@ open LLLang.AST
 type private Ctx = {
     Tokens: Tok array
     mutable Pos: int
+    Positions: PosMap
 }
 
 let private cur (c: Ctx) = c.Tokens[c.Pos]
@@ -15,6 +16,16 @@ let private curTok (c: Ctx) = c.Tokens[c.Pos].Token
 
 let private advance (c: Ctx) =
     if c.Pos < c.Tokens.Length - 1 then c.Pos <- c.Pos + 1
+
+/// Record the source position of an AST node using the position of the
+/// token at the given index. Returns the node for fluent chaining.
+/// The PosMap is keyed by reference-equality so each allocated AST node
+/// gets its own entry; duplicate sub-expressions with the same structure
+/// stay distinct.
+let inline private recordAt (c: Ctx) (tokIdx: int) (node: 'a) : 'a =
+    let t = c.Tokens[tokIdx]
+    PosMap.add c.Positions (box node) { Line = t.Line; Col = t.Col }
+    node
 
 let private skip (c: Ctx) (t: Token) : Result<unit, string> =
     if curTok c = t then advance c; Ok ()
@@ -29,6 +40,7 @@ let private skipNewlines (c: Ctx) =
 
 let rec private parseAtom (c: Ctx) : Result<Expr, string> =
     skipNewlines c
+    let startIdx = c.Pos
     match curTok c with
     | IntLit n -> advance c; Ok (ELit (LInt n))
     | FloatLit f -> advance c; Ok (ELit (LFloat f))
@@ -36,8 +48,14 @@ let rec private parseAtom (c: Ctx) : Result<Expr, string> =
     | CharLit ch -> advance c; Ok (ELit (LChar ch))
     | KwTrue -> advance c; Ok (ELit (LBool true))
     | KwFalse -> advance c; Ok (ELit (LBool false))
-    | Ident name -> advance c; Ok (EVar name)
-    | TypeId name -> advance c; Ok (ECon name)
+    | Ident name ->
+        advance c
+        // Position-tag EVar: E002 on unbound var looks this up.
+        Ok (recordAt c startIdx (EVar name))
+    | TypeId name ->
+        advance c
+        // Position-tag ECon: E002 on unbound constructor looks this up.
+        Ok (recordAt c startIdx (ECon name))
     | LParen ->
         advance c
         skipNewlines c
@@ -94,8 +112,12 @@ and private parseApp (c: Ctx) : Result<Expr, string> =
             match curTok c with
             | IntLit _ | FloatLit _ | StrLit _ | CharLit _ | KwTrue | KwFalse
             | Ident _ | TypeId _ | LParen | LBrack ->
+                let argIdx = c.Pos
                 match parseTagged c with
-                | Ok arg -> result <- EApp(result, arg)
+                | Ok arg ->
+                    // Position of EApp = position of the argument token,
+                    // which is where `E001 TypeMismatch` wants to point.
+                    result <- recordAt c argIdx (EApp(result, arg))
                 | Error _ -> cont <- false
             | _ -> cont <- false
         Ok result
@@ -109,11 +131,17 @@ and private parseMul (c: Ctx) : Result<Expr, string> =
         while cont do
             match curTok c with
             | Star | Slash as op ->
+                let opIdx = c.Pos
                 advance c
                 match parseApp c with
                 | Ok right ->
                     let opName = if op = Star then "*" else "/"
-                    result <- EApp(EApp(EVar opName, result), right)
+                    // Tag both the operator EVar and the outer EApp at the
+                    // operator token's position. This makes E001 / E002 on
+                    // binary operators report the operator column.
+                    let opVar = recordAt c opIdx (EVar opName)
+                    let inner = recordAt c opIdx (EApp(opVar, result))
+                    result <- recordAt c opIdx (EApp(inner, right))
                 | Error _ -> cont <- false
             | _ -> cont <- false
         Ok result
@@ -127,11 +155,14 @@ and private parseAdd (c: Ctx) : Result<Expr, string> =
         while cont do
             match curTok c with
             | Plus | Minus as op ->
+                let opIdx = c.Pos
                 advance c
                 match parseMul c with
                 | Ok right ->
                     let opName = if op = Plus then "+" else "-"
-                    result <- EApp(EApp(EVar opName, result), right)
+                    let opVar = recordAt c opIdx (EVar opName)
+                    let inner = recordAt c opIdx (EApp(opVar, result))
+                    result <- recordAt c opIdx (EApp(inner, right))
                 | Error _ -> cont <- false
             | _ -> cont <- false
         Ok result
@@ -160,6 +191,7 @@ and private parseCmp (c: Ctx) : Result<Expr, string> =
         while cont do
             match curTok c with
             | Lt | Gt | Le | Ge | EqEq | Neq as op ->
+                let opIdx = c.Pos
                 advance c
                 match parseCons c with
                 | Ok right ->
@@ -167,7 +199,9 @@ and private parseCmp (c: Ctx) : Result<Expr, string> =
                         match op with
                         | Lt -> "<" | Gt -> ">" | Le -> "<=" | Ge -> ">="
                         | EqEq -> "==" | Neq -> "!=" | _ -> "?"
-                    result <- EApp(EApp(EVar opName, result), right)
+                    let opVar = recordAt c opIdx (EVar opName)
+                    let inner = recordAt c opIdx (EApp(opVar, result))
+                    result <- recordAt c opIdx (EApp(inner, right))
                 | Error _ -> cont <- false
             | _ -> cont <- false
         Ok result
@@ -269,6 +303,7 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
     | KwMatch ->
         // match <scrut> with | pat -> body | pat -> body ...
         // Arms can appear inline OR on subsequent indented lines.
+        let matchIdx = c.Pos
         advance c
         match parseExprInner c with
         | Error e -> Error e
@@ -298,7 +333,9 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
                                 branches.Add((pat, body))
                                 skipNewlines c
                 if hadIndent then skip c Dedent |> ignore
-                if branches.Count > 0 then Ok (EMatchOf(scrut, List.ofSeq branches))
+                // Tag at the `match` keyword so E003 non-exhaustive points
+                // at the match expression rather than 0:0.
+                if branches.Count > 0 then Ok (recordAt c matchIdx (EMatchOf(scrut, List.ofSeq branches)))
                 else Error "Expected match branches after 'with'"
     | _ -> parsePipe c
 
@@ -426,8 +463,9 @@ and private parsePatAtom (c: Ctx) : Result<Pattern, string> =
     | t -> Error $"Expected pattern, got {t}"
 
 /// Parse an expression from a token list. Returns (expr, remaining tokens).
+/// Position information is discarded — use `parseExprWithPos` if you need it.
 let parseExpr (tokens: Tok list) : Result<Expr * Tok list, string> =
-    let ctx = { Tokens = Array.ofList tokens; Pos = 0 }
+    let ctx = { Tokens = Array.ofList tokens; Pos = 0; Positions = PosMap.create () }
     match parseExprInner ctx with
     | Error e -> Error e
     | Ok expr -> Ok (expr, ctx.Tokens |> Array.skip ctx.Pos |> Array.toList)
@@ -483,6 +521,7 @@ let private parseTypeExpr (c: Ctx) : Result<TypeExpr, string> =
 
 let private parseMatchBranches (c: Ctx) : Result<Expr, string> =
     // We're inside an indented block already (or at top-level of fn body with |)
+    let startIdx = c.Pos
     let branches = ResizeArray<Pattern * Expr>()
     let mutable cont = true
     while cont && curTok c = Bar do
@@ -498,7 +537,8 @@ let private parseMatchBranches (c: Ctx) : Result<Expr, string> =
                 | Ok expr ->
                     branches.Add((pat, expr))
                     skipNewlines c
-    if branches.Count > 0 then Ok (EMatch (List.ofSeq branches))
+    // Tag at the first `|` so E003 non-exhaustive points to the first arm.
+    if branches.Count > 0 then Ok (recordAt c startIdx (EMatch (List.ofSeq branches)))
     else Error "Expected match branches"
 
 // ---- Declaration parser ---------------------------------------------
@@ -724,6 +764,7 @@ let private parseTypeBody (c: Ctx) : Result<TypeBody, string> =
 
 let private parseDecl (c: Ctx) : Result<Decl, string> =
     skipNewlines c
+    let declIdx = c.Pos
     match curTok c with
     | KwFn ->
         advance c
@@ -734,7 +775,7 @@ let private parseDecl (c: Ctx) : Result<Decl, string> =
             | Error e -> Error e
             | Ok () ->
                 match parseFnBody c with
-                | Ok expr -> Ok (DFn(sig', expr))
+                | Ok expr -> Ok (recordAt c declIdx (DFn(sig', expr)))
                 | Error e -> Error e
     | KwLet ->
         advance c
@@ -756,8 +797,8 @@ let private parseDecl (c: Ctx) : Result<Decl, string> =
                 | Error e -> Error e
                 | Ok expr ->
                     match pat with
-                    | PVar name -> Ok (DLet(name, expr))
-                    | _ -> Ok (DLetPat(pat, expr))
+                    | PVar name -> Ok (recordAt c declIdx (DLet(name, expr)))
+                    | _ -> Ok (recordAt c declIdx (DLetPat(pat, expr)))
     | KwType ->
         advance c
         match curTok c with
@@ -869,16 +910,14 @@ let private parseDecl (c: Ctx) : Result<Decl, string> =
                                             | Error _ -> ()
                             skipNewlines c
                         skip c Dedent |> ignore
-                        Ok (DImpl(traitName, typeName, List.ofSeq impls))
+                        Ok (recordAt c declIdx (DImpl(traitName, typeName, List.ofSeq impls)))
             | t -> Error $"Expected type name in impl, got {t}"
         | t -> Error $"Expected trait name in impl, got {t}"
     | t -> Error $"Unexpected token {t} at {(cur c).Line}:{(cur c).Col}"
 
 // ---- Module parser --------------------------------------------------
 
-/// Parse a full ll-lang module from a token list.
-let parseModule (tokens: Tok list) : Result<LLModule, string> =
-    let c = { Tokens = Array.ofList tokens; Pos = 0 }
+let private parseModuleCtx (c: Ctx) : Result<LLModule, string> =
     skipNewlines c
     match skip c KwModule with
     | Error e -> Error e
@@ -924,3 +963,17 @@ let parseModule (tokens: Tok list) : Result<LLModule, string> =
             Imports = List.ofSeq imports
             Decls = List.ofSeq decls
         }
+
+/// Parse a module and return both the AST and the side-table of source
+/// positions for a subset of nodes (EVar, ECon, EApp, EMatch, EMatchOf,
+/// DFn, DLet, DLetPat, DImpl). Downstream passes use the PosMap to attach
+/// real line:col to error messages instead of the old 0:0 placeholder.
+let parseModuleWithPos (tokens: Tok list) : Result<LLModule * PosMap, string> =
+    let c = { Tokens = Array.ofList tokens; Pos = 0; Positions = PosMap.create () }
+    parseModuleCtx c |> Result.map (fun m -> m, c.Positions)
+
+/// Parse a full ll-lang module from a token list (position map discarded).
+/// Kept for callers that don't need positions; use `parseModuleWithPos`
+/// if you need source locations for error reporting.
+let parseModule (tokens: Tok list) : Result<LLModule, string> =
+    parseModuleWithPos tokens |> Result.map fst

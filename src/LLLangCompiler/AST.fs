@@ -3,6 +3,50 @@ module LLLang.AST
 type Ident = string
 type TypeIdent = string
 
+// ---- Source positions ------------------------------------------------
+//
+// The AST itself does NOT carry line / column fields on every node — that
+// would be a lot of churn for marginal value. Instead we keep a side-table
+// ("PosMap") keyed by boxed AST node reference and populated by the parser
+// at construction time. Consumers (elaborator, HMInfer) look up positions
+// when emitting errors, falling back to 0:0 if a node is absent (e.g.
+// synthesized nodes that have no source location).
+
+type Pos = { Line: int; Col: int }
+
+/// A reference-keyed dictionary from AST nodes to their source position.
+/// Uses physical (reference) equality because F# discriminated unions are
+/// reference types but compare structurally by default — structural keys
+/// would collapse duplicate sub-expressions into a single entry.
+type PosMap =
+    { Map: System.Collections.Generic.Dictionary<obj, Pos> }
+
+module PosMap =
+    let create () : PosMap =
+        // Use .NET's built-in reference-equality comparer so we don't have
+        // to hand-write one (and deal with nullable-object annotations).
+        let cmp = System.Collections.Generic.ReferenceEqualityComparer.Instance
+        { Map = System.Collections.Generic.Dictionary<obj, Pos>(cmp) }
+
+    let empty () : PosMap = create ()
+
+    /// Record the position of a single node. Idempotent (later writes win).
+    /// `node` is typed `obj | null` only to silence the F# nullness analysis
+    /// at call sites where `box x` is the input — we null-guard here.
+    let add (pm: PosMap) (node: obj | null) (pos: Pos) : unit =
+        match node with
+        | null -> ()
+        | n -> pm.Map[n] <- pos
+
+    /// Look up a node's position, or return 0:0 if absent.
+    let tryFind (pm: PosMap) (node: obj | null) : Pos =
+        match node with
+        | null -> { Line = 0; Col = 0 }
+        | n ->
+            match pm.Map.TryGetValue n with
+            | true, p -> p
+            | false, _ -> { Line = 0; Col = 0 }
+
 // ---- Types ----------------------------------------------------------
 
 type UnitExpr =
