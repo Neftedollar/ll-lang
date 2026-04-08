@@ -133,3 +133,83 @@ let ``fromElaboratorEnv turns declared type vars into quantifiers`` () =
     let env = fromElaboratorEnv e3
     let sch = Map.find "id" env
     Assert.Contains("A", sch.Vars)
+
+// --- Task 3: Unification + occurs check ---
+
+[<Fact>]
+let ``unify two identical TyName succeeds with empty subst`` () =
+    match unify (TyName "Int") (TyName "Int") with
+    | Ok s -> Assert.Equal(0, Map.count s)
+    | Error e -> failwith $"expected Ok, got {e}"
+
+[<Fact>]
+let ``unify flexible var with TyName binds var`` () =
+    match unify (TyVar "$0") (TyName "Int") with
+    | Ok s -> Assert.Equal(TyName "Int", Map.find "$0" s)
+    | Error e -> failwith $"expected Ok, got {e}"
+
+[<Fact>]
+let ``unify TyName with flexible var binds var`` () =
+    match unify (TyName "Int") (TyVar "$0") with
+    | Ok s -> Assert.Equal(TyName "Int", Map.find "$0" s)
+    | Error e -> failwith $"expected Ok, got {e}"
+
+[<Fact>]
+let ``unify rigid var with TyName fails with E001`` () =
+    match unify (TyVar "a") (TyName "Int") with
+    | Ok _ -> failwith "expected Error"
+    | Error err -> Assert.Equal(E001, err.Code)
+
+[<Fact>]
+let ``unify two TyFn recurses on params and returns`` () =
+    let t1 = TyFn(TyVar "$0", TyName "Bool")
+    let t2 = TyFn(TyName "Int", TyVar "$1")
+    match unify t1 t2 with
+    | Ok s ->
+        Assert.Equal(TyName "Int", Map.find "$0" s)
+        Assert.Equal(TyName "Bool", Map.find "$1" s)
+    | Error e -> failwith $"expected Ok, got {e}"
+
+[<Fact>]
+let ``unify TyApp with TyApp recurses`` () =
+    let t1 = TyApp(TyName "Maybe", TyVar "$0")
+    let t2 = TyApp(TyName "Maybe", TyName "Int")
+    match unify t1 t2 with
+    | Ok s -> Assert.Equal(TyName "Int", Map.find "$0" s)
+    | Error e -> failwith $"expected Ok, got {e}"
+
+[<Fact>]
+let ``unify mismatched TyName fails with E001`` () =
+    match unify (TyName "Int") (TyName "Str") with
+    | Ok _ -> failwith "expected Error"
+    | Error err -> Assert.Equal(E001, err.Code)
+
+[<Fact>]
+let ``unify tagged types with same base but different tag fails with E004`` () =
+    let t1 = TyTagged(TyName "Float", UName "m")
+    let t2 = TyTagged(TyName "Float", UName "s")
+    match unify t1 t2 with
+    | Ok _ -> failwith "expected Error"
+    | Error err -> Assert.Equal(E004, err.Code)
+
+[<Fact>]
+let ``unify tagged vs untagged base fails with E005`` () =
+    let t1 = TyTagged(TyName "Float", UName "m")
+    let t2 = TyName "Float"
+    match unify t1 t2 with
+    | Ok _ -> failwith "expected Error"
+    | Error err -> Assert.Equal(E005, err.Code)
+
+[<Fact>]
+let ``occurs check: $0 in TyFn($0, Int) -> E008`` () =
+    let v = TyVar "$0"
+    let t = TyFn(TyVar "$0", TyName "Int")
+    match unify v t with
+    | Ok _ -> failwith "expected E008"
+    | Error err -> Assert.Equal(E008, err.Code)
+
+[<Fact>]
+let ``unify same flexible var with itself succeeds empty`` () =
+    match unify (TyVar "$0") (TyVar "$0") with
+    | Ok s -> Assert.Equal(0, Map.count s)
+    | Error e -> failwith $"expected Ok, got {e}"
