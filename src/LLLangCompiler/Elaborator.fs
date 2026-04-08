@@ -48,6 +48,19 @@ let private builtinEnv : TypeEnv =
 let private buildFnType (paramTypes: TypeExpr list) (ret: TypeExpr) : TypeExpr =
     List.foldBack (fun t acc -> TyFn(t, acc)) paramTypes ret
 
+/// Normalize a type in a function signature: single-uppercase-letter TyName values
+/// (like A, B, C used as type parameters) are converted to TyVar so that the
+/// elaborator treats them as wildcards during type checking.
+let private normalizeFnTy (ty: TypeExpr) : TypeExpr =
+    let rec go t =
+        match t with
+        | TyName n when n.Length = 1 && System.Char.IsUpper n.[0] -> TyVar n
+        | TyApp(a, b) -> TyApp(go a, go b)
+        | TyFn(a, b) -> TyFn(go a, go b)
+        | TyTagged(a, u) -> TyTagged(go a, u)
+        | _ -> t
+    go ty
+
 /// Pass 1: collect all declared names → types into TypeEnv.
 let private collectDecls (m: LLModule) : TypeEnv =
     let mutable env = builtinEnv
@@ -57,12 +70,12 @@ let private collectDecls (m: LLModule) : TypeEnv =
             match nameSuffix with
             | None -> sigRecord.Name
             | Some suffix -> sigRecord.Name + "_" + suffix
-        let ret = sigRecord.ReturnType |> Option.defaultValue (TyVar "?")
+        let ret = sigRecord.ReturnType |> Option.map normalizeFnTy |> Option.defaultValue (TyVar "?")
         let ty =
             match sigRecord.Params with
             | [] -> TyVar "?"
             | ps ->
-                let paramTypes = ps |> List.map snd
+                let paramTypes = ps |> List.map (fun (_, t) -> normalizeFnTy t)
                 buildFnType paramTypes ret
         env <- Map.add name ty env
 
@@ -252,10 +265,10 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
 let private checkDecl (decl: Decl) (env: TypeEnv) : LLError list =
     match decl with
     | DFn(sigRecord, body) ->
-        // Extend env with the function's own parameters
+        // Extend env with the function's own parameters (normalize type params)
         let localEnv =
             sigRecord.Params
-            |> List.fold (fun acc (paramName, paramType) -> Map.add paramName paramType acc) env
+            |> List.fold (fun acc (paramName, paramType) -> Map.add paramName (normalizeFnTy paramType) acc) env
         snd (typeOf body localEnv)
 
     | DLet(_, expr) ->
@@ -265,7 +278,7 @@ let private checkDecl (decl: Decl) (env: TypeEnv) : LLError list =
         fns |> List.collect (fun (sigRecord, body) ->
             let localEnv =
                 sigRecord.Params
-                |> List.fold (fun acc (paramName, paramType) -> Map.add paramName paramType acc) env
+                |> List.fold (fun acc (paramName, paramType) -> Map.add paramName (normalizeFnTy paramType) acc) env
             snd (typeOf body localEnv))
 
     | DType _ | DTag _ | DUnit _ | DTrait _ -> []

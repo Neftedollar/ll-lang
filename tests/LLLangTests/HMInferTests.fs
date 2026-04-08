@@ -213,3 +213,95 @@ let ``unify same flexible var with itself succeeds empty`` () =
     match unify (TyVar "$0") (TyVar "$0") with
     | Ok s -> Assert.Equal(0, Map.count s)
     | Error e -> failwith $"expected Ok, got {e}"
+
+// --- Task 4: Algorithm W for basic expression forms ---
+
+[<Fact>]
+let ``infer int literal`` () =
+    let tm = inferOk "module M\nlet x = 42"
+    let sch = schemeOf tm "x"
+    Assert.Equal(TyName "Int", sch.Body)
+    Assert.Empty(sch.Vars)
+
+[<Fact>]
+let ``infer str literal`` () =
+    let tm = inferOk "module M\nlet s = \"hi\""
+    Assert.Equal(TyName "Str", (schemeOf tm "s").Body)
+
+[<Fact>]
+let ``infer bool literal`` () =
+    let tm = inferOk "module M\nlet b = true"
+    Assert.Equal(TyName "Bool", (schemeOf tm "b").Body)
+
+[<Fact>]
+let ``infer fn with declared params and elided return`` () =
+    let tm = inferOk "module M\nfn inc(x Int) = x + 1"
+    let sch = schemeOf tm "inc"
+    Assert.Equal(TyFn(TyName "Int", TyName "Int"), sch.Body)
+
+[<Fact>]
+let ``infer polymorphic id fn`` () =
+    let tm = inferOk "module M\nfn id(x A) A = x"
+    let sch = schemeOf tm "id"
+    Assert.Equal(1, List.length sch.Vars)
+    match sch.Body with
+    | TyFn(TyVar a, TyVar b) -> Assert.Equal<string>(a, b)
+    | t -> failwith $"expected TyFn of same var, got {t}"
+
+[<Fact>]
+let ``infer id applied to Int produces Int`` () =
+    let src = "module M\nfn id(x A) A = x\nlet n = id 42"
+    let tm = inferOk src
+    Assert.Equal(TyName "Int", (schemeOf tm "n").Body)
+
+[<Fact>]
+let ``infer id applied to Str produces Str`` () =
+    let src = "module M\nfn id(x A) A = x\nlet s = id \"hi\""
+    let tm = inferOk src
+    Assert.Equal(TyName "Str", (schemeOf tm "s").Body)
+
+[<Fact>]
+let ``infer const fn has two quantifiers`` () =
+    let tm = inferOk "module M\nfn const_(x A)(y B) A = x"
+    let sch = schemeOf tm "const_"
+    Assert.Equal(2, List.length sch.Vars)
+
+[<Fact>]
+let ``infer lambda identity`` () =
+    let tm = inferOk "module M\nlet f = \\x. x"
+    let sch = schemeOf tm "f"
+    Assert.Equal(1, List.length sch.Vars)
+    match sch.Body with
+    | TyFn(TyVar a, TyVar b) -> Assert.Equal<string>(a, b)
+    | t -> failwith $"expected TyFn identity, got {t}"
+
+[<Fact>]
+let ``infer if branches unify`` () =
+    let tm = inferOk "module M\nlet y = if true then 1 else 2"
+    Assert.Equal(TyName "Int", (schemeOf tm "y").Body)
+
+[<Fact>]
+let ``if branch mismatch yields E001`` () =
+    let errs = inferErrs "module M\nlet y = if true then 1 else \"x\""
+    Assert.Contains(errs, fun e -> e.Code = E001)
+
+[<Fact>]
+let ``pipe e -> f types as f e`` () =
+    let tm = inferOk "module M\nlet y = 5 -> (\\x. x + 1)"
+    Assert.Equal(TyName "Int", (schemeOf tm "y").Body)
+
+[<Fact>]
+let ``list of ints infers List Int`` () =
+    let tm = inferOk "module M\nlet xs = [1 2 3]"
+    let sch = schemeOf tm "xs"
+    Assert.Equal(TyApp(TyName "List", TyName "Int"), sch.Body)
+
+[<Fact>]
+let ``heterogeneous list yields E001`` () =
+    let errs = inferErrs "module M\nlet xs = [1 \"two\"]"
+    Assert.Contains(errs, fun e -> e.Code = E001)
+
+[<Fact>]
+let ``tagged literal preserves tag`` () =
+    let tm = inferOk "module M\nlet d = 5.0[Meter]"
+    Assert.Equal(TyTagged(TyName "Float", UName "Meter"), (schemeOf tm "d").Body)
