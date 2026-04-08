@@ -105,7 +105,41 @@ let private builtinEnv : TypeEnv =
         "strContains", TyFn(tStr, TyFn(tStr, tBool))
         "strToInt",    TyFn(tStr, maybeOf tInt)
     ]
-    Map.ofList (arith @ cmp @ io @ math @ list @ maybe @ result @ str)
+    // --- Phase 6.5 extensions ---
+    let charT = TyName "Char"
+    // String / char
+    let strChar = [
+        "strChars",     TyFn(tStr, listOf charT)
+        "charToInt",    TyFn(charT, tInt)
+        "intToChar",    TyFn(tInt, charT)
+        "intToStr",     TyFn(tInt, tStr)
+        "strSlice",     TyFn(tStr, TyFn(tInt, TyFn(tInt, tStr)))
+        "strIndexOf",   TyFn(tStr, TyFn(tStr, tInt))
+        "strSplit",     TyFn(tStr, TyFn(tStr, listOf tStr))
+        "strFromChars", TyFn(listOf charT, tStr)
+        "strReverse",   TyFn(tStr, tStr)
+        "charIsDigit",  TyFn(charT, tBool)
+        "charIsAlpha",  TyFn(charT, tBool)
+        "charIsSpace",  TyFn(charT, tBool)
+    ]
+    // File IO
+    let fileIO = [
+        "readFile",   TyFn(tStr, tStr)
+        "writeFile",  TyFn(tStr, TyFn(tStr, TyName "Unit"))
+        "fileExists", TyFn(tStr, tBool)
+    ]
+    // Process
+    let proc = [
+        "exit",       TyFn(tInt, TyName "Unit")
+    ]
+    // List extras (listAt requires user-declared `type Maybe`)
+    let listExtra = [
+        "listConcat",  TyFn(listOf (listOf tA), listOf tA)
+        "listIsEmpty", TyFn(listOf tA, tBool)
+        "listAt",      TyFn(listOf tA, TyFn(tInt, maybeOf tA))
+    ]
+    Map.ofList (arith @ cmp @ io @ math @ list @ maybe @ result @ str
+                @ strChar @ fileIO @ proc @ listExtra)
 
 /// Build a right-associative chain of TyFn from a list of parameter types plus a return type.
 /// e.g. [T1; T2] ret  →  TyFn(T1, TyFn(T2, ret))

@@ -44,7 +44,10 @@ let private cmdRun (path: string) : int =
                     let t = l.TrimStart()
                     not (t.StartsWith("module ")) && not (t.StartsWith("[<EntryPoint>]")))
                 |> String.concat "\n"
-            let withInvoke = stripped + "\nmain [||] |> exit\n"
+            // Phase 6.5: stdlib prelude defines `let exit : int64 -> unit`, which
+            // shadows F# core `exit : int -> 'a`. So we feed `main [||]` (int) into
+            // it via int64 conversion. The prelude exit terminates the fsi process.
+            let withInvoke = stripped + "\nmain [||] |> int64 |> exit\n"
             File.WriteAllText(tmp, withInvoke)
             let psi = ProcessStartInfo("dotnet", $"fsi \"{tmp}\"")
             psi.RedirectStandardOutput <- false
