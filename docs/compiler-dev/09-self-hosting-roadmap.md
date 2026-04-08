@@ -1179,3 +1179,105 @@ Next tick: **Phase 7.6** — pick between multi-line fn bodies + type
 decls, `trait` / `impl` module-level decls, list-literal `[a b c]`
 expression atoms / tuple `(a, b)` patterns, or bootstrapping the
 elaborator-in-ll-lang slice (Stage D in the roadmap).
+
+### 2026-04 — Phase 7.6a: elaborator slice A — name resolution + E002 (DONE)
+
+First tick of Phase 7.6 and the very first bite of the
+**elaborator-in-ll-lang** half of the self-hosting roadmap. The
+front-end half (Phases 7.1..7.5e) now produces a `List[Decl]` AST
+inside [`15-moduleparser-real.lll`](../../spec/examples/valid/15-moduleparser-real.lll);
+Phase 7.6 starts walking that AST with the same semantic passes the
+F# host elaborator runs in
+[`src/LLLangCompiler/Elaborator.fs`](../../src/LLLangCompiler/Elaborator.fs).
+
+This slice targets the **simplest and most obvious** elaborator
+function — **name resolution / free-variable check**. For each `fn`
+body, walk the expression and report `E002 UnboundVar <name>` for
+every `EVar name` whose name isn't in the collected top-level env
+and isn't bound by a local `let` / lambda / fn param / pattern
+binder.
+
+New file: [`16-elaborator-real.lll`](../../spec/examples/valid/16-elaborator-real.lll)
+(328 lines). Pipeline mirrors `Elaborator.fs`:
+
+```
+collectDecls env0 decls   -- pass 1: gather every top-level name
+checkDecls   env  decls   -- pass 2: walk each fn body under that env
+```
+
+Uses a **minimal local AST** (not reusing `15-moduleparser-real.lll`'s
+full `Decl` shape) so the slice stays self-contained and the
+hardcoded test-module literal stays compact:
+
+```lll
+type Pat  = PInt Int | PVar Str | PWild | PNil | PCons Pat Pat
+type Expr = EInt Int | EStr Str | EVar Str | EAdd Expr Expr | EApp Expr Expr
+          | ELet Str Expr Expr | ELam Str Expr | EIf Expr Expr Expr
+          | EMatch Expr List[Pat] List[Expr]
+type Decl = DFn Str List[Str] Expr | DLet Str Expr
+          | DType Str List[Str]   | DTag Str
+type Env  = MkEnv List[Str]
+```
+
+`EMatch` stores match arms as two parallel lists (same trick as
+`15-moduleparser-real.lll`) to sidestep the codegen limitation on
+mutually-recursive user type decls.
+
+The hardcoded test module has three fns, one tag, one type, and one
+let:
+
+```
+tag UserId
+type Maybe = Some | None
+let answer = 42
+fn add(a b) = a + b
+fn bad(x) = undefinedName + otherMissing
+fn useCtor(y) = match y with | 0 -> Some | _ -> None
+```
+
+`bad` intentionally references two undeclared names; the elaborator
+emits one `E002` per reference. The other two fns are clean: fn
+params `a` / `b` / `x` / `y` are locals; `Some` / `None` are ctors
+collected from the `DType`; `answer` is collected from the `DLet`
+but not used (the slice doesn't warn on unused bindings).
+
+Running the file prints:
+
+```
+E002 UnboundVar undefinedName
+E002 UnboundVar otherMissing
+```
+
+**Deliberately out of scope** (feature backlog for 7.6b/c/+):
+
+1. **E001 type checking** — no TypeEnv, no `typeOf`, no type
+   annotations at all. Name resolution only. Phase 7.6b.
+2. **E003 exhaustiveness** — no match-arm completeness check. Phase
+   7.6c.
+3. **E004 / E005 unit / tag checks** — no unit algebra, no tag
+   propagation. Phase 7.6+.
+4. **Source positions** — errors emitted as `E002 UnboundVar <name>`
+   (no `line:col` prefix). Position tracking on AST nodes is a
+   separate Phase 7.6+ item.
+5. **Builtin env** — the test input only references names the user
+   declares locally, so the env starts empty. Wiring into the real
+   `builtinEnv` lives in a later integration slice.
+6. **Parser integration** — the input module AST is hardcoded in
+   `main`, not read from a `.lll` file and threaded through the
+   parser. Phase 7.6 integration tick, not this slice.
+
+Tests: 386 -> 389.
+  * `tests/LLLangTests/ElaboratorRealTests.fs` — two facts:
+    inference round-trip + runtime E2E asserting both E002 lines on
+    stdout.
+  * `tests/LLLangTests/HMInferTests.fs` — `16-elaborator-real.lll`
+    added to the `valid corpus infers ok` theory.
+
+Next tick: **Phase 7.6b** — extend the elaborator-in-ll-lang with
+**E001 type mismatch detection**. Add a minimal `TypeExpr`, replace
+`Env = MkEnv List[Str]` with `Env = MkEnv List[(Str, TypeExpr)]`,
+thread declared types through fn param collection, add a `typeOf`
+walker that returns `(TypeExpr, List[Str])`, and flag every `EApp`
+whose argument's inferred type doesn't match the function's
+parameter type. Keep scope minimal — no inference, just checking
+against explicit annotations.

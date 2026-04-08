@@ -7,11 +7,11 @@ session to pick up without replaying history.
 
 - **main** is at a clean commit, everything pushed to
   `github.com/Neftedollar/ll-lang`.
-- **384 xUnit tests** pass (`dotnet test` from repo root).
+- **389 xUnit tests** pass (`dotnet test` from repo root).
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e done.**
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a done.**
   ll-lang now hosts a real lexer (`09-lexer-real.lll`), a real
   recursive-descent arithmetic parser (`11-parser-real.lll`), a real
   type-declaration parser (`12-typeparser-real.lll`), a real
@@ -104,16 +104,59 @@ session to pick up without replaying history.
   ctor args were added in Phase 7.5d; `tag` / `import` / `export`
   module-level decls were added in Phase 7.5e (closing the Phase 7.5
   umbrella 9/9).
+- **Phase 7.6a done** — first slice of the ll-lang elaborator lives
+  in [`16-elaborator-real.lll`](../../spec/examples/valid/16-elaborator-real.lll)
+  (328 lines). Two-pass `collectDecls` → `checkDecls` pipeline over
+  a minimal local AST, emitting `E002 UnboundVar <name>` for every
+  free variable in any fn body. Mirrors the shape of the F# host
+  elaborator's `collectDecls` + `checkDecls` in `Elaborator.fs`.
+  Still in scope for future Phase 7.6 slices: E001 type checking
+  (7.6b), E003 exhaustiveness (7.6c), E004 / E005 tag / unit checks,
+  source positions, builtin env, parser integration.
+- `lllc run spec/examples/valid/16-elaborator-real.lll` prints
+  ```
+  E002 UnboundVar undefinedName
+  E002 UnboundVar otherMissing
+  ```
+  (the hardcoded test module's one intentionally-bad fn
+  `bad(x) = undefinedName + otherMissing`; the other two fns
+  `add` / `useCtor` and the non-fn decls elaborate cleanly).
 
 ## Immediate next task
 
-**Phase 7.6 — heavier module-parser extensions in ll-lang.** The
-Phase 7.5 umbrella is closed (9/9 items done across 7.5a through
-7.5e). Phase 7.6 picks from the heavier backlog — each item is a
-larger, self-contained slice that doesn't fit the flat single-line
-dispatch pattern Phase 7.5 used. Pick any one (or combine two if they
-compose cleanly) and ship it the same way 7.5a-e shipped: extend
-`15-moduleparser-real.lll` **in place**, update the runtime E2E
+**Phase 7.6b — elaborator slice B: E001 type mismatch detection in
+ll-lang.** Phase 7.6a shipped the name-resolution spine (`collectDecls`
+→ `checkDecls`, E002-only). The next tick adds the simplest type
+check on top of that spine.
+
+Shape:
+1. Extend `Env` from `MkEnv List[Str]` to `MkEnv List[(Str, TypeExpr)]`
+   so every declared name carries its declared type.
+2. Add a minimal `TypeExpr` sum (`TyName Str` / `TyFn TypeExpr
+   TypeExpr` for now — no type vars, no tagged types, no type apps).
+3. Thread annotated fn param types through `collectDecl` / `checkDecl`;
+   `DFn` already carries params, just extend the pair to include a
+   type annotation.
+4. Add a `typeOf (env Env) (e Expr) (TypeExpr, List[Str])` walker
+   mirroring the F# host elaborator's `typeOf`. EApp is the only
+   place that actually type-checks — every other arm just forwards
+   the inferred type and any nested errors.
+5. Flag `EApp f arg` where `arg`'s inferred type doesn't unify with
+   `f`'s parameter type, emitting `E001 TypeMismatch <got> <expected>`.
+
+Keep scope minimal: no inference, no polymorphism, no tag propagation,
+no source positions. Just checking explicit annotations against
+inferred literal / variable / fn-call types.
+
+After 7.6b lands, Phase 7.6c picks up E003 exhaustiveness for
+`match` arms.
+
+### Backlog: heavier module-parser extensions in ll-lang
+
+Not blocking 7.6b/c. Phase 7.6 also has heavier module-parser work
+parallel to the elaborator-in-ll-lang track. Pick any one (or combine
+two if they compose cleanly) and ship it the same way 7.5a-e shipped:
+extend `15-moduleparser-real.lll` **in place**, update the runtime E2E
 expectation first (TDD), commit as
 `feat(corpus)` + `test(corpus)` + `docs(self-hosting)`.
 

@@ -19,7 +19,7 @@ Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting 
 
 ## Status
 
-Working end-to-end compiler with a **386-test** suite, written in F# / .NET 10. All 7 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins).
+Working end-to-end compiler with a **389-test** suite, written in F# / .NET 10. All 7 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins).
 
 **Bootstrap progress (Phase 7 — ll-lang hosting itself):**
 
@@ -31,8 +31,9 @@ Working end-to-end compiler with a **386-test** suite, written in F# / .NET 10. 
 | Fn-decl parser | curried params, return types | ✅ | [`13-fnparser-real.lll`](spec/examples/valid/13-fnparser-real.lll) |
 | Expression parser | let / if / match / lambda / app | ✅ | [`14-exprparser-real.lll`](spec/examples/valid/14-exprparser-real.lll) |
 | **Full module parser** | **all of the above, in one program** | ✅ | [`15-moduleparser-real.lll`](spec/examples/valid/15-moduleparser-real.lll) |
+| Elaborator — name resolution | collect + check passes, E002 unbound-var | ✅ | [`16-elaborator-real.lll`](spec/examples/valid/16-elaborator-real.lll) |
 
-The module parser (979 lines of ll-lang) consumes `module M \n import ... \n tag ... \n type ... \n let ... \n fn ... = ...` and pretty-prints a `List[Decl]` AST — **real proof that ll-lang can express its own front-end**.
+The module parser (979 lines of ll-lang) consumes `module M \n import ... \n tag ... \n type ... \n let ... \n fn ... = ...` and pretty-prints a `List[Decl]` AST — **real proof that ll-lang can express its own front-end**. The elaborator slice (328 lines) walks a hardcoded `List[Decl]` AST with a two-pass `collectDecls` → `checkDecls` pipeline and emits `E002 UnboundVar <name>` for every free variable, mirroring the F# host elaborator's name-resolution semantics.
 
 Still to come: elaborator, HM-inference, and codegen rewrites in ll-lang, then bootstrap fixpoint (compiler₀ compiles compiler.lll → compiler₁; compiler₁ compiles compiler.lll → compiler₂ == compiler₁).
 
@@ -45,7 +46,8 @@ Still to come: elaborator, HM-inference, and codegen rewrites in ll-lang, then b
 | 5 | F# codegen + `lllc` CLI | ✅ |
 | 6 | Stdlib (~50 builtins) | ✅ |
 | **7.1 – 7.5** | **ll-lang front-end in ll-lang** (lexer + 4 parser slices + full module parser, 979 lines) | ✅ |
-| 7.6+ | Multi-line bodies, `trait`/`impl` parsing, elaborator-in-ll-lang, codegen-in-ll-lang | 🚧 |
+| **7.6a** | **Elaborator slice A in ll-lang** (name resolution + E002 unbound-var, 328 lines) | ✅ |
+| 7.6+ | E001 type checking, E003 exhaustiveness, multi-line bodies, `trait`/`impl`, codegen-in-ll-lang | 🚧 |
 | 7.8 | Bootstrap fixpoint | ⏳ |
 
 ## Getting Started
@@ -56,7 +58,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 386 tests
+dotnet test    # 389 tests
 ```
 
 ### Run your first program
@@ -242,8 +244,8 @@ tests/LLLangTests/         — xUnit test suite (386 tests)
 
 ## Roadmap
 
-- **Phase 7.6** — heavier front-end slices in ll-lang: multi-line fn bodies, multi-line type decls, list / tuple patterns, `trait` / `impl` module-level decls.
-- **Phase 7.7** — elaborator and H-M inference rewritten in ll-lang.
+- **Phase 7.6** — elaborator in ll-lang (name resolution shipped in 7.6a; E001 type checking, E003 exhaustiveness, E004 / E005 tag checks remain), plus heavier front-end slices (multi-line fn bodies, `trait` / `impl` module-level decls).
+- **Phase 7.7** — H-M inference rewritten in ll-lang.
 - **Phase 7.8** — codegen in ll-lang, then bootstrap fixpoint (compiler₁ == compiler₂).
 - **Multi-target backends** — TypeScript / Python / JVM / LLVM after self-hosting lands.
 
