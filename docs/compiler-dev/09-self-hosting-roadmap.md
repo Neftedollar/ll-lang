@@ -535,3 +535,81 @@ Next slice: **Phase 7.3c — full expression parser** (adds `if` /
 `let` / `match` / lambda on top of the arithmetic subset), then
 tying lexer + type-decl + fn-decl + full-expression parsers together
 into the first ll-lang front end written in ll-lang itself.
+
+### 2026-04 — Phase 7.3c: full expression parser (DONE)
+
+[`spec/examples/valid/14-exprparser-real.lll`](../../spec/examples/valid/14-exprparser-real.lll)
+(425 lines) is a working recursive-descent **full expression** parser
+written in ll-lang itself. Fifth self-hosting milestone after the real
+lexer (7.1), the arithmetic parser (7.2), the type-decl parser (7.3a),
+and the fn-decl parser (7.3b). Together the five corpus files cover
+every front-end piece needed for an ll-lang-in-ll-lang compiler —
+Phase 7.4 (stitching lexer + type-decl + fn-decl + full-expression
+parsers into one file that can read a full ll-lang module) is the
+only piece left before the bootstrap can begin in earnest.
+
+Supported expression forms:
+
+- integer and string literals, lowercase variable references
+- parenthesised grouping
+- curried application via juxtaposition (`f x y` → left-associative)
+- binary `+ - * /` with classical precedence
+- `let x = e1 in e2` (single-line)
+- `if c then a else b`
+- `match e with | pat -> body | pat -> body ...` where `pat` is an
+  integer literal, string literal, variable, or wildcard
+- `\x. body` lambdas (single parameter; nest `\` for multi-arg)
+
+Out of scope (do not appear in 14-exprparser but remain open work for
+the eventual full compiler): cons / constructor patterns in match
+arms, tagged literals, list / tuple literals in expression position,
+multi-arg lambdas at the surface, type annotations, pipes, multi-line
+`let-in` bodies.
+
+The parser walks five driver inputs:
+
+```
+let x = 1 in (x + 2)
+if x then 1 else 2
+match x with | 0 -> "zero" | _ -> "other"
+\y. (y + 1)
+f x y
+```
+
+and pretty-prints each in unambiguous, fully-parenthesised form via
+`lllc run`:
+
+```
+(let x = 1 in (x + 2))
+(if x then 1 else 2)
+(match x with | 0 -> "zero" | _ -> "other")
+(fun y -> (y + 1))
+((f x) y)
+```
+
+The parser exercises every tool in the current ll-lang toolbox: a
+13-arm `Expr` sum type, a dispatch-on-first-token `parseExpr` that
+fans out to special-form helpers (`parseLet` / `parseIf` /
+`parseMatch` / `parseLam`), a three-level precedence cascade
+(`parseAddSub` → `parseMulDiv` → `parseApp` → `parseAtom`), a
+juxtaposition-as-application layer that consults an `isAtomStart`
+predicate to know when to stop, multi-token operator lexing for `->`,
+and string-literal lexing with a small `takeStrBody` helper.
+
+Match arms are represented as two parallel `List[Pat]` / `List[Expr]`
+fields inside `EMatch` rather than a mutually-recursive
+`type MatchArm = MkArm Pat Expr`. The current F# codegen lowers each
+user type independently (no `type ... and ...` grouping), so mutually-
+recursive type declarations cannot cross-reference each other. The
+parallel-list representation keeps the two components in lockstep by
+appending to both in the same recursive step of `parseArms`.
+
+Test count: 378 → 381 (corpus theory + 2 new ExprParserTests).
+
+Next slice: **Phase 7.4 — full module parser**, combining the lexer
+(09), the type-decl parser (12), the fn-decl parser (13), and the
+full-expression parser (14) into a single file that can read an
+entire ll-lang module end-to-end. This is the last step before the
+self-hosting translation work (Stage D in the plan above) can
+begin — the bootstrap compiler needs a real front end that handles
+every surface form the F# compiler parses.

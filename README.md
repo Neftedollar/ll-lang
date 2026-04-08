@@ -150,7 +150,7 @@ Source (.lll)
 
 ## Status
 
-**Phases 1–6 complete + Phase 7.1/7.2/7.3a/7.3b (real lexer, real recursive-descent expression parser, real type-declaration parser, AND real fn-declaration parser, all written in ll-lang itself, with surface tuple literals so parsers can return `(parsed, rest)` directly). 378 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, `let (a, b) = ...` destructuring, multi-line sum types, mutually recursive top-level functions, a real arithmetic parser (`(1 + (2 * 3))` precedence verified), a real type-declaration parser (four `type` decls round-trip through tokenize → parse → pretty-print), and a real fn-declaration parser (four `fn` decls with curried typed params and optional return types round-trip through tokenize → parse → pretty-print) — see `spec/examples/valid/09-lexer-real.lll`, `11-parser-real.lll`, `12-typeparser-real.lll`, and `13-fnparser-real.lll`.**
+**Phases 1–6 complete + Phase 7.1/7.2/7.3a/7.3b/7.3c (real lexer, real recursive-descent arithmetic parser, real type-declaration parser, real fn-declaration parser, AND real full-expression parser, all five written in ll-lang itself, with surface tuple literals so parsers can return `(parsed, rest)` directly). 381 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, `let (a, b) = ...` destructuring, multi-line sum types, mutually recursive top-level functions, a real arithmetic parser (`(1 + (2 * 3))` precedence verified), a real type-declaration parser (four `type` decls round-trip through tokenize → parse → pretty-print), a real fn-declaration parser (four `fn` decls with curried typed params and optional return types round-trip through tokenize → parse → pretty-print), and a real full-expression parser covering `let-in` / `if-then-else` / `match` / lambdas / curried application on top of the arithmetic subset (five expression kinds round-trip to fully-parenthesised pretty form) — see `spec/examples/valid/09-lexer-real.lll`, `11-parser-real.lll`, `12-typeparser-real.lll`, `13-fnparser-real.lll`, and `14-exprparser-real.lll`.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -164,7 +164,8 @@ Source (.lll)
 | 7.2 | Recursive-descent expression parser in ll-lang — `11-parser-real.lll` | ✅ Done |
 | 7.3a | Type-declaration parser in ll-lang — `12-typeparser-real.lll` | ✅ Done |
 | 7.3b | Fn-declaration parser in ll-lang — `13-fnparser-real.lll` | ✅ Done |
-| 7.3c+ | Full expression parser, then full ll-lang parser/elaborator/codegen in ll-lang | Planned |
+| 7.3c | Full expression parser in ll-lang — `14-exprparser-real.lll` | ✅ Done |
+| 7.4+ | Full ll-lang module parser (lexer + type/fn/expr parsers tied together), then elaborator/codegen in ll-lang | Planned |
 
 ## Getting Started
 
@@ -174,7 +175,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 378 tests
+dotnet test    # 381 tests
 ```
 
 ### Run your first program
@@ -217,12 +218,12 @@ src/LLLangCompiler/        — compiler library (F#)
   Codegen.fs               — F# source emitter
   Compiler.fs              — end-to-end pipeline entry point
 src/LLLangTool/            — `lllc` CLI (build / run)
-tests/LLLangTests/         — xUnit test suite (378 tests)
+tests/LLLangTests/         — xUnit test suite (381 tests)
 ```
 
 ## Roadmap
 
-- **Phase 7** — Self-hosting: rewrite the ll-lang compiler in ll-lang itself. The real lexer in `spec/examples/valid/09-lexer-real.lll` is the first concrete piece in place; Phase 7.2 tackles the parser.
+- **Phase 7** — Self-hosting: rewrite the ll-lang compiler in ll-lang itself. All four front-end pieces now exist in ll-lang itself (lexer `09-lexer-real.lll`, arithmetic parser `11-parser-real.lll`, type-decl parser `12-typeparser-real.lll`, fn-decl parser `13-fnparser-real.lll`, full-expression parser `14-exprparser-real.lll`). Phase 7.4 ties them into a single module parser; after that, the elaborator and codegen get their ll-lang rewrites.
 - **Multi-target** — TypeScript / Python / JVM / LLVM backends after self-hosting
 
 ## Design Philosophy
