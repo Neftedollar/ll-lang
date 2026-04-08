@@ -901,3 +901,96 @@ backlog, remaining 5 of 9 items:
 
 Next tick: **Phase 7.5c** — pick another two or three items from the
 remaining five and ship them the same way.
+
+### 2026-04 — Phase 7.5c: string literals + cons patterns in match arms (DONE)
+
+Third sub-tick of Phase 7.5. Extends
+[`spec/examples/valid/15-moduleparser-real.lll`](../../spec/examples/valid/15-moduleparser-real.lll)
+**in place** (no sibling file) with two more items from the Phase 7.5
+backlog:
+
+1. **String literals in fn bodies.** `parseAtom` gains a
+   `TStr s :: rest -> (EStr s, rest)` arm; the lexer recognises
+   `"..."` via the `takeStrBody` helper lifted from
+   14-exprparser-real.lll. The pretty printer renders `EStr s` as
+   `"<s>"` with surrounding quotes.
+2. **`[]` and `h :: t` cons patterns in match arms.** `parsePat` is
+   now recursive: a new `parsePrimaryPat` handles the existing leaf
+   patterns plus `[]` (`PNil`); the wrapper `parsePat` peeks for
+   `TColonColon` and folds the result into a right-associative
+   `PCons` so chains like `a :: b :: rest` parse as `PCons a (PCons b
+   (PVar "rest"))`. The pretty printer renders `PNil` as `[]` and
+   `PCons h t` as `(h :: t)`.
+
+Token ADT additions: `TStr Str`, `TLBrack`, `TRBrack`, `TColonColon`.
+Lexer additions: `"` triggers `lexStr` (which calls `takeStrBody` on
+the post-quote tail), `[` and `]` map directly to `TLBrack` /
+`TRBrack`, and `:` peeks the next char via `lexColonOrCons` to emit
+`TColonColon` only when it sees `::` (a bare `:` falls through
+silently — the grammar has no use for it).
+
+Pattern AST additions: `PNil` and `PCons Pat Pat`. Expression AST
+addition: `EStr Str`. The recursive `parsePat`:
+
+```
+fn parsePrimaryPat(toks List[Token]) =
+  | TInt n :: rest -> (PInt n, rest)
+  | TUnder :: rest -> (PWild, rest)
+  | TLBrack :: TRBrack :: rest -> (PNil, rest)
+  | TLower s :: rest -> (PVar s, rest)
+  | _ -> (PWild, toks)
+
+fn parsePat(toks List[Token]) =
+  let (p, rest) = parsePrimaryPat toks in
+  match rest with
+    | TColonColon :: rest2 ->
+      let (tail, rest3) = parsePat rest2 in
+      (PCons p tail, rest3)
+    | _ -> (p, rest)
+```
+
+The driver now parses two new fn decls on top of the Phase 7.5b
+baseline:
+
+```
+fn greet() Str = "hello"
+fn classifyXs(xs Int) Int = match xs with | [] -> 0 | h :: t -> 1
+```
+
+and prints
+
+```
+fn greet () -> Str = "hello"
+fn classifyXs (xs: Int) -> Int = (match xs with | [] -> 0 | (h :: t) -> 1)
+```
+
+Twelve pretty-printed lines total now — module header, two type decls,
+two module-level `let` decls, seven fn decls covering arithmetic,
+match-with-scrutinee, `if-then-else`, let-in chains, lambda
+application, string literal, and cons-pattern bodies. Note that the
+`xs` parameter in `classifyXs` is annotated as `Int` rather than
+`List Int` only because the test checks pretty-print output, not
+semantic types — the parser doesn't care.
+
+File size: 721 → 793 lines. Test count unchanged at 384 (the two
+existing ModuleParserTests absorbed the extended driver — the runtime
+E2E test got an updated `expected` list with two more lines, the
+inference round-trip re-reads straight from disk).
+
+Phase 7.5 progress: 6 of 9 items done (module-level let decls + match
+in fn body from 7.5a, lambdas + let-in chains from 7.5b, string
+literals + cons patterns from 7.5c). Phase 7.5 backlog, remaining 3 of
+9 items, grouped by theme:
+
+- **Multi-line surface forms**: multi-line fn bodies with
+  layout-sensitive parsing, multi-line type declarations
+  (`type T =\n | A\n | B`), and parametric ctor args
+  (`Some (Maybe A)`, `Some Maybe[A]`).
+- **Tagged literals**: `"x"[UserId]` post-atom lookahead.
+- **Other module-level forms**: `tag Name`, `trait ... with ...`,
+  `impl Trait for Type = ...`, `import Foo.Bar`, `export ...`. List-
+  literal `[a b c]` and tuple `(a, b)` patterns are deferred under the
+  same umbrella since the cons-only subset already shipped in 7.5c.
+
+Next tick: **Phase 7.5d** — pick another two or three items from the
+remaining backlog and ship them the same way.
