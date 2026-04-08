@@ -5,10 +5,22 @@ open LLLang.AST
 open LLLang.Types
 open LLLang.TypedAST
 
-// ---- F# keyword safety -------------------------------------------------------
+// ---- F# keyword / reserved-word safety ---------------------------------------
+//
+// Phase 7.3a bugfix (bug 3): ll-lang identifiers that collide with F#
+// keywords or with F# words reserved for future use (FS0046, e.g.
+// `params`, `object`) are rewritten to a safe form with the `__ll_`
+// prefix instead of being quoted with backticks. This keeps user-chosen
+// parameter and binding names like `params` working without exposing
+// backtick syntax in the emitted F# — and, crucially, without triggering
+// FS0046 warnings from the F# compiler on "reserved for future use"
+// words that the old quoted form did not silence. The same table covers
+// both current keywords and the reserved-word list so the generated
+// code is warning-free.
 
 let private fsKeywords =
     Set.ofList [
+        // Current F# keywords.
         "abstract"; "and"; "as"; "assert"; "asr"; "base"; "begin"; "class"
         "default"; "delegate"; "do"; "done"; "downcast"; "downto"; "elif"
         "else"; "end"; "exception"; "extern"; "false"; "finally"; "for"
@@ -18,10 +30,16 @@ let private fsKeywords =
         "not"; "null"; "of"; "open"; "or"; "override"; "private"; "public"
         "rec"; "return"; "sealed"; "static"; "struct"; "then"; "to"; "true"
         "try"; "type"; "upcast"; "use"; "val"; "virtual"; "void"; "when"
-        "while"; "with"; "yield" ]
+        "while"; "with"; "yield"
+        // F# words reserved for future use (FS0046).
+        "atomic"; "break"; "checked"; "component"; "const"; "constraint"
+        "constructor"; "continue"; "eager"; "event"; "external"; "fixed"
+        "functor"; "include"; "method"; "mixin"; "object"; "parallel"
+        "params"; "process"; "protected"; "pure"; "sig"; "tailcall"
+        "trait"; "virtual"; "volatile" ]
 
 let private safeIdent (s: string) =
-    if Set.contains s fsKeywords then "``" + s + "``" else s
+    if Set.contains s fsKeywords then "__ll_" + s else s
 
 // ---- Type emission -----------------------------------------------------------
 
