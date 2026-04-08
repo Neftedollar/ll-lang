@@ -150,7 +150,7 @@ Source (.lll)
 
 ## Status
 
-**Phases 1–6 complete + Phase 7.1 (real lexer in ll-lang itself). 284 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, mutually recursive top-level functions, and a real (multi-char identifier / multi-digit integer / keyword-aware) lexer written in ll-lang — see `spec/examples/valid/09-lexer-real.lll`.**
+**Phases 1–6 complete + Phase 7.1/7.1.5 (real lexer in ll-lang itself + cons patterns + match-as-expression). 307 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, mutually recursive top-level functions, and a real (multi-char identifier / multi-digit integer / keyword-aware) lexer written in ll-lang — see `spec/examples/valid/09-lexer-real.lll`.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -171,7 +171,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 284 tests
+dotnet test    # 307 tests
 ```
 
 ### Run your first program
@@ -214,7 +214,7 @@ src/LLLangCompiler/        — compiler library (F#)
   Codegen.fs               — F# source emitter
   Compiler.fs              — end-to-end pipeline entry point
 src/LLLangTool/            — `lllc` CLI (build / run)
-tests/LLLangTests/         — xUnit test suite (284 tests)
+tests/LLLangTests/         — xUnit test suite (307 tests)
 ```
 
 ## Roadmap
