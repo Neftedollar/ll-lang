@@ -331,17 +331,49 @@ Remaining gaps after 7.1.6 (drive Phase 7.2 parser work):
 - **Codegen indentation under deep nesting**: still a lurking hazard;
   the workaround remains "split into top-level helpers".
 
-### 2026-04 — Phase 7.2: arithmetic expression parser (IN PROGRESS)
+### 2026-04 — Phase 7.2: arithmetic expression parser (DONE)
 
-A WIP `11-parser-real.lll` was drafted (164 lines, recursive-descent
-arithmetic parser with `MkParsed` ADT wrapper) but hit an `E003
-NonExhaustiveMatch` in the elaborator's exhaustiveness pass — the match
-arms covering sub-patterns of `Expr` aren't being recognized as
-exhaustive. The draft is preserved at `/tmp/11-parser-real-wip.lll` for
-the next session. Likely root cause: the match arms destructure on
-constructor-pattern shapes that the exhaustiveness check conservatively
-flags as incomplete even when they actually cover every variant via
-mutually-exclusive guards. Debug path for next session: reproduce with
-a minimal test, trace through `exhaustivenessCheck` in
-`Elaborator.fs`, decide whether to relax the check or restructure the
-parser to satisfy it.
+`spec/examples/valid/11-parser-real.lll` (164 lines) is a working
+recursive-descent expression parser written in ll-lang itself. For
+input `"1 + 2 * 3"` it prints `(1 + (2 * 3))` end-to-end via `lllc
+run`. Together with `09-lexer-real.lll`, ll-lang now hosts both a real
+lexer and a real parser written in itself — the first end-to-end
+proof toward the Phase 7 self-hosting milestone.
+
+The parser uses every Phase 7.0/7.1 language feature: cons patterns
+(`c :: rest`), match-as-expression with explicit scrutinee, multi-line
+sum types (`Token`/`Expr`/`DigitRun`/`Parsed` ADTs), `let .. in`
+chains, and mutually recursive top-level fns (`parseExpr` ↔
+`parseExprTail`, `parseTerm` ↔ `parseTermTail`).
+
+The surface-tuple gap is worked around with named two-field ADT
+wrappers (`MkParsed Expr List[Token]`, `MkDigitRun List[Char]
+List[Char]`) and destructured via match arms.
+
+Three compiler bugs were uncovered and fixed in flight:
+
+1. **`exhaustivenessCheck` over-eagerness.** The pass was scanning the
+   FIRST fn parameter (clause sugar actually scrutinizes the LAST) and
+   recursing into nested matches, treating every match as if it
+   scrutinized the outer fn's parameter type. Fixed by narrowing the
+   check to top-level clause-sugar bodies only and using the LAST
+   parameter as the scrutinee. Nested matches and explicit
+   `match ... with` are skipped — full exhaustiveness across arbitrary
+   match expressions belongs in HMInfer (Phase 4) where types are
+   actually known.
+
+2. **F# offside violation on nested `let-in`.** TELet was emitting the
+   `in` body on a new indented line, which landed left of the
+   enclosing context column when nested inside another expression and
+   produced FS0058. Fixed by emitting `(let x = e in body)` inline.
+
+3. **Curried application of multi-arg ADT constructors.** ll-lang
+   surface syntax curries constructor applications (`MkPair x y`),
+   which the AST stores as `TEApp(TEApp(TECon "MkPair", x), y)`. F#
+   treats DU constructors with multiple fields as taking a tuple, so
+   the old curried codegen produced FS0001 type errors. Fixed by
+   gathering all args along the chain and emitting tuple form
+   `(MkPair (x, y))` when the leftmost head is a `TECon` and arity is
+   2 or more.
+
+Test count: 328 → 331 (corpus theory + 2 new ArithmeticParserTests).

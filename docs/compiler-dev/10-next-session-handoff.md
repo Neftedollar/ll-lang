@@ -7,41 +7,39 @@ session to pick up without replaying history.
 
 - **main** is at a clean commit, everything pushed to
   `github.com/Neftedollar/ll-lang`.
-- **328 xUnit tests** pass (`dotnet test` from repo root).
-- **Error positions are now real** — E001..E008 report actual
-  `line:col` instead of the historical `0:0`. Positions are threaded
-  via a `PosMap` side-table keyed by reference equality on AST
-  expression/decl nodes. See `feat(ast): thread token positions ...`
-  and `fix(errors): use real line:col ...` commits for details.
-- **Phases 1–6 done**. Phase 7 in progress: lexer-in-ll-lang shipped
-  (`09-lexer-real.lll`), parser-in-ll-lang drafted but not yet
-  compiling.
+- **331 xUnit tests** pass (`dotnet test` from repo root).
+- **Error positions are real** — E001..E008 report actual `line:col`
+  instead of the historical `0:0`, threaded via a `PosMap` side-table
+  keyed by reference equality on AST nodes.
+- **Phases 1–6 + 7.1 + 7.2 done.** ll-lang now hosts both a real
+  lexer (`09-lexer-real.lll`) AND a real recursive-descent expression
+  parser (`11-parser-real.lll`) written in itself. Together they
+  prove the language can express its own front end for an arithmetic
+  subset; scaling up to full ll-lang is Phase 7.3+.
 - No stale worktrees, no stray branches, no uncommitted changes.
 - `lllc run spec/examples/valid/hello.lll` prints `Hello, ll-lang!`.
 - `lllc run spec/examples/valid/09-lexer-real.lll` prints
   `kw:fn id:add ( id:a ) ( id:b ) = id:a + id:b`.
+- `lllc run spec/examples/valid/11-parser-real.lll` prints
+  `(1 + (2 * 3))` (precedence-correct parse of `"1 + 2 * 3"`).
 
 ## Immediate next task
 
-**Phase 7.2 — arithmetic expression parser in ll-lang.**
+**Phase 7.3 — broaden the arithmetic parser into a real ll-lang
+parser**, OR pick one of the high-leverage backlog items below.
+Reasonable next concrete steps:
 
-A WIP draft is saved at `/tmp/11-parser-real-wip.lll` (164 lines). It
-fails elaboration with cascading `E003 NonExhaustiveMatch` on the
-`Expr` ADT. Next session should:
-
-1. Read the WIP file.
-2. Write a minimal reproducer (single `match` that triggers the same
-   E003).
-3. Trace `exhaustivenessCheck` in `src/LLLangCompiler/Elaborator.fs`.
-4. Decide: either relax the exhaustiveness check for match arms that
-   destructure through `PCons` / `MkParsed` wrappers, or rewrite the
-   parser to use shapes the existing check accepts.
-5. Once it compiles, verify `lllc run spec/examples/valid/11-parser-real.lll`
-   prints `(1 + (2 * 3))` for input `"1 + 2 * 3"`.
-6. Add `tests/LLLangTests/ArithmeticParserTests.fs` with inference +
-   runtime E2E tests.
-7. Bump README test count, mark Phase 7.2 done in
-   `09-self-hosting-roadmap.md`.
+1. Extend `11-parser-real.lll` to handle ll-lang's actual AST: type
+   declarations, fn declarations with patterns, let bindings, match
+   expressions, lambdas. This is a much larger file (probably
+   500-800 lines) and will surface more language gaps.
+2. OR fix the highest-leverage backlog items first:
+   - Add surface tuple-literal expressions (eliminate the `MkParsed`
+     ADT-wrapper workaround everywhere)
+   - Fix `atom[Tag]` ambiguity (parser lookahead beyond `]`)
+   - Ship a Phase 7.2 polish fix: emit codegen prelude block AFTER
+     types but with proper handling for files that don't declare any
+     types (currently the order is fragile)
 
 ## Language gaps (backlog for Phase 7.3+)
 

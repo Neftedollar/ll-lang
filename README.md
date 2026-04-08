@@ -150,7 +150,7 @@ Source (.lll)
 
 ## Status
 
-**Phases 1–6 complete + Phase 7.1/7.1.5 (real lexer in ll-lang itself + cons patterns + match-as-expression). 328 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, mutually recursive top-level functions, and a real (multi-char identifier / multi-digit integer / keyword-aware) lexer written in ll-lang — see `spec/examples/valid/09-lexer-real.lll`.**
+**Phases 1–6 complete + Phase 7.1/7.2 (real lexer AND real recursive-descent expression parser, both written in ll-lang itself). 331 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, `let (a, b) = ...` destructuring, multi-line sum types, mutually recursive top-level functions, and a real arithmetic parser (`(1 + (2 * 3))` precedence verified) — see `spec/examples/valid/09-lexer-real.lll` and `11-parser-real.lll`.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -161,7 +161,8 @@ Source (.lll)
 | 5 | F# source codegen + `lllc` CLI (`build` / `run`) | ✅ Done |
 | 6 | Standard library — List, Maybe, Result, Str, Math, IO builtins | ✅ Done |
 | 7.1 | Real lexer in ll-lang — `09-lexer-real.lll` | ✅ Done |
-| 7.2+ | Self-hosting bootstrap (parser, elaborator, ...) | Planned |
+| 7.2 | Recursive-descent expression parser in ll-lang — `11-parser-real.lll` | ✅ Done |
+| 7.3+ | Full ll-lang parser, elaborator, codegen in ll-lang | Planned |
 
 ## Getting Started
 
@@ -171,7 +172,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 328 tests
+dotnet test    # 331 tests
 ```
 
 ### Run your first program
