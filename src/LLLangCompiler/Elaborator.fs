@@ -345,15 +345,25 @@ let private exhaustivenessCheck (m: LLModule) (_env: TypeEnv) : LLError list =
                 let requiredCtors = typeToCtors[typeName]
                 let matchBlocks = collectMatches body
                 for branches in matchBlocks do
-                    let coveredCtors =
+                    // A PWild or PVar branch is a catch-all: exhaustiveness
+                    // is trivially satisfied regardless of which constructors
+                    // appear in the other branches.
+                    let hasCatchAll =
                         branches
-                        |> List.choose (fun (pat, _) ->
+                        |> List.exists (fun (pat, _) ->
                             match pat with
-                            | PCon(name, _) -> Some name
-                            | _ -> None)
-                    for c in requiredCtors do
-                        if not (List.contains c coveredCtors) then
-                            yield e003 0 0 typeName c
+                            | PWild | PVar _ -> true
+                            | _ -> false)
+                    if not hasCatchAll then
+                        let coveredCtors =
+                            branches
+                            |> List.choose (fun (pat, _) ->
+                                match pat with
+                                | PCon(name, _) -> Some name
+                                | _ -> None)
+                        for c in requiredCtors do
+                            if not (List.contains c coveredCtors) then
+                                yield e003 0 0 typeName c
             | _ -> ()
         | _ -> () ]
 

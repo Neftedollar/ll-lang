@@ -147,6 +147,38 @@ let ``no E003 when all constructors covered`` () =
 let ``no E003 when type has no constructors`` () =
     Assert.Empty(elab "module M\nlet x = 42")
 
+[<Fact>]
+let ``no E003 when PWild catch-all covers remaining ctors`` () =
+    // Shape has Circle and Rect; only Circle matched plus `_` -> catch-all.
+    let src =
+        "module M\n" +
+        "type Shape = Circle Float | Rect Float Float\n" +
+        "fn area(s Shape) Float =\n" +
+        "  | Circle r -> 3.14159\n" +
+        "  | _ -> 0.0"
+    Assert.Empty(elab src |> List.filter (fun e -> e.Code = E003))
+
+[<Fact>]
+let ``no E003 when PVar catch-all covers remaining ctors`` () =
+    // A variable pattern (other) is also a catch-all.
+    let src =
+        "module M\n" +
+        "type Shape = Circle Float | Rect Float Float\n" +
+        "fn area(s Shape) Float =\n" +
+        "  | Circle r -> 3.14159\n" +
+        "  | other -> 0.0"
+    Assert.Empty(elab src |> List.filter (fun e -> e.Code = E003))
+
+[<Fact>]
+let ``E003 still fires for truly nonexhaustive match without catch-all`` () =
+    let src =
+        "module M\n" +
+        "type Shape = Circle Float | Rect Float Float\n" +
+        "fn area(s Shape) Float =\n" +
+        "  | Circle r -> 3.14159"
+    let errs = elab src
+    Assert.Contains(E003, errs |> List.map _.Code)
+
 // --- Integration tests: invalid corpus ---
 
 let private expectError code name =
