@@ -146,15 +146,21 @@ let private collectDecls (m: LLModule) : TypeEnv =
 /// Normalize a type annotation that the parser may represent as either
 /// TyApp(base, TyName tag) or TyTagged(base, UName tag).
 /// Returns Some(base, tagName) if the type is a tagged/app form, else None.
+/// `TyApp(base, TyVar t)` is only treated as a tagged numeric form when `base`
+/// is `Float`/`Int` — otherwise (e.g. `List[A]`, `Maybe[A]`) it's a real type
+/// application and must NOT be classified as tagged.
 let private asTagged (ty: TypeExpr) : (TypeExpr * string) option =
     match ty with
     | TyTagged(base', UName tag) -> Some(base', tag)
-    | TyApp(base', TyName tag)   -> Some(base', tag)
-    | TyApp(base', TyVar tag)    -> Some(base', tag)
+    | TyApp((TyName "Float" | TyName "Int") as base', TyName tag) -> Some(base', tag)
+    | TyApp((TyName "Float" | TyName "Int") as base', TyVar tag)  -> Some(base', tag)
     | _                          -> None
 
 /// Structural equality for types. TyVar matches anything (wildcard).
-/// Treats TyApp(b, TyName t) and TyTagged(b, UName t) as equivalent.
+/// Treats TyApp(b, TyName t) and TyTagged(b, UName t) as equivalent for
+/// numeric tagged types. Numeric tagged forms are checked BEFORE structural
+/// TyApp recursion so that `Float[m]` vs `Float[kg]` is a mismatch (E004)
+/// rather than a TyVar-wildcard match.
 let rec private tyEqual (a: TypeExpr) (b: TypeExpr) : bool =
     match a, b with
     | TyVar _, _          -> true
@@ -162,8 +168,13 @@ let rec private tyEqual (a: TypeExpr) (b: TypeExpr) : bool =
     | TyName x, TyName y  -> x = y
     | TyTagged(b1, u1), TyTagged(b2, u2) -> tyEqual b1 b2 && u1 = u2
     | TyFn(a1, r1), TyFn(a2, r2)         -> tyEqual a1 a2 && tyEqual r1 r2
+    | TyApp(a1, b1), TyApp(a2, b2) ->
+        // Numeric tagged form takes precedence: Float[m] vs Float[kg] must
+        // compare by tag name, not via TyVar wildcards.
+        match asTagged a, asTagged b with
+        | Some(ba, ta), Some(bb, tb) -> tyEqual ba bb && ta = tb
+        | _ -> tyEqual a1 a2 && tyEqual b1 b2
     | _ ->
-        // Normalize both sides and compare
         match asTagged a, asTagged b with
         | Some(ba, ta), Some(bb, tb) -> tyEqual ba bb && ta = tb
         | _ -> false
