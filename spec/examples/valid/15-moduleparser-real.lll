@@ -1,43 +1,53 @@
 module Examples.ModuleParser
 
--- Phase 7.4: a real recursive-descent **full module** parser written in
--- ll-lang itself. Showcase milestone — the first single file that can
--- consume a whole `module M\n type ... \n fn ... = ...` source end-to-
--- end and emit a `List[Decl]` AST. Stitches together the four earlier
--- self-hosting slices:
+-- Phase 7.4 / 7.5a: a real recursive-descent **full module** parser
+-- written in ll-lang itself. Showcase milestone — the first single file
+-- that can consume a whole `module M\n type ...\n let ... \n fn ... = ...`
+-- source end-to-end and emit a `List[Decl]` AST. Stitches together the
+-- earlier self-hosting slices:
 --   * 09-lexer-real.lll       — single-pass char tokenizer
 --   * 12-typeparser-real.lll  — single-line sum-type decls
 --   * 13-fnparser-real.lll    — curried typed fn decls + arithmetic body
---   * 14-exprparser-real.lll  — `if-then-else`, application, var refs
+--   * 14-exprparser-real.lll  — `if-then-else`, `match`, var refs
 --
--- Constrained by design (Phase 7.5's job to extend): no `let` decls at
--- module level, no `let-in` / `match` / lambda inside fn bodies, no
--- multi-line bodies, no `tag`, no `import`/`export`, no `trait`/`impl`,
--- no multi-line type decls, no parametric ctor args (`Maybe[A]`), no
--- string literals, no cons / tuple / list patterns. What IS covered is
--- enough to prove the front-end can be a single ll-lang program:
+-- Phase 7.5a added `let name = expr` decls at module level and a
+-- `match scrut with | pat -> body | ...` special form inside fn bodies
+-- (lifting the match machinery from 14-exprparser-real.lll).
+--
+-- Still constrained (Phase 7.5's remaining seven items): no `let-in`
+-- chains / lambdas inside fn bodies, no multi-line bodies, no
+-- `tag`/`trait`/`impl`/`import`, no multi-line type decls, no parametric
+-- ctor args (`Maybe[A]`), no string literals, no cons / tuple / list
+-- patterns in match arms (only int lit / var / wildcard).
+--
+-- What IS covered is enough to prove the front-end can be a single
+-- ll-lang program:
 --   * module header with dot-separated TypeId segments
 --   * multiple single-line sum-type decls with multi-ctor `|` chains
+--   * multiple module-level `let name = expr` decls
 --   * multiple single-line fn decls with curried typed params, optional
 --     return type, int-literal / var-ref / arithmetic / if-then-else /
---     application bodies
+--     match-with-scrutinee / application bodies
 --
 -- Grammar (each decl on its own line; `\n` between decls):
---   module  = 'module' Upper ('.' Upper)* '\n' decls
---   decls   = decl*
---   decl    = typeDecl | fnDecl
+--   module   = 'module' Upper ('.' Upper)* '\n' decls
+--   decls    = decl*
+--   decl     = typeDecl | letDecl | fnDecl
 --   typeDecl = 'type' Upper param* '=' ctor ('|' ctor)*
 --   param    = single-uppercase-letter (A, B, ...)
 --   ctor     = Upper typeArg*
 --   typeArg  = Upper                  -- TyVar if length 1, else TyCon
+--   letDecl  = 'let' lower '=' expr
 --   fnDecl   = 'fn' lower paramGroup* typeName? '=' expr
 --   paramGroup = '(' lower typeName ')'  |  '(' ')'
---   expr    = ifExpr | addSub
---   ifExpr  = 'if' expr 'then' expr 'else' expr
---   addSub  = mulDiv (('+' | '-') mulDiv)*
---   mulDiv  = app (('*' | '/') app)*
---   app     = atom atom*
---   atom    = int | lower | Upper | '(' expr ')'
+--   expr     = ifExpr | matchExpr | addSub
+--   ifExpr   = 'if' expr 'then' expr 'else' expr
+--   matchExpr = 'match' expr 'with' ('|' pat '->' addSub)+
+--   pat      = int | lower | '_'
+--   addSub   = mulDiv (('+' | '-') mulDiv)*
+--   mulDiv   = app (('*' | '/') app)*
+--   app      = atom atom*
+--   atom     = int | lower | Upper | '(' expr ')'
 --
 -- The pretty printer produces a deterministic, unambiguous string so the
 -- runtime test can substring-match each line of the expected output.
@@ -51,6 +61,9 @@ type Token =
   | TKwIf
   | TKwThen
   | TKwElse
+  | TKwLet
+  | TKwMatch
+  | TKwWith
   | TLower Str
   | TUpper Str
   | TInt Int
@@ -59,6 +72,8 @@ type Token =
   | TEq
   | TBar
   | TDot
+  | TArrow
+  | TUnder
   | TPlus
   | TMinus
   | TStar
@@ -82,11 +97,24 @@ type TypeRef = TR Str
 
 type Param = MkParam Str TypeRef
 
+-- Match patterns for this slice: int literal, lowercase var binder, and
+-- wildcard `_`. Constructor patterns, string literals, and cons / list
+-- / tuple patterns all stay in Phase 7.5's backlog.
+type Pat =
+  | PInt Int
+  | PVar Str
+  | PWild
+
 -- Expression grammar for this slice: int literal, var ref (covers both
 -- lowercase identifiers and uppercase constructor references — the
 -- elaborator would distinguish, but for pretty-printing they're the
--- same leaf), parenthesised grouping, `+ - * /`, `if-then-else`, and
--- curried juxtaposition application.
+-- same leaf), parenthesised grouping, `+ - * /`, `if-then-else`, curried
+-- juxtaposition application, AND `match scrut with | pat -> body | ...`.
+-- Match arms are stored as two parallel lists inside EMatch (pats, bodies)
+-- the same way 14-exprparser-real.lll does it — the current codegen
+-- can't emit mutually-recursive `type MatchArm = MkArm Pat Expr`, so
+-- splitting the arm into two lockstep lists dodges the issue and keeps
+-- the invariant `length pats == length bodies` by construction.
 type Expr =
   | EInt Int
   | EVar Str
@@ -96,6 +124,11 @@ type Expr =
   | EDiv Expr Expr
   | EApp Expr Expr
   | EIf Expr Expr Expr
+  | EMatch Expr List[Pat] List[Expr]
+
+-- Phase 7.5a: `let name = expr` at module level. Lives alongside type and
+-- fn decls inside the top-level `Decl` sum.
+type LetDecl = MkLet Str Expr
 
 type FnDecl = MkFn Str List[Param] Maybe[TypeRef] Expr
 
@@ -103,6 +136,7 @@ type FnDecl = MkFn Str List[Param] Maybe[TypeRef] Expr
 
 type Decl =
   | DType TypeDecl
+  | DLet LetDecl
   | DFn FnDecl
 
 type Module = MkModule Str List[Decl]
@@ -149,8 +183,9 @@ fn parseIntStr(s Str) Int =
 
 -- Classify an identifier: keywords map to TKw*; uppercase-start becomes
 -- TUpper (type / ctor names); lowercase-start becomes TLower (fn names,
--- params, value vars). This parser never needs distinct `let`/`in`/
--- `match`/`with` because the constrained body grammar doesn't use them.
+-- params, value vars). Phase 7.5a adds `let` (module-level decls) and
+-- `match` / `with` (match-as-expression inside fn bodies). `in` is still
+-- not needed because let-in chains inside fn bodies are still Phase 7.5+.
 fn classifyIdent(s Str) Token =
   match s with
     | "module" -> TKwModule
@@ -159,6 +194,9 @@ fn classifyIdent(s Str) Token =
     | "if" -> TKwIf
     | "then" -> TKwThen
     | "else" -> TKwElse
+    | "let" -> TKwLet
+    | "match" -> TKwMatch
+    | "with" -> TKwWith
     | _ ->
       let cs = strChars s in
       match cs with
@@ -176,9 +214,19 @@ fn lexNum(cs List[Char]) List[Token] =
   let leftover = dropWhilePred charIsDigit cs in
   listAppend [TInt (parseIntStr (strFromChars digits))] (lexChars leftover)
 
+-- Handle `-` vs `->`: peek the next char to decide between TMinus and
+-- TArrow. `->` is used by match arms (`| pat -> body`); 15 only had
+-- TMinus before Phase 7.5a. Lifted from 14-exprparser-real.lll.
+fn lexMinusOrArrow(cs List[Char]) List[Token] =
+  | c :: rest ->
+    if c == '>' then listAppend [TArrow] (lexChars rest)
+    else listAppend [TMinus] (lexChars cs)
+  | _ -> [TMinus]
+
 -- Main loop. Newlines are significant (they separate decls); spaces and
 -- tabs are skipped. Every other single-char symbol maps directly to its
--- token constructor.
+-- token constructor. Phase 7.5a adds `_` → TUnder (wildcard pattern) and
+-- the two-char `->` arrow via the `lexMinusOrArrow` helper.
 fn lexChars(cs List[Char]) List[Token] =
   | c :: rest ->
     if c == '\n' then listAppend [TNewline] (lexChars rest)
@@ -190,8 +238,9 @@ fn lexChars(cs List[Char]) List[Token] =
     else if c == '=' then listAppend [TEq] (lexChars rest)
     else if c == '|' then listAppend [TBar] (lexChars rest)
     else if c == '.' then listAppend [TDot] (lexChars rest)
+    else if c == '_' then listAppend [TUnder] (lexChars rest)
     else if c == '+' then listAppend [TPlus] (lexChars rest)
-    else if c == '-' then listAppend [TMinus] (lexChars rest)
+    else if c == '-' then lexMinusOrArrow rest
     else if c == '*' then listAppend [TStar] (lexChars rest)
     else if c == '/' then listAppend [TSlash] (lexChars rest)
     else lexChars rest
@@ -228,10 +277,12 @@ fn parseModule(toks List[Token]) Module =
   MkModule name decls
 
 -- Main decl loop. Cons-pattern fast paths dispatch on the first token.
--- Anything that isn't `type` or `fn` terminates the loop — TEnd, TNewline
--- (already skipped), unexpected tokens all fall through to the wildcard.
+-- Anything that isn't `type`, `let`, or `fn` terminates the loop — TEnd,
+-- TNewline (already skipped), unexpected tokens all fall through to the
+-- wildcard. Phase 7.5a adds the `let` arm.
 fn parseDecls(toks List[Token]) List[Decl] =
   | TKwType :: _ -> consTypeDecl (parseTypeDecl toks)
+  | TKwLet :: _ -> consLetDecl (parseLetDecl toks)
   | TKwFn :: _ -> consFnDecl (parseFnDecl toks)
   | _ -> []
 
@@ -240,9 +291,25 @@ fn consTypeDecl(pair) List[Decl] =
   let (td, rest) = pair in
   DType td :: parseDecls (skipNewlines rest)
 
+-- Same shape for let decls (Phase 7.5a).
+fn consLetDecl(pair) List[Decl] =
+  let (ld, rest) = pair in
+  DLet ld :: parseDecls (skipNewlines rest)
+
 fn consFnDecl(pair) List[Decl] =
   let (fd, rest) = pair in
   DFn fd :: parseDecls (skipNewlines rest)
+
+-- ---------- Let-decl parser (Phase 7.5a) --------------------------------
+
+-- Single module-level let decl: 'let' lower '=' expr. The RHS reuses the
+-- full `parseExpr` pipeline so it can be any expression the fn-body
+-- grammar accepts (int lit, arithmetic, if-then-else, match, ...).
+fn parseLetDecl(toks List[Token]) =
+  | TKwLet :: TLower name :: TEq :: rest ->
+    let (body, rest2) = parseExpr rest in
+    (MkLet name body, rest2)
+  | _ -> (MkLet "?" (EInt 0), toks)
 
 -- ---------- Type-decl parser (adapted from 12-typeparser-real.lll) ------
 
@@ -338,11 +405,13 @@ fn isAtomStart(t Token) Bool =
   | TLParen -> true
   | _ -> false
 
--- Top-level expression dispatcher. Only one special form in this slice:
--- `if`. Everything else falls through to the arithmetic / application
--- cascade. `let-in` and `match` are Phase 7.5's job.
+-- Top-level expression dispatcher. Phase 7.5a adds `match` as a second
+-- special form alongside `if`. Everything else falls through to the
+-- arithmetic / application cascade. `let-in` and lambdas are still
+-- Phase 7.5+.
 fn parseExpr(toks List[Token]) =
   | TKwIf :: rest -> parseIf rest
+  | TKwMatch :: rest -> parseMatch rest
   | _ -> parseAddSub toks
 
 -- `if c then a else b`. Each of the three sub-expressions is parsed via
@@ -360,6 +429,63 @@ fn parseIf(toks List[Token]) =
   in
   let (b, rest5) = parseExpr rest4 in
   (EIf c a b, rest5)
+
+-- `match scrut with | pat -> body | pat -> body ...`. Same shape as the
+-- helper in 14-exprparser-real.lll: scrutinee is parsed via `parseExpr`
+-- (it stops cleanly at `TKwWith` because `with` is not an atom-starter
+-- nor an arithmetic operator), then `parseArms` pulls the two parallel
+-- arm lists out of the rest of the token stream.
+fn parseMatch(toks List[Token]) =
+  let (scrut, rest) = parseExpr toks in
+  let rest2 = match rest with
+    | TKwWith :: r -> r
+    | _ -> rest
+  in
+  let (armLists, rest3) = parseArms rest2 in
+  let (pats, bodies) = armLists in
+  (EMatch scrut pats bodies, rest3)
+
+-- Collect arms while the next token is `|`. Returns `((pats, bodies),
+-- rest)` — the two arm lists stay in lockstep because each recursive
+-- step cons'es onto both at once. The outer result is still a 2-tuple
+-- `(result, leftover)` like every other parseX helper.
+fn parseArms(toks List[Token]) =
+  | TBar :: _ ->
+    let (armPair, rest) = parseArm toks in
+    let (p, b) = armPair in
+    let (moreLists, rest2) = parseArms rest in
+    let (ps, bs) = moreLists in
+    ((p :: ps, b :: bs), rest2)
+  | _ -> (([], []), toks)
+
+-- Single arm. Assumes the leading `|` is still on the front. Returns
+-- `((pat, body), leftover)` so the caller can destructure cleanly.
+fn parseArm(toks List[Token]) =
+  | TBar :: rest ->
+    let (p, rest2) = parsePat rest in
+    let rest3 = match rest2 with
+      | TArrow :: r -> r
+      | _ -> rest2
+    in
+    let (body, rest4) = parseArmBody rest3 in
+    ((p, body), rest4)
+  | _ -> ((PWild, EInt 0), toks)
+
+-- Arm bodies stop at the next `|` (start of sibling arm) or at TNewline
+-- / TEnd (decl boundary). Parsing at the `parseAddSub` level rather than
+-- full `parseExpr` prevents an arm body from accidentally grabbing a
+-- trailing `| ...` as part of a nested match — safe because 15's match
+-- bodies never themselves contain bare `let`/`match`/lambdas (those are
+-- Phase 7.5+).
+fn parseArmBody(toks List[Token]) = parseAddSub toks
+
+-- Pattern: int literal, lowercase var binder, or wildcard `_`. Ctor /
+-- cons / list / tuple / string patterns all stay in Phase 7.5+.
+fn parsePat(toks List[Token]) =
+  | TInt n :: rest -> (PInt n, rest)
+  | TUnder :: rest -> (PWild, rest)
+  | TLower s :: rest -> (PVar s, rest)
+  | _ -> (PWild, toks)
 
 -- Arithmetic precedence cascade, same shape as 13/14.
 fn parseAddSub(toks List[Token]) =
@@ -462,6 +588,31 @@ fn showReturn(r Maybe[TypeRef]) Str =
     | Some t -> showTypeRef t
     | None -> "?"
 
+-- Pattern pretty-printer for match arms (Phase 7.5a).
+fn showPat(p Pat) Str =
+  | PInt n -> intToStr n
+  | PVar s -> s
+  | PWild -> "_"
+
+-- Render a single `| pat -> body` arm; helper for `showArms`.
+fn showArm(p Pat)(body Expr) Str =
+  strConcat (strConcat (strConcat "| " (showPat p)) " -> ") (showExpr body)
+
+-- Walk the two parallel lists in lockstep to produce `| pat -> body`
+-- chunks joined by single spaces. The invariant `length pats == length
+-- bodies` is maintained by `parseArms`.
+fn showArms(pats List[Pat])(bodies List[Expr]) Str =
+  match pats with
+    | p :: ps ->
+      match bodies with
+        | b :: bs ->
+          let head = showArm p b in
+          let tail = showArms ps bs in
+          if strLen tail == 0 then head
+          else strConcat (strConcat head " ") tail
+        | _ -> ""
+    | _ -> ""
+
 -- Fully-parenthesised expression pretty-printer, matching 13/14's shape
 -- so the runtime test can substring-match each body.
 fn showExpr(e Expr) Str =
@@ -476,6 +627,9 @@ fn showExpr(e Expr) Str =
     let p1 = strConcat "(if " (showExpr c) in
     let p2 = strConcat (strConcat p1 " then ") (showExpr a) in
     strConcat (strConcat (strConcat p2 " else ") (showExpr b)) ")"
+  | EMatch scrut pats bodies ->
+    let head = strConcat (strConcat "(match " (showExpr scrut)) " with " in
+    strConcat (strConcat head (showArms pats bodies)) ")"
 
 fn showFnDecl(d FnDecl) Str =
   | MkFn name prms ret body ->
@@ -483,8 +637,14 @@ fn showFnDecl(d FnDecl) Str =
     let arrowPart = strConcat (strConcat headPart " -> ") (showReturn ret) in
     strConcat (strConcat arrowPart " = ") (showExpr body)
 
+-- Let-decl pretty printer (Phase 7.5a): `let <name> = <show expr>`.
+fn showLetDecl(d LetDecl) Str =
+  | MkLet name body ->
+    strConcat (strConcat (strConcat "let " name) " = ") (showExpr body)
+
 fn showDecl(d Decl) Str =
   | DType td -> showTypeDecl td
+  | DLet ld -> showLetDecl ld
   | DFn fd -> showFnDecl fd
 
 -- Render a list of decls joined by `\n`, matching the input layout.
@@ -500,7 +660,7 @@ fn showModule(m Module) Str =
 -- ---------- Driver -------------------------------------------------------
 
 fn main() =
-  let src = "module Examples.Toy\ntype Maybe A = Some A | None\ntype Color = Red | Green | Blue\nfn double(x Int) Int = x * 2\nfn pickColor(x Int) Color = if x then Red else Green\nfn answer() Int = 42" in
+  let src = "module Examples.Bigger\ntype Maybe A = Some A | None\ntype Color = Red | Green | Blue\nlet answer = 42\nlet zero = 0\nfn double(x Int) Int = x * 2\nfn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\nfn pickColor(x Int) Color = if x then Red else Green" in
   let toks = tokenize src in
   let mod = parseModule toks in
   printfn (showModule mod)
