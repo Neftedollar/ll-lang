@@ -132,31 +132,35 @@ Source (.lll)
   Lexer          — tokenizes with synthetic INDENT/DEDENT
     │
     ▼
-  Parser         — produces typed AST
+  Parser         — produces AST
     │
     ▼
   Elaborator     — resolves names, checks tags, validates exhaustiveness
     │
     ▼
-  [Phase 4] H-M Inference  — full type inference (in progress)
+  HMInfer        — Algorithm W, let-generalization, trait dispatch (E006),
+                   occurs check (E008), unit algebra preservation
     │
     ▼
-  [Phase 5] Codegen        — .NET IL / F# target
+  Codegen        — emits idiomatic F# source
+    │
+    ▼
+  dotnet fsi     — runs the result (via `llc run`)
 ```
 
 ## Status
 
-**Phases 1–3 complete. 88 tests passing.**
+**Phases 1–5 complete. 191 tests passing. Working end-to-end compiler.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 1 | Spec — grammar, type rules, example corpus | Done |
-| 2 | Lexer + Parser | Done |
-| 3 | Elaborator — name resolution, tag/unit checks, exhaustiveness | Done |
-| 4 | H-M type inference | In progress |
-| 5 | Code generation (.NET IL) | Planned |
-| 6 | Standard library | Planned |
-| 7 | Self-hosting | Planned |
+| 1 | Spec — grammar, type rules, example corpus | ✅ Done |
+| 2 | Lexer + Parser | ✅ Done |
+| 3 | Elaborator — name resolution, tag/unit checks, exhaustiveness | ✅ Done |
+| 4 | Hindley-Milner inference + TypedAST + trait dispatch | ✅ Done |
+| 5 | F# source codegen + `llc` CLI (`build` / `run`) | ✅ Done |
+| 6 | Standard library expansion | Planned |
+| 7 | Self-hosting bootstrap | Planned |
 
 ## Getting Started
 
@@ -166,32 +170,57 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test
+dotnet test    # 191 tests
 ```
 
-All 88 tests should pass.
+### Run your first program
+
+```bash
+cat > hello.lll <<'EOF'
+module Hello
+
+fn main() = printfn "Hello, ll-lang!"
+EOF
+
+dotnet run --project src/LLLangTool -- run hello.lll
+# → Hello, ll-lang!
+```
+
+### CLI
+
+```
+llc build <file.lll>   # elaborate + infer + emit <file>.fs
+llc run <file.lll>     # build + execute via dotnet fsi
+```
 
 ## Project Structure
 
 ```
-spec/                    — formal grammar (EBNF), type rules, example corpus
+spec/                      — formal grammar (EBNF), type rules, example corpus
   grammar.ebnf
-  examples/valid/        — valid .lll programs
-  examples/invalid/      — programs with expected error codes
-src/LLLangCompiler/      — compiler source (F#)
-  AST.fs                 — AST types
-  Lexer.fs               — tokenizer
-  Parser.fs              — parser
-  Elaborator.fs          — name resolution + type checking
-tests/LLLangTests/       — test suite (88 tests)
+  type-system.md
+  error-codes.md
+  examples/valid/          — working .lll programs (hello, basics, ADTs, ...)
+  examples/invalid/        — programs annotated with expected error codes
+src/LLLangCompiler/        — compiler library (F#)
+  AST.fs                   — untyped surface AST
+  Lexer.fs                 — tokenizer with layout (INDENT/DEDENT)
+  Parser.fs                — recursive-descent parser
+  Elaborator.fs            — name resolution, declared-type checking (E001-E005)
+  Types.fs                 — TypeScheme, Subst, generalize/instantiate
+  TypedAST.fs              — typed AST after H-M inference
+  HMInfer.fs               — Algorithm W, unification (E008), trait dispatch (E006)
+  Codegen.fs               — F# source emitter
+  Compiler.fs              — end-to-end pipeline entry point
+src/LLLangTool/            — `llc` CLI (build / run)
+tests/LLLangTests/         — xUnit test suite (191 tests)
 ```
 
 ## Roadmap
 
-- **Phase 4** — Hindley-Milner inference: full parametric polymorphism, let-generalization
-- **Phase 5** — Code generation: compile to .NET IL or transpile to F#
-- **Phase 6** — Standard library: List, Option, Result, IO primitives
-- **Phase 7** — Self-hosting: ll-lang compiler written in ll-lang
+- **Phase 6** — Standard library: `List`, `Maybe`, `Result`, `Str`, `Math`, IO primitives
+- **Phase 7** — Self-hosting: rewrite the ll-lang compiler in ll-lang itself
+- **Multi-target** — TypeScript / Python / JVM / LLVM backends after self-hosting
 
 ## Design Philosophy
 

@@ -2,3 +2,6 @@ bin/
 obj/
 *.user
 .vs/
+
+# unrelated sibling MCP project
+my-mcps/
