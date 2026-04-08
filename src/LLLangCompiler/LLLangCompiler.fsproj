@@ -11,5 +11,8 @@
     <Compile Include="AST.fs" />
     <Compile Include="Parser.fs" />
     <Compile Include="Elaborator.fs" />
+    <Compile Include="Types.fs" />
+    <Compile Include="TypedAST.fs" />
+    <Compile Include="HMInfer.fs" />
   </ItemGroup>
 </Project>
