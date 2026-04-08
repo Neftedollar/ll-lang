@@ -31,5 +31,6 @@
     <Compile Include="ExprParserTests.fs" />
     <Compile Include="ModuleParserTests.fs" />
     <Compile Include="ElaboratorRealTests.fs" />
+    <Compile Include="PipelineRealTests.fs" />
   </ItemGroup>
 </Project>
