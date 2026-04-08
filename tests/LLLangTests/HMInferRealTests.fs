@@ -61,20 +61,27 @@ let ``18-hminfer-real.lll runs and emits unify + inferExpr result lines`` () =
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
-    // Phase 7.7a covered the unify tests t1-t5. Phase 7.7b extends `main`
+    // Phase 7.7a covered the unify tests t1-t5. Phase 7.7b extended `main`
     // with inference tests t6-t10 that exercise `inferExpr` against
     // literal / addition / var-in-env / application-in-env / app-mismatch
-    // expression shapes:
-    //   t1: unify Int Int                          -> ok
-    //   t2: unify Int Str                          -> mismatch
-    //   t3: unify a Int                            -> ok bound a
-    //   t4: unify (Int -> Str) (Int -> Str)        -> ok
-    //   t5: unify (Int -> Str) (Int -> Bool)       -> mismatch
-    //   t6: infer (EInt 42)                        -> Int
-    //   t7: infer (EAdd 1 2)                       -> Int
-    //   t8: infer (EVar "x") {x: Int}              -> Int
-    //   t9: infer (EApp double (EInt 5))           -> Int
+    // expression shapes. Phase 7.7c adds t11-t15: ELam (identity +
+    // lambda-with-Add), ELet (mono-bind), and EIf (then/else same type +
+    // then/else mismatch).
+    //   t1:  unify Int Int                         -> ok
+    //   t2:  unify Int Str                         -> mismatch
+    //   t3:  unify a Int                           -> ok bound a
+    //   t4:  unify (Int -> Str) (Int -> Str)       -> ok
+    //   t5:  unify (Int -> Str) (Int -> Bool)      -> mismatch
+    //   t6:  infer (EInt 42)                       -> Int
+    //   t7:  infer (EAdd 1 2)                      -> Int
+    //   t8:  infer (EVar "x") {x: Int}             -> Int
+    //   t9:  infer (EApp double (EInt 5))          -> Int
     //   t10: infer (EApp double (EStr "x"))        -> ERROR (unify fail)
+    //   t11: infer (ELam "x" (EVar "x"))           -> ($0 -> $0) identity
+    //   t12: infer (ELam "x" (EAdd (EVar "x") 1))  -> (Int -> Int)
+    //   t13: infer (ELet "x" 5 (EAdd (EVar "x") 1))-> Int
+    //   t14: infer (EIf true 1 2)                  -> Int
+    //   t15: infer (EIf true 1 "x")                -> ERROR (branch mismatch)
     let expected =
         [ "t1 unify Int Int ok"
           "t2 unify Int Str mismatch"
@@ -85,7 +92,12 @@ let ``18-hminfer-real.lll runs and emits unify + inferExpr result lines`` () =
           "t7 infer (1 + 2) : Int"
           "t8 infer x in env : Int"
           "t9 infer (double 5) in env : Int"
-          "t10 infer (double \"x\") in env : ERROR" ]
+          "t10 infer (double \"x\") in env : ERROR"
+          "t11 infer (\\x. x) : ($0 -> $0)"
+          "t12 infer (\\x. x + 1) : (Int -> Int)"
+          "t13 infer (let x = 5 in x + 1) : Int"
+          "t14 infer (if true then 1 else 2) : Int"
+          "t15 infer (if true then 1 else \"x\") : ERROR" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),
