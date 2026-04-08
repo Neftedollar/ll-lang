@@ -579,26 +579,85 @@ let private parseFnBody (c: Ctx) : Result<Expr, string> =
     | _ -> parseExprInner c
 
 let private parseTypeBody (c: Ctx) : Result<TypeBody, string> =
+    // Helper: parse a single sum-type arm `Ctor arg1 arg2 ...` starting at a TypeId.
+    // Returns Ok None if curTok is not a TypeId.
+    let parseSumArm () : Result<(TypeIdent * TypeExpr list) option, string> =
+        match curTok c with
+        | TypeId name ->
+            advance c
+            let args = ResizeArray<TypeExpr>()
+            let mutable argCont = true
+            while argCont do
+                match curTok c with
+                | TypeId _ | Ident _ | LParen ->
+                    let saved = c.Pos
+                    match parseTypeExpr c with
+                    | Ok te -> args.Add(te)
+                    | Error _ -> c.Pos <- saved; argCont <- false
+                | _ -> argCont <- false
+            Ok (Some (name, List.ofSeq args))
+        | _ -> Ok None
+
+    // Phase 7.1.6: multi-line sum type form.
+    //   type Token =
+    //     | TIdent Str
+    //     | TNum Str
+    //     | TLParen
+    // After `=`, the parser sees Newline+Indent. Parse a sequence of `| Ctor args`
+    // arms separated by newlines until Dedent. Both forms produce TBSum.
+    let tryParseMultiLineSum () : Result<TypeBody, string> option =
+        // Save position so we can rewind if it's not actually a multi-line sum.
+        let saved = c.Pos
+        // Skip leading newlines and look for INDENT followed by `|`.
+        while curTok c = Newline do advance c
+        if curTok c = Indent then
+            advance c
+            while curTok c = Newline do advance c
+            if curTok c = Bar then
+                let ctors = ResizeArray<TypeIdent * TypeExpr list>()
+                let mutable cont = true
+                let mutable err = None
+                while cont && curTok c = Bar do
+                    advance c  // consume |
+                    match parseSumArm () with
+                    | Ok (Some arm) ->
+                        ctors.Add(arm)
+                        // Skip trailing newlines between arms.
+                        while curTok c = Newline do advance c
+                    | Ok None ->
+                        err <- Some "Expected constructor name after '|' in sum type body"
+                        cont <- false
+                    | Error e ->
+                        err <- Some e
+                        cont <- false
+                // Consume the closing DEDENT (and trailing newlines).
+                while curTok c = Newline do advance c
+                skip c Dedent |> ignore
+                match err with
+                | Some e -> Some (Error e)
+                | None ->
+                    if ctors.Count > 0 then Some (Ok (TBSum (List.ofSeq ctors)))
+                    else Some (Error "Expected at least one constructor arm in sum type body")
+            else
+                // Not a multi-line sum — rewind.
+                c.Pos <- saved
+                None
+        else
+            c.Pos <- saved
+            None
+
+    match tryParseMultiLineSum () with
+    | Some result -> result
+    | None ->
     match curTok c with
     | TypeId _ ->
         // Sum type: Ctor1 args | Ctor2 args | ...
         let ctors = ResizeArray<TypeIdent * TypeExpr list>()
         let mutable cont = true
         while cont do
-            match curTok c with
-            | TypeId name ->
-                advance c
-                let args = ResizeArray<TypeExpr>()
-                let mutable argCont = true
-                while argCont do
-                    match curTok c with
-                    | TypeId _ | Ident _ | LParen ->
-                        let saved = c.Pos
-                        match parseTypeExpr c with
-                        | Ok te -> args.Add(te)
-                        | Error _ -> c.Pos <- saved; argCont <- false
-                    | _ -> argCont <- false
-                ctors.Add((name, List.ofSeq args))
+            match parseSumArm () with
+            | Ok (Some arm) ->
+                ctors.Add(arm)
                 if curTok c = Bar then advance c
                 else cont <- false
             | _ -> cont <- false

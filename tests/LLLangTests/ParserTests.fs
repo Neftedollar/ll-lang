@@ -164,6 +164,48 @@ let ``parse sum type`` () =
     | DType("Shape", [], TBSum ctors) -> Assert.Equal(2, ctors.Length)
     | d -> failwith $"Expected DType Shape, got {d}"
 
+// --- Phase 7.1.6: multi-line sum type declarations ---
+
+[<Fact>]
+let ``parse multi-line sum type with three indented arms`` () =
+    let src =
+        "module M\n" +
+        "type Token =\n" +
+        "  | TIdent Str\n" +
+        "  | TNum Str\n" +
+        "  | TLParen\n"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DType("Token", [], TBSum ctors) ->
+        Assert.Equal(3, ctors.Length)
+        Assert.Equal("TIdent", fst ctors[0])
+        Assert.Equal("TNum",   fst ctors[1])
+        Assert.Equal("TLParen", fst ctors[2])
+        Assert.Equal(1, (snd ctors[0]).Length)  // TIdent has one Str arg
+        Assert.Equal(0, (snd ctors[2]).Length)  // TLParen has no args
+    | d -> failwith $"Expected DType Token with TBSum 3 arms, got {d}"
+
+[<Fact>]
+let ``parse multi-line sum type with type parameter`` () =
+    let src =
+        "module M\n" +
+        "type Maybe A =\n" +
+        "  | Some A\n" +
+        "  | None\n"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DType("Maybe", [TPBare "A"], TBSum ctors) ->
+        Assert.Equal(2, ctors.Length)
+    | d -> failwith $"Expected DType Maybe A multi-line, got {d}"
+
+[<Fact>]
+let ``single-line sum type still works (regression)`` () =
+    let src = "module M\ntype Shape = Circle Float | Empty"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DType("Shape", [], TBSum ctors) -> Assert.Equal(2, ctors.Length)
+    | d -> failwith $"Expected DType Shape, got {d}"
+
 [<Fact>]
 let ``parse tag declaration`` () =
     let src = "module M\ntag UserId"
