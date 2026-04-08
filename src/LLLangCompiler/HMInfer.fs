@@ -7,13 +7,43 @@ open LLLang.Elaborator
 
 // ---- Error helpers -------------------------------------------------------
 
-let private mkErr code msg : LLError = { Code = code; Line = 0; Col = 0; Message = msg }
-let private e001 t1 t2 = mkErr E001 $"E001 TypeMismatch {t1} vs {t2}"
-let private e002 name  = mkErr E002 $"E002 UnboundVar {name}"
-let private e004 t1 t2 = mkErr E004 $"E004 UnitMismatch {t1} vs {t2}"
-let private e005 t1 t2 = mkErr E005 $"E005 TaggedUntaggedMismatch {t1} vs {t2}"
-let private e006 tr ty = mkErr E006 $"E006 MissingImpl {tr} for {ty}"
-let private e008 v  t  = mkErr E008 $"E008 OccursCheck {v} in {t}"
+let private mkErr code line col msg : LLError =
+    { Code = code; Line = line; Col = col
+      Message = sprintf "%s %d:%d %s" (code.ToString()) line col msg }
+
+/// Position-less error emitters. Unification returns errors without a
+/// source position (it doesn't see the source AST); callers that DO know
+/// the source expression later reposition the error via `repos`.
+let private e001 t1 t2 = mkErr E001 0 0 $"TypeMismatch {t1} vs {t2}"
+let private e002 name  = mkErr E002 0 0 $"UnboundVar {name}"
+let private e004 t1 t2 = mkErr E004 0 0 $"UnitMismatch {t1} vs {t2}"
+let private e005 t1 t2 = mkErr E005 0 0 $"TaggedUntaggedMismatch {t1} vs {t2}"
+let private e006 tr ty = mkErr E006 0 0 $"MissingImpl {tr} for {ty}"
+let private e008 v  t  = mkErr E008 0 0 $"OccursCheck {v} in {t}"
+
+/// Look up a node's source position in the PosMap side-table.
+/// Accepts `obj | null` so callers can pass the result of `box` directly
+/// without having to satisfy F#'s nullness checker.
+let private posOf (pm: PosMap) (node: obj | null) : int * int =
+    PosMap.tryFind pm node |> fun p -> (p.Line, p.Col)
+
+/// Rewrite an error's line/col (and its rendered Message) to match `(ln, col)`.
+/// Used to attach a caller-supplied source position to errors produced by
+/// position-agnostic helpers like `unify`. If the error already has a
+/// non-zero line, keep it (nested errors can supply their own position).
+let private repos (ln: int) (col: int) (err: LLError) : LLError =
+    if err.Line <> 0 || err.Col <> 0 then err
+    else
+        // Reconstruct the Message with the new line/col. The format is
+        // "EXXX L:C Rest..." — split off the first two whitespace-separated
+        // tokens and replace the second ("L:C") with the new one.
+        let parts = err.Message.Split([| ' ' |], 3)
+        let newMsg =
+            if parts.Length >= 2 then
+                let rest = if parts.Length = 3 then " " + parts[2] else ""
+                sprintf "%s %d:%d%s" parts[0] ln col rest
+            else err.Message
+        { err with Line = ln; Col = col; Message = newMsg }
 
 // ---- Helpers -------------------------------------------------------------
 
@@ -60,10 +90,12 @@ type private InferState = {
     mutable Errors: LLError list
     mutable Dispatch: Map<ExprId, DispatchInfo>
     mutable NextId: int
+    /// Source position side-table from the parser.
+    Positions: PosMap
 }
 
-let private newState () : InferState =
-    { Fresh = newFreshState (); Errors = []; Dispatch = Map.empty; NextId = 0 }
+let private newState (pm: PosMap) : InferState =
+    { Fresh = newFreshState (); Errors = []; Dispatch = Map.empty; NextId = 0; Positions = pm }
 
 let private newId (st: InferState) : ExprId =
     let n = st.NextId in st.NextId <- n + 1; n
@@ -72,10 +104,28 @@ let private mkTyped (st: InferState) (kind: TypedExprKind) (ty: TypeExpr) : Type
     { Id = newId st; Type = ty; Expr = kind }
 
 /// Unify and push any error into state, returning empty subst on failure.
+/// Errors are stamped with 0:0 — callers that want a real position should
+/// use `unifyAt` instead (passing the source expression for lookup).
 let private unifyS (st: InferState) (t1: TypeExpr) (t2: TypeExpr) : Subst =
     match unify t1 t2 with
     | Ok s -> s
     | Error e -> st.Errors <- st.Errors @ [e]; empty
+
+/// Unify with a source expression for position reporting. Any emitted error
+/// gets its line/col stamped from `srcNode`'s entry in the PosMap (or 0:0
+/// if not present).
+let private unifyAt (st: InferState) (srcNode: obj | null) (t1: TypeExpr) (t2: TypeExpr) : Subst =
+    match unify t1 t2 with
+    | Ok s -> s
+    | Error e ->
+        let (ln, col) = posOf st.Positions srcNode
+        st.Errors <- st.Errors @ [repos ln col e]
+        empty
+
+/// Push an unbound-var/ctor error with the source position of `srcNode`.
+let private pushE002 (st: InferState) (srcNode: obj | null) (name: string) =
+    let (ln, col) = posOf st.Positions srcNode
+    st.Errors <- st.Errors @ [repos ln col (e002 name)]
 
 // ---- Walk typed tree applying a substitution --------------------------------
 
@@ -129,7 +179,7 @@ let rec private inferExpr (env: Env) (st: InferState) (expr: Expr) : Subst * Typ
     | EVar x ->
         match Map.tryFind x env with
         | None ->
-            st.Errors <- st.Errors @ [e002 x]
+            pushE002 st (box expr) x
             let beta = freshVar st.Fresh
             (empty, beta, mkTyped st (TEVar x) beta)
         | Some sch ->
@@ -139,7 +189,7 @@ let rec private inferExpr (env: Env) (st: InferState) (expr: Expr) : Subst * Typ
     | ECon c ->
         match Map.tryFind c env with
         | None ->
-            st.Errors <- st.Errors @ [e002 c]
+            pushE002 st (box expr) c
             let beta = freshVar st.Fresh
             (empty, beta, mkTyped st (TECon c) beta)
         | Some sch ->
@@ -189,7 +239,9 @@ let rec private inferExpr (env: Env) (st: InferState) (expr: Expr) : Subst * Typ
                 let env1 = applyEnv s1 env
                 let (s2, tauA, teA) = inferExpr env1 st a
                 let beta = freshVar st.Fresh
-                let s3 = unifyS st (applyType s2 tauF) (TyFn(tauA, beta))
+                // EApp position is at the argument token — that's where
+                // E001 TypeMismatch should point for the caller.
+                let s3 = unifyAt st (box expr) (applyType s2 tauF) (TyFn(tauA, beta))
                 let sAll = compose s3 (compose s2 s1)
                 let retTy = applyType sAll beta
                 let te = mkTyped st (TEApp(applyTE sAll teF, applyTE sAll teA)) retTy
@@ -199,7 +251,7 @@ let rec private inferExpr (env: Env) (st: InferState) (expr: Expr) : Subst * Typ
             let env1 = applyEnv s1 env
             let (s2, tauA, teA) = inferExpr env1 st a
             let beta = freshVar st.Fresh
-            let s3 = unifyS st (applyType s2 tauF) (TyFn(tauA, beta))
+            let s3 = unifyAt st (box expr) (applyType s2 tauF) (TyFn(tauA, beta))
             let sAll = compose s3 (compose s2 s1)
             let retTy = applyType sAll beta
             let te = mkTyped st (TEApp(applyTE sAll teF, applyTE sAll teA)) retTy
@@ -328,10 +380,13 @@ let rec private inferExpr (env: Env) (st: InferState) (expr: Expr) : Subst * Typ
         let (s0, tauScrut, teScrut) = inferExpr env st scrut
         let env0 = applyEnv s0 env
         let alpha = freshVar st.Fresh   // result type
+        // Any error bubbling up from this match should be attributed to
+        // the match expression's source position.
+        let matchObj = box expr
         let (sAll, typedBranches) =
             List.fold (fun (sAcc, brsAcc) (pat, body) ->
                 let (patTy, bindings) = patternType st env0 pat
-                let su = unifyS st (applyType sAcc patTy) (applyType sAcc tauScrut)
+                let su = unifyAt st matchObj (applyType sAcc patTy) (applyType sAcc tauScrut)
                 let sAccPlusSu = compose su sAcc
                 let envExt =
                     List.fold
@@ -340,7 +395,7 @@ let rec private inferExpr (env: Env) (st: InferState) (expr: Expr) : Subst * Typ
                         bindings
                 let (sb, tauB, teB) = inferExpr envExt st body
                 let sbAll = compose sb sAccPlusSu
-                let sr = unifyS st (applyType sbAll tauB) (applyType sbAll alpha)
+                let sr = unifyAt st matchObj (applyType sbAll tauB) (applyType sbAll alpha)
                 let sStep = compose sr sbAll
                 let tp = { Pat = pat; Type = applyType sStep patTy }
                 (sStep, brsAcc @ [(tp, applyTE sStep teB)])
@@ -353,13 +408,14 @@ let rec private inferExpr (env: Env) (st: InferState) (expr: Expr) : Subst * Typ
         // Match as expression: synthesize scrutinee var, build function type
         let alpha = freshVar st.Fresh  // scrutinee type
         let beta  = freshVar st.Fresh  // result type
+        let matchObj = box expr
         let (sAll, typedBranches) =
             List.fold (fun (sAcc, brsAcc) (pat, body) ->
                 let (patTy, patBindings) = patternType st env pat
-                let su = unifyS st (applyType sAcc patTy) (applyType sAcc alpha)
+                let su = unifyAt st matchObj (applyType sAcc patTy) (applyType sAcc alpha)
                 let envExt = List.fold (fun e (n, t) -> Map.add n (mono t) e) (applyEnv (compose su sAcc) env) patBindings
                 let (sb, tauB, teB) = inferExpr envExt st body
-                let sr = unifyS st (applyType sb tauB) (applyType (compose sb su) beta)
+                let sr = unifyAt st matchObj (applyType sb tauB) (applyType (compose sb su) beta)
                 let sStep = compose sr (compose sb (compose su sAcc))
                 let tp = { Pat = pat; Type = applyType sStep patTy }
                 (sStep, brsAcc @ [(tp, applyTE sStep teB)])
@@ -548,6 +604,7 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
             | Some ty -> ty
             | None -> freshVar st.Fresh
         // Special case: body is EMatch -> last param is scrutinee
+        let bodyObj = box body
         let (sBody, tauBody, teBody) =
             match body with
             | EMatch branches when not (List.isEmpty normParams) ->
@@ -558,10 +615,10 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
                 let (sAll, typedBranches) =
                     List.fold (fun (sAcc, brsAcc) (pat, branchBody) ->
                         let (patTy, patBindings) = patternType st paramEnv pat
-                        let su = unifyS st (applyType sAcc patTy) (applyType sAcc lastParamTy)
+                        let su = unifyAt st bodyObj (applyType sAcc patTy) (applyType sAcc lastParamTy)
                         let envExt = List.fold (fun e (n, t) -> Map.add n (mono t) e) (applyEnv (compose su sAcc) paramEnv) patBindings
                         let (sb, tauB, teB) = inferExpr envExt st branchBody
-                        let sr = unifyS st (applyType sb tauB) (applyType (compose sb su) beta)
+                        let sr = unifyAt st bodyObj (applyType sb tauB) (applyType (compose sb su) beta)
                         let sStep = compose sr (compose sb (compose su sAcc))
                         let tp = { Pat = pat; Type = applyType sStep patTy }
                         (sStep, brsAcc @ [(tp, applyTE sStep teB)])
@@ -572,7 +629,7 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
             | _ ->
                 inferExpr paramEnv st body
         // Unify body type with expected return
-        let sRet = unifyS st (applyType sBody tauBody) (applyType sBody expectedRet)
+        let sRet = unifyAt st bodyObj (applyType sBody tauBody) (applyType sBody expectedRet)
         let sAll = compose sRet sBody
         // Build full fn type (curried)
         let paramTys = normParams |> List.map (fun (_, ty) -> applyType sAll ty)
@@ -625,6 +682,7 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
                 | Some ty -> ty
                 | None -> freshVar st.Fresh
             // Handle match bodies (last param is scrutinee)
+            let bodyObj = box body
             let (sBody, tauBody, teBody) =
                 match body with
                 | EMatch branches when not (List.isEmpty normParams) ->
@@ -634,10 +692,10 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
                     let (sAll, typedBranches) =
                         List.fold (fun (sAcc, brsAcc) (pat, branchBody) ->
                             let (patTy, patBindings) = patternType st paramEnv pat
-                            let su = unifyS st (applyType sAcc patTy) (applyType sAcc lastParamTy)
+                            let su = unifyAt st bodyObj (applyType sAcc patTy) (applyType sAcc lastParamTy)
                             let envExt = List.fold (fun e (n, t) -> Map.add n (mono t) e) (applyEnv (compose su sAcc) paramEnv) patBindings
                             let (sb, tauB, teB) = inferExpr envExt st branchBody
-                            let sr = unifyS st (applyType sb tauB) (applyType (compose sb su) beta)
+                            let sr = unifyAt st bodyObj (applyType sb tauB) (applyType (compose sb su) beta)
                             let sStep = compose sr (compose sb (compose su sAcc))
                             let tp = { Pat = pat; Type = applyType sStep patTy }
                             (sStep, brsAcc @ [(tp, applyTE sStep teB)])
@@ -647,7 +705,7 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
                     (sAll, applyType sAll beta, matchTE)
                 | _ ->
                     inferExpr paramEnv st body
-            let sRet = unifyS st (applyType sBody tauBody) (applyType sBody expectedRet)
+            let sRet = unifyAt st bodyObj (applyType sBody tauBody) (applyType sBody expectedRet)
             let sAll = compose sRet sBody
             let paramTys = normParams |> List.map (fun (_, ty) -> applyType sAll ty)
             let retTy = applyType sAll expectedRet
@@ -670,9 +728,9 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
 
 // ---- Main entry point -------------------------------------------------------
 
-let infer (m: LLModule) (env0: Elaborator.TypeEnv) : Result<TypedModule, LLError list> =
+let infer (pm: PosMap) (m: LLModule) (env0: Elaborator.TypeEnv) : Result<TypedModule, LLError list> =
     let initEnv = fromElaboratorEnv env0
-    let st = newState ()
+    let st = newState pm
     // ---- Pass 1: add tentative mono schemes for every top-level DFn ----
     //
     // Build a tentative TyFn type from declared param / return types. Untyped

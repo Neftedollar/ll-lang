@@ -2,6 +2,7 @@ module LLLang.Tests.RealLexerTests
 
 open System.IO
 open Xunit
+open LLLang.AST
 open LLLang.Lexer
 open LLLang.Parser
 open LLLang.Elaborator
@@ -19,13 +20,13 @@ let private readValid name =
 [<Fact>]
 let ``09-lexer-real.lll parses, elaborates, and infers without errors`` () =
     let src = readValid "09-lexer-real.lll"
-    match tokenize src |> Result.bind parseModule with
+    match tokenize src |> Result.bind parseModuleWithPos with
     | Error e -> Assert.Fail($"parse: {e}")
-    | Ok m ->
-        match elaborate m with
+    | Ok (m, pm) ->
+        match elaborate pm m with
         | Error es -> Assert.Fail($"elaborator: {es}")
         | Ok (m', env) ->
-            match infer m' env with
+            match infer pm m' env with
             | Error es -> Assert.Fail($"infer: {es}")
             | Ok tm -> Assert.NotNull(tm.Env)
 

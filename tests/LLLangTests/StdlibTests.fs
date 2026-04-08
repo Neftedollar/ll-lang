@@ -13,12 +13,12 @@ open LLLang.Codegen
 // ---- helpers ----
 
 let private inferSrc (src: string) : Result<TypedModule, LLError list> =
-    match tokenize src |> Result.bind parseModule with
+    match tokenize src |> Result.bind parseModuleWithPos with
     | Error e -> failwith $"parse: {e}"
-    | Ok m ->
-        match elaborate m with
+    | Ok (m, pm) ->
+        match elaborate pm m with
         | Error es -> failwith $"elaborator: {es}"
-        | Ok (m', env) -> infer m' env
+        | Ok (m', env) -> infer pm m' env
 
 let private inferOk (src: string) : TypedModule =
     match inferSrc src with

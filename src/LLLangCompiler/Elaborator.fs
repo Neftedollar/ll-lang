@@ -305,9 +305,17 @@ let private classifyMismatch (paramType: TypeExpr) (argType: TypeExpr) line col 
     | _ ->
         e001 line col argType paramType
 
+/// Look up the source position of an AST node in the PosMap side-table.
+/// Returns 0:0 when a node was synthesized (no source location recorded).
+let private posOf (pm: PosMap) (node: obj | null) : int * int =
+    let p = PosMap.tryFind pm node
+    (p.Line, p.Col)
+
 /// Pass 2: type-check an expression, accumulating errors.
 /// Returns (inferred type, errors). Does NOT throw — errors are collected.
-let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
+/// `pm` is the side-table populated by the parser so error emitters can
+/// attach real line:col to each error.
+let rec private typeOf (pm: PosMap) (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
     match expr with
     | ELit(LInt _)   -> (TyName "Int",   [])
     | ELit(LFloat _) -> (TyName "Float", [])
@@ -316,29 +324,34 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
     | ELit(LChar _)  -> (TyName "Char",  [])
 
     | ETagged(e, tag) ->
-        let (innerType, errs) = typeOf e env
+        let (innerType, errs) = typeOf pm e env
         (TyTagged(innerType, UName tag), errs)
 
     | EVar x ->
         match Map.tryFind x env with
         | Some ty -> (ty, [])
-        | None    -> (TyVar "?", [e002 0 0 x])
+        | None    ->
+            let (ln, col) = posOf pm (box expr)
+            (TyVar "?", [e002 ln col x])
 
     | ECon c ->
         match Map.tryFind c env with
         | Some ty -> (ty, [])
-        | None    -> (TyVar "?", [e002 0 0 c])
+        | None    ->
+            let (ln, col) = posOf pm (box expr)
+            (TyVar "?", [e002 ln col c])
 
     | EApp(f, arg) ->
-        let (fType, fe) = typeOf f env
-        let (argType, ae) = typeOf arg env
+        let (fType, fe) = typeOf pm f env
+        let (argType, ae) = typeOf pm arg env
         let allErrors = fe @ ae
         match fType with
         | TyFn(paramType, returnType) ->
             if tyEqual argType paramType then
                 (returnType, allErrors)
             else
-                let err = classifyMismatch paramType argType 0 0
+                let (ln, col) = posOf pm (box expr)
+                let err = classifyMismatch paramType argType ln col
                 (returnType, allErrors @ [err])
         | _ ->
             (TyVar "?", allErrors)
@@ -346,17 +359,17 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
     | ELam(_, _) -> (TyVar "?", [])
 
     | EIf(cond, t, e) ->
-        let (_, ce) = typeOf cond env
-        let (_, te) = typeOf t env
-        let (_, ee) = typeOf e env
+        let (_, ce) = typeOf pm cond env
+        let (_, te) = typeOf pm t env
+        let (_, ee) = typeOf pm e env
         (TyVar "?", ce @ te @ ee)
 
     | ELet(x, e, bodyOpt) ->
-        let (eTy, eErrs) = typeOf e env
+        let (eTy, eErrs) = typeOf pm e env
         let env' = Map.add x eTy env
         match bodyOpt with
         | Some body ->
-            let (bTy, bErrs) = typeOf body env'
+            let (bTy, bErrs) = typeOf pm body env'
             (bTy, eErrs @ bErrs)
         | None -> (eTy, eErrs)
 
@@ -370,13 +383,13 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
             | PTuple ps -> ps |> List.collect patVars
             | PCons(h, t) -> patVars h @ patVars t
             | PLit _ | PWild -> []
-        let (eTy, eErrs) = typeOf e env
+        let (eTy, eErrs) = typeOf pm e env
         let env' =
             patVars pat
             |> List.fold (fun acc n -> Map.add n (TyVar "?") acc) env
         match bodyOpt with
         | Some body ->
-            let (bTy, bErrs) = typeOf body env'
+            let (bTy, bErrs) = typeOf pm body env'
             (bTy, eErrs @ bErrs)
         | None -> (eTy, eErrs)
 
@@ -395,7 +408,7 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
                 let localEnv =
                     patVars pat
                     |> List.fold (fun acc n -> Map.add n (TyVar "?") acc) env
-                snd (typeOf branchExpr localEnv))
+                snd (typeOf pm branchExpr localEnv))
         (TyVar "?", errs)
 
     | EMatchOf(scrut, branches) ->
@@ -407,75 +420,77 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
             | PTuple pats -> pats |> List.collect patVars
             | PCons(h, t) -> patVars h @ patVars t
             | PLit _ | PWild -> []
-        let (_, sErrs) = typeOf scrut env
+        let (_, sErrs) = typeOf pm scrut env
         let bErrs =
             branches
             |> List.collect (fun (pat, branchExpr) ->
                 let localEnv =
                     patVars pat
                     |> List.fold (fun acc n -> Map.add n (TyVar "?") acc) env
-                snd (typeOf branchExpr localEnv))
+                snd (typeOf pm branchExpr localEnv))
         (TyVar "?", sErrs @ bErrs)
 
     | ECons(h, t) ->
-        let (_, hErrs) = typeOf h env
-        let (_, tErrs) = typeOf t env
+        let (_, hErrs) = typeOf pm h env
+        let (_, tErrs) = typeOf pm t env
         (TyVar "?", hErrs @ tErrs)
 
     | EPipe(e, f) ->
-        let (_, ee) = typeOf e env
-        let (_, fe) = typeOf f env
+        let (_, ee) = typeOf pm e env
+        let (_, fe) = typeOf pm f env
         (TyVar "?", ee @ fe)
 
     | EList(elems) ->
-        let errs = elems |> List.collect (fun el -> snd (typeOf el env))
+        let errs = elems |> List.collect (fun el -> snd (typeOf pm el env))
         (TyVar "?", errs)
 
     | ETuple(elems) ->
-        let errs = elems |> List.collect (fun el -> snd (typeOf el env))
+        let errs = elems |> List.collect (fun el -> snd (typeOf pm el env))
         (TyVar "?", errs)
 
 /// Check a single declaration for errors, given the already-built TypeEnv.
-let private checkDecl (decl: Decl) (env: TypeEnv) : LLError list =
+let private checkDecl (pm: PosMap) (decl: Decl) (env: TypeEnv) : LLError list =
     match decl with
     | DFn(sigRecord, body) ->
         // Extend env with the function's own parameters (normalize type params)
         let localEnv =
             sigRecord.Params
             |> List.fold (fun acc (paramName, paramType) -> Map.add paramName (normalizeFnTy paramType) acc) env
-        snd (typeOf body localEnv)
+        snd (typeOf pm body localEnv)
 
     | DLet(_, expr) ->
-        snd (typeOf expr env)
+        snd (typeOf pm expr env)
 
     | DLetPat(_, expr) ->
-        snd (typeOf expr env)
+        snd (typeOf pm expr env)
 
     | DImpl(_, _, fns) ->
         fns |> List.collect (fun (sigRecord, body) ->
             let localEnv =
                 sigRecord.Params
                 |> List.fold (fun acc (paramName, paramType) -> Map.add paramName (normalizeFnTy paramType) acc) env
-            snd (typeOf body localEnv))
+            snd (typeOf pm body localEnv))
 
     | DType _ | DTag _ | DUnit _ | DTrait _ -> []
 
 /// Check all declarations in a module, accumulating errors.
-let private checkDecls (m: LLModule) (env: TypeEnv) : LLError list =
+let private checkDecls (pm: PosMap) (m: LLModule) (env: TypeEnv) : LLError list =
     m.Decls
-    |> List.collect (fun (decl, _isExported) -> checkDecl decl env)
+    |> List.collect (fun (decl, _isExported) -> checkDecl pm decl env)
 
-/// Recursively find all EMatch branch lists within an expression.
+/// Recursively find all EMatch / EMatchOf expressions within `expr`.
+/// Each entry is (outer match expr, its branch list) — the outer expr is
+/// returned so callers can look up its source position in the PosMap.
 /// Does NOT recurse into ELam (separate scope).
-let rec private collectMatches (expr: Expr) : (Pattern * Expr) list list =
+let rec private collectMatches (expr: Expr) : (Expr * (Pattern * Expr) list) list =
     match expr with
     | EMatch(branches) ->
         let nested = branches |> List.collect (fun (_, e) -> collectMatches e)
-        branches :: nested
+        (expr, branches) :: nested
     | EMatchOf(scrut, branches) ->
         let scrutMatches = collectMatches scrut
         let nested = branches |> List.collect (fun (_, e) -> collectMatches e)
-        scrutMatches @ (branches :: nested)
+        scrutMatches @ ((expr, branches) :: nested)
     | EApp(f, arg) ->
         collectMatches f @ collectMatches arg
     | EIf(cond, t, e) ->
@@ -503,7 +518,9 @@ let rec private collectMatches (expr: Expr) : (Pattern * Expr) list list =
 /// Pass 3: exhaustiveness check for match expressions.
 /// For each DFn whose first parameter type is a named sum type,
 /// verify that every match in the body covers all constructors.
-let private exhaustivenessCheck (m: LLModule) (_env: TypeEnv) : LLError list =
+/// `pm` is used to attach the source position of each offending match
+/// expression to the emitted E003 error.
+let private exhaustivenessCheck (pm: PosMap) (m: LLModule) (_env: TypeEnv) : LLError list =
     // Build map: typeName → constructor name list
     let typeToCtors =
         m.Decls
@@ -522,7 +539,7 @@ let private exhaustivenessCheck (m: LLModule) (_env: TypeEnv) : LLError list =
             | TyName typeName when Map.containsKey typeName typeToCtors ->
                 let requiredCtors = typeToCtors[typeName]
                 let matchBlocks = collectMatches body
-                for branches in matchBlocks do
+                for (matchExpr, branches) in matchBlocks do
                     // A PWild / PVar / PTuple branch is a catch-all relative
                     // to a sum type: tuples are product types, not sum types,
                     // so a PTuple pattern cannot discriminate constructors and
@@ -540,9 +557,12 @@ let private exhaustivenessCheck (m: LLModule) (_env: TypeEnv) : LLError list =
                                 match pat with
                                 | PCon(name, _) -> Some name
                                 | _ -> None)
+                        // Look up the match expression's position so E003
+                        // points at the `match` / first `|` arm rather than 0:0.
+                        let (ln, col) = posOf pm (box matchExpr)
                         for c in requiredCtors do
                             if not (List.contains c coveredCtors) then
-                                yield e003 0 0 typeName c
+                                yield e003 ln col typeName c
             | _ -> ()
         | _ -> () ]
 
@@ -618,10 +638,12 @@ let rewriteTagsInModule (m: LLModule) : LLModule =
 /// Returns Ok (rewrittenModule, TypeEnv) on success, Error errors on any violation.
 /// The rewritten module has all `TyApp(T, TyVar t)` (where `t` is a declared tag)
 /// normalised to `TyTagged(T, UName t)` so HMInfer sees correct types.
-let elaborate (m: LLModule) : Result<LLModule * TypeEnv, LLError list> =
+/// `pm` is the side-table of source positions populated by the parser; pass
+/// `PosMap.empty ()` if positions are unavailable (errors will fall back to 0:0).
+let elaborate (pm: PosMap) (m: LLModule) : Result<LLModule * TypeEnv, LLError list> =
     let m' = rewriteTagsInModule m
     let env = collectDecls m'
-    let checkErrors = checkDecls m' env
-    let exhaustErrors = exhaustivenessCheck m' env
+    let checkErrors = checkDecls pm m' env
+    let exhaustErrors = exhaustivenessCheck pm m' env
     let errors = checkErrors @ exhaustErrors
     if errors.IsEmpty then Ok (m', env) else Error errors

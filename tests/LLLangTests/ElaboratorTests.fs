@@ -9,19 +9,19 @@ open LLLang.Elaborator
 
 /// Lex + parse + elaborate. Returns error list (empty = clean).
 let elab src =
-    match tokenize src |> Result.bind parseModule with
+    match tokenize src |> Result.bind parseModuleWithPos with
     | Error e -> failwith $"parse: {e}"
-    | Ok m ->
-        match elaborate m with
+    | Ok (m, pm) ->
+        match elaborate pm m with
         | Ok _ -> []
         | Error errs -> errs
 
 /// Lex + parse + elaborate. Returns TypeEnv or fails.
 let elabOk src =
-    match tokenize src |> Result.bind parseModule with
+    match tokenize src |> Result.bind parseModuleWithPos with
     | Error e -> failwith $"parse: {e}"
-    | Ok m ->
-        match elaborate m with
+    | Ok (m, pm) ->
+        match elaborate pm m with
         | Ok (_, env) -> env
         | Error errs -> failwith $"unexpected errors: {errs}"
 
