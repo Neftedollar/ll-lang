@@ -813,3 +813,91 @@ seven still drive future work):
 Next tick: **Phase 7.5b** — pick any two of the above remaining seven
 and ship them the same way (in-place extension of 15, TDD for the
 runtime pretty-print expectation, commit-split feat / test / docs).
+
+### 2026-04 — Phase 7.5b: lambdas + let-in chains in fn bodies (DONE)
+
+Second sub-tick of Phase 7.5. Extends
+[`spec/examples/valid/15-moduleparser-real.lll`](../../spec/examples/valid/15-moduleparser-real.lll)
+**in place** (no sibling file) with two more fn-body expression forms
+from the Phase 7.5 backlog:
+
+1. **`\x. body` lambdas.** Single-param lambda expression. Multi-param
+   is expressed by nesting (`\x. \y. body`). The body is parsed at
+   full `parseExpr` level so it can contain any expression form the
+   grammar accepts, including further lambdas and let-in chains.
+2. **`let name = e1 in e2` let-in chains.** Single-binder expression
+   let-in. Chains are right-recursive — `let y = ... in let z = ... in
+   body` parses as two nested `ELetIn` nodes. Both `e1` and `e2` go
+   through the full `parseExpr`, so nested lambdas, match, if-then-else,
+   and arithmetic all work.
+
+Token ADT additions: `TKwIn`, `TBackslash`. Lexer additions: `"in"`
+in `classifyIdent`, and `\` → `TBackslash` in `lexChars` (`.` → `TDot`
+was already present from Phase 7.5a's match-arrow support). Note the
+`\\` double-escape in the ll-lang source for `c == '\\'` — char
+literals use the same escaping rules as strings.
+
+Expression AST additions: `ELam Str Expr` and `ELetIn Str Expr Expr`.
+Both dispatch from `parseExpr`:
+
+```
+fn parseExpr(toks List[Token]) =
+  | TKwIf :: rest -> parseIf rest
+  | TKwMatch :: rest -> parseMatch rest
+  | TKwLet :: rest -> parseLetIn rest         -- Phase 7.5b
+  | TBackslash :: rest -> parseLam rest       -- Phase 7.5b
+  | _ -> parseAddSub toks
+```
+
+Important: `TKwLet` is now consumed by two independent dispatchers —
+`parseDecls` peels it off at module level for `let name = expr` decls
+(no `in`), and `parseExpr` peels it off at expression level for
+`let name = e1 in e2` chains. Context disambiguates cleanly because
+the two entry points are independent — `parseDecls` never calls
+`parseExpr` with a leading `TKwLet`, and `parseExpr` never sees tokens
+from a module-level decl.
+
+Pretty printer: `showExpr` gains two new arms — `ELam` prints as
+`(fun <n> -> <body>)` (F#-ish shape, same as 14-exprparser-real.lll)
+and `ELetIn` prints as `(let <n> = <e1> in <e2>)`.
+
+The driver now parses two new fn decls on top of the Phase 7.5a
+baseline:
+
+```
+fn shift(x Int) Int = let y = x + 1 in y * 2
+fn applyDouble(x Int) Int = (\y. y * 2) x
+```
+
+and prints
+
+```
+fn shift (x: Int) -> Int = (let y = (x + 1) in (y * 2))
+fn applyDouble (x: Int) -> Int = ((fun y -> (y * 2)) x)
+```
+
+Ten pretty-printed lines total now — module header, two type decls,
+two module-level `let` decls, five fn decls covering arithmetic,
+match-with-scrutinee, `if-then-else`, let-in chains, and lambda
+application bodies.
+
+File size: 666 → 721 lines. Test count unchanged at 384 (the two
+existing ModuleParserTests absorbed the extended driver — the runtime
+E2E test got an updated `expected` list, the inference round-trip
+re-reads straight from disk).
+
+Phase 7.5 progress: 4 of 9 items done (module-level let decls + match
+in fn body from 7.5a, lambdas + let-in chains from 7.5b). Phase 7.5
+backlog, remaining 5 of 9 items:
+
+- Multi-line fn bodies with layout-sensitive parsing
+- Cons / list / tuple patterns in `match` arms
+- Tagged literals (`"x"[UserId]`)
+- Other module-level forms — `tag Name`, `trait ... with ...`, `impl
+  Trait for Type = ...`, `import Foo.Bar`, `export ...`
+- Multi-line type declarations (`type T =\n | A\n | B`)
+- Parametric ctor args (`Some (Maybe A)`, `Some Maybe[A]`)
+- String literals in bodies
+
+Next tick: **Phase 7.5c** — pick another two or three items from the
+remaining five and ship them the same way.

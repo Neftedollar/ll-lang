@@ -11,22 +11,23 @@ session to pick up without replaying history.
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a done.** ll-lang
-  now hosts a real lexer (`09-lexer-real.lll`), a real recursive-
-  descent arithmetic parser (`11-parser-real.lll`), a real type-
-  declaration parser (`12-typeparser-real.lll`), a real fn-declaration
-  parser (`13-fnparser-real.lll`), a real full-expression parser
-  (`14-exprparser-real.lll`), AND — as of Phase 7.4 / 7.5a — a real full
-  **module parser** (`15-moduleparser-real.lll`, 666 lines) that
-  stitches the previous five slices into one recursive-descent front
-  end consuming a whole `module M\n type ...\n let ...\n fn ... = ...`
-  source end-to-end, including module-level `let` decls and
-  `match`-with-explicit-scrutinee inside `fn` bodies (the two
-  highest-leverage items from the Phase 7.5 backlog, closed in Phase
-  7.5a). "ll-lang has a full front-end in itself" is now one runnable
-  program, not a story spread across four separate slices. Phase 7.5
-  still has seven remaining items (see list below) before the
-  self-hosting elaborator + codegen work begins.
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b done.**
+  ll-lang now hosts a real lexer (`09-lexer-real.lll`), a real
+  recursive-descent arithmetic parser (`11-parser-real.lll`), a real
+  type-declaration parser (`12-typeparser-real.lll`), a real
+  fn-declaration parser (`13-fnparser-real.lll`), a real full-expression
+  parser (`14-exprparser-real.lll`), AND — as of Phase 7.4 / 7.5a /
+  7.5b — a real full **module parser** (`15-moduleparser-real.lll`, 721
+  lines) that stitches the previous five slices into one
+  recursive-descent front end consuming a whole `module M\n type ...\n
+  let ...\n fn ... = ...` source end-to-end, including module-level
+  `let` decls, `match`-with-explicit-scrutinee, `let name = e1 in e2`
+  chains, and `\x. body` lambdas inside `fn` bodies (the four
+  highest-leverage items from the Phase 7.5 backlog, closed across
+  Phases 7.5a and 7.5b). "ll-lang has a full front-end in itself" is
+  now one runnable program, not a story spread across four separate
+  slices. Phase 7.5 still has five remaining items (see list below)
+  before the self-hosting elaborator + codegen work begins.
 - No stale worktrees, no stray branches, no uncommitted changes.
 - `lllc run spec/examples/valid/hello.lll` prints `Hello, ll-lang!`.
 - `lllc run spec/examples/valid/09-lexer-real.lll` prints
@@ -71,13 +72,16 @@ session to pick up without replaying history.
   fn double (x: Int) -> Int = (x * 2)
   fn classify (x: Int) -> Int = (match x with | 0 -> 0 | _ -> 1)
   fn pickColor (x: Int) -> Color = (if x then Red else Green)
+  fn shift (x: Int) -> Int = (let y = (x + 1) in (y * 2))
+  fn applyDouble (x: Int) -> Int = ((fun y -> (y * 2)) x)
   ```
   (a whole module — header, two type decls, two module-level `let`
-  decls, three fn decls covering arithmetic, match-with-explicit-
-  scrutinee, and `if-then-else` bodies — round-tripped through
-  tokenize → parseModule → showModule). The `let` decls and
-  `match`-in-fn-body were added in Phase 7.5a on top of the Phase
-  7.4 baseline.
+  decls, five fn decls covering arithmetic, match-with-explicit-
+  scrutinee, `if-then-else`, let-in chain, and lambda-application
+  bodies — round-tripped through tokenize → parseModule → showModule).
+  The `let` decls and `match`-in-fn-body were added in Phase 7.5a on
+  top of the Phase 7.4 baseline; `let-in` chains and `\x. body`
+  lambdas were added in Phase 7.5b.
 
 ## Immediate next task
 
@@ -89,8 +93,8 @@ compiler's front end is fully expressible in ll-lang and the
 self-hosting translation work (Stage D in the roadmap — elaborator
 and codegen in ll-lang) can begin in earnest.
 
-Scope — **2 of 9 items done in Phase 7.5a (struck through); 7 still
-open**:
+Scope — **4 of 9 items done in Phases 7.5a + 7.5b (struck through); 5
+still open**:
 
 1. ~~**`let` decls at module level.** Added `DLet LetDecl` to `Decl`
    and a `TKwLet :: _ ->` arm in `parseDecls`. RHS reuses the full
@@ -101,14 +105,16 @@ open**:
    either layout-sensitive parsing that tracks indentation relative
    to the `=`, or an explicit terminator. The F# compiler uses
    layout; the ll-lang mirror should too.
-3. **`let-in` / lambdas in fn bodies.** Phase 7.5a already merged
-   `match` back into 15. Still missing: `parseLet` (`TKwLet :: ...`)
-   for let-in chains inside expressions, and `parseLam` (`TBackslash
-   :: ...`) for lambdas. Add `TKwIn`, `TBackslash`, `TDot` token
-   constructors plus the matching lexer arms. Note: the top-level
-   `parseDecls` dispatcher already consumes `TKwLet` for module-level
-   `let` decls, so context has to split on whether we're at decl
-   level (no `in`) or expression position (requires `in`).
+3. ~~**`let-in` / lambdas in fn bodies.** `parseExpr` now dispatches
+   `TKwLet :: rest -> parseLetIn rest` (single-binder `let name = e1
+   in e2`, right-recursive for chains) and `TBackslash :: rest ->
+   parseLam rest` (single-param `\x. body`, nest for multi-arg). Both
+   forms go through the full `parseExpr` on their sub-expressions so
+   they can contain any other form the grammar accepts. The
+   `parseDecls` `TKwLet :: _` arm is unchanged — context disambiguates
+   between module-level decl and expression-position let-in because
+   the two entry points never overlap on the same token stream. (DONE
+   — Phase 7.5b.)~~
 4. **Cons / list / tuple patterns in `match`.** 15's match arms are
    constrained to lit / var / wildcard patterns (from Phase 7.5a). A
    follow-up version needs cons (`head :: tail`), list (`[a b c]`),
