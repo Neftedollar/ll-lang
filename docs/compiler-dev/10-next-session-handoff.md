@@ -7,7 +7,12 @@ session to pick up without replaying history.
 
 - **main** is at a clean commit, everything pushed to
   `github.com/Neftedollar/ll-lang`.
-- **325 xUnit tests** pass (`dotnet test` from repo root).
+- **328 xUnit tests** pass (`dotnet test` from repo root).
+- **Error positions are now real** — E001..E008 report actual
+  `line:col` instead of the historical `0:0`. Positions are threaded
+  via a `PosMap` side-table keyed by reference equality on AST
+  expression/decl nodes. See `feat(ast): thread token positions ...`
+  and `fix(errors): use real line:col ...` commits for details.
 - **Phases 1–6 done**. Phase 7 in progress: lexer-in-ll-lang shipped
   (`09-lexer-real.lll`), parser-in-ll-lang drafted but not yet
   compiling.
