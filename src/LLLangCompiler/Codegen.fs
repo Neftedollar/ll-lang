@@ -89,6 +89,11 @@ let rec private emitPattern (p: Pattern) : string =
     | PVar x   -> safeIdent x
     | PWild    -> "_"
     | PLit l   -> emitLit l
+    // Phase 7.3a bugfix (bug 2): the `[]` pattern sentinel produced by
+    // the parser for empty-list patterns must render as the F# empty-list
+    // literal, not as an ordinary ctor reference — otherwise safeIdent
+    // would spit out a bogus `[]` identifier reference.
+    | PCon("[]", []) -> "[]"
     | PCon(c, [])  -> safeIdent c
     | PCon(c, [p]) -> safeIdent c + " " + emitPattern p
     | PCon(c, ps)  -> safeIdent c + "(" + (ps |> List.map emitPattern |> String.concat ", ") + ")"

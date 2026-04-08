@@ -471,6 +471,14 @@ and private patternType (st: InferState) (env: Env) (pat: Pattern) : TypeExpr * 
             (bindingsH @ bindingsT)
             |> List.map (fun (n, t) -> (n, applyType s2 t))
         (applyType s2 listTy, bindings)
+    | PCon("[]", []) ->
+        // Phase 7.3a bugfix (bug 2): empty-list pattern sentinel. The
+        // parser produces `PCon("[]", [])` for `[]` and as the tail of
+        // `[p1, ..., pN]` cons chains. Types as `List αElem` where
+        // αElem is a fresh flex var so it unifies against any list
+        // element type the arm needs.
+        let alphaElem = freshVar st.Fresh
+        (TyApp(TyName "List", alphaElem), [])
     | PCon(name, argPats) ->
         match Map.tryFind name env with
         | None ->

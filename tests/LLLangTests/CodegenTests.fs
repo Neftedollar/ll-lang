@@ -569,3 +569,28 @@ let ``Bug1 runtime: clause-sugar wildcard arm with multi-line let-in returns 30`
         "fn main() = printfn (intToStr (f B))"
     let stdout = runLLLangSrc src
     Assert.Contains("30", stdout)
+
+// --- Phase 7.3a bugfix (bug 2): list-literal patterns + arm preservation ---
+
+[<Fact>]
+let ``Bug2 runtime: mixed cons / empty-list / wildcard arms all reached`` () =
+    // End-to-end exercise of the bug 2 reproducer. Before the fix only
+    // the first arm survived codegen (the `| []` arm crashed pattern
+    // parsing and the remaining arms were silently dropped), so calling
+    // the empty case hit a runtime MatchFailure. After the fix every
+    // arm reaches codegen: `f [TEnd]` → 1, `f []` → 2, `f [TMore]` → 3,
+    // and the total of 1 + 2 + 3 = 6 confirms all three arms run.
+    let src =
+        "module Tmp.Bug2Arms\n" +
+        "type Token = TEnd | TMore\n" +
+        "fn f(toks List[Token]) Int =\n" +
+        "  | TEnd :: _ -> 1\n" +
+        "  | [] -> 2\n" +
+        "  | _ -> 3\n" +
+        "fn main() =\n" +
+        "  let a = f [TEnd] in\n" +
+        "  let b = f [] in\n" +
+        "  let c = f [TMore] in\n" +
+        "  printfn (intToStr (a + b + c))"
+    let stdout = runLLLangSrc src
+    Assert.Contains("6", stdout)

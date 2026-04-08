@@ -878,3 +878,36 @@ let ``Bug1: clause-sugar wildcard arm with multi-line let-in scopes bindings`` (
         "    x + y"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Tag", TyName "Int"), (schemeOf tm "f").Body)
+
+// --- Phase 7.3a bugfix (bug 2): list-literal patterns + arm preservation ---
+
+[<Fact>]
+let ``Bug2: empty-list pattern in clause-sugar arm typechecks`` () =
+    // Regression for: `| [] -> ...` arm. Before the fix the pattern
+    // parser errored on LBrack and the arm-loop silently dropped every
+    // arm after it; the fn ended up with only the cons arm in its AST.
+    // After the fix the `[]` pattern is recognised as PCon("[]", []),
+    // HMInfer.patternType treats it as `List αElem`, and all three arms
+    // survive — the fn's inferred type reflects the full List -> Int.
+    let src =
+        "module M\n" +
+        "type Token = TEnd | TMore\n" +
+        "fn f(toks List[Token]) Int =\n" +
+        "  | TEnd :: _ -> 1\n" +
+        "  | [] -> 2\n" +
+        "  | _ -> 3"
+    let tm = inferOk src
+    Assert.Equal(TyFn(TyApp(TyName "List", TyName "Token"), TyName "Int"), (schemeOf tm "f").Body)
+
+[<Fact>]
+let ``Bug2: list-literal pattern [x] binds head and matches single-elem list`` () =
+    // `[x]` desugars to `PCons(PVar x, PCon("[]", []))`. The inferred
+    // type of head1 is `List[Int] -> Int` once the `0` fallback pins
+    // the element type.
+    let src =
+        "module M\n" +
+        "fn head1(xs List[Int]) Int =\n" +
+        "  | [x] -> x\n" +
+        "  | _ -> 0"
+    let tm = inferOk src
+    Assert.Equal(TyFn(TyApp(TyName "List", TyName "Int"), TyName "Int"), (schemeOf tm "head1").Body)

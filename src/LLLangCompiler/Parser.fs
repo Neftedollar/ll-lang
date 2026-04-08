@@ -366,26 +366,37 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
                 // off only the first let to the arm, leaving subsequent
                 // ones to float out to the surrounding module and produce
                 // E002 UnboundVar on the names they were meant to bind.
+                //
+                // Phase 7.3a bugfix (bug 2): propagate the first arm-level
+                // parse error via `armErr` instead of silently dropping
+                // every arm after a bad pattern. With the old behaviour a
+                // single `| [] -> ...` arm would truncate the whole match
+                // and leave only the arms that happened to come before it
+                // in the AST, producing a runtime MatchFailure.
                 let branches = ResizeArray<Pattern * Expr>()
                 let mutable cont = true
+                let mutable armErr : string option = None
                 while cont && curTok c = Bar do
                     advance c  // consume |
                     match parsePattern c with
-                    | Error e -> Error e |> ignore; cont <- false
+                    | Error e -> armErr <- Some e; cont <- false
                     | Ok pat ->
                         match skip c Arrow with
-                        | Error e -> Error e |> ignore; cont <- false
+                        | Error e -> armErr <- Some e; cont <- false
                         | Ok () ->
                             match parseBlockExpr c with
-                            | Error e -> Error e |> ignore; cont <- false
+                            | Error e -> armErr <- Some e; cont <- false
                             | Ok body ->
                                 branches.Add((pat, body))
                                 skipNewlines c
                 if hadIndent then skip c Dedent |> ignore
-                // Tag at the `match` keyword so E003 non-exhaustive points
-                // at the match expression rather than 0:0.
-                if branches.Count > 0 then Ok (recordAt c matchIdx (EMatchOf(scrut, List.ofSeq branches)))
-                else Error "Expected match branches after 'with'"
+                match armErr with
+                | Some e -> Error e
+                | None ->
+                    // Tag at the `match` keyword so E003 non-exhaustive points
+                    // at the match expression rather than 0:0.
+                    if branches.Count > 0 then Ok (recordAt c matchIdx (EMatchOf(scrut, List.ofSeq branches)))
+                    else Error "Expected match branches after 'with'"
     | _ -> parsePipe c
 
 /// Parse an expression inside an indented block. If the parsed expression
@@ -462,6 +473,47 @@ and private parsePatAtom (c: Ctx) : Result<Pattern, string> =
     | CharLit ch -> advance c; Ok (PLit (LChar ch))
     | KwTrue -> advance c; Ok (PLit (LBool true))
     | KwFalse -> advance c; Ok (PLit (LBool false))
+    | LBrack ->
+        // Phase 7.3a bugfix (bug 2): list-literal patterns.
+        //   []                → PCon("[]", [])                 (empty list)
+        //   [p]               → PCons(p, PCon("[]", []))       (one-elem)
+        //   [p1, p2, ..., pN] → PCons(p1, PCons(p2, ..., PCon("[]", [])))
+        // The special ctor name "[]" is recognised by HMInfer's patternType
+        // (list Nil) and by Codegen.emitPattern (rendered as the F# `[]`
+        // literal). Elements are comma-separated, matching the tuple and
+        // list-literal expression surface syntax used elsewhere. This
+        // unblocks idiomatic `| [] -> ...` arms in fn-body clause sugar
+        // that the old parser silently dropped (see bug 2).
+        advance c
+        skipNewlines c
+        if curTok c = RBrack then
+            advance c
+            Ok (PCon("[]", []))
+        else
+            let elems = ResizeArray<Pattern>()
+            let rec readOne () : Result<unit, string> =
+                match parsePatCons c with
+                | Error e -> Error e
+                | Ok p ->
+                    elems.Add(p)
+                    skipNewlines c
+                    if curTok c = Comma then
+                        advance c
+                        skipNewlines c
+                        readOne ()
+                    else Ok ()
+            match readOne () with
+            | Error e -> Error e
+            | Ok () ->
+                match skip c RBrack with
+                | Error e -> Error e
+                | Ok () ->
+                    // Fold elements right-associatively into a cons chain
+                    // terminated by the empty-list constructor.
+                    let nil = PCon("[]", [])
+                    let result =
+                        Seq.foldBack (fun p acc -> PCons(p, acc)) elems nil
+                    Ok result
     | TypeId name ->
         advance c
         // collect subpatterns (atoms only, not constructors with args)
@@ -577,25 +629,36 @@ let private parseMatchBranches (c: Ctx) : Result<Expr, string> =
     // only the first `let` got attached to the arm; the rest floated to
     // top level and the body referenced names the module parser never
     // saw, producing E002 UnboundVar.
+    //
+    // Phase 7.3a bugfix (bug 2): propagate the first arm-level parse
+    // error via `armErr` instead of silently dropping every arm after a
+    // bad pattern. With the old behaviour a single `| [] -> ...` arm
+    // would truncate the whole clause-sugar body and leave only the arms
+    // that happened to come before it in the AST, producing a runtime
+    // MatchFailure when a dropped arm matched at runtime.
     let startIdx = c.Pos
     let branches = ResizeArray<Pattern * Expr>()
     let mutable cont = true
+    let mutable armErr : string option = None
     while cont && curTok c = Bar do
         advance c  // consume |
         match parsePattern c with
-        | Error e -> Error e |> ignore; cont <- false
+        | Error e -> armErr <- Some e; cont <- false
         | Ok pat ->
             match skip c Arrow with
-            | Error e -> Error e |> ignore; cont <- false
+            | Error e -> armErr <- Some e; cont <- false
             | Ok () ->
                 match parseBlockExpr c with
-                | Error e -> Error e |> ignore; cont <- false
+                | Error e -> armErr <- Some e; cont <- false
                 | Ok expr ->
                     branches.Add((pat, expr))
                     skipNewlines c
-    // Tag at the first `|` so E003 non-exhaustive points to the first arm.
-    if branches.Count > 0 then Ok (recordAt c startIdx (EMatch (List.ofSeq branches)))
-    else Error "Expected match branches"
+    match armErr with
+    | Some e -> Error e
+    | None ->
+        // Tag at the first `|` so E003 non-exhaustive points to the first arm.
+        if branches.Count > 0 then Ok (recordAt c startIdx (EMatch (List.ofSeq branches)))
+        else Error "Expected match branches"
 
 // ---- Declaration parser ---------------------------------------------
 
