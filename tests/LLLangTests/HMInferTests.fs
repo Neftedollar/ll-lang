@@ -48,3 +48,88 @@ let ``Types and TypedAST modules compile and Env type exists`` () =
     let m : TypeScheme = { Vars = []; Body = TyName "Int" }
     Assert.Equal(0, Map.count empty)
     Assert.Equal<Ident list>([], m.Vars)
+
+// --- Task 2: Substitution + fresh vars + generalize/instantiate ---
+
+[<Fact>]
+let ``freshVar increments and produces $N names`` () =
+    let s = newFreshState ()
+    let a = freshVar s
+    let b = freshVar s
+    Assert.Equal(TyVar "$0", a)
+    Assert.Equal(TyVar "$1", b)
+
+[<Fact>]
+let ``applyType replaces flexible var`` () =
+    let s : Subst = Map.ofList ["$0", TyName "Int"]
+    let t = TyFn(TyVar "$0", TyName "Bool")
+    Assert.Equal(TyFn(TyName "Int", TyName "Bool"), applyType s t)
+
+[<Fact>]
+let ``applyType does not replace rigid var`` () =
+    let s : Subst = Map.ofList ["a", TyName "Int"]
+    let t = TyVar "a"
+    Assert.Equal(TyVar "a", applyType s t)
+
+[<Fact>]
+let ``applyType is recursive through TyFn and TyApp`` () =
+    let s : Subst = Map.ofList ["$0", TyName "Int"; "$1", TyName "Str"]
+    let t = TyApp(TyVar "$0", TyFn(TyVar "$1", TyVar "$0"))
+    Assert.Equal(TyApp(TyName "Int", TyFn(TyName "Str", TyName "Int")), applyType s t)
+
+[<Fact>]
+let ``compose applies s2 first then s1`` () =
+    let s1 : Subst = Map.ofList ["$1", TyName "Int"]
+    let s2 : Subst = Map.ofList ["$0", TyVar "$1"]
+    let composed = compose s1 s2
+    Assert.Equal(TyName "Int", applyType composed (TyVar "$0"))
+
+[<Fact>]
+let ``ftvType collects only flexible vars`` () =
+    let t = TyFn(TyVar "$0", TyFn(TyVar "a", TyVar "$1"))
+    let ftvs = ftvType t
+    Assert.True(Set.contains "$0" ftvs)
+    Assert.True(Set.contains "$1" ftvs)
+    Assert.False(Set.contains "a" ftvs)
+
+[<Fact>]
+let ``ftvScheme removes quantified vars from body free vars`` () =
+    let sch = { Vars = ["$0"]; Body = TyFn(TyVar "$0", TyVar "$1") }
+    let ftvs = ftvScheme sch
+    Assert.False(Set.contains "$0" ftvs)
+    Assert.True(Set.contains "$1" ftvs)
+
+[<Fact>]
+let ``generalize quantifies free vars not in env`` () =
+    let envScheme = { Vars = []; Body = TyVar "$5" }
+    let env : Env = Map.ofList ["fixed", envScheme]
+    let ty = TyFn(TyVar "$0", TyVar "$5")
+    let sch = generalize env ty
+    Assert.Equal<Ident list>(["$0"], sch.Vars)
+
+[<Fact>]
+let ``instantiate replaces each quantified var with a fresh flexible var`` () =
+    let fs = newFreshState ()
+    let sch = { Vars = ["a"]; Body = TyFn(TyVar "a", TyVar "a") }
+    let t = instantiate fs sch
+    match t with
+    | TyFn(TyVar v1, TyVar v2) ->
+        Assert.Equal(v1, v2)
+        Assert.StartsWith("$", v1)
+    | _ -> failwith $"expected TyFn of same fresh var, got {t}"
+
+[<Fact>]
+let ``instantiate uses different fresh vars for different quantifiers`` () =
+    let fs = newFreshState ()
+    let sch = { Vars = ["a"; "b"]; Body = TyFn(TyVar "a", TyVar "b") }
+    match instantiate fs sch with
+    | TyFn(TyVar v1, TyVar v2) ->
+        Assert.NotEqual<string>(v1, v2)
+    | t -> failwith $"expected TyFn, got {t}"
+
+[<Fact>]
+let ``fromElaboratorEnv turns declared type vars into quantifiers`` () =
+    let e3 : LLLang.Elaborator.TypeEnv = Map.ofList ["id", TyFn(TyVar "A", TyVar "A")]
+    let env = fromElaboratorEnv e3
+    let sch = Map.find "id" env
+    Assert.Contains("A", sch.Vars)
