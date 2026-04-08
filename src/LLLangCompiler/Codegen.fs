@@ -149,6 +149,17 @@ and private emitExpr (indent: int) (te: TypedExpr) : string =
             |> String.concat "\n"
         "(match " + emitExpr indent scrut + " with\n" + brsStr + ")"
 
+    | TEMatchOf(scrut, branches) ->
+        // Inline form keeps the entire match-expression on one line so it
+        // can be embedded in any expression position without offside-rule
+        // surprises. F# accepts `(match x with | p1 -> e1 | p2 -> e2)`.
+        let brsStr =
+            branches
+            |> List.map (fun (tp, body) ->
+                "| " + emitPattern tp.Pat + " -> " + emitExpr indent body)
+            |> String.concat " "
+        "(match " + emitExpr indent scrut + " with " + brsStr + ")"
+
     | TECons(h, t) ->
         "(" + emitExpr indent h + " :: " + emitExpr indent t + ")"
 
@@ -162,7 +173,8 @@ let private containsVar (name: string) (te: TypedExpr) : bool =
         | TELam(_, body) | TETagged(body, _) -> walk body
         | TELet(_, _, e1, e2) -> walk e1 || (e2 |> Option.exists walk)
         | TEIf(c, t, el) -> walk c || walk t || walk el
-        | TEMatch(s, brs) -> walk s || List.exists (fun (_, b) -> walk b) brs
+        | TEMatch(s, brs) | TEMatchOf(s, brs) ->
+            walk s || List.exists (fun (_, b) -> walk b) brs
         | TEList es | TETuple es -> List.exists walk es
         | _ -> false
     walk te

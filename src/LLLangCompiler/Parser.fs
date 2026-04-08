@@ -252,6 +252,40 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
             match parseExprInner c with
             | Ok body -> Ok (ELam(List.ofSeq parms, body))
             | Error e -> Error e
+    | KwMatch ->
+        // match <scrut> with | pat -> body | pat -> body ...
+        // Arms can appear inline OR on subsequent indented lines.
+        advance c
+        match parseExprInner c with
+        | Error e -> Error e
+        | Ok scrut ->
+            skipNewlines c
+            match skip c KwWith with
+            | Error e -> Error e
+            | Ok () ->
+                skipNewlines c
+                // Optional INDENT for indented arm block.
+                let hadIndent = curTok c = Indent
+                if hadIndent then advance c
+                skipNewlines c
+                let branches = ResizeArray<Pattern * Expr>()
+                let mutable cont = true
+                while cont && curTok c = Bar do
+                    advance c  // consume |
+                    match parsePattern c with
+                    | Error e -> Error e |> ignore; cont <- false
+                    | Ok pat ->
+                        match skip c Arrow with
+                        | Error e -> Error e |> ignore; cont <- false
+                        | Ok () ->
+                            match parseExprInner c with
+                            | Error e -> Error e |> ignore; cont <- false
+                            | Ok body ->
+                                branches.Add((pat, body))
+                                skipNewlines c
+                if hadIndent then skip c Dedent |> ignore
+                if branches.Count > 0 then Ok (EMatchOf(scrut, List.ofSeq branches))
+                else Error "Expected match branches after 'with'"
     | _ -> parsePipe c
 
 /// Parse an expression inside an indented block. If the parsed expression

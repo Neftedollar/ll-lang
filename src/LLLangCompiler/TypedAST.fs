@@ -35,6 +35,7 @@ and TypedExprKind =
     | TELet of Ident * TypeScheme * TypedExpr * TypedExpr option
     | TEIf of TypedExpr * TypedExpr * TypedExpr
     | TEMatch of TypedExpr * (TypedPattern * TypedExpr) list
+    | TEMatchOf of TypedExpr * (TypedPattern * TypedExpr) list
     | TEPipe of TypedExpr * TypedExpr
     | TETagged of TypedExpr * TypeIdent
     | TEList of TypedExpr list

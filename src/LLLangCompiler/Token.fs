@@ -6,6 +6,7 @@ type Token =
     | KwFn | KwLet | KwIn | KwType | KwTag | KwUnit
     | KwTrait | KwImpl | KwImport | KwExport | KwModule
     | KwIf | KwThen | KwElse | KwTrue | KwFalse
+    | KwMatch | KwWith
     // Identifiers
     | Ident of string       // starts lowercase: variable, function name
     | TypeId of string      // starts uppercase: type, constructor, module segment

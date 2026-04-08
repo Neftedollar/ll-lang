@@ -96,6 +96,9 @@ and private applyTEK (s: Subst) (k: TypedExprKind) : TypedExprKind =
     | TEMatch(sc, brs) ->
         TEMatch(applyTE s sc, brs |> List.map (fun (p, b) ->
             { p with Type = applyType s p.Type }, applyTE s b))
+    | TEMatchOf(sc, brs) ->
+        TEMatchOf(applyTE s sc, brs |> List.map (fun (p, b) ->
+            { p with Type = applyType s p.Type }, applyTE s b))
     | TEPipe(a, b) -> TEPipe(applyTE s a, applyTE s b)
     | TETagged(e, tag) -> TETagged(applyTE s e, tag)
     | TEList es -> TEList (es |> List.map (applyTE s))
@@ -283,6 +286,34 @@ let rec private inferExpr (env: Env) (st: InferState) (expr: Expr) : Subst * Typ
         let sAll = compose s3 (compose s2 s1)
         let resultTy = applyType sAll listOfH
         let te = mkTyped st (TECons(applyTE sAll teH, applyTE sAll teT)) resultTy
+        (sAll, resultTy, te)
+
+    | EMatchOf(scrut, branches) ->
+        // Explicit-scrutinee match expression. Unlike EMatch (which the
+        // DFn/DImpl special-case turns into a fn body), this form is usable
+        // in any expression position: `let v = match x with | ... | ...`.
+        let (s0, tauScrut, teScrut) = inferExpr env st scrut
+        let env0 = applyEnv s0 env
+        let alpha = freshVar st.Fresh   // result type
+        let (sAll, typedBranches) =
+            List.fold (fun (sAcc, brsAcc) (pat, body) ->
+                let (patTy, bindings) = patternType st env0 pat
+                let su = unifyS st (applyType sAcc patTy) (applyType sAcc tauScrut)
+                let sAccPlusSu = compose su sAcc
+                let envExt =
+                    List.fold
+                        (fun e (n, t) -> Map.add n (mono (applyType sAccPlusSu t)) e)
+                        (applyEnv sAccPlusSu env0)
+                        bindings
+                let (sb, tauB, teB) = inferExpr envExt st body
+                let sbAll = compose sb sAccPlusSu
+                let sr = unifyS st (applyType sbAll tauB) (applyType sbAll alpha)
+                let sStep = compose sr sbAll
+                let tp = { Pat = pat; Type = applyType sStep patTy }
+                (sStep, brsAcc @ [(tp, applyTE sStep teB)])
+            ) (s0, []) branches
+        let resultTy = applyType sAll alpha
+        let te = mkTyped st (TEMatchOf(applyTE sAll teScrut, typedBranches)) resultTy
         (sAll, resultTy, te)
 
     | EMatch branches ->

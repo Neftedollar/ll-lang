@@ -47,7 +47,8 @@ type Expr =
     | ELam of Ident list * Expr               // \x y. e
     | ELet of Ident * Expr * Expr option      // let x = e (in e)?
     | EIf of Expr * Expr * Expr              // if e then e else e
-    | EMatch of (Pattern * Expr) list         // | p -> e branches
+    | EMatch of (Pattern * Expr) list         // | p -> e (implicit fn-body scrutinee)
+    | EMatchOf of Expr * (Pattern * Expr) list // match scrut with | p -> e
     | EPipe of Expr * Expr                    // e -> e
     | ETagged of Expr * TypeIdent             // e[Tag]
     | EList of Expr list                      // [e e e]

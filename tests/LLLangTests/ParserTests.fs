@@ -414,3 +414,33 @@ let ``parse cons precedence: a + 1 :: rest is (a + 1) :: rest`` () =
     | ECons(EApp(EApp(EVar "+", EVar "a"), ELit (LInt 1L)), EVar "rest") -> ()
     | e -> failwith $"Expected ECons((a+1), rest), got {e}"
 
+// --- Phase 7.1.5: match as expression ---
+
+[<Fact>]
+let ``parse match expression: match x with`` () =
+    match parseExprStr "match x with | 0 -> \"zero\" | _ -> \"other\"" with
+    | EMatchOf(EVar "x",
+               [(PLit (LInt 0L), ELit (LStr "zero"));
+                (PWild, ELit (LStr "other"))]) -> ()
+    | e -> failwith $"Expected EMatchOf, got {e}"
+
+[<Fact>]
+let ``parse match expression in let binding`` () =
+    let src = "let v = match x with | 0 -> 1 | _ -> 2"
+    match parseExprStr src with
+    | ELet("v",
+           EMatchOf(EVar "x",
+                    [(PLit (LInt 0L), ELit (LInt 1L));
+                     (PWild, ELit (LInt 2L))]),
+           None) -> ()
+    | e -> failwith $"Expected ELet v = EMatchOf, got {e}"
+
+[<Fact>]
+let ``parse match expression with cons pattern`` () =
+    let src = "match xs with | h :: t -> h | _ -> 0"
+    match parseExprStr src with
+    | EMatchOf(EVar "xs",
+               [(PCons(PVar "h", PVar "t"), EVar "h");
+                (PWild, ELit (LInt 0L))]) -> ()
+    | e -> failwith $"Expected EMatchOf with PCons branch, got {e}"
+

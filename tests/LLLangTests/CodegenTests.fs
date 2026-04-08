@@ -171,7 +171,7 @@ let ``PTuple pattern with wildcard emits (a, _)`` () =
     let fs = codegenSrc src
     Assert.Contains("| (a, _) ->", fs)
 
-// --- Phase 7.1.5: cons patterns + cons expressions ---
+// --- Phase 7.1.5: cons patterns + cons expressions + match-as-expression ---
 
 [<Fact>]
 let ``PCons pattern emits F# (h :: t)`` () =
@@ -184,6 +184,19 @@ let ``ECons expression emits F# (h :: t)`` () =
     let src = "module M\nlet xs = 1 :: [2 3]"
     let fs = codegenSrc src
     Assert.Contains("(1L :: ", fs)
+
+[<Fact>]
+let ``match-as-expression emits F# match-with`` () =
+    let src =
+        "module M\n" +
+        "fn label(n Int) Str =\n" +
+        "  match n with | 0 -> \"zero\" | _ -> \"other\""
+    let fs = codegenSrc src
+    Assert.Contains("match n with", fs)
+    Assert.Contains("| 0L ->", fs)
+    Assert.Contains("| _ ->", fs)
+    Assert.Contains("\"zero\"", fs)
+    Assert.Contains("\"other\"", fs)
 
 // ---------- Task 5: top-level module emission ----------
 
@@ -407,3 +420,13 @@ let ``runtime: cons expression builds list matched by literal`` () =
         "  printfn (intToStr (listLen xs))"
     let stdout = runLLLangSrc src
     Assert.Contains("5", stdout)
+
+[<Fact>]
+let ``runtime: match-as-expression in let binding`` () =
+    let src =
+        "module Tmp.MatchExpr\n" +
+        "fn main() =\n" +
+        "  let v = match 0 with | 0 -> \"zero\" | _ -> \"other\" in\n" +
+        "  printfn v"
+    let stdout = runLLLangSrc src
+    Assert.Contains("zero", stdout)

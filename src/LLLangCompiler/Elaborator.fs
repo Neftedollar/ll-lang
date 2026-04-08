@@ -365,6 +365,25 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
                 snd (typeOf branchExpr localEnv))
         (TyVar "?", errs)
 
+    | EMatchOf(scrut, branches) ->
+        // Same as EMatch but with explicit scrutinee — type-check it too.
+        let rec patVars (pat: Pattern) : string list =
+            match pat with
+            | PVar n -> [n]
+            | PCon(_, pats) -> pats |> List.collect patVars
+            | PTuple pats -> pats |> List.collect patVars
+            | PCons(h, t) -> patVars h @ patVars t
+            | PLit _ | PWild -> []
+        let (_, sErrs) = typeOf scrut env
+        let bErrs =
+            branches
+            |> List.collect (fun (pat, branchExpr) ->
+                let localEnv =
+                    patVars pat
+                    |> List.fold (fun acc n -> Map.add n (TyVar "?") acc) env
+                snd (typeOf branchExpr localEnv))
+        (TyVar "?", sErrs @ bErrs)
+
     | ECons(h, t) ->
         let (_, hErrs) = typeOf h env
         let (_, tErrs) = typeOf t env
@@ -417,6 +436,10 @@ let rec private collectMatches (expr: Expr) : (Pattern * Expr) list list =
     | EMatch(branches) ->
         let nested = branches |> List.collect (fun (_, e) -> collectMatches e)
         branches :: nested
+    | EMatchOf(scrut, branches) ->
+        let scrutMatches = collectMatches scrut
+        let nested = branches |> List.collect (fun (_, e) -> collectMatches e)
+        scrutMatches @ (branches :: nested)
     | EApp(f, arg) ->
         collectMatches f @ collectMatches arg
     | EIf(cond, t, e) ->

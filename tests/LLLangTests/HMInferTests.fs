@@ -476,7 +476,7 @@ let ``TypedAST has no TyVar placeholder for 01-basics`` () =
             checkExpr e1
             Option.iter checkExpr e2
         | TEIf(a, b, c) -> checkExpr a; checkExpr b; checkExpr c
-        | TEMatch(s, branches) ->
+        | TEMatch(s, branches) | TEMatchOf(s, branches) ->
             checkExpr s
             for (p, body) in branches do
                 if containsWildcard p.Type then failwith $"wildcard in pattern type: {p.Type}"
@@ -509,7 +509,7 @@ let rec private collectTypes (e: TypedExpr) : TypeExpr list =
         | TELet(_, _, e1, e2) ->
             collectTypes e1 @ (e2 |> Option.map collectTypes |> Option.defaultValue [])
         | TEIf(a, b, c) -> collectTypes a @ collectTypes b @ collectTypes c
-        | TEMatch(s, branches) ->
+        | TEMatch(s, branches) | TEMatchOf(s, branches) ->
             collectTypes s @
             (branches |> List.collect (fun (p, body) -> p.Type :: collectTypes body))
         | TEPipe(a, b) -> collectTypes a @ collectTypes b
@@ -579,7 +579,7 @@ let ``every TELam parameter carries a concrete type in basics`` () =
         | TEApp(a, b) | TECons(a, b) -> walk a; walk b
         | TELet(_, _, e1, e2) -> walk e1; Option.iter walk e2
         | TEIf(a, b, c) -> walk a; walk b; walk c
-        | TEMatch(s, branches) ->
+        | TEMatch(s, branches) | TEMatchOf(s, branches) ->
             walk s
             for (_, body) in branches do walk body
         | TEPipe(a, b) -> walk a; walk b
@@ -732,3 +732,31 @@ let ``infer cons expression type mismatch yields E001`` () =
     // 1 :: ["a"]  — Int head + List Str -> mismatch
     let errs = inferErrs "module M\nlet xs = 1 :: [\"a\"]"
     Assert.Contains(errs, fun e -> e.Code = E001)
+
+// --- Phase 7.1.5: match as expression ---
+
+[<Fact>]
+let ``infer match-as-expression in let binding`` () =
+    let src =
+        "module M\n" +
+        "let v = match 0 with | 0 -> \"zero\" | _ -> \"other\""
+    let tm = inferOk src
+    Assert.Equal(TyName "Str", (schemeOf tm "v").Body)
+
+[<Fact>]
+let ``infer match-as-expression branch type mismatch yields E001`` () =
+    let src =
+        "module M\n" +
+        "let v = match 0 with | 0 -> \"zero\" | _ -> 1"
+    let errs = inferErrs src
+    Assert.Contains(errs, fun e -> e.Code = E001)
+
+[<Fact>]
+let ``infer cons pattern in match-as-expression`` () =
+    // first uses an explicit `match` so the body is in expression position.
+    let src =
+        "module M\n" +
+        "fn first(xs Int) Int =\n" +
+        "  match [xs] with | h :: _ -> h | _ -> 0"
+    let tm = inferOk src
+    Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "first").Body)
