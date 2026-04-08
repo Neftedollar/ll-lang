@@ -1678,7 +1678,97 @@ Tests: 395 (unchanged vs 7.7a). The runtime E2E fact in
 stdout; the inference round-trip fact still passes unchanged (the
 new types and helpers all infer cleanly through the host compiler).
 
-Next tick: **Phase 7.7c** — add let-generalization, `Result`-based
-error reporting, and the occurs check (`e008`). After 7.7c the HM
-spine is feature-complete enough to host `ELet` / `ELam` in later
-slices.
+Next tick: **Phase 7.7c** — extend `inferExpr` with `ELam`, `ELet`
+(mono, no let-generalization yet), and `EIf` so the HM middle covers
+most fn body shapes. Let-generalization / polymorphism / occurs
+check / `Result`-based errors still land in Phase 7.7d+.
+
+### 2026-04 — Phase 7.7c: HM inference slice C — ELam + ELet + EIf (DONE)
+
+Third tick of **Phase 7.7**. Extends
+[`18-hminfer-real.lll`](../../spec/examples/valid/18-hminfer-real.lll)
+in place from 490 to 616 lines (+126). Phase 7.7b shipped the
+algorithm-W loop over `EInt` / `EStr` / `EBool` / `EVar` / `EAdd` /
+`EApp`; this slice adds the three structural Expr variants so
+`inferExpr` can walk most mono-typed fn bodies end-to-end.
+
+**New shape (on top of Phase 7.7b)**:
+
+```lll
+type Expr =
+  | EInt Int | EStr Str | EBool Bool | EVar Str
+  | EAdd Expr Expr | EApp Expr Expr
+  | ELam Str Expr              -- new
+  | ELet Str Expr Expr         -- new
+  | EIf Expr Expr Expr         -- new
+
+fn applyEnv(s Subst)(e Env) Env         -- new, walks env types via applyType
+fn applyTypeList(s Subst)(ts ...) ...    -- new, inner recursive listMap
+```
+
+`inferExpr`'s three new arms mirror (mono slices of) the F# host's
+corresponding cases in `src/LLLangCompiler/HMInfer.fs` line 260 /
+276 / 315 area:
+
+* `ELam name body` — fresh `α` for the param, extend env with
+  `(name : α)`, infer body → `(τbody, sBody)`, return
+  `TyFn (applyType sBody α) τbody` under `sBody`.
+* `ELet name e1 e2` — infer `e1` → `(τ1, s1)`, extend
+  `applyEnv s1 env` with `(name : τ1)`, infer `e2` under that env
+  → `(τ2, s2)`, return `τ2` under `compose s2 s1`. **No
+  generalization** — `name` binds to the raw monomorphic `τ1`, so
+  `let id = \x. x in (id 5, id "a")` polymorphism doesn't work yet.
+  That lands in Phase 7.7d alongside type schemes.
+* `EIf cond thn els` — infer `cond`, unify with `TyName "Bool"`,
+  infer both branches under the updated env, unify `τt ~ τe`,
+  return `applyType sAll τt` under the composed subst. ERROR
+  sentinel on any unify failure (cond not `Bool`, or branches
+  mismatch).
+
+Each arm is split into its own helper chain (`inferLam`; `inferLet`
+/ `inferLetBody`; `inferIf` / `inferIfCondBool` / `inferIfThen` /
+`inferIfElse` / `inferIfUnify`) to keep `match` nesting one level
+deep — same trick as Phase 7.7a/7.7b's `unify` and `inferExpr`
+spines, for the same indentation-ambiguity reason.
+
+The `main` driver appends five hardcoded cases to the ten existing
+ones:
+
+```
+t11 infer (\x. x) : ($0 -> $0)
+t12 infer (\x. x + 1) : (Int -> Int)
+t13 infer (let x = 5 in x + 1) : Int
+t14 infer (if true then 1 else 2) : Int
+t15 infer (if true then 1 else "x") : ERROR
+```
+
+t11 proves lambda + fresh-var round-trip (`$0` comes from the first
+`freshVar 0` call). t12 proves lambda body unifies against `EAdd`'s
+`TyName "Int"` constraint. t13 proves the mono `ELet` threads the
+RHS type through the body env. t14 proves `EIf` unifies both
+branches against each other. t15 proves the branch-mismatch ERROR
+path is deterministic.
+
+**Deliberately still out of scope** (carved out for Phase 7.7d):
+
+1. **Let-generalization, polymorphism, type schemes** — no
+   `generalize` / `instantiate`; no `TypeScheme` in `Env`.
+2. **Occurs check (`e008`)** — `unify` still happily binds
+   `a := TyFn(a, b)`.
+3. **`EMatch` inference** — needs pattern-type checking.
+4. **Real error reporting** — `inferExpr` still returns `TyName
+   "ERROR"` sentinel.
+5. **Multi-param lambda** — `\x y. body` maps to nested `ELam`; the
+   AST variant takes a single `Str`, not a list.
+6. **Wiring into `17-pipeline-real.lll`** — still standalone.
+
+Tests: 395 (unchanged vs 7.7b). The runtime E2E fact in
+`HMInferRealTests.fs` updated to assert all fifteen lines appear in
+stdout; the inference round-trip fact still passes unchanged (the
+new `ELam` / `ELet` / `EIf` cases and their helpers all infer
+cleanly through the host compiler).
+
+Next tick: **Phase 7.7d** — add let-generalization, `Result`-based
+error reporting, and the occurs check (`e008`). After 7.7d the HM
+spine is feature-complete enough to host polymorphic stdlib
+functions like `listMap` / `maybeMap` in later slices.

@@ -11,7 +11,7 @@ session to pick up without replaying history.
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b done.**
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b + 7.7c done.**
   ll-lang now hosts a real lexer (`09-lexer-real.lll`), a real
   recursive-descent arithmetic parser (`11-parser-real.lll`), a real
   type-declaration parser (`12-typeparser-real.lll`), a real
@@ -150,29 +150,30 @@ session to pick up without replaying history.
   (hardcoded source: `module M\ntype Shape = Circle | Rect\nfn
   good(x Int) Int = x + 1\nfn bad(x Int) Int = undefinedName\nfn
   shapeBad(s Shape) Int = match s with | 0 -> 1`).
-- **Phase 7.7a + 7.7b done** — the first two slices of **Hindley-
-  Milner inference in ll-lang itself** live in
+- **Phase 7.7a + 7.7b + 7.7c done** — the first three slices of
+  **Hindley-Milner inference in ll-lang itself** live in
   [`18-hminfer-real.lll`](../../spec/examples/valid/18-hminfer-real.lll)
-  (490 lines). 7.7a shipped a minimal `TypeExpr` (TyName / TyVar /
+  (616 lines). 7.7a shipped a minimal `TypeExpr` (TyName / TyVar /
   TyFn), a parallel-list `Subst`, an `applyType` walker, and a
   `unify : TypeExpr -> TypeExpr -> Maybe[Subst]` mirroring the F# host's
   `HMInfer.unify` in `src/LLLangCompiler/HMInfer.fs` line 63 area.
-  7.7b extends it in place with an `Env` (parallel-list like `Subst`),
+  7.7b extended it in place with an `Env` (parallel-list like `Subst`),
   a dumb list-concat `composeSubst`, an explicit `Int`-threaded
   `freshVar`, an `Expr` AST (`EInt` / `EStr` / `EBool` / `EVar` /
   `EAdd` / `EApp`), an `InferResult = MkInferResult TypeExpr Subst Int`
   three-field carrier, and `inferExpr env n e` covering every arm
   (literal / var lookup / EAdd unify-both-with-Int / EApp fresh-beta
-  + unify-with-TyFn). Each arm of both `unify` and `inferExpr` is
-  split into its own helper to keep `match` nesting one level deep.
-  `unifyResults` now threads the result-side subst back into the head
-  subst via `composeSubst` so bindings emitted while unifying `TyFn`
-  result types survive — the five 7.7a `unify` tests are unaffected
-  because their result substs are all empty. Deliberately still out
-  of scope: polymorphism / let-generalization / type schemes, occurs
-  check, `ELam` / `ELet` / `EIf` / `EMatch` inference, real
-  `Result[_, LLError]` error reporting (sentinel `TyName "ERROR"`
-  stands in), and wiring into `17-pipeline-real.lll`.
+  + unify-with-TyFn). 7.7c adds three new `Expr` variants — `ELam Str
+  Expr`, `ELet Str Expr Expr`, `EIf Expr Expr Expr` — plus an
+  `applyEnv : Subst -> Env -> Env` helper and three new `inferExpr`
+  arm chains following Algorithm W for lambda / let-in-mono /
+  if-then-else. Each arm of `unify`, `inferExpr`, and the three new
+  variants is split into its own helper to keep `match` nesting one
+  level deep. Deliberately still out of scope after 7.7c:
+  polymorphism / let-generalization / type schemes, occurs check,
+  `EMatch` inference, real `Result[_, LLError]` error reporting
+  (sentinel `TyName "ERROR"` stands in), multi-param lambda, and
+  wiring into `17-pipeline-real.lll`.
 - `lllc run spec/examples/valid/18-hminfer-real.lll` prints
   ```
   t1 unify Int Int ok
@@ -185,34 +186,41 @@ session to pick up without replaying history.
   t8 infer x in env : Int
   t9 infer (double 5) in env : Int
   t10 infer (double "x") in env : ERROR
+  t11 infer (\x. x) : ($0 -> $0)
+  t12 infer (\x. x + 1) : (Int -> Int)
+  t13 infer (let x = 5 in x + 1) : Int
+  t14 infer (if true then 1 else 2) : Int
+  t15 infer (if true then 1 else "x") : ERROR
   ```
   (five hardcoded `unify` cases — three success / "ok bound" lines
-  and two mismatch lines — plus five hardcoded `inferExpr` cases —
-  literal, addition, var lookup, application success, and
-  application mismatch).
+  and two mismatch lines — plus ten hardcoded `inferExpr` cases:
+  literal, addition, var lookup, application success, application
+  mismatch, identity lambda, lambda-with-body, mono let-in, if-int-
+  int, and if-int-str mismatch).
 
 ## Immediate next task
 
-**Phase 7.7c — add let-generalization, `Result`-based error
-reporting, and the occurs check (`e008`) to the HM-inference-in-
-ll-lang slice**. Phase 7.7b shipped a toy algorithm-W loop over a
-tiny `Expr` AST; the next tick makes the spine feature-complete
-enough to host `ELet` / `ELam` in later slices.
+**Phase 7.7d — add let-generalization + polymorphism + occurs check
++ `Result`-based error reporting to the HM-inference-in-ll-lang
+slice**. Phase 7.7c shipped mono-typed `ELam` / `ELet` / `EIf`
+inference; the next tick makes the spine feature-complete enough
+to host polymorphic stdlib functions like `listMap` and real
+error reporting.
 
-Shape (Phase 7.7c):
+Shape (Phase 7.7d):
 1. Extend `18-hminfer-real.lll` in place with a `TypeScheme`
    (`MkScheme List[Str] TypeExpr` — list of bound vars + body type)
    and wire it into `Env` so `envLookup` returns a scheme not a raw
-   type.
+   type. `applyEnv` must skip quantified vars.
 2. Add `generalize : Env -> TypeExpr -> TypeScheme` and
    `instantiate : Int -> TypeScheme -> (TypeExpr, Int)` using the
-   existing `freshVar` counter.
-3. Replace `inferExpr`'s `EVar` miss-case sentinel `TyName "ERROR"`
-   with a proper `Result[InferResult, LLError]` return, where
-   `LLError` is a small ADT (at minimum `E002UnboundVar Str` and
-   `E001TypeMismatch Str Str`). Thread the `Result` through every
-   arm — the helper-split pattern 7.7a/7.7b established should
-   extend cleanly.
+   existing `freshVar` counter. Rewire `ELet` to generalize at the
+   binding site.
+3. Replace `inferExpr`'s `ERROR` sentinel with a proper
+   `Result[InferResult, LLError]` return, where `LLError` is a small
+   ADT (at minimum `E002UnboundVar Str` and `E001TypeMismatch Str
+   Str`). Thread the `Result` through every arm — the helper-split
+   pattern 7.7a/7.7b/7.7c established should extend cleanly.
 4. Add `occurs : Str -> TypeExpr -> Bool` and wire it into `unify`'s
    `TyVar` arm — return an `Err (E008 OccursCheck)` if the var
    occurs in the candidate type. Mirrors the F# host's `e008
@@ -225,9 +233,9 @@ Shape (Phase 7.7c):
    style test proving polymorphism works, and an occurs-check test
    proving `unify a (TyFn a b)` returns `Err E008`.
 
-Keep scope still tight for 7.7c too: no `ELam` / `EIf` / `EMatch`
-inference yet, no trait dispatch, no source positions, no `TyApp` /
-`TyTagged`. Those land in 7.7d and beyond.
+Keep scope tight for 7.7d: no `EMatch` inference yet, no trait
+dispatch, no source positions, no `TyApp` / `TyTagged`. Those
+land in 7.7e and beyond.
 
 ### Backlog: heavier module-parser extensions in ll-lang
 
