@@ -539,6 +539,7 @@ let rec private containsWildcard (ty: TypeExpr) : bool =
 [<InlineData("08-lexer-poc.lll")>]
 [<InlineData("09-lexer-real.lll")>]
 [<InlineData("10-multiline-sum.lll")>]
+[<InlineData("11-parser-real.lll")>]
 // 04-traits.lll and 05-modules.lll fail elaboration (unbound map/head from missing imports/impls).
 let ``valid corpus infers ok`` (name: string) =
     let tm = inferOk (readValid name)
