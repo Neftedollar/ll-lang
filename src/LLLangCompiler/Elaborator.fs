@@ -38,6 +38,12 @@ let private e005 line col paramType argType = {
 /// Arithmetic and comparison operators pre-populated as TyVar wildcards.
 /// These are parsed as EApp(EApp(EVar "+", ...), ...) and must not trigger E002
 /// since they are never declared in source modules.
+///
+/// Phase 6 adds a minimal stdlib: Math, List, Maybe, Result, Str, IO builtins.
+/// The codegen F# prelude block (see Codegen.fsharpPrelude) provides the
+/// runtime bindings. Note: Maybe / Result are NOT built-in types — user code
+/// that consumes e.g. `listHead` (which returns `Maybe A`) must also declare
+/// `type Maybe A = Some A | None`. Same for Result.
 let private builtinEnv : TypeEnv =
     let arithOps = [ "+"; "-"; "*"; "/" ]
     let cmpOps   = [ "=="; "!="; "<"; ">"; "<="; ">=" ]
@@ -46,8 +52,60 @@ let private builtinEnv : TypeEnv =
     // IO builtins (emitted verbatim in codegen).
     let io = [
         "printfn", TyFn(TyName "Str", TyName "Unit")
+        "print",   TyFn(TyName "Str", TyName "Unit")
     ]
-    Map.ofList (arith @ cmp @ io)
+    // --- stdlib type shorthands ---
+    let tA = TyVar "A"
+    let tB = TyVar "B"
+    let tE = TyVar "E"
+    let tF = TyVar "F"
+    let tInt   = TyName "Int"
+    let tFloat = TyName "Float"
+    let tStr   = TyName "Str"
+    let tBool  = TyName "Bool"
+    let listOf t = TyApp(TyName "List", t)
+    let maybeOf t = TyApp(TyName "Maybe", t)
+    let resultOf a e = TyApp(TyApp(TyName "Result", a), e)
+    // Math
+    let math = [
+        "abs",  TyFn(tInt, tInt)
+        "absf", TyFn(tFloat, tFloat)
+        "sqrt", TyFn(tFloat, tFloat)
+        "min",  TyFn(tInt, TyFn(tInt, tInt))
+        "max",  TyFn(tInt, TyFn(tInt, tInt))
+    ]
+    // List
+    let list = [
+        "listLen",     TyFn(listOf tA, tInt)
+        "listMap",     TyFn(TyFn(tA, tB), TyFn(listOf tA, listOf tB))
+        "listFilter",  TyFn(TyFn(tA, tBool), TyFn(listOf tA, listOf tA))
+        "listFold",    TyFn(TyFn(tB, TyFn(tA, tB)), TyFn(tB, TyFn(listOf tA, tB)))
+        "listHead",    TyFn(listOf tA, maybeOf tA)
+        "listTail",    TyFn(listOf tA, maybeOf (listOf tA))
+        "listReverse", TyFn(listOf tA, listOf tA)
+        "listAppend",  TyFn(listOf tA, TyFn(listOf tA, listOf tA))
+    ]
+    // Maybe
+    let maybe = [
+        "maybeMap",         TyFn(TyFn(tA, tB), TyFn(maybeOf tA, maybeOf tB))
+        "maybeBind",        TyFn(maybeOf tA, TyFn(TyFn(tA, maybeOf tB), maybeOf tB))
+        "maybeWithDefault", TyFn(tA, TyFn(maybeOf tA, tA))
+    ]
+    // Result
+    let result = [
+        "resultMap",    TyFn(TyFn(tA, tB), TyFn(resultOf tA tE, resultOf tB tE))
+        "resultBind",   TyFn(resultOf tA tE, TyFn(TyFn(tA, resultOf tB tE), resultOf tB tE))
+        "resultMapErr", TyFn(TyFn(tE, tF), TyFn(resultOf tA tE, resultOf tA tF))
+    ]
+    // Str
+    let str = [
+        "strLen",      TyFn(tStr, tInt)
+        "strConcat",   TyFn(tStr, TyFn(tStr, tStr))
+        "strTrim",     TyFn(tStr, tStr)
+        "strContains", TyFn(tStr, TyFn(tStr, tBool))
+        "strToInt",    TyFn(tStr, maybeOf tInt)
+    ]
+    Map.ofList (arith @ cmp @ io @ math @ list @ maybe @ result @ str)
 
 /// Build a right-associative chain of TyFn from a list of parameter types plus a return type.
 /// e.g. [T1; T2] ret  →  TyFn(T1, TyFn(T2, ret))
