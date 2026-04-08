@@ -613,3 +613,113 @@ entire ll-lang module end-to-end. This is the last step before the
 self-hosting translation work (Stage D in the plan above) can
 begin — the bootstrap compiler needs a real front end that handles
 every surface form the F# compiler parses.
+
+### 2026-04 — Phase 7.4: full ll-lang module parser (DONE)
+
+[`spec/examples/valid/15-moduleparser-real.lll`](../../spec/examples/valid/15-moduleparser-real.lll)
+(506 lines) is the **showcase milestone** for Phase 7: a single
+runnable ll-lang program that stitches the lexer (09), type-decl
+parser (12), fn-decl parser (13), and full-expression parser (14)
+into one recursive-descent module-level front end. After this lands,
+"ll-lang has a full front-end in itself" stops being a story spread
+across four separate corpus slices and becomes one file that consumes
+a whole `module M\n type ...\n fn ... = ...` source end-to-end and
+emits a `List[Decl]` AST.
+
+The parser handles the module-level form
+`module M.N\n type T = ...\n type U = ...\n fn f(p T) R = expr\n ...`
+for the driver input
+
+```
+module Examples.Toy
+type Maybe A = Some A | None
+type Color = Red | Green | Blue
+fn double(x Int) Int = x * 2
+fn pickColor(x Int) Color = if x then Red else Green
+fn answer() Int = 42
+```
+
+and prints the reconstructed module deterministically via `lllc run`:
+
+```
+module Examples.Toy
+type Maybe (A) = Some(A) | None
+type Color = Red | Green | Blue
+fn double (x: Int) -> Int = (x * 2)
+fn pickColor (x: Int) -> Color = (if x then Red else Green)
+fn answer () -> Int = 42
+```
+
+Six pretty-printed decls in total: the module header with
+dot-separated TypeId segments, two `type` decls (one parametric
+`Maybe A = Some A | None`, one nullary enum `Color = Red | Green |
+Blue`), and three `fn` decls demonstrating three body shapes — int
+literal (`42`), arithmetic (`x * 2`), and `if-then-else` with ctor
+references as expression leaves (`if x then Red else Green`).
+
+The parser unifies every prior self-hosting slice:
+
+- **Token set** — a single 20-constructor `Token` ADT covering every
+  token any of 09/12/13/14 needed, plus `TKwModule` and `TDot` for the
+  module header.
+- **Lexer** — same shape as 09, with `\n` emitted as `TNewline` (so
+  the module loop can see decl boundaries) and keyword classification
+  extended to the Phase 7.4 keyword set (`module`/`type`/`fn`/`if`/
+  `then`/`else`).
+- **Type-decl parser** — lifted wholesale from 12, same
+  `parseTypeDecl`/`parseCtors`/`parseTypeArgs` helpers.
+- **Fn-decl parser** — lifted from 13, same `parseFnDecl`/
+  `parseParamGroups`/`parseReturnType`.
+- **Expression parser** — a **constrained subset** of 14: int lit, var
+  ref (`TLower` or `TUpper` for ctor refs), parens, `+ - * /`,
+  `if-then-else`, curried application. No `let-in`, no `match`, no
+  lambdas — those stay in 14 and will come back in Phase 7.5's
+  extended body grammar. Dropping them kept the file under 700 lines
+  and focused on the module-level structure.
+- **Top-level driver** — `parseModule` reads the header, then
+  `parseDecls` dispatches on the first token of each line (`TKwType`/
+  `TKwFn`), consing onto a `List[Decl]` via `DType`/`DFn` wrappers
+  around the reused type-decl / fn-decl ASTs. `Module` is modeled as
+  `MkModule Str List[Decl]` — the name is a pre-joined `Str`.
+
+**Explicit out-of-scope** (becomes Phase 7.5's feature backlog):
+
+1. **`let` decls at module level** — only `type` and `fn` currently.
+   The Phase 7.5 top-level dispatcher needs a `TKwLet :: _ ->` arm.
+2. **`tag Name`, `unit`, `trait`/`impl`, `import`/`export`** — all
+   the other module-level forms the F# `Parser.fs` accepts are missing.
+3. **Multi-line fn bodies with indented `let-in` chains** — 15 only
+   handles single-line bodies. Real corpus files (01-basics.lll,
+   etc.) routinely declare multi-line bodies; a Phase 7.5 version
+   needs layout-sensitive body parsing that either tracks indentation
+   or requires an explicit `end` delimiter.
+4. **`match` / lambda / `let-in` in fn bodies** — dropped for line
+   budget. 14-exprparser-real.lll already implements each of these;
+   re-merging them into the module-level parser is mostly a copy-
+   paste job plus harmonising the `isAtomStart` token set and adding
+   `TKwMatch`/`TKwWith`/`TBackslash`/`TDot`/`TArrow`/`TUnder` back to
+   the unified Token ADT.
+5. **Cons / tuple / list patterns in `match`** — same story. The
+   surface forms exist in the compiler; 15 doesn't parse them.
+6. **Parametric type application in ctor args** — e.g., `Maybe[A]`
+   inside `Some (Maybe A)` doesn't round-trip. The `parseTypeArgs`
+   helper only accepts bare `Upper` tokens.
+7. **Multi-line type declarations** — the multi-line `type T =\n |
+   A\n | B` form the compiler already supports (see `10-multiline-
+   sum.lll`) is not handled by 15's single-line-only parser.
+8. **Tagged literals (`"x"[UserId]`)** — not recognised by the lexer
+   and not part of the expression grammar.
+9. **String literals in bodies** — dropped to avoid the
+   `takeStrBody` helper overhead; would be trivial to add back from
+   14-exprparser-real.lll.
+
+Test count: 381 → 384 (corpus theory + 2 new ModuleParserTests).
+
+Next slice: **Phase 7.5 — extended module parser**. Extend 15 (or
+fork it into 16-moduleparser-full-real.lll) to cover the Phase 7.4
+out-of-scope list: `let` decls, `tag`/`trait`/`impl`/`import`,
+multi-line bodies with proper layout, and a full-expression body
+grammar including `let-in` / `match` / lambdas / cons+list patterns.
+After that the bootstrap compiler's front end is expressible in
+ll-lang and the self-hosting translation work (Stage D in the plan
+above — elaborator and codegen in ll-lang) can begin.

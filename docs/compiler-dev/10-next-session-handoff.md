@@ -7,20 +7,25 @@ session to pick up without replaying history.
 
 - **main** is at a clean commit, everything pushed to
   `github.com/Neftedollar/ll-lang`.
-- **381 xUnit tests** pass (`dotnet test` from repo root).
+- **384 xUnit tests** pass (`dotnet test` from repo root).
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c done.** ll-lang now
-  hosts a real lexer (`09-lexer-real.lll`), a real recursive-descent
-  arithmetic parser (`11-parser-real.lll`), a real type-declaration
-  parser (`12-typeparser-real.lll`), a real fn-declaration parser
-  (`13-fnparser-real.lll`), AND a real full-expression parser
-  (`14-exprparser-real.lll`) written in itself. Together they prove
-  the language can express every front-end piece needed for an
-  ll-lang-in-ll-lang compiler — Phase 7.4 (tying the four parsers
-  plus the lexer into one module-level front end) is the only step
-  before the elaborator / codegen rewrites.
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 done.** ll-lang
+  now hosts a real lexer (`09-lexer-real.lll`), a real recursive-
+  descent arithmetic parser (`11-parser-real.lll`), a real type-
+  declaration parser (`12-typeparser-real.lll`), a real fn-declaration
+  parser (`13-fnparser-real.lll`), a real full-expression parser
+  (`14-exprparser-real.lll`), AND — as of Phase 7.4 — a real full
+  **module parser** (`15-moduleparser-real.lll`, 506 lines) that
+  stitches the previous five slices into one recursive-descent front
+  end consuming a whole `module M\n type ...\n fn ... = ...` source
+  end-to-end. "ll-lang has a full front-end in itself" is now one
+  runnable program, not a story spread across four separate slices.
+  Phase 7.5 (extended module parser — let decls, multi-line bodies,
+  `match`/lambda/let-in in fn bodies, cons + list patterns, tagged
+  literals, tag/trait/impl/import module-level forms) is the natural
+  next step before the self-hosting elaborator + codegen work begins.
 - No stale worktrees, no stray branches, no uncommitted changes.
 - `lllc run spec/examples/valid/hello.lll` prints `Hello, ll-lang!`.
 - `lllc run spec/examples/valid/09-lexer-real.lll` prints
@@ -55,33 +60,73 @@ session to pick up without replaying history.
   (five expression kinds — let-in, if-then-else, match-as-expression,
   lambda, curried application — round-tripped through tokenize →
   parse → fully-parenthesised pretty).
+- `lllc run spec/examples/valid/15-moduleparser-real.lll` prints
+  ```
+  module Examples.Toy
+  type Maybe (A) = Some(A) | None
+  type Color = Red | Green | Blue
+  fn double (x: Int) -> Int = (x * 2)
+  fn pickColor (x: Int) -> Color = (if x then Red else Green)
+  fn answer () -> Int = 42
+  ```
+  (a whole module — header, two type decls, three fn decls covering
+  int-literal, arithmetic, and `if-then-else` bodies — round-tripped
+  through tokenize → parseModule → showModule).
 
 ## Immediate next task
 
-**Phase 7.4 — full ll-lang module parser in ll-lang**. Combine the
-real lexer (09), the type-decl parser (12), the fn-decl parser (13),
-and the full-expression parser (14) into one module-level front end
-that can read an entire `module M\n type ... \n fn ... = ...` file
-end-to-end and produce a `List[Decl]` AST. This is the last step
-before the self-hosting translation work (Stage D in the roadmap)
-can begin in earnest — the bootstrap compiler needs a front end that
-handles every surface form the F# `Parser.fs` parses.
+**Phase 7.5 — extended module parser in ll-lang**. Extend
+`15-moduleparser-real.lll` (or fork it into a sibling
+`16-moduleparser-full-real.lll`) to cover the features deliberately
+cut from Phase 7.4 for line-budget reasons. After this, the bootstrap
+compiler's front end is fully expressible in ll-lang and the
+self-hosting translation work (Stage D in the roadmap — elaborator
+and codegen in ll-lang) can begin in earnest.
 
-Sketch of work:
+Scope:
 
-1. Unify the four parsers' token types into one `Token` sum. Most
-   constructors already agree (`TKwFn`, `TKwType`, `TUpper`, `TLower`,
-   `TInt`, `TLParen`, etc.); a few renames will harmonise the set.
-2. Extend the expression parser (14) to the body-expression grammar
-   the fn-decl parser (13) actually needs: fn-declaration bodies use
-   a richer expression language than 14 currently supports. Specifically,
-   cons `::` patterns and list literals in expression position are
-   out-of-scope in 14 and will need to come back.
-3. Add a `Decl` sum (`DType TypeDecl | DFn FnDecl | DLet name expr`)
-   and a top-level `parseModule` driver that walks the token stream,
-   dispatching on `TKwType` / `TKwFn` / `TKwLet` for each decl.
-4. Test with a small real corpus file — e.g., round-trip
-   `hello.lll` through tokenize → parseModule → pretty → compare.
+1. **`let` decls at module level.** Add `DLet name expr` to the
+   `Decl` sum and a `TKwLet :: _ ->` arm in `parseDecls`. Reuse the
+   `parseExpr` driver for the right-hand side.
+2. **Multi-line `fn` bodies.** Today 15 only parses single-line
+   bodies (the lexer stops expr parsing at `TNewline` by virtue of
+   `TNewline` not being an atom-starter). A multi-line body needs
+   either layout-sensitive parsing that tracks indentation relative
+   to the `=`, or an explicit terminator. The F# compiler uses
+   layout; the ll-lang mirror should too.
+3. **`let-in` / `match` / lambdas in fn bodies.** Re-merge the
+   special-form dispatchers from `14-exprparser-real.lll`:
+   `parseLet` (`TKwLet :: ...`), `parseMatch` (`TKwMatch :: ...`),
+   `parseLam` (`TBackslash :: ...`). Add the missing token
+   constructors (`TKwLet`, `TKwIn`, `TKwMatch`, `TKwWith`,
+   `TBackslash`, `TDot`, `TBar`, `TArrow`, `TUnder`) and the
+   matching lexer arms. 15 doesn't need `TBar` for expression form
+   today because ctor types use bar chars too — re-merging needs to
+   disambiguate at the token level or use a context stack.
+4. **Cons / list / tuple patterns in `match`.** 14's match arms are
+   constrained to lit / var / wildcard patterns. A Phase 7.5 version
+   needs cons (`head :: tail`), list (`[a b c]`), and tuple
+   (`(a, b)`) patterns to match what the F# parser accepts.
+5. **Tagged literals (`"x"[UserId]`).** Not lexed today — needs a
+   post-atom lookahead for `TLBracket`.
+6. **Other module-level forms.** `tag Name`, `trait ... with ...`,
+   `impl Trait for Type = ...`, `import Foo.Bar`, `export ...`. Each
+   one is a single dispatcher arm plus a small parseX helper.
+7. **Multi-line type decls.** 10-multiline-sum.lll uses the form
+   `type T =\n  | A\n  | B` — 15's `parseCtors` doesn't skip
+   newlines between ctors. Fix: make `parseCtorsTail` / `parseCtor`
+   newline-tolerant.
+8. **Parametric ctor args.** `type T = Some (Maybe A)` and
+   `type T = Some Maybe[A]` — 15's `parseTypeArgs` only accepts
+   single `TUpper` tokens. Add a recursive `parseTypeArg` that can
+   descend into parens and brackets.
+9. **String literals in bodies.** Dropped from 15's lexer for line
+   budget; lift the `takeStrBody` helper back from 14-exprparser-
+   real.lll.
+
+Test the result by round-tripping an actual existing corpus file
+(e.g., `01-basics.lll`, `02-adts.lll`, or even a trimmed variant of
+`hello.lll`) through tokenize → parseModule → pretty → compare.
 
 Other backlog items worth picking up opportunistically:
 
@@ -94,7 +139,7 @@ Other backlog items worth picking up opportunistically:
   isolation (no `type ... and ...` grouping). A grouping pass in
   codegen would let future corpus files use the more natural shape.
 
-## Language gaps (backlog for Phase 7.3+)
+## Language gaps (backlog for Phase 7.5+)
 
 Tracked in order of expected leverage for self-hosting work:
 
