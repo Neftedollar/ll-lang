@@ -116,21 +116,40 @@ and private emitExpr (indent: int) (te: TypedExpr) : string =
         "(" + emitExpr indent a + " " + fop + " " + emitExpr indent b + ")"
 
     | TEApp(f, a) ->
-        "(" + emitExpr indent f + " " + emitExpr indent a + ")"
+        // Multi-arg ADT constructors take a tuple in F#, not curried args.
+        // `MkPair x y` in ll-lang must become `MkPair (x, y)` in F# even
+        // though both surface and AST treat it as curried. Detect a TECon
+        // head reachable through nested TEApps and gather every arg.
+        let rec gatherArgs head acc =
+            match head.Expr with
+            | TEApp(g, x) -> gatherArgs g (x :: acc)
+            | _ -> (head, acc)
+        let (head, args) = gatherArgs f [a]
+        match head.Expr with
+        | TECon c when List.length args > 1 ->
+            let argsStr = args |> List.map (emitExpr indent) |> String.concat ", "
+            "(" + safeIdent c + " (" + argsStr + "))"
+        | _ ->
+            "(" + emitExpr indent f + " " + emitExpr indent a + ")"
 
     | TELam(ps, body) ->
         let paramStr = ps |> List.map (fst >> safeIdent) |> String.concat " "
         "(fun " + paramStr + " -> " + emitExpr indent body + ")"
 
     | TELet(x, _, e, Some body) ->
-        "(let " + safeIdent x + " = " + emitExpr indent e + " in\n" + ind + "  " + emitExpr (indent+2) body + ")"
+        // Single-line `(let x = e in body)` dodges F# offside-rule trouble:
+        // when the let-in is nested inside a parent expression at column N,
+        // a continuation line at column ind would land left of the parent's
+        // implicit context column and be parsed as a sibling. Inline form
+        // sidesteps the whole problem at the cost of long lines.
+        "(let " + safeIdent x + " = " + emitExpr indent e + " in " + emitExpr indent body + ")"
 
     | TELet(x, _, e, None) ->
         "(let " + safeIdent x + " = " + emitExpr indent e + ")"
 
     | TELetPat(tp, e, Some body) ->
-        // F# accepts `let <pat> = <e> in <body>` directly for tuple/wildcard.
-        "(let " + emitPattern tp.Pat + " = " + emitExpr indent e + " in\n" + ind + "  " + emitExpr (indent+2) body + ")"
+        // Same single-line strategy as TELet — F# accepts inline let-pat-in.
+        "(let " + emitPattern tp.Pat + " = " + emitExpr indent e + " in " + emitExpr indent body + ")"
 
     | TELetPat(tp, e, None) ->
         "(let " + emitPattern tp.Pat + " = " + emitExpr indent e + ")"
