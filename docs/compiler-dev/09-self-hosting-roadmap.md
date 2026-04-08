@@ -1448,3 +1448,113 @@ inference smoke coverage to three self-host files (15 / 16 / 17).
 Next tick: **Phase 7.6c** — E001 type mismatch in ll-lang, OR
 jump ahead to **Phase 7.7** — start porting H-M inference into
 ll-lang itself.
+
+### 2026-04 — Phase 7.7a: HM inference slice A — TypeExpr + Subst + unify (DONE)
+
+First tick of **Phase 7.7** — the H-M middle of the compiler, written
+in ll-lang itself. After Phase 7.6 closed out the front-end half
+(lex / parse / elaborate, all in ll-lang), this slice starts the
+type-inference half. New file:
+[`18-hminfer-real.lll`](../../spec/examples/valid/18-hminfer-real.lll)
+(287 lines). Defines a minimal `TypeExpr` AST, a parallel-list `Subst`,
+an `applyType` walker, and a `unify : TypeExpr -> TypeExpr -> Maybe[Subst]`
+mirroring the F# host's `HMInfer.unify` in
+`src/LLLangCompiler/HMInfer.fs` line 63 area.
+
+**Shape (deliberately tight)**:
+
+```lll
+type TypeExpr =
+  | TyName Str           -- concrete: "Int", "Str", "Bool"
+  | TyVar Str            -- type variable: "a", "b", "$0"
+  | TyFn TypeExpr TypeExpr  -- arrow type
+
+type Subst = MkSubst List[Str] List[TypeExpr]
+
+fn unify(t1 TypeExpr)(t2 TypeExpr) Maybe[Subst]
+```
+
+`unify`'s arms mirror the F# host arm-by-arm:
+
+* `TyName a` vs `TyName b`     — `Some empty` if equal, else `None`
+* `TyVar a`  vs `TyVar b`      — `Some empty` if same name, else bind
+                                 `a := TyVar b`
+* `TyVar a`  vs t (non-var)    — `Some (a := t)`
+* t (non-var) vs `TyVar b`     — symmetric: `Some (b := t)`
+* `TyFn a1 r1` vs `TyFn a2 r2` — recurse: unify args, apply subst to
+                                 results, unify results, return head
+                                 subst (no compose — see scope below)
+* anything else                — `None`
+
+The `main` driver runs five hardcoded `unify` cases and joins their
+result lines into a single `printfn` (ll-lang's `fn main` body is one
+expression — there's no statement sequence):
+
+```
+t1 unify Int Int ok
+t2 unify Int Str mismatch
+t3 unify a Int ok bound a
+t4 unify (Int -> Str) (Int -> Str) ok
+t5 unify (Int -> Bool) (Int -> Str) mismatch
+```
+
+**Implementation notes**:
+
+* Parallel-list `Subst` (`List[Str]` keys + `List[TypeExpr]` vals)
+  rather than `List[(Str, TypeExpr)]`. Same trick as
+  `16-elaborator-real.lll`'s `EMatch` arms — sidesteps the codegen's
+  current limitation around tuples-in-list patterns.
+* Each `t1` arm of `unify` is split into its own helper
+  (`unifyName` / `unifyVar` / `unifyFn` / `unifyResults`) to keep
+  every `match` one level deep. Three-level nested matches in ll-lang
+  have ambiguous arm bleed-over because indentation rules can't tell
+  which match a shallower `|` belongs to — e.g.,
+  `match t1 with | TyName a -> match t2 with | ... | _ -> None`
+  parses the trailing `_` as a `t1` arm, not a `t2` arm.
+* `emptySubst` takes a dummy `Int` parameter — zero-arg fns in
+  ll-lang require a discard arg at the call site (same trick as
+  `16-elaborator-real.lll`'s `testModule` at line 426).
+* `applyType` does single-level lookup, not chain-following. Sufficient
+  for this slice because `singletonSubst` only ever produces
+  `var -> non-var` bindings, so a chain would never form.
+* `unifyFn` returns the head subst directly without composing the
+  result subst into it. Composition only matters once an `inferExpr`
+  walker (Phase 7.7b) needs to thread substs across multi-binder
+  expressions; the five test cases here never produce a non-empty
+  arg subst that the result subst would need to be threaded through.
+
+**Deliberately out of scope** (carved out for Phase 7.7b and later):
+
+1. **`inferExpr`** — no algorithm-W loop. The `Expr` AST that 7.7b
+   will walk is left as a doc-only stub in the file's header so the
+   diff against the F# host stays trivial.
+2. **`Env`** — no name-to-type mapping. `inferExpr`'s var lookup
+   needs an `Env`; this slice has only `unify`, which is
+   position-agnostic and env-agnostic.
+3. **`FreshState` / fresh-var counter** — no algorithm-W means no
+   fresh-var allocation. Phase 7.7b adds a counter (either via a
+   threaded `Int` or a mutable `Ref`-like ADT).
+4. **Occurs check** — `unify` happily binds `a := TyFn(a, b)` today.
+   Phase 7.7b adds the check, mirroring the F# host's `e008
+   OccursCheck` in `HMInfer.fs` line 52 area.
+5. **`composeSubst`** — only matters for `inferExpr`. The current
+   `unifyFn` returns the head subst directly. 7.7b adds compose.
+6. **Let-generalization, polymorphism, type schemes** — much later.
+7. **Trait dispatch (E006)** — even later.
+8. **`TyApp` / `TyTagged`** — record types, parametric types, and
+   tagged unit types are all out of scope. The F# host's `TypeExpr`
+   has them; this slice does not.
+9. **Source positions on errors** — `unify` returns `None`, not an
+   `Err` carrying a code + position. Error codes / positions land in
+   a later slice once `inferExpr` needs them.
+
+Tests: 395 (+3 vs 392). New `HMInferRealTests.fs` adds an inference
+round-trip fact and a runtime E2E fact (asserting all five `t<N>
+unify ...` lines appear in stdout); a new row in `HMInferTests.fs`'s
+`valid corpus infers ok` theory brings the inference smoke coverage
+to four self-host files (15 / 16 / 17 / 18).
+
+Next tick: **Phase 7.7b** — extend `18-hminfer-real.lll` with `Env`,
+fresh-var counter, occurs check, `composeSubst`, the documented
+`Expr` AST, and a toy `inferExpr` covering literal / var / EAdd /
+EApp arms.

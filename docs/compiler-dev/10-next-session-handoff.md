@@ -7,11 +7,11 @@ session to pick up without replaying history.
 
 - **main** is at a clean commit, everything pushed to
   `github.com/Neftedollar/ll-lang`.
-- **392 xUnit tests** pass (`dotnet test` from repo root).
+- **395 xUnit tests** pass (`dotnet test` from repo root).
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration done.**
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a done.**
   ll-lang now hosts a real lexer (`09-lexer-real.lll`), a real
   recursive-descent arithmetic parser (`11-parser-real.lll`), a real
   type-declaration parser (`12-typeparser-real.lll`), a real
@@ -150,41 +150,64 @@ session to pick up without replaying history.
   (hardcoded source: `module M\ntype Shape = Circle | Rect\nfn
   good(x Int) Int = x + 1\nfn bad(x Int) Int = undefinedName\nfn
   shapeBad(s Shape) Int = match s with | 0 -> 1`).
+- **Phase 7.7a done** — the first slice of **Hindley-Milner inference
+  in ll-lang itself** lives in
+  [`18-hminfer-real.lll`](../../spec/examples/valid/18-hminfer-real.lll)
+  (287 lines). Defines a minimal `TypeExpr` (TyName / TyVar / TyFn),
+  a parallel-list `Subst`, an `applyType` walker, and a
+  `unify : TypeExpr -> TypeExpr -> Maybe[Subst]` mirroring the F# host's
+  `HMInfer.unify` in `src/LLLangCompiler/HMInfer.fs` line 63 area.
+  The unifier covers each shape arm-by-arm: `TyName` vs `TyName`,
+  `TyVar` (bind) on either side, `TyFn` vs `TyFn` (recurse args
+  then results, single-level subst, no compose). Deliberately tight
+  scope: no `inferExpr`, no env, no fresh-var counter, no occurs
+  check, no compose, no `TyApp` / `TyTagged`. Each `t1` arm of
+  `unify` is split into its own helper (`unifyName` / `unifyVar` /
+  `unifyFn` / `unifyResults`) to keep `match` nesting one level deep
+  — three-level nested matches in ll-lang have ambiguous arm
+  bleed-over because indentation rules can't tell which match a
+  shallower `|` belongs to.
+- `lllc run spec/examples/valid/18-hminfer-real.lll` prints
+  ```
+  t1 unify Int Int ok
+  t2 unify Int Str mismatch
+  t3 unify a Int ok bound a
+  t4 unify (Int -> Str) (Int -> Str) ok
+  t5 unify (Int -> Bool) (Int -> Str) mismatch
+  ```
+  (five hardcoded `unify` cases — three success / "ok bound" lines
+  and two mismatch lines, covering each `unify` arm at least once).
 
 ## Immediate next task
 
-**Phase 7.6c — elaborator slice C: E001 type mismatch detection in
-ll-lang** (or jump straight to full H-M inference — both are valid
-next steps). Phase 7.6a shipped the name-resolution spine
-(`collectDecls` → `checkDecls`, E002); Phase 7.6b layered on a
-constructor-coverage exhaustiveness pass (E003 over top-level
-clause-sugar matches). The next tick picks up declared-type
-checking.
+**Phase 7.7b — extend the HM-inference-in-ll-lang slice with `Env`,
+fresh-var counter, occurs check, and a toy `inferExpr`**. Phase 7.7a
+shipped the `unify` spine; the next tick adds the algorithm-W loop
+shape so the file can infer literal / variable / addition / app
+expression types end-to-end.
 
-Shape (E001 route):
-1. Extend `Env` from `MkEnv List[Str]` to a parallel pair (`Str`
-   name list + `TypeExpr` type list) so every declared name carries
-   its declared type. The existing `DFn Str List[Str] Str Expr`
-   already carries the last-param type; extend it to per-param
-   types or introduce a helper param-type list.
-2. Add a minimal `TypeExpr` sum (`TyName Str` / `TyFn TypeExpr
-   TypeExpr` for now — no type vars, no tagged types, no type apps).
-3. Thread annotated fn param types through `collectDecl` / `checkDecl`.
-4. Add a `typeOf (env)(e) (TypeExpr, List[Str])` walker mirroring
-   the F# host elaborator's `typeOf`. EApp is the only place that
-   actually type-checks — every other arm just forwards the
-   inferred type and any nested errors.
-5. Flag `EApp f arg` where `arg`'s inferred type doesn't unify with
-   `f`'s parameter type, emitting `E001 TypeMismatch <got> <expected>`.
+Shape (Phase 7.7b):
+1. Extend `18-hminfer-real.lll` in place with an `Env` (parallel
+   `List[Str]` + `List[TypeExpr]`, same trick as `Subst`).
+2. Add a `FreshState` carrier — either a mutable counter via a side
+   `Int Ref`-like ADT, or thread `Int` through every `infer` call.
+3. Add the `Expr` sum the file's header already documents: `EInt` /
+   `EStr` / `EBool` / `EVar` / `EAdd` / `EApp`.
+4. Implement `inferExpr (env Env)(fresh Int)(e Expr) (TypeExpr, Subst, Int)`
+   covering every arm. EAdd unifies both children with `Int`; EApp
+   unifies `f`'s type with `TyFn(arg_ty, beta)` and returns `beta`
+   under the result subst.
+5. Add `occurs : Str -> TypeExpr -> Bool` and wire it into `unify`'s
+   `TyVar` arm (return `None` if the var occurs in the candidate
+   type) — this is E008 in the F# host.
+6. Add a `composeSubst : Subst -> Subst -> Subst` so `inferExpr`
+   can thread substs across multi-binder expressions. The current
+   `unifyFn` returns the head subst only; once `inferExpr` exists
+   it has to compose for the result-subst case.
 
-Keep scope minimal: no inference, no polymorphism, no tag propagation,
-no source positions. Just checking explicit annotations against
-inferred literal / variable / fn-call types.
-
-Alternative route: **full H-M inference** in ll-lang as one larger
-slice, covering E001 + E006 + E008 at once. Higher leverage for
-self-hosting but also much larger — needs `TypeScheme`, `Subst`,
-`generalize`, `instantiate`, occurs check, and Algorithm W itself.
+Keep scope still tight: no let-generalization, no `ELam` / `EIf` /
+`EMatch` / `ELet`, no trait dispatch, no source positions, no
+`TyApp` / `TyTagged`. Those land in 7.7c onwards.
 
 ### Backlog: heavier module-parser extensions in ll-lang
 
