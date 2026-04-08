@@ -150,7 +150,7 @@ Source (.lll)
 
 ## Status
 
-**Phases 1–6 complete + Phase 7.1/7.2/7.3a/7.3b/7.3c/7.4/7.5a/7.5b/7.5c/7.5d (real lexer, real recursive-descent arithmetic parser, real type-declaration parser, real fn-declaration parser, real full-expression parser, real full-module parser, AND — as of Phase 7.5a/7.5b/7.5c/7.5d — module-level `let` decls, `match`-with-explicit-scrutinee, `let-in` chains, `\x. body` lambdas, string literals, `[]` / `h :: t` cons patterns in match arms, **tagged literals** in expression position (`"x"[UserId]`), and **parametric ctor args** in type decls (`Maybe[Int]`) inside the same file — ten ll-lang-in-ll-lang self-hosting slices, culminating in a single file that consumes a whole `module M\n type ...\n let ...\n fn ... = ...` source and emits a `List[Decl]` AST). 384 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, `let (a, b) = ...` destructuring, multi-line sum types, mutually recursive top-level functions, a real arithmetic parser (`(1 + (2 * 3))` precedence verified), a real type-declaration parser (four `type` decls round-trip through tokenize → parse → pretty-print), a real fn-declaration parser (four `fn` decls with curried typed params and optional return types round-trip through tokenize → parse → pretty-print), a real full-expression parser covering `let-in` / `if-then-else` / `match` / lambdas / curried application on top of the arithmetic subset (five expression kinds round-trip to fully-parenthesised pretty form), and a real full-module parser that stitches lexer + type-decl + fn-decl + expression parsers into one program and pretty-prints a whole module (module header + two type decls + two module-level `let` decls + seven `fn` decls with int-literal, arithmetic, match-with-scrutinee, `if-then-else`, let-in chain, lambda-application, string-literal, and cons-pattern bodies) — see `spec/examples/valid/09-lexer-real.lll`, `11-parser-real.lll`, `12-typeparser-real.lll`, `13-fnparser-real.lll`, `14-exprparser-real.lll`, and `15-moduleparser-real.lll`.**
+**Phases 1–6 complete + Phase 7.1/7.2/7.3a/7.3b/7.3c/7.4/7.5a/7.5b/7.5c/7.5d (real lexer, real recursive-descent arithmetic parser, real type-declaration parser, real fn-declaration parser, real full-expression parser, real full-module parser, AND — as of Phase 7.5a/7.5b/7.5c/7.5d — module-level `let` decls, `match`-with-explicit-scrutinee, `let-in` chains, `\x. body` lambdas, string literals, `[]` / `h :: t` cons patterns in match arms, **tagged literals** in expression position (`"x"[UserId]`), and **parametric ctor args** in type decls (`Maybe[Int]`) inside the same file — ten ll-lang-in-ll-lang self-hosting slices, culminating in a single file that consumes a whole `module M\n type ...\n let ...\n fn ... = ...` source and emits a `List[Decl]` AST). 386 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, `let (a, b) = ...` destructuring, multi-line sum types, mutually recursive top-level functions, a real arithmetic parser (`(1 + (2 * 3))` precedence verified), a real type-declaration parser (four `type` decls round-trip through tokenize → parse → pretty-print), a real fn-declaration parser (four `fn` decls with curried typed params and optional return types round-trip through tokenize → parse → pretty-print), a real full-expression parser covering `let-in` / `if-then-else` / `match` / lambdas / curried application on top of the arithmetic subset (five expression kinds round-trip to fully-parenthesised pretty form), and a real full-module parser that stitches lexer + type-decl + fn-decl + expression parsers into one program and pretty-prints a whole module (module header + two type decls + two module-level `let` decls + seven `fn` decls with int-literal, arithmetic, match-with-scrutinee, `if-then-else`, let-in chain, lambda-application, string-literal, and cons-pattern bodies) — see `spec/examples/valid/09-lexer-real.lll`, `11-parser-real.lll`, `12-typeparser-real.lll`, `13-fnparser-real.lll`, `14-exprparser-real.lll`, and `15-moduleparser-real.lll`.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -180,7 +180,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 384 tests
+dotnet test    # 386 tests
 ```
 
 ### Run your first program
@@ -223,7 +223,7 @@ src/LLLangCompiler/        — compiler library (F#)
   Codegen.fs               — F# source emitter
   Compiler.fs              — end-to-end pipeline entry point
 src/LLLangTool/            — `lllc` CLI (build / run)
-tests/LLLangTests/         — xUnit test suite (384 tests)
+tests/LLLangTests/         — xUnit test suite (386 tests)
 ```
 
 ## Roadmap
