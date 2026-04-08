@@ -793,3 +793,41 @@ let ``type body: nested juxtaposition in parens (Result Int Str)`` () =
                     [TyApp(TyApp(TyName "Result", TyName "Int"), TyName "Str")])]) -> ()
     | d -> failwith $"Expected TBSum [MkFoo (Result Int Str)], got {d}"
 
+// --- Phase 7.5d bugfix: parseModule must propagate decl parse errors ---
+//
+// The old `parseModuleCtx` decl loop swallowed every `parseDecl` error with
+// `| Error _ -> advance c` and kept going. Downstream that turned any parse
+// error — e.g. a keyword like `tag` accidentally used as a binder in a
+// clause-form arm, or a keyword in a fn parameter name — into a mysterious
+// cascade of `E002 UnboundVar` at every call site of the dropped decl, with
+// the real parse error never surfacing. The fix is to propagate the first
+// broken decl as a module-level parse error so the driver prints a clear
+// `Expected ... at L:C, got ...` pointing at the actual offending token.
+
+[<Fact>]
+let ``bug1: clause-form arm with keyword binder 'tag' surfaces as parse error not UnboundVar`` () =
+    // `tag` is a lexer keyword (KwTag). Using it as a pattern binder inside
+    // a clause-form fn arm used to silently kill the whole enclosing decl
+    // — every call site of the fn then blew up with E002 UnboundVar at the
+    // call site instead of pointing at the `tag` token. This test pins the
+    // new behaviour: parseModule returns an error that mentions the bad
+    // token's position, so callers see the real problem.
+    let src =
+        "module M\n" +
+        "type Expr = EInt Int | ETagged Expr Str\n" +
+        "fn showExpr(e Expr) Str =\n" +
+        "  | EInt n -> \"int\"\n" +
+        "  | ETagged inner tag -> tag\n" +
+        "fn main() = printfn (showExpr (EInt 1))"
+    let toks =
+        match tokenize src with
+        | Ok ts -> ts
+        | Error e -> failwith $"Lex error: {e}"
+    match parseModule toks with
+    | Ok _ -> failwith "Expected parseModule to fail on `tag` binder, got Ok"
+    | Error msg ->
+        // Error must reference the offending position, not drop the decl
+        // silently and let `showExpr` become an UnboundVar downstream.
+        Assert.Contains("KwTag", msg)
+
+

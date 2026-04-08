@@ -1153,7 +1153,17 @@ let private parseModuleCtx (c: Ctx) : Result<LLModule, string> =
             imports.Add(List.ofSeq parts)
             skipNewlines c
         let decls = ResizeArray<Decl * bool>()
-        while curTok c <> Eof do
+        // Phase 7.5d bugfix: propagate the first decl parse error instead
+        // of silently advancing one token and dropping the whole decl.
+        // The old behaviour (`| Error _ -> advance c`) turned any parse
+        // error — e.g. a keyword like `tag` accidentally used as a binder
+        // name — into a cascading `E002 UnboundVar` at every call site of
+        // the dropped decl, with the actual parse error never surfacing.
+        // Now the first broken decl aborts the module parse and the
+        // driver reports the real `Expected ... got ...` message pointing
+        // at the offending token's line:col.
+        let mutable declErr : string option = None
+        while curTok c <> Eof && declErr.IsNone do
             skipNewlines c
             if curTok c = Eof then ()
             else
@@ -1161,12 +1171,15 @@ let private parseModuleCtx (c: Ctx) : Result<LLModule, string> =
                 if exported then advance c
                 match parseDecl c with
                 | Ok d -> decls.Add((d, exported)); skipNewlines c
-                | Error _ -> advance c  // skip on error to continue
-        Ok {
-            Path = List.ofSeq path
-            Imports = List.ofSeq imports
-            Decls = List.ofSeq decls
-        }
+                | Error e -> declErr <- Some e
+        match declErr with
+        | Some e -> Error e
+        | None ->
+            Ok {
+                Path = List.ofSeq path
+                Imports = List.ofSeq imports
+                Decls = List.ofSeq decls
+            }
 
 /// Parse a module and return both the AST and the side-table of source
 /// positions for a subset of nodes (EVar, ECon, EApp, EMatch, EMatchOf,

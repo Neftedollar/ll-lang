@@ -463,7 +463,7 @@ let ``runtime: let wildcard destructuring discards rhs`` () =
         "module Tmp.LetWild\n" +
         "fn run() Int =\n" +
         "  let _ = 99 in 7\n" +
-        "fn main() = printfn (intToStr (run ()))"
+        "fn main() = printfn (intToStr run)"
     let stdout = runLLLangSrc src
     Assert.Contains("7", stdout)
 

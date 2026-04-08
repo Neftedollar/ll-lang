@@ -22,6 +22,6 @@ fn safeDivide(a Float)(b Float) Maybe[Float] =
   else Some (a / b)
 
 -- Result usage
-fn parseAge(s Str) Result[Int Str] =
+fn parseAge(s Str) Result[Int][Str] =
   if s == "" then Err "empty input"
   else Ok 42
