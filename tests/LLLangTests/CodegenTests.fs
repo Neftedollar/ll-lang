@@ -547,3 +547,25 @@ let ``runtime: 10-multiline-sum.lll prints id:foo`` () =
     proc.WaitForExit()
     Assert.True(stdout.Contains("id:foo"),
                 $"Expected stdout to contain 'id:foo'. stdout={stdout} stderr={stderr}")
+
+// --- Phase 7.3a bugfix (bug 1): clause-sugar arm body scoping ---------
+
+[<Fact>]
+let ``Bug1 runtime: clause-sugar wildcard arm with multi-line let-in returns 30`` () =
+    // End-to-end exercise of the bug 1 reproducer: a multi-line
+    // `let .. in` chain inside the wildcard arm body. Before the fix
+    // the bindings escaped the arm scope and the program failed to
+    // compile. After the fix parseBlockExpr folds the chain into the
+    // arm body and the program runs and prints 30.
+    let src =
+        "module Tmp.Bug1Scope\n" +
+        "type Tag = A | B\n" +
+        "fn f(t Tag) Int =\n" +
+        "  | A -> 1\n" +
+        "  | _ ->\n" +
+        "    let p = (10, 20) in\n" +
+        "    let (x, y) = p in\n" +
+        "    x + y\n" +
+        "fn main() = printfn (intToStr (f B))"
+    let stdout = runLLLangSrc src
+    Assert.Contains("30", stdout)

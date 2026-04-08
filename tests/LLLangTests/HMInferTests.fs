@@ -856,3 +856,25 @@ let ``infer literal tuple matches PTuple encoding round-trip`` () =
         "  let (a, _, _) = t in a"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "fst3").Body)
+
+// --- Phase 7.3a bugfix (bug 1): clause-sugar arm body scoping ---------
+
+[<Fact>]
+let ``Bug1: clause-sugar wildcard arm with multi-line let-in scopes bindings`` () =
+    // Regression for: a nested `let .. in` chain in the wildcard arm body
+    // of a clause-sugar fn. With the old arm-body parser (parseExprInner)
+    // only the first `let` got attached to the arm and the rest floated
+    // to top level, producing E002 UnboundVar x / y. With parseBlockExpr
+    // the whole chain stays inside the arm body and typechecks cleanly
+    // to Tag -> Int.
+    let src =
+        "module M\n" +
+        "type Tag = A | B\n" +
+        "fn f(t Tag) Int =\n" +
+        "  | A -> 1\n" +
+        "  | _ ->\n" +
+        "    let p = (10, 20) in\n" +
+        "    let (x, y) = p in\n" +
+        "    x + y"
+    let tm = inferOk src
+    Assert.Equal(TyFn(TyName "Tag", TyName "Int"), (schemeOf tm "f").Body)

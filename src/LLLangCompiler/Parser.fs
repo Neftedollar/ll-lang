@@ -359,6 +359,13 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
                 let hadIndent = curTok c = Indent
                 if hadIndent then advance c
                 skipNewlines c
+                // Phase 7.3a bugfix (bug 1): arm bodies use parseBlockExpr
+                // so multi-line `let .. in` chains inside a match arm fold
+                // their continuations at the arm's indent level and keep
+                // their bindings in scope. parseExprInner alone would hand
+                // off only the first let to the arm, leaving subsequent
+                // ones to float out to the surrounding module and produce
+                // E002 UnboundVar on the names they were meant to bind.
                 let branches = ResizeArray<Pattern * Expr>()
                 let mutable cont = true
                 while cont && curTok c = Bar do
@@ -369,7 +376,7 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
                         match skip c Arrow with
                         | Error e -> Error e |> ignore; cont <- false
                         | Ok () ->
-                            match parseExprInner c with
+                            match parseBlockExpr c with
                             | Error e -> Error e |> ignore; cont <- false
                             | Ok body ->
                                 branches.Add((pat, body))
@@ -563,6 +570,13 @@ let private parseTypeExpr (c: Ctx) : Result<TypeExpr, string> =
 
 let private parseMatchBranches (c: Ctx) : Result<Expr, string> =
     // We're inside an indented block already (or at top-level of fn body with |)
+    // Phase 7.3a bugfix (bug 1): the arm body is parsed with parseBlockExpr
+    // (not parseExprInner) so multi-line `let .. in` chains inside a
+    // clause-sugar arm body fold their continuations at the arm's indent
+    // level and keep their bindings in scope. With parseExprInner alone
+    // only the first `let` got attached to the arm; the rest floated to
+    // top level and the body referenced names the module parser never
+    // saw, producing E002 UnboundVar.
     let startIdx = c.Pos
     let branches = ResizeArray<Pattern * Expr>()
     let mutable cont = true
@@ -574,7 +588,7 @@ let private parseMatchBranches (c: Ctx) : Result<Expr, string> =
             match skip c Arrow with
             | Error e -> Error e |> ignore; cont <- false
             | Ok () ->
-                match parseExprInner c with
+                match parseBlockExpr c with
                 | Error e -> Error e |> ignore; cont <- false
                 | Ok expr ->
                     branches.Add((pat, expr))
