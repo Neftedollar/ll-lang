@@ -1,0 +1,328 @@
+module Examples.ElaboratorReal
+
+-- Phase 7.6a: first slice of the ll-lang **elaborator** written in
+-- ll-lang itself. This is the very first tick of the "elaborator in
+-- ll-lang" half of the self-hosting roadmap — the front-end half
+-- (Phases 7.1..7.5e) now produces a `List[Decl]` AST inside
+-- `15-moduleparser-real.lll`, and Phase 7.6 starts walking that AST
+-- with the same semantic passes the F# host elaborator runs in
+-- `src/LLLangCompiler/Elaborator.fs`.
+--
+-- This slice targets the **simplest and most obvious** elaborator
+-- function — **name resolution** / free-variable check. For each `fn`
+-- body, walk the expression and report `E002 UnboundVar <name>` for
+-- every `EVar name` whose name isn't in the collected top-level env
+-- and isn't bound by a local `let` / lambda / fn param / pattern
+-- binder.
+--
+-- Pipeline: Decl list -> collect top-level names into `Env` ->
+-- `checkDecl` each fn body, extending `Env` with the fn's params
+-- before walking `body`. `checkExpr env body` recurses through the
+-- expression, threading the local scope via explicit extension on
+-- `ELet` / `ELam` / `EMatch` arm pattern binders. Every `EVar name`
+-- that isn't in the current env accumulates one error string.
+--
+-- Deliberately minimal ("slice A"):
+--   * Minimal local AST (not reusing the full `Decl` shape from
+--     `15-moduleparser-real.lll`) — `DFn` / `DLet` / `DType` (ctors
+--     only) / `DTag`, plus `EInt` / `EStr` / `EVar` / `EAdd` / `EApp`
+--     / `ELet` / `ELam` / `EIf` / `EMatch` expression forms, plus
+--     `PInt` / `PVar` / `PWild` / `PNil` / `PCons` patterns.
+--   * No type checking (E001 — Phase 7.6b).
+--   * No exhaustiveness (E003 — Phase 7.6c).
+--   * No tag / unit checks (E004 / E005 — Phase 7.6+).
+--   * No builtin env — the test input only references names the user
+--     declares locally, so the env starts empty. Wiring into the real
+--     `builtinEnv` lives in a later integration slice.
+--   * No source positions — errors are emitted as `E002 UnboundVar
+--     <name>` (no `line:col` prefix). Position tracking on AST nodes
+--     is a separate Phase 7.6+ item.
+--   * Input module AST is **hardcoded** in `main` — reading a real
+--     `.lll` file through the parser and elaborating the result is
+--     the Phase 7.6 integration tick, not this slice.
+--
+-- Runtime output, for the hardcoded test module:
+--   E002 UnboundVar undefinedName
+--   E002 UnboundVar otherMissing
+
+-- ---------- Types -------------------------------------------------------
+
+-- Minimal expression AST for this slice. `EVar name` is the only leaf
+-- the elaborator actually checks against the env; every other leaf
+-- (`EInt`, `EStr`) carries no identifier. Recursive arms recurse into
+-- sub-expressions exactly as the F# host elaborator's `typeOf` does.
+-- `EMatch` stores match arms as two parallel lists (same trick as
+-- `15-moduleparser-real.lll`) to sidestep the codegen limitation that
+-- prevents mutually-recursive user type decls.
+type Pat =
+  | PInt Int
+  | PVar Str
+  | PWild
+  | PNil
+  | PCons Pat Pat
+
+type Expr =
+  | EInt Int
+  | EStr Str
+  | EVar Str
+  | EAdd Expr Expr
+  | EApp Expr Expr
+  | ELet Str Expr Expr
+  | ELam Str Expr
+  | EIf Expr Expr Expr
+  | EMatch Expr List[Pat] List[Expr]
+
+-- Minimal decl AST. `DFn name params body` — `params` is the flat
+-- list of parameter names (no types in this slice; types are Phase
+-- 7.6b's problem). `DLet` / `DTag` introduce a single name into the
+-- top-level env and have no effect on name resolution beyond that
+-- (the RHS of a `DLet` is not walked in this slice — module-level
+-- `let`s with free vars on the RHS can surface in a later tick).
+-- `DType name ctors` introduces every constructor name into the env;
+-- the type name itself doesn't become a value binder, matching the
+-- F# host elaborator's behaviour.
+type Decl =
+  | DFn Str List[Str] Expr
+  | DLet Str Expr
+  | DType Str List[Str]
+  | DTag Str
+
+-- Name-resolution env: just a `List[Str]` of declared names. No types,
+-- no source positions — this slice cares only about "is this name
+-- defined?". Wrapped in `MkEnv` so future slices can carry richer data
+-- (per-name types, scope depth, etc.) without changing the surface.
+type Env = MkEnv List[Str]
+
+-- ---------- Env helpers -------------------------------------------------
+
+-- Linear scan over the name list. Short-circuits on first match via a
+-- `listFold` accumulator carrying the running `found?` flag. `==` on
+-- `Str` is the polymorphic equality the builtin env injects as
+-- `a -> a -> Bool`; on strings it's the same as F#'s `=` on strings.
+fn envHas(env Env)(name Str) Bool =
+  match env with
+    | MkEnv xs ->
+      listFold (\acc x. if acc then true else if x == name then true else false) false xs
+
+fn envAdd(env Env)(name Str) Env =
+  match env with
+    | MkEnv xs -> MkEnv (listAppend xs [name])
+
+-- Fold a list of names into an env, extending one binder at a time.
+-- Used for fn params, for collected top-level decl names, and for
+-- pattern binders introduced inside match arms.
+fn envAddAll(env Env)(names List[Str]) Env =
+  listFold (\acc n. envAdd acc n) env names
+
+-- ---------- Pattern binders ---------------------------------------------
+
+-- Collect every `PVar` binder introduced by a pattern. Wildcards, nil,
+-- and int literal patterns don't bind anything. `PCons h t` binds
+-- whatever the head and tail patterns bind, left-to-right. Mirrors the
+-- F# host elaborator's local `patVars` helper.
+fn patBinders(p Pat) List[Str] =
+  | PInt _ -> []
+  | PWild -> []
+  | PNil -> []
+  | PVar name -> [name]
+  | PCons h t -> listAppend (patBinders h) (patBinders t)
+
+-- ---------- Expression walker ------------------------------------------
+
+-- Walk `e` under `env`, returning the list of `E002 UnboundVar <name>`
+-- error strings produced by every `EVar name` not in `env` plus any
+-- errors produced by sub-expressions. The only arms that actually
+-- flag are `EVar`; every compound arm recurses and concatenates its
+-- children's error lists. `ELet` / `ELam` / `EMatch` extend the local
+-- env for their body sub-expression(s) before recursing.
+fn checkExpr(env Env)(e Expr) List[Str] =
+  | EInt _ -> []
+  | EStr _ -> []
+  | EVar name ->
+    if envHas env name then []
+    else
+      let msg = strConcat "E002 UnboundVar " name in
+      [msg]
+  | EAdd l r -> listAppend (checkExpr env l) (checkExpr env r)
+  | EApp f x -> listAppend (checkExpr env f) (checkExpr env x)
+  | ELet name rhs body ->
+    let rhsErrs = checkExpr env rhs in
+    let env2 = envAdd env name in
+    let bodyErrs = checkExpr env2 body in
+    listAppend rhsErrs bodyErrs
+  | ELam param body ->
+    let env2 = envAdd env param in
+    checkExpr env2 body
+  | EIf cnd thn els ->
+    let ce = checkExpr env cnd in
+    let te = checkExpr env thn in
+    let ee = checkExpr env els in
+    listAppend (listAppend ce te) ee
+  | EMatch scrut pats bodies ->
+    let scrutErrs = checkExpr env scrut in
+    let armErrs = checkArms env pats bodies in
+    listAppend scrutErrs armErrs
+
+-- Walk the two parallel arm lists in lockstep. For each arm, extend
+-- the scrutinee env with every binder the pattern introduces, then
+-- walk the body expression under the extended env. Pattern binders
+-- are only visible inside their own arm body, not across arms.
+fn checkArms(env Env)(pats List[Pat])(bodies List[Expr]) List[Str] =
+  match pats with
+    | p :: ps ->
+      match bodies with
+        | b :: bs ->
+          let armEnv = envAddAll env (patBinders p) in
+          let armErrs = checkExpr armEnv b in
+          let restErrs = checkArms env ps bs in
+          listAppend armErrs restErrs
+        | _ -> []
+    | _ -> []
+
+-- ---------- Decl walker --------------------------------------------------
+
+-- Walk a single decl under the top-level `env`. `DFn` extends `env`
+-- with its own params (fn params are locals, not top-level names)
+-- then walks `body`. `DLet` / `DType` / `DTag` have no body to walk
+-- in this slice — their effect on name resolution is entirely in the
+-- collection pass below. (A richer slice would also walk `DLet`'s RHS,
+-- but since module-level lets in the F# host elaborator only carry
+-- literals, int / str / tagged literals etc., skipping them here is
+-- safe — any free var there would surface in whichever `fn body` ends
+-- up using the `let`-bound name.)
+fn checkDecl(env Env)(d Decl) List[Str] =
+  | DFn _ params body ->
+    let bodyEnv = envAddAll env params in
+    checkExpr bodyEnv body
+  | DLet _ _ -> []
+  | DType _ _ -> []
+  | DTag _ -> []
+
+-- Walk every decl and concatenate all error lists. Each decl is
+-- checked under the **same** top-level env — fn params don't leak
+-- out, because `checkDecl` extends a local env for the duration of
+-- one decl only.
+fn checkDecls(env Env)(decls List[Decl]) List[Str] =
+  | d :: rest -> listAppend (checkDecl env d) (checkDecls env rest)
+  | _ -> []
+
+-- ---------- Collector ----------------------------------------------------
+
+-- Collect the single top-level name each decl introduces into the env.
+-- For `DFn` / `DLet` / `DTag` that's one name each; for `DType` that's
+-- every ctor name (the type name itself isn't a value, matching the
+-- F# host elaborator). The same ctor-as-value rule means a match arm
+-- body like `| _ -> Some x` looks up `Some` in the env and finds it
+-- via the `DType` collect pass.
+fn collectDecl(env Env)(d Decl) Env =
+  | DFn name _ _ -> envAdd env name
+  | DLet name _ -> envAdd env name
+  | DType _ ctors -> envAddAll env ctors
+  | DTag name -> envAdd env name
+
+fn collectDecls(env Env)(decls List[Decl]) Env =
+  | d :: rest -> collectDecls (collectDecl env d) rest
+  | _ -> env
+
+-- ---------- Top-level elaborator entry ----------------------------------
+
+-- Elaborate a whole decl list: first collect every top-level name into
+-- a fresh empty env, then walk every decl's body under that env and
+-- return the combined error list. Mirrors the F# host elaborator's
+-- two-pass `collectDecls` -> `checkDecls` shape in
+-- `src/LLLangCompiler/Elaborator.fs`.
+fn elaborate(decls List[Decl]) List[Str] =
+  let env0 = MkEnv [] in
+  let env = collectDecls env0 decls in
+  checkDecls env decls
+
+-- ---------- Pretty printer for error list -------------------------------
+
+-- Render the error list as one message per line. Empty list prints a
+-- single `ok` sentinel so the runtime test can tell a clean elaborate
+-- apart from an elaborate that printed nothing at all.
+fn showErrs(errs List[Str]) Str =
+  if listIsEmpty errs then "ok"
+  else listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n") s) "" errs
+
+-- ---------- Hardcoded test module ---------------------------------------
+
+-- A small module with three fns, one let, one type, and one tag. Two
+-- fns are fully well-bound (should produce no errors); one fn has two
+-- `EVar`s referencing undeclared names, which should each fire exactly
+-- one E002. The ctor-as-value rule is exercised by the third fn,
+-- whose body references `Some` (declared by the `DType`).
+--
+-- Equivalent surface syntax:
+--   tag UserId
+--   type Maybe = Some | None
+--   let answer = 42
+--   fn add(a b) = a + b
+--   fn bad(x) = undefinedName + otherMissing
+--   fn useCtor(y) =
+--     match y with
+--       | 0 -> Some
+--       | _ -> None
+--
+-- The fn `bad` references two names that are not declared anywhere in
+-- the module, and the elaborator should emit one E002 per reference.
+-- The other two fns are clean (fn params `a`/`b`/`x`/`y` are locals;
+-- `Some` and `None` are ctors collected from the `DType`; `answer` is
+-- collected from `DLet` but not used — and that's fine, the slice
+-- doesn't warn on unused bindings).
+--
+-- Note: each decl is `let`-bound on its own line before the decl list
+-- is assembled. Space-separated list literals `[e1 e2 e3]` don't play
+-- well with multi-argument ctor applications (`[DFn "a" ps body DLet
+-- ...]` would parse as one nested EApp chain, not three elements),
+-- so each decl gets its own name and the final list is just variable
+-- refs joined by spaces.
+-- Hardcoded test module. Takes a dummy `Int` param (ignored) because
+-- zero-arg fn invocation at call-site in ll-lang is surface-awkward
+-- — easier to accept one ignored `Int` and call it as `testModule 0`
+-- from `main`.
+fn testModule(u Int) List[Decl] =
+  -- `add(a b) = a + b` — two params, both referenced in the body.
+  let addParams = ["a" "b"] in
+  let addBody = EAdd (EVar "a") (EVar "b") in
+  let addFn = DFn "add" addParams addBody in
+  -- `bad(x) = undefinedName + otherMissing` — two free vars, both flagged.
+  let badParams = ["x"] in
+  let badLhs = EVar "undefinedName" in
+  let badRhs = EVar "otherMissing" in
+  let badBody = EAdd badLhs badRhs in
+  let badFn = DFn "bad" badParams badBody in
+  -- `useCtor(y) = match y with | 0 -> Some | _ -> None` — the ctor
+  -- refs `Some` / `None` are resolved via the collected type decl.
+  -- Pattern + body elements are each let-bound individually because
+  -- list literals `[PInt 0 PWild]` would otherwise parse as a single
+  -- curried ctor application (TypeId-starting list elements invoke
+  -- `parseApp` which greedily consumes subsequent atoms, see Parser.fs
+  -- line 112-116).
+  let useCtorParams = ["y"] in
+  let pat0 = PInt 0 in
+  let pat1 = PWild in
+  let useCtorPats = [pat0 pat1] in
+  let body0 = EVar "Some" in
+  let body1 = EVar "None" in
+  let useCtorBodies = [body0 body1] in
+  let useCtorScrut = EVar "y" in
+  let useCtorBody = EMatch useCtorScrut useCtorPats useCtorBodies in
+  let useCtorFn = DFn "useCtor" useCtorParams useCtorBody in
+  -- Non-fn decls: a tag, a type with two ctors, a let. None contain
+  -- sub-expressions that need walking in this slice.
+  let tagDecl = DTag "UserId" in
+  let ctorNames = ["Some" "None"] in
+  let typeDecl = DType "Maybe" ctorNames in
+  let letDecl = DLet "answer" (EInt 42) in
+  -- Assemble the final decl list. All elements are lowercase idents
+  -- (`tagDecl`, `addFn`, ...) so `parseTagged` is used per element
+  -- and each one is a single atom, not a curried application.
+  [tagDecl typeDecl letDecl addFn badFn useCtorFn]
+
+-- ---------- Driver -------------------------------------------------------
+
+fn main() =
+  let decls = testModule 0 in
+  let errs = elaborate decls in
+  printfn (showErrs errs)
