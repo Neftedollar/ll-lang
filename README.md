@@ -150,7 +150,7 @@ Source (.lll)
 
 ## Status
 
-**Phases 1–6 complete. 268 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, and a lexer proof-of-concept written in ll-lang itself.**
+**Phases 1–6 complete. 281 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, mutually recursive top-level functions, and a lexer proof-of-concept written in ll-lang itself.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -170,7 +170,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 268 tests
+dotnet test    # 281 tests
 ```
 
 ### Run your first program
@@ -213,7 +213,7 @@ src/LLLangCompiler/        — compiler library (F#)
   Codegen.fs               — F# source emitter
   Compiler.fs              — end-to-end pipeline entry point
 src/LLLangTool/            — `lllc` CLI (build / run)
-tests/LLLangTests/         — xUnit test suite (268 tests)
+tests/LLLangTests/         — xUnit test suite (281 tests)
 ```
 
 ## Roadmap
