@@ -1,10 +1,10 @@
 module Examples.ModuleParser
 
--- Phase 7.4 / 7.5a / 7.5b: a real recursive-descent **full module**
--- parser written in ll-lang itself. Showcase milestone — the first single
--- file that can consume a whole `module M\n type ...\n let ... \n fn ... = ...`
--- source end-to-end and emit a `List[Decl]` AST. Stitches together the
--- earlier self-hosting slices:
+-- Phase 7.4 / 7.5a / 7.5b / 7.5c: a real recursive-descent **full
+-- module** parser written in ll-lang itself. Showcase milestone — the
+-- first single file that can consume a whole `module M\n type ...\n
+-- let ... \n fn ... = ...` source end-to-end and emit a `List[Decl]`
+-- AST. Stitches together the earlier self-hosting slices:
 --   * 09-lexer-real.lll       — single-pass char tokenizer
 --   * 12-typeparser-real.lll  — single-line sum-type decls
 --   * 13-fnparser-real.lll    — curried typed fn decls + arithmetic body
@@ -24,11 +24,21 @@ module Examples.ModuleParser
 -- as an expression let-in. Context disambiguates cleanly because the
 -- two entry points are independent.
 --
--- Still constrained (Phase 7.5's remaining five items): no multi-line
+-- Phase 7.5c added two more items from the Phase 7.5 backlog: **string
+-- literals** in fn-body expressions (`EStr s`, lexed as `TStr` via the
+-- `takeStrBody` helper lifted from 14-exprparser-real.lll) and **cons
+-- / nil patterns** in match arms (`PNil` for `[]`, `PCons h t` for
+-- `h :: t`, right-associative via recursive `parsePat`). The lexer
+-- gained `TLBrack` / `TRBrack` / `TColonColon` tokens; `parseAtom` got
+-- a `TStr` arm; `parsePat` was split into `parsePrimaryPat` (which
+-- handles `[]` as a primary) plus a recursive wrapper that folds a
+-- trailing `:: pat` into `PCons`.
+--
+-- Still constrained (Phase 7.5's remaining three items): no multi-line
 -- fn bodies, no `tag`/`trait`/`impl`/`import`, no multi-line type
--- decls, no parametric ctor args (`Maybe[A]`), no string literals, no
--- cons / tuple / list patterns in match arms (only int lit / var /
--- wildcard).
+-- decls, no parametric ctor args (`Maybe[A]`), no tagged literals
+-- (`"x"[UserId]`), no list-literal patterns (`[a b c]`), no tuple
+-- patterns.
 --
 -- What IS covered is enough to prove the front-end can be a single
 -- ll-lang program:
@@ -55,11 +65,12 @@ module Examples.ModuleParser
 --   matchExpr = 'match' expr 'with' ('|' pat '->' addSub)+
 --   letInExpr = 'let' lower '=' expr 'in' expr
 --   lamExpr  = '\' lower '.' expr
---   pat      = int | lower | '_'
+--   pat      = primaryPat ('::' pat)?
+--   primaryPat = int | lower | '_' | '[' ']'
 --   addSub   = mulDiv (('+' | '-') mulDiv)*
 --   mulDiv   = app (('*' | '/') app)*
 --   app      = atom atom*
---   atom     = int | lower | Upper | '(' expr ')'
+--   atom     = int | str | lower | Upper | '(' expr ')'
 --
 -- The pretty printer produces a deterministic, unambiguous string so the
 -- runtime test can substring-match each line of the expected output.
@@ -80,14 +91,18 @@ type Token =
   | TLower Str
   | TUpper Str
   | TInt Int
+  | TStr Str
   | TLParen
   | TRParen
+  | TLBrack
+  | TRBrack
   | TEq
   | TBar
   | TDot
   | TBackslash
   | TArrow
   | TUnder
+  | TColonColon
   | TPlus
   | TMinus
   | TStar
@@ -111,13 +126,16 @@ type TypeRef = TR Str
 
 type Param = MkParam Str TypeRef
 
--- Match patterns for this slice: int literal, lowercase var binder, and
--- wildcard `_`. Constructor patterns, string literals, and cons / list
--- / tuple patterns all stay in Phase 7.5's backlog.
+-- Match patterns for this slice: int literal, lowercase var binder,
+-- wildcard `_`, nil `[]`, and cons `h :: t`. Phase 7.5c added `PNil` /
+-- `PCons`; constructor patterns, string-literal patterns, list
+-- literals, and tuple patterns still live in Phase 7.5+'s backlog.
 type Pat =
   | PInt Int
   | PVar Str
   | PWild
+  | PNil
+  | PCons Pat Pat
 
 -- Expression grammar for this slice: int literal, var ref (covers both
 -- lowercase identifiers and uppercase constructor references — the
@@ -131,6 +149,7 @@ type Pat =
 -- the invariant `length pats == length bodies` by construction.
 type Expr =
   | EInt Int
+  | EStr Str
   | EVar Str
   | EAdd Expr Expr
   | ESub Expr Expr
@@ -231,6 +250,30 @@ fn lexNum(cs List[Char]) List[Token] =
   let leftover = dropWhilePred charIsDigit cs in
   listAppend [TInt (parseIntStr (strFromChars digits))] (lexChars leftover)
 
+-- Collect a string literal body: the opening `"` has already been
+-- consumed, now greedily take chars until the closing `"`. Returns
+-- (body-chars, leftover). Lifted from 14-exprparser-real.lll.
+fn takeStrBody(cs List[Char]) =
+  | c :: rest ->
+    if c == '"' then ([], rest)
+    else
+      let (body, leftover) = takeStrBody rest in
+      (c :: body, leftover)
+  | _ -> ([], [])
+
+fn lexStr(cs List[Char]) List[Token] =
+  let (body, leftover) = takeStrBody cs in
+  listAppend [TStr (strFromChars body)] (lexChars leftover)
+
+-- Handle `:` vs `::`: peek the next char to decide. Only `::` is a
+-- valid token in this grammar (cons pattern separator); a bare `:` is
+-- not used anywhere, so it falls through silently.
+fn lexColonOrCons(cs List[Char]) List[Token] =
+  | c :: rest ->
+    if c == ':' then listAppend [TColonColon] (lexChars rest)
+    else lexChars cs
+  | _ -> [TEnd]
+
 -- Handle `-` vs `->`: peek the next char to decide between TMinus and
 -- TArrow. `->` is used by match arms (`| pat -> body`); 15 only had
 -- TMinus before Phase 7.5a. Lifted from 14-exprparser-real.lll.
@@ -251,13 +294,17 @@ fn lexChars(cs List[Char]) List[Token] =
     else if charIsSpace c then lexChars rest
     else if isIdStart c then lexId cs
     else if charIsDigit c then lexNum cs
+    else if c == '"' then lexStr rest
     else if c == '(' then listAppend [TLParen] (lexChars rest)
     else if c == ')' then listAppend [TRParen] (lexChars rest)
+    else if c == '[' then listAppend [TLBrack] (lexChars rest)
+    else if c == ']' then listAppend [TRBrack] (lexChars rest)
     else if c == '=' then listAppend [TEq] (lexChars rest)
     else if c == '|' then listAppend [TBar] (lexChars rest)
     else if c == '.' then listAppend [TDot] (lexChars rest)
     else if c == '\\' then listAppend [TBackslash] (lexChars rest)
     else if c == '_' then listAppend [TUnder] (lexChars rest)
+    else if c == ':' then lexColonOrCons rest
     else if c == '+' then listAppend [TPlus] (lexChars rest)
     else if c == '-' then lexMinusOrArrow rest
     else if c == '*' then listAppend [TStar] (lexChars rest)
@@ -419,6 +466,7 @@ fn parseReturnType(toks List[Token]) =
 -- cleanly at decl boundaries and before `then`/`else` tokens.
 fn isAtomStart(t Token) Bool =
   | TInt _ -> true
+  | TStr _ -> true
   | TLower _ -> true
   | TUpper _ -> true
   | TLParen -> true
@@ -529,13 +577,29 @@ fn parseArm(toks List[Token]) =
 -- Phase 7.5+).
 fn parseArmBody(toks List[Token]) = parseAddSub toks
 
--- Pattern: int literal, lowercase var binder, or wildcard `_`. Ctor /
--- cons / list / tuple / string patterns all stay in Phase 7.5+.
-fn parsePat(toks List[Token]) =
+-- Primary pattern: int literal, lowercase var binder, wildcard `_`,
+-- or empty-list `[]`. The recursive `parsePat` calls this once, then
+-- peeks for `TColonColon` to optionally fold the result into a
+-- right-associative `PCons`. Ctor / list-literal / tuple / string
+-- patterns all stay in Phase 7.5+.
+fn parsePrimaryPat(toks List[Token]) =
   | TInt n :: rest -> (PInt n, rest)
   | TUnder :: rest -> (PWild, rest)
+  | TLBrack :: TRBrack :: rest -> (PNil, rest)
   | TLower s :: rest -> (PVar s, rest)
   | _ -> (PWild, toks)
+
+-- Pattern: a primary pattern optionally followed by `:: pat`. The
+-- right side is parsed via `parsePat` itself so chains like
+-- `a :: b :: rest` fold right-associatively into `PCons a (PCons b
+-- (PVar "rest"))`. Phase 7.5c added `PNil` and `PCons`.
+fn parsePat(toks List[Token]) =
+  let (p, rest) = parsePrimaryPat toks in
+  match rest with
+    | TColonColon :: rest2 ->
+      let (tail, rest3) = parsePat rest2 in
+      (PCons p tail, rest3)
+    | _ -> (p, rest)
 
 -- Arithmetic precedence cascade, same shape as 13/14.
 fn parseAddSub(toks List[Token]) =
@@ -579,10 +643,13 @@ fn parseAppTail(lhs Expr)(toks List[Token]) =
       else (lhs, toks)
     | _ -> (lhs, toks)
 
--- Atom: int, lower / upper variable reference, parenthesised expr.
--- Anything unexpected falls through to a defensive `EInt 0`.
+-- Atom: int, string literal, lower / upper variable reference,
+-- parenthesised expr. Anything unexpected falls through to a defensive
+-- `EInt 0`. Phase 7.5c added the `TStr s :: rest -> (EStr s, rest)`
+-- arm; the lexer already produces `TStr` for `"..."` literals.
 fn parseAtom(toks List[Token]) =
   | TInt n :: rest -> (EInt n, rest)
+  | TStr s :: rest -> (EStr s, rest)
   | TLower s :: rest -> (EVar s, rest)
   | TUpper s :: rest -> (EVar s, rest)
   | TLParen :: rest ->
@@ -638,11 +705,15 @@ fn showReturn(r Maybe[TypeRef]) Str =
     | Some t -> showTypeRef t
     | None -> "?"
 
--- Pattern pretty-printer for match arms (Phase 7.5a).
+-- Pattern pretty-printer for match arms (Phase 7.5a + 7.5c). Phase
+-- 7.5c added `PNil` (rendered as `[]`) and `PCons h t` (rendered as
+-- `(h :: t)`, recursively, so chains nest as `(a :: (b :: rest))`).
 fn showPat(p Pat) Str =
   | PInt n -> intToStr n
   | PVar s -> s
   | PWild -> "_"
+  | PNil -> "[]"
+  | PCons h t -> strConcat (strConcat (strConcat (strConcat "(" (showPat h)) " :: ") (showPat t)) ")"
 
 -- Render a single `| pat -> body` arm; helper for `showArms`.
 fn showArm(p Pat)(body Expr) Str =
@@ -667,6 +738,7 @@ fn showArms(pats List[Pat])(bodies List[Expr]) Str =
 -- so the runtime test can substring-match each body.
 fn showExpr(e Expr) Str =
   | EInt n -> intToStr n
+  | EStr s -> strConcat (strConcat "\"" s) "\""
   | EVar s -> s
   | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " + ") (showExpr r)) ")"
   | ESub l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " - ") (showExpr r)) ")"
@@ -715,7 +787,7 @@ fn showModule(m Module) Str =
 -- ---------- Driver -------------------------------------------------------
 
 fn main() =
-  let src = "module Examples.Bigger\ntype Maybe A = Some A | None\ntype Color = Red | Green | Blue\nlet answer = 42\nlet zero = 0\nfn double(x Int) Int = x * 2\nfn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\nfn pickColor(x Int) Color = if x then Red else Green\nfn shift(x Int) Int = let y = x + 1 in y * 2\nfn applyDouble(x Int) Int = (\\y. y * 2) x" in
+  let src = "module Examples.Bigger\ntype Maybe A = Some A | None\ntype Color = Red | Green | Blue\nlet answer = 42\nlet zero = 0\nfn double(x Int) Int = x * 2\nfn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\nfn pickColor(x Int) Color = if x then Red else Green\nfn shift(x Int) Int = let y = x + 1 in y * 2\nfn applyDouble(x Int) Int = (\\y. y * 2) x\nfn greet() Str = \"hello\"\nfn classifyXs(xs Int) Int = match xs with | [] -> 0 | h :: t -> 1" in
   let toks = tokenize src in
   let mod = parseModule toks in
   printfn (showModule mod)
