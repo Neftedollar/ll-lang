@@ -54,11 +54,12 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
-    // Phase 7.5b extends the Phase 7.5a driver with two more fn-body
-    // expression forms: `let name = e1 in e2` chains and `\x. body`
-    // lambdas. The driver now covers module-level `let` decls, match in
-    // fn bodies, plus the new `shift` (let-in chain) and `applyDouble`
-    // (lambda applied to argument) fn decls:
+    // Phase 7.5c extends the Phase 7.5b driver with two more forms from
+    // the Phase 7.5 backlog: **string literals** in fn-body expressions
+    // (`EStr`) and **cons / nil patterns** in match arms (`PNil` for
+    // `[]`, `PCons h t` for `h :: t`). The driver now also contains a
+    // `greet` fn whose body is a bare string literal and a `classifyXs`
+    // fn whose match arms exercise the new `[]` and `h :: t` patterns:
     //   "module Examples.Bigger\n
     //    type Maybe A = Some A | None\n
     //    type Color = Red | Green | Blue\n
@@ -68,13 +69,17 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
     //    fn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\n
     //    fn pickColor(x Int) Color = if x then Red else Green\n
     //    fn shift(x Int) Int = let y = x + 1 in y * 2\n
-    //    fn applyDouble(x Int) Int = (\\y. y * 2) x"
+    //    fn applyDouble(x Int) Int = (\\y. y * 2) x\n
+    //    fn greet() Str = \"hello\"\n
+    //    fn classifyXs(xs Int) Int = match xs with | [] -> 0 | h :: t -> 1"
     // and pretty-prints the whole module deterministically: the module
     // header on its own line, each type/let/fn decl normalised to the form
     // used by 12/13/14 (ctor args in parens; fn params space-separated;
     // body expressions fully parenthesised; let decls as `let name = expr`;
     // match in expression position as `(match scrut with | p -> e | ...)`;
-    // let-in chains as `(let name = e1 in e2)`; lambdas as `(fun x -> e)`).
+    // let-in chains as `(let name = e1 in e2)`; lambdas as `(fun x -> e)`;
+    // string literals rendered with surrounding quotes as `"<s>"`; nil
+    // patterns as `[]`; cons patterns as `(h :: t)`).
     let expected =
         [ "module Examples.Bigger"
           "type Maybe (A) = Some(A) | None"
@@ -85,7 +90,9 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
           "fn classify (x: Int) -> Int = (match x with | 0 -> 0 | _ -> 1)"
           "fn pickColor (x: Int) -> Color = (if x then Red else Green)"
           "fn shift (x: Int) -> Int = (let y = (x + 1) in (y * 2))"
-          "fn applyDouble (x: Int) -> Int = ((fun y -> (y * 2)) x)" ]
+          "fn applyDouble (x: Int) -> Int = ((fun y -> (y * 2)) x)"
+          "fn greet () -> Str = \"hello\""
+          "fn classifyXs (xs: Int) -> Int = (match xs with | [] -> 0 | (h :: t) -> 1)" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),
