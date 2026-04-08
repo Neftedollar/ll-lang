@@ -54,19 +54,26 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
-    // Phase 7.5d extends the Phase 7.5c driver with two more forms from
-    // the Phase 7.5 backlog: **tagged literals** in expression position
-    // (`ETagged`, surface `"user-42"[UserId]`) and **parametric ctor
-    // args** in type decls (bracket form `Maybe[Int]` rendered as the
-    // new `TAApp` TypeArg ctor). The driver gains a `type Container =
-    // MkBox Maybe[Int]` decl and a `let uid = "user-42"[UserId]` decl:
+    // Phase 7.5e extends the Phase 7.5d driver with three more module-
+    // level decl forms from the Phase 7.5 backlog: **`tag Name`** decls
+    // (`DTag`), **`import Foo.Bar`** decls (`DImport`, dot-joined path),
+    // and the **`export`** prefix modifier on any existing decl
+    // (`DExport`, a wrapper variant that renders as `export ` + the
+    // inner decl's pretty form). The driver gains two import decls, two
+    // tag decls, and one exported fn decl on top of the Phase 7.5d
+    // baseline:
     //   "module Examples.Bigger\n
+    //    import Std.List\n
+    //    import Std.Maybe\n
+    //    tag UserId\n
+    //    tag Email\n
     //    type Maybe A = Some A | None\n
     //    type Color = Red | Green | Blue\n
     //    type Container = MkBox Maybe[Int]\n
     //    let answer = 42\n
     //    let zero = 0\n
     //    let uid = \"user-42\"[UserId]\n
+    //    export fn addOne(x Int) Int = x + 1\n
     //    fn double(x Int) Int = x * 2\n
     //    fn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\n
     //    fn pickColor(x Int) Color = if x then Red else Green\n
@@ -75,22 +82,29 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
     //    fn greet() Str = \"hello\"\n
     //    fn classifyXs(xs Int) Int = match xs with | [] -> 0 | h :: t -> 1"
     // and pretty-prints the whole module deterministically: the module
-    // header on its own line, each type/let/fn decl normalised to the form
-    // used by 12/13/14 (ctor args in parens; fn params space-separated;
-    // body expressions fully parenthesised; let decls as `let name = expr`;
-    // match in expression position as `(match scrut with | p -> e | ...)`;
-    // let-in chains as `(let name = e1 in e2)`; lambdas as `(fun x -> e)`;
-    // string literals rendered with surrounding quotes as `"<s>"`; nil
-    // patterns as `[]`; cons patterns as `(h :: t)`; tagged literals as
-    // `(<lit>[Tag])`; parametric ctor args as `<Head>[<arg>]`).
+    // header on its own line, each import/tag/type/let/fn decl normalised
+    // to the form used by 12/13/14 (ctor args in parens; fn params
+    // space-separated; body expressions fully parenthesised; let decls as
+    // `let name = expr`; match in expression position as `(match scrut
+    // with | p -> e | ...)`; let-in chains as `(let name = e1 in e2)`;
+    // lambdas as `(fun x -> e)`; string literals rendered with
+    // surrounding quotes as `"<s>"`; nil patterns as `[]`; cons patterns
+    // as `(h :: t)`; tagged literals as `(<lit>[Tag])`; parametric ctor
+    // args as `<Head>[<arg>]`; tag decls as `tag <Name>`; import decls as
+    // `import <Dot.Path>`; exported decls as `export <show inner decl>`).
     let expected =
         [ "module Examples.Bigger"
+          "import Std.List"
+          "import Std.Maybe"
+          "tag UserId"
+          "tag Email"
           "type Maybe (A) = Some(A) | None"
           "type Color = Red | Green | Blue"
           "type Container = MkBox(Maybe[Int])"
           "let answer = 42"
           "let zero = 0"
           "let uid = (\"user-42\"[UserId])"
+          "export fn addOne (x: Int) -> Int = (x + 1)"
           "fn double (x: Int) -> Int = (x * 2)"
           "fn classify (x: Int) -> Int = (match x with | 0 -> 0 | _ -> 1)"
           "fn pickColor (x: Int) -> Color = (if x then Red else Green)"
