@@ -150,7 +150,7 @@ Source (.lll)
 
 ## Status
 
-**Phases 1–6 complete. 281 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, mutually recursive top-level functions, and a lexer proof-of-concept written in ll-lang itself.**
+**Phases 1–6 complete + Phase 7.1 (real lexer in ll-lang itself). 284 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, mutually recursive top-level functions, and a real (multi-char identifier / multi-digit integer / keyword-aware) lexer written in ll-lang — see `spec/examples/valid/09-lexer-real.lll`.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -160,7 +160,8 @@ Source (.lll)
 | 4 | Hindley-Milner inference + TypedAST + trait dispatch | ✅ Done |
 | 5 | F# source codegen + `lllc` CLI (`build` / `run`) | ✅ Done |
 | 6 | Standard library — List, Maybe, Result, Str, Math, IO builtins | ✅ Done |
-| 7 | Self-hosting bootstrap | Planned |
+| 7.1 | Real lexer in ll-lang — `09-lexer-real.lll` | ✅ Done |
+| 7.2+ | Self-hosting bootstrap (parser, elaborator, ...) | Planned |
 
 ## Getting Started
 
@@ -170,7 +171,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 281 tests
+dotnet test    # 284 tests
 ```
 
 ### Run your first program
@@ -213,12 +214,12 @@ src/LLLangCompiler/        — compiler library (F#)
   Codegen.fs               — F# source emitter
   Compiler.fs              — end-to-end pipeline entry point
 src/LLLangTool/            — `lllc` CLI (build / run)
-tests/LLLangTests/         — xUnit test suite (281 tests)
+tests/LLLangTests/         — xUnit test suite (284 tests)
 ```
 
 ## Roadmap
 
-- **Phase 7** — Self-hosting: rewrite the ll-lang compiler in ll-lang itself. The lexer PoC in `spec/examples/valid/08-lexer-poc.lll` is the starting point.
+- **Phase 7** — Self-hosting: rewrite the ll-lang compiler in ll-lang itself. The real lexer in `spec/examples/valid/09-lexer-real.lll` is the first concrete piece in place; Phase 7.2 tackles the parser.
 - **Multi-target** — TypeScript / Python / JVM / LLVM backends after self-hosting
 
 ## Design Philosophy

@@ -224,3 +224,53 @@ The self-hosting milestone is a single GitHub issue
 (`Neftedollar/ll-lang#7-self-hosting`) with sub-issues for each stage.
 Progress is measured by which `.fs` files have a working `.lll`
 counterpart.
+
+## Progress log
+
+### 2026-04 — Phase 7.1: real lexer in ll-lang (DONE)
+
+The first concrete piece of `Compiler.Lexer` is now expressible in
+ll-lang and lives in
+[`spec/examples/valid/09-lexer-real.lll`](../../spec/examples/valid/09-lexer-real.lll).
+It strictly subsumes the `08-lexer-poc.lll` toy: it groups multi-char
+identifiers and multi-digit integers, recognises a small keyword set
+(`let` / `fn` / `if` / `then` / `else`) and the single-char operators /
+parens, and emits a flat `List Token`. The accompanying tests live in
+`tests/LLLangTests/RealLexerTests.fs`. Test count: 281 → 284.
+
+Things this proves the language can already do, in idiomatic form:
+
+- ADTs with 17+ constructors (`type Token = ...`).
+- Recursive top-level fns operating on `List Char`.
+- `Maybe`-returning destructuring helpers (`listHead` / `listTail`)
+  factored into thin wrappers — workable but verbose.
+- Multi-fn mutual recursion across `lexChars`, `lexId`, `lexNum`,
+  `lexOp` — codegen wraps the lot in a `let rec ... and ...` block.
+
+Things this surfaced as language gaps for Phase 7.2+:
+
+1. **No `::` cons in patterns or expressions.** All list deconstruction
+   has to go through `listHead` / `listTail` plus a Maybe-unwrapping
+   helper, which is much noisier than a `c :: rest` pattern. Adding
+   `::` to the parser, the AST (or sugaring it as `PCon "::"`),
+   inference, and codegen is the highest-leverage next change.
+2. **`atom[TypeId]` ambiguity.** A bracketed type-constructor expression
+   that immediately follows another atom (`listAppend [TPlus] xs`) is
+   parsed as a tagged literal instead of a list literal applied as an
+   argument. The lexer works around this with a `pre` helper, but the
+   parser should disambiguate using lookahead beyond `]`.
+3. **No `match ... with` in expression position.** `EMatch` is only
+   reachable as a fn body, so every nested case-split has to be lifted
+   into its own top-level helper. For a real compiler we want
+   expression-form `match`.
+4. **No `let` patterns.** `let (a, b) = ...` would let the lexer thread
+   `(taken, leftover)` tuples through `takeWhile` in a single pass,
+   instead of running two passes (`takeWhilePred` + `dropWhilePred`).
+5. **Codegen indentation under deep nesting.** Naive emission of
+   `let ... in <body>` chains inside an `if`-ladder produces F# that
+   trips the offside rule. The lexer was restructured into smaller
+   top-level fns to dodge this; the better fix is for codegen to emit
+   normalised newlines and re-indent each `let` body from a known
+   anchor.
+
+These gaps drive the Phase 7.2 work plan.
