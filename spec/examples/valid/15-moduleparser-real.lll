@@ -1,6 +1,6 @@
 module Examples.ModuleParser
 
--- Phase 7.4 / 7.5a / 7.5b / 7.5c: a real recursive-descent **full
+-- Phase 7.4 / 7.5a / 7.5b / 7.5c / 7.5d: a real recursive-descent **full
 -- module** parser written in ll-lang itself. Showcase milestone — the
 -- first single file that can consume a whole `module M\n type ...\n
 -- let ... \n fn ... = ...` source end-to-end and emit a `List[Decl]`
@@ -34,11 +34,21 @@ module Examples.ModuleParser
 -- handles `[]` as a primary) plus a recursive wrapper that folds a
 -- trailing `:: pat` into `PCons`.
 --
--- Still constrained (Phase 7.5's remaining three items): no multi-line
--- fn bodies, no `tag`/`trait`/`impl`/`import`, no multi-line type
--- decls, no parametric ctor args (`Maybe[A]`), no tagged literals
--- (`"x"[UserId]`), no list-literal patterns (`[a b c]`), no tuple
--- patterns.
+-- Phase 7.5d added two more items: **tagged literals** in expression
+-- position (`ETagged e tag`, surface `"x"[UserId]` / `5[m]`, restricted
+-- to `EInt` / `EStr` atoms to mirror the host compiler's Phase 7.2.2
+-- literal-only rule) and **parametric ctor args** in type decls
+-- (`TAApp head args`, bracket-form surface `Maybe[Int]` / `Result[A][E]`
+-- — picked over the `(Maybe Int)` juxtaposition form because brackets
+-- need no lookahead). The lexer already has `TLBrack` / `TRBrack` from
+-- Phase 7.5c; `parseAtom` got a `maybeTagged` post-pass after `EInt`
+-- and `EStr`; `parseTypeArgs` was split into `parseOneTypeArg` +
+-- `parseBrackArgs` so bracket groups can chain and nest.
+--
+-- Still constrained (Phase 7.5's remaining one-or-two items): no multi-
+-- line fn bodies, no `tag`/`trait`/`impl`/`import`/`export` module-
+-- level decls, no multi-line type decls, no list-literal expression
+-- atoms (`[a b c]` in expression position), no tuple patterns.
 --
 -- What IS covered is enough to prove the front-end can be a single
 -- ll-lang program:
@@ -56,7 +66,8 @@ module Examples.ModuleParser
 --   typeDecl = 'type' Upper param* '=' ctor ('|' ctor)*
 --   param    = single-uppercase-letter (A, B, ...)
 --   ctor     = Upper typeArg*
---   typeArg  = Upper                  -- TyVar if length 1, else TyCon
+--   typeArg  = Upper brackGroup*       -- Phase 7.5d: `Maybe[Int]` chain
+--   brackGroup = '[' typeArg ']'       -- recursive, flattened into TAApp
 --   letDecl  = 'let' lower '=' expr
 --   fnDecl   = 'fn' lower paramGroup* typeName? '=' expr
 --   paramGroup = '(' lower typeName ')'  |  '(' ')'
@@ -70,7 +81,8 @@ module Examples.ModuleParser
 --   addSub   = mulDiv (('+' | '-') mulDiv)*
 --   mulDiv   = app (('*' | '/') app)*
 --   app      = atom atom*
---   atom     = int | str | lower | Upper | '(' expr ')'
+--   atom     = int tag? | str tag? | lower | Upper | '(' expr ')'
+--   tag      = '[' Upper ']'           -- Phase 7.5d: ETagged wrapper
 --
 -- The pretty printer produces a deterministic, unambiguous string so the
 -- runtime test can substring-match each line of the expected output.
@@ -112,9 +124,15 @@ type Token =
 
 -- Type-decl AST ------------------------------------------------------------
 
+-- Phase 7.5d: `TAApp head args` is the bracket-form parametric type
+-- application `Maybe[Int]` / `Result[A][E]`. Multiple bracket groups on
+-- the same head flatten into one `TAApp` with a multi-element arg list.
+-- Plain single-segment names still parse as `TAVar` (single letter) or
+-- `TACon` (multi-char) exactly like earlier slices.
 type TypeArg =
   | TAVar Str
   | TACon Str
+  | TAApp Str List[TypeArg]
 
 type Ctor = MkCtor Str List[TypeArg]
 
@@ -151,6 +169,7 @@ type Expr =
   | EInt Int
   | EStr Str
   | EVar Str
+  | ETagged Expr Str
   | EAdd Expr Expr
   | ESub Expr Expr
   | EMul Expr Expr
@@ -419,13 +438,44 @@ fn parseCtor(toks List[Token]) =
   | _ -> (MkCtor "?" [], toks)
 
 -- Collect zero or more type args. Stops on TBar / TNewline / TEnd / any
--- non-Upper token. Single-letter names become TAVar; longer names TACon.
+-- non-Upper token. Each arg is parsed via `parseOneTypeArg`, which
+-- handles both the bare form (`Int`, `A`) and the Phase 7.5d bracket-
+-- form parametric application (`Maybe[Int]`, `Result[A][E]`).
 fn parseTypeArgs(toks List[Token]) =
-  | TUpper s :: rest ->
-    let arg = if strLen s == 1 then TAVar s else TACon s in
+  | TUpper _ :: _ ->
+    let (arg, rest) = parseOneTypeArg toks in
     let (args, rest2) = parseTypeArgs rest in
     (arg :: args, rest2)
   | _ -> ([], toks)
+
+-- Phase 7.5d: parse a single type arg. Bare TUpper becomes `TAVar` (len
+-- 1) or `TACon` (longer). If the head is immediately followed by one or
+-- more bracket groups `[ typeArg ]`, those groups flatten into a single
+-- `TAApp head args` ctor. Recurses through `parseBrackArgs` so a
+-- bracket group's inner arg can itself be another bracket-form
+-- application (`Foo[Bar[Baz]]`).
+fn parseOneTypeArg(toks List[Token]) =
+  | TUpper s :: rest ->
+    let (brackArgs, rest2) = parseBrackArgs [] rest in
+    if listIsEmpty brackArgs then
+      let arg = if strLen s == 1 then TAVar s else TACon s in
+      (arg, rest2)
+    else (TAApp s brackArgs, rest2)
+  | _ -> (TACon "?", toks)
+
+-- Collect successive `[ typeArg ]` bracket groups, appending each
+-- parsed inner arg to the running `acc` list. Stops on the first
+-- non-TLBrack token. The caller is responsible for deciding whether the
+-- resulting arg list should become a `TAApp` or a plain bare form.
+fn parseBrackArgs(acc List[TypeArg])(toks List[Token]) =
+  | TLBrack :: rest ->
+    let (inner, rest2) = parseOneTypeArg rest in
+    let rest3 = match rest2 with
+      | TRBrack :: r -> r
+      | _ -> rest2
+    in
+    parseBrackArgs (listAppend acc [inner]) rest3
+  | _ -> (acc, toks)
 
 -- ---------- Fn-decl parser (adapted from 13-fnparser-real.lll) ----------
 
@@ -646,8 +696,18 @@ fn parseAppTail(lhs Expr)(toks List[Token]) =
 -- Atom: int, string literal, lower / upper variable reference,
 -- parenthesised expr. Anything unexpected falls through to a defensive
 -- `EInt 0`. Phase 7.5c added the `TStr s :: rest -> (EStr s, rest)`
--- arm; the lexer already produces `TStr` for `"..."` literals.
+-- arm; the lexer already produces `TStr` for `"..."` literals. Phase
+-- 7.5d folds a trailing `[Tag]` into `ETagged` by dispatching on the
+-- wider 4-token prefix `TInt/TStr :: TLBrack :: TUpper ty :: TRBrack
+-- :: rest` BEFORE falling through to the plain 1-token `TInt n :: rest`
+-- / `TStr s :: rest` arms. Mirrors the host compiler's Phase 7.2.2
+-- rule: only int / str literal atoms can take a tag — other atom
+-- shapes (`TLower`, `TUpper`, `TLParen`) never try to match a `[Tag]`
+-- suffix here, so a stray `[` in those positions stays on the token
+-- stream and would later error out.
 fn parseAtom(toks List[Token]) =
+  | TInt n :: TLBrack :: TUpper ty :: TRBrack :: rest -> (ETagged (EInt n) ty, rest)
+  | TStr s :: TLBrack :: TUpper ty :: TRBrack :: rest -> (ETagged (EStr s) ty, rest)
   | TInt n :: rest -> (EInt n, rest)
   | TStr s :: rest -> (EStr s, rest)
   | TLower s :: rest -> (EVar s, rest)
@@ -662,10 +722,22 @@ fn parseAtom(toks List[Token]) =
 -- ---------- Pretty printer ----------------------------------------------
 
 -- Render a TypeArg as its bare name; type vars and type cons are
--- disambiguated by the wrapping context.
+-- disambiguated by the wrapping context. Phase 7.5d: `TAApp head args`
+-- renders as `head[arg1][arg2]...` — each bracket group is emitted
+-- via the `showBrackArgs` helper, which recursively calls `showTypeArg`
+-- on every inner arg so nested applications `Foo[Bar[Baz]]` print
+-- uniformly.
 fn showTypeArg(a TypeArg) Str =
   | TAVar s -> s
   | TACon s -> s
+  | TAApp head args -> strConcat head (showBrackArgs args)
+
+-- Render a list of bracket-form args as `[a1][a2]...`. One bracket
+-- group per arg, matching the surface input shape `Result[A][E]`. Lives
+-- separately from `showArgs` (which renders comma-joined parens for
+-- ctor-arg lists).
+fn showBrackArgs(args List[TypeArg]) Str =
+  listFold (\acc a. strConcat (strConcat acc "[") (strConcat (showTypeArg a) "]")) "" args
 
 -- Render a list of args as `(a1, a2)` or empty string for no args.
 fn showArgs(args List[TypeArg]) Str =
@@ -740,6 +812,7 @@ fn showExpr(e Expr) Str =
   | EInt n -> intToStr n
   | EStr s -> strConcat (strConcat "\"" s) "\""
   | EVar s -> s
+  | ETagged e2 t -> strConcat (strConcat (strConcat (strConcat "(" (showExpr e2)) "[") t) "])"
   | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " + ") (showExpr r)) ")"
   | ESub l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " - ") (showExpr r)) ")"
   | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " * ") (showExpr r)) ")"
@@ -787,7 +860,7 @@ fn showModule(m Module) Str =
 -- ---------- Driver -------------------------------------------------------
 
 fn main() =
-  let src = "module Examples.Bigger\ntype Maybe A = Some A | None\ntype Color = Red | Green | Blue\nlet answer = 42\nlet zero = 0\nfn double(x Int) Int = x * 2\nfn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\nfn pickColor(x Int) Color = if x then Red else Green\nfn shift(x Int) Int = let y = x + 1 in y * 2\nfn applyDouble(x Int) Int = (\\y. y * 2) x\nfn greet() Str = \"hello\"\nfn classifyXs(xs Int) Int = match xs with | [] -> 0 | h :: t -> 1" in
+  let src = "module Examples.Bigger\ntype Maybe A = Some A | None\ntype Color = Red | Green | Blue\ntype Container = MkBox Maybe[Int]\nlet answer = 42\nlet zero = 0\nlet uid = \"user-42\"[UserId]\nfn double(x Int) Int = x * 2\nfn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\nfn pickColor(x Int) Color = if x then Red else Green\nfn shift(x Int) Int = let y = x + 1 in y * 2\nfn applyDouble(x Int) Int = (\\y. y * 2) x\nfn greet() Str = \"hello\"\nfn classifyXs(xs Int) Int = match xs with | [] -> 0 | h :: t -> 1" in
   let toks = tokenize src in
   let mod = parseModule toks in
   printfn (showModule mod)
