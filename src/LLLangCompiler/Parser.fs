@@ -390,11 +390,19 @@ let private parseFnSig (c: Ctx) : Result<FnSig, string> =
             | Ok cn -> constraints.Add(cn)
             | Error _ -> c.Pos <- saved; cont <- false
         let parms = ResizeArray<Param>()
-        while curTok c = LParen do
+        let mutable paramCont = true
+        while paramCont && curTok c = LParen do
             let saved = c.Pos
-            match parseParam c with
-            | Ok p -> parms.Add(p)
-            | Error _ -> c.Pos <- saved
+            // Handle empty parens `()` as "no params" marker (e.g. `fn main()`).
+            advance c
+            if curTok c = RParen then
+                advance c
+                // `()` group contributes zero params; continue loop to allow mixing.
+            else
+                c.Pos <- saved
+                match parseParam c with
+                | Ok p -> parms.Add(p)
+                | Error _ -> c.Pos <- saved; paramCont <- false
         let retType =
             match curTok c with
             | TypeId _ | Ident _ | LParen ->

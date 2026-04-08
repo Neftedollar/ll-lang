@@ -140,3 +140,27 @@ let ``PWild pattern emits underscore`` () =
 let ``PCon single-arg pattern emits bare variable`` () =
     let src = "module M\ntype Maybe A = Some A | None\nfn unwrap(m Maybe[Int]) =\n  | Some x -> x\n  | None -> 0"
     Assert.Contains("| Some x ->", codegenSrc src)
+
+// ---------- Task 5: top-level module emission ----------
+
+[<Fact>]
+let ``module header is emitted`` () =
+    Assert.Contains("module Examples.Basics", codegenSrc "module Examples.Basics\nlet x = 1")
+
+[<Fact>]
+let ``multiple declarations emitted in order`` () =
+    let src = "module M\nlet a = 1\nlet b = 2\nlet c = 3"
+    let fs = codegenSrc src
+    Assert.True(fs.IndexOf("let a =") < fs.IndexOf("let b ="))
+    Assert.True(fs.IndexOf("let b =") < fs.IndexOf("let c ="))
+
+[<Fact>]
+let ``fn main gets EntryPoint attribute`` () =
+    let src = "module M\nfn main() = 0"
+    let fs = codegenSrc src
+    Assert.Contains("[<EntryPoint>]", fs)
+    Assert.Contains("let main (argv: string[]) =", fs)
+
+[<Fact>]
+let ``non-main fn does not get EntryPoint`` () =
+    Assert.DoesNotContain("[<EntryPoint>]", codegenSrc "module M\nfn add(a Int)(b Int) Int = a + b")
