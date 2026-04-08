@@ -28,5 +28,6 @@
     <Compile Include="ArithmeticParserTests.fs" />
     <Compile Include="TypeParserTests.fs" />
     <Compile Include="FnParserTests.fs" />
+    <Compile Include="ExprParserTests.fs" />
   </ItemGroup>
 </Project>
