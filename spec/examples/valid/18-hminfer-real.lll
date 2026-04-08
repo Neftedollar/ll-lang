@@ -320,6 +320,25 @@ fn envLookupLists(keys List[Str])(vals List[TypeExpr])(name Str) Maybe[TypeExpr]
         | _ -> None
     | _ -> None
 
+-- Walk an `Env`'s value list and apply `s` to every binding's type.
+-- Mirrors the F# host's `applyEnv` in `src/LLLangCompiler/Types.fs`.
+-- Phase 7.7c uses it in the `ELet` and `EIf` arms so bindings emitted
+-- while inferring earlier sub-expressions are visible to later ones.
+-- Mono-typed only — no `applyScheme` / quantified-var skipping; the
+-- existing `Env` stores raw `TypeExpr` not `TypeScheme`.
+fn applyEnv(s Subst)(e Env) Env =
+  match e with
+    | MkEnv ks vs -> MkEnv ks (applyTypeList s vs)
+
+-- Map `applyType s` over a list of `TypeExpr`. Written as an explicit
+-- recursive walk rather than `listMap` because the corpus file doesn't
+-- declare the stdlib `listMap` dependency and the recursive form is
+-- the same cost as hauling in the builtin.
+fn applyTypeList(s Subst)(ts List[TypeExpr]) List[TypeExpr] =
+  match ts with
+    | t :: rest -> applyType s t :: applyTypeList s rest
+    | _ -> []
+
 -- ---------- Expr AST (Phase 7.7b) ---------------------------------------
 
 -- The tiny expression AST that `inferExpr` walks. Deliberately smaller
@@ -327,6 +346,12 @@ fn envLookupLists(keys List[Str])(vals List[TypeExpr])(name Str) Maybe[TypeExpr]
 -- yet; those land in 7.7c onwards with let-generalization, polymorphism,
 -- and type schemes. The header's doc-only stub promised exactly this
 -- shape.
+-- Phase 7.7c adds `ELam` (lambda), `ELet` (let-in, mono-bound — no
+-- generalization yet), and `EIf` (if-then-else). `inferExpr` grows
+-- three new arms mirroring the F# host's `ELam` / `ELet(_, _, Some _)`
+-- / `EIf` cases in `src/LLLangCompiler/HMInfer.fs` line 260 / 276 /
+-- 315 area. Each new arm is still split into its own helper to keep
+-- `match` nesting one level deep.
 type Expr =
   | EInt Int
   | EStr Str
@@ -334,6 +359,9 @@ type Expr =
   | EVar Str
   | EAdd Expr Expr
   | EApp Expr Expr
+  | ELam Str Expr
+  | ELet Str Expr Expr
+  | EIf Expr Expr Expr
 
 -- ---------- Fresh var generator (Phase 7.7b) ----------------------------
 
@@ -383,6 +411,9 @@ fn inferExpr(env Env)(n Int)(e Expr) InferResult =
     | EVar name -> inferVar env n name
     | EAdd l r -> inferAdd env n l r
     | EApp f a -> inferApp env n f a
+    | ELam name body -> inferLam env n name body
+    | ELet name e1 e2 -> inferLet env n name e1 e2
+    | EIf cond thn els -> inferIf env n cond thn els
 
 -- `EVar`: env lookup, ERROR sentinel on miss.
 fn inferVar(env Env)(n Int)(name Str) InferResult =
@@ -445,6 +476,87 @@ fn inferAppFresh(sf Subst)(sa Subst)(tf TypeExpr)(ta TypeExpr)(n Int) InferResul
       MkInferResult retTy sAll n1
     | _ -> MkInferResult (TyName "ERROR") (emptySubst 0) n1
 
+-- ---------- ELam / ELet / EIf inference (Phase 7.7c) --------------------
+
+-- `ELam name body`: allocate a fresh `α` for the param, extend the env
+-- with `(name : α)`, infer the body under the extended env, and return
+-- `TyFn (applyType sBody α) τbody` under `sBody`. Mirrors the F# host's
+-- `ELam` arm in `src/LLLangCompiler/HMInfer.fs` line 260 area (minus
+-- the multi-param curry — this slice only supports single-param
+-- lambdas, which is all `\x. x`, `\x. x + 1`, etc. need).
+fn inferLam(env Env)(n Int)(name Str)(body Expr) InferResult =
+  let (alpha, n1) = freshVar n in
+  let env2 = envExtend env name alpha in
+  match inferExpr env2 n1 body with
+    | MkInferResult tBody sBody nBody ->
+      let paramTy = applyType sBody alpha in
+      MkInferResult (TyFn paramTy tBody) sBody nBody
+
+-- `ELet name e1 e2`: infer `e1`, extend the env with `(name : τ1)` under
+-- the resulting subst, infer `e2`, return `τ2` under `compose s2 s1`.
+-- NO let-generalization — `name` is bound to the raw monomorphic
+-- `τ1`, so `let id = \x. x in (id 5, id "a")`-style polymorphism
+-- doesn't work yet. That lands in Phase 7.7d alongside type schemes.
+fn inferLet(env Env)(n Int)(name Str)(e1 Expr)(e2 Expr) InferResult =
+  match inferExpr env n e1 with
+    | MkInferResult t1 s1 n1 -> inferLetBody env s1 n1 name t1 e2
+
+-- Body half of `ELet`: extends the env with the (applied) binding and
+-- recurses into `e2`, then composes the subst. Split out because the
+-- outer `inferLet` match already eats one level of `match` nesting.
+fn inferLetBody(env Env)(s1 Subst)(n Int)(name Str)(t1 TypeExpr)(e2 Expr) InferResult =
+  let env2 = applyEnv s1 env in
+  let env3 = envExtend env2 name t1 in
+  match inferExpr env3 n e2 with
+    | MkInferResult t2 s2 n2 ->
+      let sAll = composeSubst s1 s2 in
+      MkInferResult t2 sAll n2
+
+-- `EIf cond thn els`: infer `cond`, unify it with `TyName "Bool"`, infer
+-- both branches under the updated env, unify the two branch types, and
+-- return the unified branch type under the composed subst. On any
+-- unify failure (cond not `Bool`, or branches don't agree) return the
+-- ERROR sentinel so the test driver stays deterministic.
+fn inferIf(env Env)(n Int)(cond Expr)(thn Expr)(els Expr) InferResult =
+  match inferExpr env n cond with
+    | MkInferResult tc sc nc -> inferIfCondBool env sc nc tc thn els
+
+-- Unify the condition type with `Bool`; on success dispatch to
+-- `inferIfThen`, on failure produce the ERROR sentinel. Split into
+-- its own helper so the `match unify with | Some scb -> match
+-- inferExpr ...` chain stays one level deep.
+fn inferIfCondBool(env Env)(sc Subst)(n Int)(tc TypeExpr)(thn Expr)(els Expr) InferResult =
+  match unify tc (TyName "Bool") with
+    | Some scb ->
+      let s1 = composeSubst sc scb in
+      inferIfThen env s1 n thn els
+    | _ -> MkInferResult (TyName "ERROR") (emptySubst 0) n
+
+-- Infer the `then` branch under the env with the head subst applied.
+fn inferIfThen(env Env)(s1 Subst)(n Int)(thn Expr)(els Expr) InferResult =
+  let env1 = applyEnv s1 env in
+  match inferExpr env1 n thn with
+    | MkInferResult tt st nt -> inferIfElse env1 s1 st nt tt els
+
+-- Infer the `else` branch under the env with the head subst + then-
+-- subst applied, then dispatch to the final branch-unify step.
+fn inferIfElse(env Env)(s1 Subst)(st Subst)(n Int)(tt TypeExpr)(els Expr) InferResult =
+  let s12 = composeSubst s1 st in
+  let env2 = applyEnv st env in
+  match inferExpr env2 n els with
+    | MkInferResult te se ne -> inferIfUnify s12 se tt te ne
+
+-- Unify the two branch types; on success return the substituted then-
+-- type under the composed subst, on failure the ERROR sentinel.
+fn inferIfUnify(s12 Subst)(se Subst)(tt TypeExpr)(te TypeExpr)(n Int) InferResult =
+  match unify tt te with
+    | Some sbr ->
+      let s123 = composeSubst s12 se in
+      let sAll = composeSubst s123 sbr in
+      let retTy = applyType sAll tt in
+      MkInferResult retTy sAll n
+    | _ -> MkInferResult (TyName "ERROR") (emptySubst 0) n
+
 -- ---------- Inference test driver (Phase 7.7b) --------------------------
 
 -- Run a single labelled `inferExpr` test and produce one stdout line.
@@ -486,5 +598,19 @@ fn main() =
   let line8 = runInferTest "t8" "x in env" envXInt (EVar "x") in
   let line9 = runInferTest "t9" "(double 5) in env" envDouble (EApp (EVar "double") (EInt 5)) in
   let line10 = runInferTest "t10" "(double \"x\") in env" envDouble (EApp (EVar "double") (EStr "x")) in
-  let lines = [line1 line2 line3 line4 line5 line6 line7 line8 line9 line10] in
+  -- Phase 7.7c inference cases: ELam / ELet / EIf. All closed, so the
+  -- env is empty. Expressions hand-built from the Expr AST (no surface
+  -- lambda / let / if parser in this file); the description string is
+  -- the surface rendering for human-readable stdout.
+  let identFn = ELam "x" (EVar "x") in
+  let addOneFn = ELam "x" (EAdd (EVar "x") (EInt 1)) in
+  let letExpr = ELet "x" (EInt 5) (EAdd (EVar "x") (EInt 1)) in
+  let ifIntExpr = EIf (EBool true) (EInt 1) (EInt 2) in
+  let ifBadExpr = EIf (EBool true) (EInt 1) (EStr "x") in
+  let line11 = runInferTest "t11" "(\\x. x)" (emptyEnv 0) identFn in
+  let line12 = runInferTest "t12" "(\\x. x + 1)" (emptyEnv 0) addOneFn in
+  let line13 = runInferTest "t13" "(let x = 5 in x + 1)" (emptyEnv 0) letExpr in
+  let line14 = runInferTest "t14" "(if true then 1 else 2)" (emptyEnv 0) ifIntExpr in
+  let line15 = runInferTest "t15" "(if true then 1 else \"x\")" (emptyEnv 0) ifBadExpr in
+  let lines = [line1 line2 line3 line4 line5 line6 line7 line8 line9 line10 line11 line12 line13 line14 line15] in
   printfn (joinLines lines)
