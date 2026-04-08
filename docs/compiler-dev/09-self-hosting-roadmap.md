@@ -723,3 +723,93 @@ grammar including `let-in` / `match` / lambdas / cons+list patterns.
 After that the bootstrap compiler's front end is expressible in
 ll-lang and the self-hosting translation work (Stage D in the plan
 above — elaborator and codegen in ll-lang) can begin.
+
+### 2026-04 — Phase 7.5a: let decls + match in fn body (DONE)
+
+First sub-tick of Phase 7.5. Extends
+[`spec/examples/valid/15-moduleparser-real.lll`](../../spec/examples/valid/15-moduleparser-real.lll)
+**in place** (no sibling file) with the two highest-leverage items
+from the Phase 7.4 out-of-scope list:
+
+1. **`let name = expr` decls at module level.** `Decl` gains a `DLet
+   LetDecl` arm where `LetDecl = MkLet Str Expr`. `parseDecls`
+   dispatches on `TKwLet :: _` and calls the new `parseLetDecl`
+   helper, which consumes `TKwLet TLower TEq` and then reuses the
+   full `parseExpr` driver for the right-hand side (so any expression
+   form the fn-body grammar accepts is also valid on the RHS of a
+   `let`).
+2. **`match scrut with | pat -> body | pat -> body ...` in fn bodies.**
+   Lifts the match machinery wholesale from
+   14-exprparser-real.lll: `parseMatch` uses `parseExpr` for the
+   scrutinee (which stops at `TKwWith` because `with` isn't an
+   atom-starter), then `parseArms` pulls two parallel lists (pats,
+   bodies) out of the arm loop. `EMatch Expr List[Pat] List[Expr]`
+   uses the same parallel-list trick 14 relies on to dodge
+   mutually-recursive `type MatchArm = MkArm Pat Expr` which the
+   current codegen cannot emit. A fresh `Pat = PInt Int | PVar Str |
+   PWild` sum covers the three arm-pattern shapes in this slice
+   (constructor / cons / list / tuple / string patterns all stay in
+   Phase 7.5+).
+
+Token ADT additions: `TKwLet`, `TKwMatch`, `TKwWith`, `TArrow`,
+`TUnder`. Lexer additions: `let`/`match`/`with` keywords in
+`classifyIdent`, `_` → `TUnder`, and a 2-char lookahead `lexMinusOrArrow`
+helper that splits `-` from `->` (same shape as the helper in
+14-exprparser-real.lll).
+
+Pretty printer: `showPat`/`showArm`/`showArms` emit `| pat -> body`
+chunks joined by single spaces, `showExpr EMatch` wraps them as
+`(match <scrut> with | p -> e | ...)`, `showLetDecl` emits `let <name>
+= <e>`, and `showDecl` gains the `DLet` arm.
+
+The driver now parses
+
+```
+module Examples.Bigger
+type Maybe A = Some A | None
+type Color = Red | Green | Blue
+let answer = 42
+let zero = 0
+fn double(x Int) Int = x * 2
+fn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1
+fn pickColor(x Int) Color = if x then Red else Green
+```
+
+and prints
+
+```
+module Examples.Bigger
+type Maybe (A) = Some(A) | None
+type Color = Red | Green | Blue
+let answer = 42
+let zero = 0
+fn double (x: Int) -> Int = (x * 2)
+fn classify (x: Int) -> Int = (match x with | 0 -> 0 | _ -> 1)
+fn pickColor (x: Int) -> Color = (if x then Red else Green)
+```
+
+Eight pretty-printed lines — module header, two type decls, two
+module-level `let` decls, three fn decls with arithmetic,
+match-with-scrutinee, and `if-then-else` bodies.
+
+File size: 506 → 666 lines. Test count unchanged at 384 (the two
+existing ModuleParserTests absorbed the extended driver — the runtime
+E2E test got an updated `expected` list, the inference round-trip
+re-reads straight from disk).
+
+Phase 7.5 backlog, remaining 7 of 9 items (unchanged — the other
+seven still drive future work):
+
+- Multi-line fn bodies with layout-sensitive parsing
+- `let-in` chains / lambdas inside fn bodies (already in 14; re-merge
+  into 15 with the token-level `|` disambiguation)
+- Cons / list / tuple patterns in `match` arms
+- Tagged literals (`"x"[UserId]`)
+- Other module-level forms — `tag Name`, `trait ... with ...`, `impl
+  Trait for Type = ...`, `import Foo.Bar`, `export ...`
+- Multi-line type declarations (`type T =\n | A\n | B`)
+- Parametric ctor args (`Some (Maybe A)`, `Some Maybe[A]`)
+
+Next tick: **Phase 7.5b** — pick any two of the above remaining seven
+and ship them the same way (in-place extension of 15, TDD for the
+runtime pretty-print expectation, commit-split feat / test / docs).

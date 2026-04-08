@@ -11,21 +11,22 @@ session to pick up without replaying history.
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 done.** ll-lang
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a done.** ll-lang
   now hosts a real lexer (`09-lexer-real.lll`), a real recursive-
   descent arithmetic parser (`11-parser-real.lll`), a real type-
   declaration parser (`12-typeparser-real.lll`), a real fn-declaration
   parser (`13-fnparser-real.lll`), a real full-expression parser
-  (`14-exprparser-real.lll`), AND — as of Phase 7.4 — a real full
-  **module parser** (`15-moduleparser-real.lll`, 506 lines) that
+  (`14-exprparser-real.lll`), AND — as of Phase 7.4 / 7.5a — a real full
+  **module parser** (`15-moduleparser-real.lll`, 666 lines) that
   stitches the previous five slices into one recursive-descent front
-  end consuming a whole `module M\n type ...\n fn ... = ...` source
-  end-to-end. "ll-lang has a full front-end in itself" is now one
-  runnable program, not a story spread across four separate slices.
-  Phase 7.5 (extended module parser — let decls, multi-line bodies,
-  `match`/lambda/let-in in fn bodies, cons + list patterns, tagged
-  literals, tag/trait/impl/import module-level forms) is the natural
-  next step before the self-hosting elaborator + codegen work begins.
+  end consuming a whole `module M\n type ...\n let ...\n fn ... = ...`
+  source end-to-end, including module-level `let` decls and
+  `match`-with-explicit-scrutinee inside `fn` bodies (the two
+  highest-leverage items from the Phase 7.5 backlog, closed in Phase
+  7.5a). "ll-lang has a full front-end in itself" is now one runnable
+  program, not a story spread across four separate slices. Phase 7.5
+  still has seven remaining items (see list below) before the
+  self-hosting elaborator + codegen work begins.
 - No stale worktrees, no stray branches, no uncommitted changes.
 - `lllc run spec/examples/valid/hello.lll` prints `Hello, ll-lang!`.
 - `lllc run spec/examples/valid/09-lexer-real.lll` prints
@@ -62,51 +63,56 @@ session to pick up without replaying history.
   parse → fully-parenthesised pretty).
 - `lllc run spec/examples/valid/15-moduleparser-real.lll` prints
   ```
-  module Examples.Toy
+  module Examples.Bigger
   type Maybe (A) = Some(A) | None
   type Color = Red | Green | Blue
+  let answer = 42
+  let zero = 0
   fn double (x: Int) -> Int = (x * 2)
+  fn classify (x: Int) -> Int = (match x with | 0 -> 0 | _ -> 1)
   fn pickColor (x: Int) -> Color = (if x then Red else Green)
-  fn answer () -> Int = 42
   ```
-  (a whole module — header, two type decls, three fn decls covering
-  int-literal, arithmetic, and `if-then-else` bodies — round-tripped
-  through tokenize → parseModule → showModule).
+  (a whole module — header, two type decls, two module-level `let`
+  decls, three fn decls covering arithmetic, match-with-explicit-
+  scrutinee, and `if-then-else` bodies — round-tripped through
+  tokenize → parseModule → showModule). The `let` decls and
+  `match`-in-fn-body were added in Phase 7.5a on top of the Phase
+  7.4 baseline.
 
 ## Immediate next task
 
-**Phase 7.5 — extended module parser in ll-lang**. Extend
-`15-moduleparser-real.lll` (or fork it into a sibling
-`16-moduleparser-full-real.lll`) to cover the features deliberately
-cut from Phase 7.4 for line-budget reasons. After this, the bootstrap
+**Phase 7.5 — extended module parser in ll-lang** (ongoing). Continue
+extending `15-moduleparser-real.lll` **in place** — the same shape
+Phase 7.5a used — to cover the remaining items the Phase 7.4 baseline
+deliberately cut for line-budget reasons. After this, the bootstrap
 compiler's front end is fully expressible in ll-lang and the
 self-hosting translation work (Stage D in the roadmap — elaborator
 and codegen in ll-lang) can begin in earnest.
 
-Scope:
+Scope — **2 of 9 items done in Phase 7.5a (struck through); 7 still
+open**:
 
-1. **`let` decls at module level.** Add `DLet name expr` to the
-   `Decl` sum and a `TKwLet :: _ ->` arm in `parseDecls`. Reuse the
-   `parseExpr` driver for the right-hand side.
+1. ~~**`let` decls at module level.** Added `DLet LetDecl` to `Decl`
+   and a `TKwLet :: _ ->` arm in `parseDecls`. RHS reuses the full
+   `parseExpr` driver. (DONE — Phase 7.5a.)~~
 2. **Multi-line `fn` bodies.** Today 15 only parses single-line
    bodies (the lexer stops expr parsing at `TNewline` by virtue of
    `TNewline` not being an atom-starter). A multi-line body needs
    either layout-sensitive parsing that tracks indentation relative
    to the `=`, or an explicit terminator. The F# compiler uses
    layout; the ll-lang mirror should too.
-3. **`let-in` / `match` / lambdas in fn bodies.** Re-merge the
-   special-form dispatchers from `14-exprparser-real.lll`:
-   `parseLet` (`TKwLet :: ...`), `parseMatch` (`TKwMatch :: ...`),
-   `parseLam` (`TBackslash :: ...`). Add the missing token
-   constructors (`TKwLet`, `TKwIn`, `TKwMatch`, `TKwWith`,
-   `TBackslash`, `TDot`, `TBar`, `TArrow`, `TUnder`) and the
-   matching lexer arms. 15 doesn't need `TBar` for expression form
-   today because ctor types use bar chars too — re-merging needs to
-   disambiguate at the token level or use a context stack.
-4. **Cons / list / tuple patterns in `match`.** 14's match arms are
-   constrained to lit / var / wildcard patterns. A Phase 7.5 version
-   needs cons (`head :: tail`), list (`[a b c]`), and tuple
-   (`(a, b)`) patterns to match what the F# parser accepts.
+3. **`let-in` / lambdas in fn bodies.** Phase 7.5a already merged
+   `match` back into 15. Still missing: `parseLet` (`TKwLet :: ...`)
+   for let-in chains inside expressions, and `parseLam` (`TBackslash
+   :: ...`) for lambdas. Add `TKwIn`, `TBackslash`, `TDot` token
+   constructors plus the matching lexer arms. Note: the top-level
+   `parseDecls` dispatcher already consumes `TKwLet` for module-level
+   `let` decls, so context has to split on whether we're at decl
+   level (no `in`) or expression position (requires `in`).
+4. **Cons / list / tuple patterns in `match`.** 15's match arms are
+   constrained to lit / var / wildcard patterns (from Phase 7.5a). A
+   follow-up version needs cons (`head :: tail`), list (`[a b c]`),
+   and tuple (`(a, b)`) patterns to match what the F# parser accepts.
 5. **Tagged literals (`"x"[UserId]`).** Not lexed today — needs a
    post-atom lookahead for `TLBracket`.
 6. **Other module-level forms.** `tag Name`, `trait ... with ...`,
