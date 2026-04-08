@@ -211,12 +211,33 @@ fn unifyFn(a1 TypeExpr)(r1 TypeExpr)(t2 TypeExpr) Maybe[Subst] =
 
 -- Helper to keep `unifyFn`'s nested `match unify ... with | Some s1 ->
 -- match unify r1b r2b with | Some _ ->` from going three matches deep.
--- Returns `Some s1` if the result types unify (regardless of what the
--- result-side subst is — we don't compose in this slice), else `None`.
+-- In Phase 7.7b this now threads the result-side subst back into the
+-- head subst via `composeSubst` so `inferExpr` (below) sees every bind
+-- accumulated during `TyFn` unification — e.g. the `$0 -> Int` bind
+-- that falls out of `unify (TyFn Int Int) (TyFn Int $0)` for the
+-- `EApp double (EInt 5)` test. The five Phase 7.7a `unify` tests are
+-- unaffected because their result substs are all empty.
 fn unifyResults(s1 Subst)(r1b TypeExpr)(r2b TypeExpr) Maybe[Subst] =
   match unify r1b r2b with
-    | Some _ -> Some s1
+    | Some s2 -> Some (composeSubst s1 s2)
     | _ -> None
+
+-- ---------- composeSubst (Phase 7.7b) -----------------------------------
+
+-- Dumb substitution composition: just concatenate the two parallel-list
+-- substs head-to-tail. Mirrors the F# host's `Subst.compose` in
+-- `src/LLLangCompiler/Types.fs` but WITHOUT the "apply s1 to s2's vals"
+-- step — good enough for this slice because we only unify monomorphic
+-- types (no polymorphism, no chained bindings). The head subst's keys
+-- end up first in the resulting lists so a later `lookupSubst` finds
+-- them ahead of any conflicting entry from the tail.
+fn composeSubst(s1 Subst)(s2 Subst) Subst =
+  match s1 with
+    | MkSubst k1 v1 -> composeWith k1 v1 s2
+
+fn composeWith(k1 List[Str])(v1 List[TypeExpr])(s2 Subst) Subst =
+  match s2 with
+    | MkSubst k2 v2 -> MkSubst (listAppend k1 k2) (listAppend v1 v2)
 
 -- ---------- Pretty-printers ---------------------------------------------
 
@@ -266,6 +287,177 @@ fn runTest(label Str)(t1 TypeExpr)(t2 TypeExpr) Str =
 fn joinLines(xs List[Str]) Str =
   listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n") s) "" xs
 
+-- ---------- Env (Phase 7.7b) --------------------------------------------
+
+-- Typing environment: parallel `List[Str]` names + `List[TypeExpr]`
+-- types, exactly mirroring `Subst`. Same rationale too — tuples-in-list
+-- have surface-syntax friction, so two parallel lists it is.
+type Env = MkEnv List[Str] List[TypeExpr]
+
+-- Zero-arg constructor pattern: dummy `Int` param at the call site
+-- (`emptyEnv 0`), same trick as `emptySubst`.
+fn emptyEnv(u Int) Env = MkEnv [] []
+
+-- Extend an env with a new binding. New entries go at the head so
+-- `envLookup` finds the most recently bound name first (classic
+-- lexical shadowing).
+fn envExtend(e Env)(name Str)(t TypeExpr) Env =
+  match e with
+    | MkEnv ks vs -> MkEnv (name :: ks) (t :: vs)
+
+-- Linear lookup, same shape as `lookupSubst` / `lookupSubstLists`.
+fn envLookup(e Env)(name Str) Maybe[TypeExpr] =
+  match e with
+    | MkEnv ks vs -> envLookupLists ks vs name
+
+fn envLookupLists(keys List[Str])(vals List[TypeExpr])(name Str) Maybe[TypeExpr] =
+  match keys with
+    | k :: ks ->
+      match vals with
+        | v :: vs ->
+          if k == name then Some v
+          else envLookupLists ks vs name
+        | _ -> None
+    | _ -> None
+
+-- ---------- Expr AST (Phase 7.7b) ---------------------------------------
+
+-- The tiny expression AST that `inferExpr` walks. Deliberately smaller
+-- than the F# host's `AST.Expr` — no `ELam` / `ELet` / `EIf` / `EMatch`
+-- yet; those land in 7.7c onwards with let-generalization, polymorphism,
+-- and type schemes. The header's doc-only stub promised exactly this
+-- shape.
+type Expr =
+  | EInt Int
+  | EStr Str
+  | EBool Bool
+  | EVar Str
+  | EAdd Expr Expr
+  | EApp Expr Expr
+
+-- ---------- Fresh var generator (Phase 7.7b) ----------------------------
+
+-- Thread an `Int` counter through inference. Each call consumes `n` and
+-- returns `(TyVar "$n", n + 1)`. Mirrors the F# host's `freshVar` in
+-- `src/LLLangCompiler/Types.fs` (which uses a mutable ref cell; we stay
+-- purely functional by threading the counter explicitly).
+fn freshVar(n Int) =
+  (TyVar (strConcat "$" (intToStr n)), n + 1)
+
+-- ---------- InferResult carrier (Phase 7.7b) ----------------------------
+
+-- `inferExpr` returns three things at once: the inferred type, the
+-- substitution collected during inference, and the new fresh counter.
+-- A tiny three-field ADT sidesteps the no-tuple-construction-in-return
+-- workaround that plagued earlier slices.
+type InferResult = MkInferResult TypeExpr Subst Int
+
+-- ---------- inferExpr (Phase 7.7b) --------------------------------------
+
+-- Walk an `Expr` and produce an `InferResult`. Mirrors (a tiny slice of)
+-- the F# host's `HMInfer.inferExpr` in `src/LLLangCompiler/HMInfer.fs`
+-- line 172 area. Each arm is split into its own helper to keep `match`
+-- nesting one level deep — the same trick as `unify` uses, for the
+-- same reason.
+--
+--   * `EInt _`  -> `(TyName "Int",  empty, n)`
+--   * `EStr _`  -> `(TyName "Str",  empty, n)`
+--   * `EBool _` -> `(TyName "Bool", empty, n)`
+--   * `EVar name` -> lookup in env; missing = `(TyName "ERROR", empty, n)`.
+--     (The F# host emits `E002 UnboundVar`; this slice simplifies to a
+--     sentinel type so the test driver stays printfn-only.)
+--   * `EAdd l r` -> infer l, infer r, unify both with `TyName "Int"`,
+--     result `TyName "Int"` under the composed subst.
+--   * `EApp f a` -> infer f, infer a, fresh β, unify `applyType s_a τf`
+--     with `TyFn(τa, β)`, result `applyType s β` under the composed
+--     subst. On unify failure, return the ERROR sentinel so t10 has a
+--     deterministic output.
+--
+-- No occurs check, no polymorphism, no let-generalization — those land
+-- in 7.7c onwards.
+fn inferExpr(env Env)(n Int)(e Expr) InferResult =
+  match e with
+    | EInt _ -> MkInferResult (TyName "Int") (emptySubst 0) n
+    | EStr _ -> MkInferResult (TyName "Str") (emptySubst 0) n
+    | EBool _ -> MkInferResult (TyName "Bool") (emptySubst 0) n
+    | EVar name -> inferVar env n name
+    | EAdd l r -> inferAdd env n l r
+    | EApp f a -> inferApp env n f a
+
+-- `EVar`: env lookup, ERROR sentinel on miss.
+fn inferVar(env Env)(n Int)(name Str) InferResult =
+  match envLookup env name with
+    | Some t -> MkInferResult t (emptySubst 0) n
+    | _ -> MkInferResult (TyName "ERROR") (emptySubst 0) n
+
+-- `EAdd`: destructure the left-hand result, pass to `inferAddR`.
+fn inferAdd(env Env)(n Int)(l Expr)(r Expr) InferResult =
+  match inferExpr env n l with
+    | MkInferResult tl sl nl -> inferAddR env nl sl tl r
+
+-- Right-hand half of `EAdd`: destructure the right-hand result, pass
+-- to `inferAddUnify`.
+fn inferAddR(env Env)(n Int)(sl Subst)(tl TypeExpr)(r Expr) InferResult =
+  match inferExpr env n r with
+    | MkInferResult tr sr nr -> inferAddUnify sl sr tl tr nr
+
+-- Unify the left operand with `Int`; on success dispatch to
+-- `inferAddUnify2`, on failure produce the ERROR sentinel.
+fn inferAddUnify(sl Subst)(sr Subst)(tl TypeExpr)(tr TypeExpr)(n Int) InferResult =
+  match unify tl (TyName "Int") with
+    | Some s3 -> inferAddUnify2 sl sr s3 tr n
+    | _ -> MkInferResult (TyName "ERROR") (emptySubst 0) n
+
+-- Unify the right operand with `Int`; on success return `Int` under the
+-- composed subst; on failure the ERROR sentinel.
+fn inferAddUnify2(sl Subst)(sr Subst)(s3 Subst)(tr TypeExpr)(n Int) InferResult =
+  match unify tr (TyName "Int") with
+    | Some s4 ->
+      let s12 = composeSubst sl sr in
+      let s123 = composeSubst s12 s3 in
+      let sAll = composeSubst s123 s4 in
+      MkInferResult (TyName "Int") sAll n
+    | _ -> MkInferResult (TyName "ERROR") (emptySubst 0) n
+
+-- `EApp`: destructure the function result, pass to `inferAppArg`.
+fn inferApp(env Env)(n Int)(f Expr)(a Expr) InferResult =
+  match inferExpr env n f with
+    | MkInferResult tf sf nf -> inferAppArg env nf sf tf a
+
+-- Argument half of `EApp`: destructure the arg result, pass to
+-- `inferAppFresh`.
+fn inferAppArg(env Env)(n Int)(sf Subst)(tf TypeExpr)(a Expr) InferResult =
+  match inferExpr env n a with
+    | MkInferResult ta sa na -> inferAppFresh sf sa tf ta na
+
+-- Fresh-var + unify half of `EApp`: allocate a fresh result type,
+-- unify the (substituted) function type against `TyFn ta beta`, and
+-- return the substituted `beta` as the result type. On unify failure
+-- return the ERROR sentinel so t10 is deterministic.
+fn inferAppFresh(sf Subst)(sa Subst)(tf TypeExpr)(ta TypeExpr)(n Int) InferResult =
+  let (beta, n1) = freshVar n in
+  let tfApplied = applyType sa tf in
+  match unify tfApplied (TyFn ta beta) with
+    | Some s3 ->
+      let s12 = composeSubst sf sa in
+      let sAll = composeSubst s12 s3 in
+      let retTy = applyType sAll beta in
+      MkInferResult retTy sAll n1
+    | _ -> MkInferResult (TyName "ERROR") (emptySubst 0) n1
+
+-- ---------- Inference test driver (Phase 7.7b) --------------------------
+
+-- Run a single labelled `inferExpr` test and produce one stdout line.
+-- `desc` is a hand-written surface rendering of the expression (the
+-- `Expr` AST has no `showExpr` helper in this file — the five cases
+-- are hardcoded in `main` so a literal description is cheaper than a
+-- walker). Output shape: `"<label> infer <desc> : <type>"`.
+fn runInferTest(label Str)(desc Str)(env Env)(e Expr) Str =
+  match inferExpr env 0 e with
+    | MkInferResult t _ _ ->
+      let header = strConcat (strConcat (strConcat label " infer ") desc) " : " in
+      strConcat header (showType t)
+
 -- ---------- main --------------------------------------------------------
 
 fn main() =
@@ -277,11 +469,22 @@ fn main() =
   let intToStrFn = TyFn tyInt tyStr in
   let intToStrFn2 = TyFn tyInt tyStr in
   let intToBoolFn = TyFn tyInt tyBool in
+  let intToIntFn = TyFn tyInt tyInt in
   -- Five hardcoded unify cases — see header for full plan.
   let line1 = runTest "t1" tyInt tyInt in
   let line2 = runTest "t2" tyInt tyStr in
   let line3 = runTest "t3" tyVarA tyInt in
   let line4 = runTest "t4" intToStrFn intToStrFn2 in
   let line5 = runTest "t5" intToBoolFn intToStrFn in
-  let lines = [line1 line2 line3 line4 line5] in
+  -- Phase 7.7b inference cases. Env for t8-t10 binds `x : Int` and
+  -- `double : Int -> Int`; t6 / t7 use `emptyEnv` because their
+  -- expressions are closed.
+  let envXInt = envExtend (emptyEnv 0) "x" tyInt in
+  let envDouble = envExtend (emptyEnv 0) "double" intToIntFn in
+  let line6 = runInferTest "t6" "42" (emptyEnv 0) (EInt 42) in
+  let line7 = runInferTest "t7" "(1 + 2)" (emptyEnv 0) (EAdd (EInt 1) (EInt 2)) in
+  let line8 = runInferTest "t8" "x in env" envXInt (EVar "x") in
+  let line9 = runInferTest "t9" "(double 5) in env" envDouble (EApp (EVar "double") (EInt 5)) in
+  let line10 = runInferTest "t10" "(double \"x\") in env" envDouble (EApp (EVar "double") (EStr "x")) in
+  let lines = [line1 line2 line3 line4 line5 line6 line7 line8 line9 line10] in
   printfn (joinLines lines)
