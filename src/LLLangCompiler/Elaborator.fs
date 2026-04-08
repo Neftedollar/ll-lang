@@ -478,48 +478,28 @@ let private checkDecls (pm: PosMap) (m: LLModule) (env: TypeEnv) : LLError list 
     m.Decls
     |> List.collect (fun (decl, _isExported) -> checkDecl pm decl env)
 
-/// Recursively find all EMatch / EMatchOf expressions within `expr`.
-/// Each entry is (outer match expr, its branch list) — the outer expr is
-/// returned so callers can look up its source position in the PosMap.
-/// Does NOT recurse into ELam (separate scope).
-let rec private collectMatches (expr: Expr) : (Expr * (Pattern * Expr) list) list =
-    match expr with
-    | EMatch(branches) ->
-        let nested = branches |> List.collect (fun (_, e) -> collectMatches e)
-        (expr, branches) :: nested
-    | EMatchOf(scrut, branches) ->
-        let scrutMatches = collectMatches scrut
-        let nested = branches |> List.collect (fun (_, e) -> collectMatches e)
-        scrutMatches @ ((expr, branches) :: nested)
-    | EApp(f, arg) ->
-        collectMatches f @ collectMatches arg
-    | EIf(cond, t, e) ->
-        collectMatches cond @ collectMatches t @ collectMatches e
-    | ELet(_, e, bodyOpt) ->
-        let bodyMatches =
-            match bodyOpt with
-            | Some body -> collectMatches body
-            | None -> []
-        collectMatches e @ bodyMatches
-    | ELetPat(_, e, bodyOpt) ->
-        let bodyMatches =
-            match bodyOpt with
-            | Some body -> collectMatches body
-            | None -> []
-        collectMatches e @ bodyMatches
-    | EPipe(e, f) ->
-        collectMatches e @ collectMatches f
-    | EList(elems) | ETuple(elems) ->
-        elems |> List.collect collectMatches
-    | ECons(h, t) -> collectMatches h @ collectMatches t
-    | ETagged(e, _) -> collectMatches e
-    | ELam _ | ELit _ | EVar _ | ECon _ -> []
-
 /// Pass 3: exhaustiveness check for match expressions.
-/// For each DFn whose first parameter type is a named sum type,
-/// verify that every match in the body covers all constructors.
-/// `pm` is used to attach the source position of each offending match
-/// expression to the emitted E003 error.
+/// For each DFn whose body is a clause-sugar top-level `EMatch` (i.e.
+/// `fn f(..)(x T) = | PatA -> .. | PatB -> ..`) AND whose LAST parameter
+/// type is a named sum type, verify that the body's branches cover all
+/// constructors of that type.
+///
+/// Scope limitation: the check is deliberately narrow to avoid false
+/// positives.  We only inspect the *direct* top-level `EMatch` of the fn
+/// body, because:
+///   1. Clause-sugar curries over the LAST parameter — that's the implicit
+///      scrutinee. Checking against the first parameter is incorrect for
+///      multi-param fns (e.g. `fn f(lhs Expr)(toks List[Token]) = | TPlus :: rest -> ..`
+///      where the top-level match is on `toks`, not `lhs`).
+///   2. Nested `EMatch` / `EMatchOf` expressions inside the body scrutinize
+///      *arbitrary* intermediate values whose types we can't know without
+///      full H-M inference. Treating them all as "matches against the
+///      fn's first parameter type" produces cascading spurious E003s.
+///
+/// HMInfer (Phase 4) is the proper place for full exhaustiveness across
+/// every match. This pass only catches the most common clause-sugar case.
+/// `pm` is used to attach the source position of the offending match
+/// expression to each emitted E003 error.
 let private exhaustivenessCheck (pm: PosMap) (m: LLModule) (_env: TypeEnv) : LLError list =
     // Build map: typeName → constructor name list
     let typeToCtors =
@@ -534,35 +514,36 @@ let private exhaustivenessCheck (pm: PosMap) (m: LLModule) (_env: TypeEnv) : LLE
     [ for (decl, _) in m.Decls do
         match decl with
         | DFn(sigRecord, body) when not sigRecord.Params.IsEmpty ->
-            let (_, firstParamType) = sigRecord.Params[0]
-            match firstParamType with
-            | TyName typeName when Map.containsKey typeName typeToCtors ->
+            // Clause-sugar scrutinizes the LAST curried param, not the first.
+            let (_, lastParamType) = List.last sigRecord.Params
+            // Only check the TOP-LEVEL body if it is an `EMatch` clause sugar.
+            // Nested matches and explicit `match ... with` (EMatchOf) are
+            // skipped — their scrutinee type requires H-M inference to know.
+            match body, lastParamType with
+            | EMatch branches, TyName typeName when Map.containsKey typeName typeToCtors ->
                 let requiredCtors = typeToCtors[typeName]
-                let matchBlocks = collectMatches body
-                for (matchExpr, branches) in matchBlocks do
-                    // A PWild / PVar / PTuple branch is a catch-all relative
-                    // to a sum type: tuples are product types, not sum types,
-                    // so a PTuple pattern cannot discriminate constructors and
-                    // must be treated as a catch-all for exhaustiveness.
-                    let hasCatchAll =
+                // A PWild / PVar / PTuple / PCons branch is a catch-all
+                // relative to a sum type: tuples are product types, not sum
+                // types, and a cons pattern is already open-ended.
+                let hasCatchAll =
+                    branches
+                    |> List.exists (fun (pat, _) ->
+                        match pat with
+                        | PWild | PVar _ | PTuple _ | PCons _ -> true
+                        | _ -> false)
+                if not hasCatchAll then
+                    let coveredCtors =
                         branches
-                        |> List.exists (fun (pat, _) ->
+                        |> List.choose (fun (pat, _) ->
                             match pat with
-                            | PWild | PVar _ | PTuple _ | PCons _ -> true
-                            | _ -> false)
-                    if not hasCatchAll then
-                        let coveredCtors =
-                            branches
-                            |> List.choose (fun (pat, _) ->
-                                match pat with
-                                | PCon(name, _) -> Some name
-                                | _ -> None)
-                        // Look up the match expression's position so E003
-                        // points at the `match` / first `|` arm rather than 0:0.
-                        let (ln, col) = posOf pm (box matchExpr)
-                        for c in requiredCtors do
-                            if not (List.contains c coveredCtors) then
-                                yield e003 ln col typeName c
+                            | PCon(name, _) -> Some name
+                            | _ -> None)
+                    // Look up the match expression's position so E003
+                    // points at the `match` / first `|` arm rather than 0:0.
+                    let (ln, col) = posOf pm (box body)
+                    for c in requiredCtors do
+                        if not (List.contains c coveredCtors) then
+                            yield e003 ln col typeName c
             | _ -> ()
         | _ -> () ]
 
