@@ -232,3 +232,87 @@ let ``llc build writes .fs file next to source`` () =
     Assert.True(System.IO.File.Exists(fsPath), $"Expected {fsPath} to exist. stdout={stdout} stderr={stderr}")
     let content = System.IO.File.ReadAllText(fsPath)
     Assert.Contains("module Tmp.Test", content)
+
+// ---------- Task 8: corpus round-trip ----------
+
+[<Fact>]
+let ``compile 01-basics.lll returns Ok`` () =
+    let src = readValid "01-basics.lll"
+    match LLLang.Compiler.compile src with
+    | Ok fs -> Assert.NotEmpty(fs)
+    | Error es -> Assert.Fail($"01-basics.lll failed: {es}")
+
+[<Fact>]
+let ``compile 01-basics.lll output contains module header`` () =
+    let src = readValid "01-basics.lll"
+    match LLLang.Compiler.compile src with
+    | Ok fs -> Assert.Contains("module Examples.Basics", fs)
+    | Error es -> Assert.Fail($"01-basics.lll failed: {es}")
+
+[<Fact>]
+let ``compile 01-basics.lll output contains let pi`` () =
+    let src = readValid "01-basics.lll"
+    match LLLang.Compiler.compile src with
+    | Ok fs -> Assert.Contains("let pi =", fs)
+    | Error es -> Assert.Fail($"01-basics.lll failed: {es}")
+
+[<Fact>]
+let ``compile 01-basics.lll output contains let add`` () =
+    let src = readValid "01-basics.lll"
+    match LLLang.Compiler.compile src with
+    | Ok fs -> Assert.Contains("let add ", fs)
+    | Error es -> Assert.Fail($"01-basics.lll failed: {es}")
+
+[<Fact>]
+let ``compile 02-adts.lll returns Ok`` () =
+    let src = readValid "02-adts.lll"
+    match LLLang.Compiler.compile src with
+    | Ok fs -> Assert.NotEmpty(fs)
+    | Error es -> Assert.Fail($"02-adts.lll failed: {es}")
+
+[<Fact>]
+let ``compile 02-adts.lll output contains type Shape`` () =
+    let src = readValid "02-adts.lll"
+    match LLLang.Compiler.compile src with
+    | Ok fs -> Assert.Contains("type Shape =", fs)
+    | Error es -> Assert.Fail($"02-adts.lll failed: {es}")
+
+[<Fact>]
+let ``compile 02-adts.lll output contains type Point record`` () =
+    let src = readValid "02-adts.lll"
+    match LLLang.Compiler.compile src with
+    | Ok fs -> Assert.Contains("type Point = {", fs)
+    | Error es -> Assert.Fail($"02-adts.lll failed: {es}")
+
+[<Theory>]
+[<InlineData("01-basics.lll")>]
+[<InlineData("02-adts.lll")>]
+[<InlineData("hello.lll")>]
+let ``all valid corpus files produce non-empty output with module header`` (filename: string) =
+    let src = readValid filename
+    match LLLang.Compiler.compile src with
+    | Ok fs ->
+        Assert.True(fs.Length > 0, $"{filename}: empty output")
+        Assert.Contains("module ", fs)
+    | Error es -> Assert.Fail($"{filename} failed: {es}")
+
+[<Fact>]
+let ``hello world runs via llc run and prints Hello ll-lang!`` () =
+    let lllPath =
+        System.IO.Path.Combine(
+            __SOURCE_DIRECTORY__,
+            "../../spec/examples/valid/hello.lll")
+    let llcDll =
+        System.IO.Path.Combine(
+            __SOURCE_DIRECTORY__,
+            "../../src/LLLangTool/bin/Debug/net10.0/llc.dll")
+    let psi = System.Diagnostics.ProcessStartInfo("dotnet", $"\"{llcDll}\" run \"{lllPath}\"")
+    psi.RedirectStandardOutput <- true
+    psi.RedirectStandardError  <- true
+    psi.UseShellExecute        <- false
+    use proc = System.Diagnostics.Process.Start(psi)
+    let stdout = proc.StandardOutput.ReadToEnd()
+    let stderr = proc.StandardError.ReadToEnd()
+    proc.WaitForExit()
+    Assert.True(stdout.Contains("Hello, ll-lang!"),
+                $"Expected stdout to contain 'Hello, ll-lang!'. stdout={stdout} stderr={stderr}")

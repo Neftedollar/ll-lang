@@ -28,14 +28,24 @@ let private cmdBuild (path: string) : int =
         eprintfn "llc: %s" ex.Message
         1
 
-/// Run: compile file.lll → temp .fs → dotnet fsi. Returns exit code.
+/// Run: compile file.lll → temp .fsx → dotnet fsi. Returns exit code.
+/// The emitted F# contains a [<EntryPoint>] main, which fsi does NOT auto-invoke;
+/// we strip the attribute and append an explicit `main [||] |> exit` call.
 let private cmdRun (path: string) : int =
     try
         let src = File.ReadAllText(path)
         match LLLang.Compiler.compile src with
         | Ok fs ->
             let tmp = Path.GetTempFileName() + ".fsx"
-            File.WriteAllText(tmp, fs)
+            // For fsi scripts: strip module header and [<EntryPoint>], append explicit invocation.
+            let stripped =
+                fs.Split('\n')
+                |> Array.filter (fun l ->
+                    let t = l.TrimStart()
+                    not (t.StartsWith("module ")) && not (t.StartsWith("[<EntryPoint>]")))
+                |> String.concat "\n"
+            let withInvoke = stripped + "\nmain [||] |> exit\n"
+            File.WriteAllText(tmp, withInvoke)
             let psi = ProcessStartInfo("dotnet", $"fsi \"{tmp}\"")
             psi.RedirectStandardOutput <- false
             psi.RedirectStandardError  <- false
