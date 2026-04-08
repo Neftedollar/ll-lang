@@ -812,7 +812,7 @@ fn showExpr(e Expr) Str =
   | EInt n -> intToStr n
   | EStr s -> strConcat (strConcat "\"" s) "\""
   | EVar s -> s
-  | ETagged e2 t -> strConcat (strConcat (strConcat (strConcat "(" (showExpr e2)) "[") t) "])"
+  | ETagged inner t -> strConcat (strConcat (strConcat (strConcat "(" (showExpr inner)) "[") t) "])"
   | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " + ") (showExpr r)) ")"
   | ESub l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " - ") (showExpr r)) ")"
   | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " * ") (showExpr r)) ")"
