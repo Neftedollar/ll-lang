@@ -157,6 +157,20 @@ let ``PCon single-arg pattern emits bare variable`` () =
     let src = "module M\ntype Maybe A = Some A | None\nfn unwrap(m Maybe[Int]) =\n  | Some x -> x\n  | None -> 0"
     Assert.Contains("| Some x ->", codegenSrc src)
 
+[<Fact>]
+let ``PTuple pattern emits F# tuple pattern`` () =
+    // Requires untyped-param support for `fn fst(p)` so inference can
+    // discover the tuple shape from the match pattern.
+    let src = "module M\nfn fst(p) =\n  | (a, b) -> a"
+    let fs = codegenSrc src
+    Assert.Contains("| (a, b) ->", fs)
+
+[<Fact>]
+let ``PTuple pattern with wildcard emits (a, _)`` () =
+    let src = "module M\nfn fst(p) =\n  | (a, _) -> a"
+    let fs = codegenSrc src
+    Assert.Contains("| (a, _) ->", fs)
+
 // ---------- Task 5: top-level module emission ----------
 
 [<Fact>]

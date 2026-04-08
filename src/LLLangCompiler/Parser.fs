@@ -420,12 +420,21 @@ let private parseParam (c: Ctx) : Result<Param, string> =
         match curTok c with
         | Ident name ->
             advance c
-            match parseTypeExpr c with
-            | Error e -> Error e
-            | Ok ty ->
-                match skip c RParen with
+            // Phase 6.8: allow `(name)` with no type annotation. Mark with
+            // TyVar "?" so HMInfer can replace it with a fresh flex var at
+            // top-level inference time. Enables `fn fst(p) = ...` and allows
+            // inference to discover e.g. `(A, B) -> A` for tuple-destructuring
+            // fns without a tuple-type surface syntax.
+            if curTok c = RParen then
+                advance c
+                Ok (name, TyVar "?")
+            else
+                match parseTypeExpr c with
                 | Error e -> Error e
-                | Ok () -> Ok (name, ty)
+                | Ok ty ->
+                    match skip c RParen with
+                    | Error e -> Error e
+                    | Ok () -> Ok (name, ty)
         | t -> Error $"Expected param name, got {t}"
 
 let private parseConstraint (c: Ctx) : Result<Constraint, string> =

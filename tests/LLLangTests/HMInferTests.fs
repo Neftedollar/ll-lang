@@ -617,6 +617,72 @@ let ``trait dispatch: Functor Maybe resolves at call site`` () =
     let tm = inferOk functorMaybeModule
     Assert.True(Map.containsKey "map_Maybe" tm.Env)
 
+// --- Phase 6.8: tuple patterns (polymorphism via untyped param) ---
+
+[<Fact>]
+let ``fn with PTuple pattern infers polymorphic (A, B) -> A`` () =
+    // `fn fst(p) = match p with | (a, _) -> a` should generalize to a
+    // polymorphic scheme of shape `(A, B) -> A` — encoded as
+    // `TyFn(TyApp(TyApp(Tuple, $x), $y), $x)` after the two-pass + "?" slot
+    // replacement machinery runs.
+    let src = "module M\nfn fst(p) =\n  | (a, _) -> a"
+    let tm = inferOk src
+    let sch = schemeOf tm "fst"
+    match sch.Body with
+    | TyFn(argTy, retTy) ->
+        match argTy with
+        | TyApp(TyApp(TyName "Tuple", TyVar a), TyVar _) ->
+            match retTy with
+            | TyVar r -> Assert.Equal<string>(a, r)
+            | _ -> failwith $"expected TyVar return matching tuple first elem, got {retTy}"
+        | _ -> failwith $"expected argTy Tuple[A][B], got {argTy}"
+    | _ -> failwith $"expected fn type, got {sch.Body}"
+
+[<Fact>]
+let ``tuple pattern match with specific types infers Int`` () =
+    // `fn f(p) = match p with | (a, b) -> a + 1` has `a + 1` pinning `a`
+    // to Int, so the scheme's return type must be Int.
+    let src = "module M\nfn f(p) =\n  | (a, b) -> a + 1"
+    let tm = inferOk src
+    let sch = schemeOf tm "f"
+    match sch.Body with
+    | TyFn(_, TyName "Int") -> ()
+    | _ -> failwith $"expected TyFn(_, Int), got {sch.Body}"
+
+// --- Phase 6.8: mutually recursive top-level fns (two-pass inference) ---
+
+[<Fact>]
+let ``mutual recursion: even and odd both Int -> Bool`` () =
+    let src =
+        "module M\n" +
+        "fn even(n Int) Bool = if n == 0 then true else odd (n - 1)\n" +
+        "fn odd(n Int) Bool = if n == 0 then false else even (n - 1)"
+    let tm = inferOk src
+    Assert.Equal(TyFn(TyName "Int", TyName "Bool"), (schemeOf tm "even").Body)
+    Assert.Equal(TyFn(TyName "Int", TyName "Bool"), (schemeOf tm "odd").Body)
+
+[<Fact>]
+let ``caller-before-callee: fn uses later-declared helper`` () =
+    let src =
+        "module M\n" +
+        "fn caller(n Int) Int = helper n\n" +
+        "fn helper(n Int) Int = n + 1"
+    let tm = inferOk src
+    Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "caller").Body)
+    Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "helper").Body)
+
+[<Fact>]
+let ``single recursion fact still works`` () =
+    let src = "module M\nfn fact(n Int) Int = if n <= 1 then 1 else n * fact (n - 1)"
+    let tm = inferOk src
+    Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "fact").Body)
+
+[<Fact>]
+let ``single recursion fib still works`` () =
+    let src = "module M\nfn fib(n Int) Int = if n <= 1 then n else fib (n - 1) + fib (n - 2)"
+    let tm = inferOk src
+    Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "fib").Body)
+
 [<Fact>]
 let ``E006 corpus fires in HMInfer`` () =
     let src = readInvalid "E006-missing-impl.lll"

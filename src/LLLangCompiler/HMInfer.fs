@@ -384,9 +384,40 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
         ((td, exported), env2)
 
     | DFn(sig_, body) ->
-        // Normalize param and return types: TyName X -> TyVar X for type params
-        let normParams = sig_.Params |> List.map (fun (n, ty) -> n, normalizeTy ty)
-        let normRet = sig_.ReturnType |> Option.map normalizeTy
+        // Normalize param and return types: TyName X -> TyVar X for type params.
+        // `TyVar "?"` marks an untyped slot (e.g. `fn f(p) = ...`) and gets
+        // replaced with a fresh flex var for inference.
+        // If a tentative monomorphic scheme for this fn is already in `env`
+        // (populated by Pass 1 of the two-pass top-level inference), reuse
+        // its param/return types so recursive call sites resolving this fn's
+        // name observe the SAME fresh flex vars we're about to infer against.
+        // Otherwise (e.g. DImpl's inner fns, which skip Pass 1), fall back to
+        // freshly resolving each slot from the raw sig.
+        let resolveSlot (ty: TypeExpr) =
+            match ty with
+            | TyVar "?" -> freshVar st.Fresh
+            | other -> normalizeTy other
+        let (normParams, normRet) =
+            match Map.tryFind sig_.Name env with
+            | Some { Vars = []; Body = tentBody } ->
+                // Unroll the tentative fn type into [paramTy...] + retTy.
+                let rec unroll ty remaining =
+                    match remaining with
+                    | [] -> ([], ty)
+                    | _ :: rest ->
+                        match ty with
+                        | TyFn(a, b) ->
+                            let (restTys, r) = unroll b rest
+                            (a :: restTys, r)
+                        | _ -> ([], ty)
+                let (paramTys, retTy) = unroll tentBody sig_.Params
+                let paramsZipped =
+                    List.zip (sig_.Params |> List.map fst) paramTys
+                (paramsZipped, Some retTy)
+            | _ ->
+                let nps = sig_.Params |> List.map (fun (n, ty) -> n, resolveSlot ty)
+                let nr = sig_.ReturnType |> Option.map normalizeTy
+                (nps, nr)
         // Collect declared type parameter names (rigid vars) from params + return
         let declaredTyVars =
             let paramVars = normParams |> List.collect (fun (_, ty) -> collectRigidVars ty)
@@ -431,8 +462,15 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
         let paramTys = normParams |> List.map (fun (_, ty) -> applyType sAll ty)
         let retTy = applyType sAll expectedRet
         let fnTy = buildFnType paramTys retTy
-        // Generalize: add declared rigid type vars + any free flex vars
-        let baseSch = generalize (applyEnv sAll env) fnTy
+        // Generalize against the env WITHOUT this fn's own tentative scheme.
+        // Pass-1 of the two-pass inference added a tentative mono scheme for
+        // this fn; if we left it in `env` here, any fresh flex vars from
+        // Pass 1 (e.g. for untyped params) would appear in ftvEnv and escape
+        // generalization, leaving the final scheme monomorphic. Remove the
+        // tentative scheme so flex vars that only appear in this fn's
+        // signature get properly quantified.
+        let envForGen = Map.remove sig_.Name env
+        let baseSch = generalize (applyEnv sAll envForGen) fnTy
         let sch = { baseSch with Vars = (declaredTyVars @ baseSch.Vars) |> List.distinct |> List.sort }
         let env2 = Map.add sig_.Name sch env
         let typedSig : TypedFnSig = {
@@ -519,11 +557,46 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
 let infer (m: LLModule) (env0: Elaborator.TypeEnv) : Result<TypedModule, LLError list> =
     let initEnv = fromElaboratorEnv env0
     let st = newState ()
+    // ---- Pass 1: add tentative mono schemes for every top-level DFn ----
+    //
+    // Build a tentative TyFn type from declared param / return types. Untyped
+    // slots (`TyVar "?"`, emitted by the parser for `(p)` form or elided
+    // return types) get fresh flex vars so inference of the bodies can refine
+    // them. The tentative scheme is stored as a monomorphic scheme: declared
+    // rigid type vars stay as TyVar (unchanged), so recursive call sites see
+    // a consistent type. This enables forward references and mutual recursion
+    // between top-level fns.
+    //
+    // Limitation: if both fns in a mutually recursive pair elide their return
+    // type, the fresh flex vars may not resolve unless at least one fn's body
+    // pins them down. Requiring at least one declared return type is a
+    // documented constraint; see the tests in HMInferTests `Phase 6.8`.
+    let resolveSlot (ty: TypeExpr) =
+        match ty with
+        | TyVar "?" -> freshVar st.Fresh
+        | other -> normalizeTy other
+    let envWithTentative =
+        List.fold (fun envAcc (decl, _exported) ->
+            match decl with
+            | DFn(sig_, _body) ->
+                let pTys = sig_.Params |> List.map (fun (_, t) -> resolveSlot t)
+                let rTy =
+                    match sig_.ReturnType with
+                    | Some t -> normalizeTy t
+                    | None -> freshVar st.Fresh
+                let fnTy = buildFnType pTys rTy
+                Map.add sig_.Name (mono fnTy) envAcc
+            | _ -> envAcc
+        ) initEnv m.Decls
+    // ---- Pass 2: infer each decl against the env that already contains
+    // every sibling's tentative scheme. For each DFn, the inferDecl DFn
+    // branch detects its tentative scheme in env and reuses the pre-allocated
+    // param/return types so inference and the Pass-1 types agree.
     let (decls, _) =
         List.fold (fun (declsAcc, envAcc) (decl, exported) ->
             let (td, env') = inferDecl envAcc st decl exported
             (declsAcc @ [td], env')
-        ) ([], initEnv) m.Decls
+        ) ([], envWithTentative) m.Decls
     // Collect final env from accumulated decls
     let finalEnv =
         List.fold (fun envAcc (td, _) ->

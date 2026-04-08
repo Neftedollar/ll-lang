@@ -165,6 +165,16 @@ let private containsVar (name: string) (te: TypedExpr) : bool =
 
 // ---- Declaration emission ---------------------------------------------------
 
+let private isMainFn (sig_: TypedFnSig) =
+    sig_.Name = "main" && List.isEmpty sig_.Params
+
+/// Emit a single TDFn's body clause: `<name> <params> =\n    <body>`.
+/// Shared between stand-alone `let ...` and `let rec ... and ...` emission.
+let private emitFnClause (sig_: TypedFnSig) (body: TypedExpr) : string =
+    let paramStr = sig_.Params |> List.map (fst >> safeIdent) |> String.concat " "
+    let paramPart = if paramStr = "" then "" else " " + paramStr
+    safeIdent sig_.Name + paramPart + " =\n    " + emitExpr 4 body
+
 let private emitDecl (decl: TypedDecl) : string =
     match decl with
 
@@ -190,16 +200,12 @@ let private emitDecl (decl: TypedDecl) : string =
     | TDTrait _ -> ""
 
     | TDFn(sig_, _, body) ->
-        let isMain = sig_.Name = "main" && List.isEmpty sig_.Params
-        let isRec = containsVar sig_.Name body
-        let recKw = if isRec then "rec " else ""
-        let paramStr = sig_.Params |> List.map (fst >> safeIdent) |> String.concat " "
-        let bodyStr = emitExpr 4 body
-        if isMain then
-            "[<EntryPoint>]\nlet main (argv: string[]) =\n    " + bodyStr + "\n    0"
+        if isMainFn sig_ then
+            "[<EntryPoint>]\nlet main (argv: string[]) =\n    " + emitExpr 4 body + "\n    0"
         else
-            let paramPart = if paramStr = "" then "" else " " + paramStr
-            "let " + recKw + safeIdent sig_.Name + paramPart + " =\n    " + bodyStr
+            let isRec = containsVar sig_.Name body
+            let recKw = if isRec then "rec " else ""
+            "let " + recKw + emitFnClause sig_ body
 
     | TDLet(x, _, e) ->
         "let " + safeIdent x + " = " + emitExpr 0 e
@@ -212,6 +218,80 @@ let private emitDecl (decl: TypedDecl) : string =
             let paramPart = if paramStr = "" then "" else " " + paramStr
             "let " + recKw + safeIdent typeName + "_" + safeIdent sig_.Name + paramPart + " =\n    " + emitExpr 4 body
         ) |> String.concat "\n\n"
+
+// ---- Group consecutive fn decls into `let rec ... and ...` blocks ---------
+//
+// Two or more sibling top-level fns in ll-lang can be mutually recursive
+// (see HMInfer's two-pass top-level inference). At codegen time we must emit
+// them as a single F# `let rec f ... and g ...` group or the second fn will
+// fail to resolve the first. We partition the non-type decls into runs of
+// consecutive non-main TDFn decls; each run is emitted as a `let rec ... and
+// ...` block iff at least one fn in the run references another fn in the
+// same run. Otherwise runs are split into singleton groups so existing
+// output stays as `let f ...` (no unnecessary `rec`).
+
+/// Partition declarations into groups: either a single non-fn decl, a single
+/// main fn, a singleton non-main fn, or a multi-fn mutually-recursive group.
+let private groupDecls (ds: (TypedDecl * bool) list) : (TypedDecl * bool) list list =
+    let runs = ResizeArray<(TypedDecl * bool) list>()
+    let current = ResizeArray<TypedDecl * bool>()
+    let flush () =
+        if current.Count > 0 then
+            runs.Add(List.ofSeq current)
+            current.Clear()
+    for (d, exported) in ds do
+        match d with
+        | TDFn(sig_, _, _) when not (isMainFn sig_) ->
+            current.Add((d, exported))
+        | _ ->
+            flush ()
+            runs.Add([(d, exported)])
+    flush ()
+    let result = ResizeArray<(TypedDecl * bool) list>()
+    for run in runs do
+        let isFnRun =
+            match run with
+            | (TDFn(sig_, _, _), _) :: _ when not (isMainFn sig_) -> run.Length >= 1
+            | _ -> false
+        if isFnRun && run.Length >= 2 then
+            let names =
+                run |> List.choose (fun (d, _) ->
+                    match d with TDFn(sig_, _, _) -> Some sig_.Name | _ -> None)
+            let mentionsOther =
+                run
+                |> List.exists (fun (d, _) ->
+                    match d with
+                    | TDFn(sig_, _, body) ->
+                        names
+                        |> List.exists (fun n ->
+                            n <> sig_.Name && containsVar n body)
+                    | _ -> false)
+            if mentionsOther then
+                result.Add(run)
+            else
+                for item in run do result.Add([item])
+        else
+            result.Add(run)
+    List.ofSeq result
+
+/// Emit a group: a single decl delegates to emitDecl; a 2+ fn group becomes
+/// a `let rec <first> and <rest>` block.
+let private emitDeclGroup (group: (TypedDecl * bool) list) : string =
+    match group with
+    | [] -> ""
+    | [(d, _)] -> emitDecl d
+    | fns ->
+        let clauses =
+            fns
+            |> List.map (fun (d, _) ->
+                match d with
+                | TDFn(sig_, _, body) -> emitFnClause sig_ body
+                | _ -> failwith "groupDecls invariant violated")
+        match clauses with
+        | first :: rest ->
+            "let rec " + first + "\n\n"
+            + (rest |> List.map (fun c -> "and " + c) |> String.concat "\n\n")
+        | [] -> ""
 
 // ---- F# prelude block (Phase 6 stdlib) --------------------------------------
 //
@@ -312,13 +392,19 @@ let private emitModule (tm: TypedModule) : string =
         | _ -> false
     let typeDecls = tm.Decls |> List.filter (fun (d, _) -> isTypeDecl d)
     let otherDecls = tm.Decls |> List.filter (fun (d, _) -> not (isTypeDecl d))
-    let emitGroup (ds: (TypedDecl * bool) list) =
-        ds
+    // Types: flat emit (no mutual-rec grouping).
+    let typeStr =
+        typeDecls
         |> List.map (fun (d, _) -> emitDecl d)
         |> List.filter (fun s -> s <> "")
         |> String.concat "\n\n"
-    let typeStr  = emitGroup typeDecls
-    let otherStr = emitGroup otherDecls
+    // Non-type decls: group consecutive non-main TDFn decls so F# sees a
+    // `let rec ... and ...` block, enabling mutual recursion across siblings.
+    let otherStr =
+        groupDecls otherDecls
+        |> List.map emitDeclGroup
+        |> List.filter (fun s -> s <> "")
+        |> String.concat "\n\n"
     let prelude = assemblePrelude tm
     let parts =
         [ header
