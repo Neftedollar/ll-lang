@@ -26,5 +26,6 @@
     <Compile Include="StdlibTests.fs" />
     <Compile Include="RealLexerTests.fs" />
     <Compile Include="ArithmeticParserTests.fs" />
+    <Compile Include="TypeParserTests.fs" />
   </ItemGroup>
 </Project>
