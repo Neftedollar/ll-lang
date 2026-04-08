@@ -150,7 +150,7 @@ Source (.lll)
 
 ## Status
 
-**Phases 1–6 complete + Phase 7.1/7.2 (real lexer AND real recursive-descent expression parser, both written in ll-lang itself, with surface tuple literals so parsers can return `(parsed, rest)` directly). 347 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, `let (a, b) = ...` destructuring, multi-line sum types, mutually recursive top-level functions, and a real arithmetic parser (`(1 + (2 * 3))` precedence verified) — see `spec/examples/valid/09-lexer-real.lll` and `11-parser-real.lll`.**
+**Phases 1–6 complete + Phase 7.1/7.2 (real lexer AND real recursive-descent expression parser, both written in ll-lang itself, with surface tuple literals so parsers can return `(parsed, rest)` directly). 354 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, `let (a, b) = ...` destructuring, multi-line sum types, mutually recursive top-level functions, and a real arithmetic parser (`(1 + (2 * 3))` precedence verified) — see `spec/examples/valid/09-lexer-real.lll` and `11-parser-real.lll`.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -172,7 +172,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 347 tests
+dotnet test    # 354 tests
 ```
 
 ### Run your first program
