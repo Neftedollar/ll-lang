@@ -467,6 +467,44 @@ let ``runtime: let wildcard destructuring discards rhs`` () =
     let stdout = runLLLangSrc src
     Assert.Contains("7", stdout)
 
+// --- Phase 7.2.1: surface tuple literal expressions ---
+
+[<Fact>]
+let ``codegen: tuple literal (1, 2) emits F# (1L, 2L)`` () =
+    let src = "module M\nlet p = (1, 2)"
+    let fs = codegenSrc src
+    Assert.Contains("(1L, 2L)", fs)
+
+[<Fact>]
+let ``codegen: tuple literal three elements emits comma-separated`` () =
+    let src = "module M\nlet t = (1, 2, 3)"
+    let fs = codegenSrc src
+    Assert.Contains("(1L, 2L, 3L)", fs)
+
+[<Fact>]
+let ``codegen: tuple literal + destructure in fn body`` () =
+    let src =
+        "module M\n" +
+        "fn run() Int =\n" +
+        "  let p = (1, 2) in\n" +
+        "  let (a, b) = p in a"
+    let fs = codegenSrc src
+    Assert.Contains("(1L, 2L)", fs)
+    Assert.Contains("let (a, b) =", fs)
+
+[<Fact>]
+let ``runtime: tuple literal + destructure end-to-end prints first elem`` () =
+    let src =
+        "module Tmp.TupLit\n" +
+        "fn pair(a Int)(b Int) = (a, b)\n" +
+        "fn fst(p) Int =\n" +
+        "  let (a, b) = p in a\n" +
+        "fn main() =\n" +
+        "  let p = pair 1 2 in\n" +
+        "  printfn (intToStr (fst p))"
+    let stdout = runLLLangSrc src
+    Assert.Contains("1", stdout)
+
 // --- Phase 7.1.6: multi-line sum type runtime ---
 
 [<Fact>]

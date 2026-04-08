@@ -538,3 +538,71 @@ let ``parse top-level let with simple var still produces DLet`` () =
     | DLet("pi", ELit (LFloat _)) -> ()
     | d -> failwith $"Expected DLet pi (regression), got {d}"
 
+// --- Phase 7.2.1: surface tuple literal expressions ---
+
+[<Fact>]
+let ``parse tuple literal: (1, 2) produces ETuple of two ints`` () =
+    match parseExprStr "(1, 2)" with
+    | ETuple [ELit (LInt 1L); ELit (LInt 2L)] -> ()
+    | e -> failwith $"Expected ETuple [1; 2], got {e}"
+
+[<Fact>]
+let ``parse single-parenthesised expression stays as inner expr (no ETuple)`` () =
+    // (e) is just grouping, NOT a 1-tuple.
+    match parseExprStr "(42)" with
+    | ELit (LInt 42L) -> ()
+    | e -> failwith $"Expected ELit 42, got {e}"
+
+[<Fact>]
+let ``parse tuple literal: (1, 2, 3) three elements`` () =
+    match parseExprStr "(1, 2, 3)" with
+    | ETuple [ELit (LInt 1L); ELit (LInt 2L); ELit (LInt 3L)] -> ()
+    | e -> failwith $"Expected ETuple [1; 2; 3], got {e}"
+
+[<Fact>]
+let ``parse tuple literal: heterogeneous (1, "x")`` () =
+    match parseExprStr "(1, \"x\")" with
+    | ETuple [ELit (LInt 1L); ELit (LStr "x")] -> ()
+    | e -> failwith $"Expected ETuple [1; \"x\"], got {e}"
+
+[<Fact>]
+let ``parse let with tuple literal RHS`` () =
+    match parseExprStr "let p = (1, 2)" with
+    | ELet("p", ETuple [ELit (LInt 1L); ELit (LInt 2L)], None) -> ()
+    | e -> failwith $"Expected ELet p = ETuple [1; 2], got {e}"
+
+[<Fact>]
+let ``parse let-pat with tuple literal RHS round-trip`` () =
+    // The classic "construct + destructure" pattern.
+    match parseExprStr "let (a, b) = (1, 2) in a" with
+    | ELetPat(PTuple [PVar "a"; PVar "b"],
+              ETuple [ELit (LInt 1L); ELit (LInt 2L)],
+              Some (EVar "a")) -> ()
+    | e -> failwith $"Expected ELetPat (a, b) = (1, 2) in a, got {e}"
+
+[<Fact>]
+let ``parse trailing comma in tuple literal is rejected`` () =
+    // (a,) — trailing comma not accepted (we go strict, not Python-style).
+    match tokenize "let p = (1,)" with
+    | Error e -> failwith $"Lex error: {e}"
+    | Ok toks ->
+        match parseExpr toks with
+        | Ok (e, _) -> failwith $"Expected parse error for (1,), got {e}"
+        | Error _ -> ()
+
+[<Fact>]
+let ``parse empty parens () still works for fn main`` () =
+    // Regression: () remains valid for fn main() decl form.
+    let src = "module M\nfn main() = 0"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(s, ELit (LInt 0L)) when s.Name = "main" && List.isEmpty s.Params -> ()
+    | d -> failwith $"Expected DFn main() = 0, got {d}"
+
+[<Fact>]
+let ``parse fn call with tuple argument: f (1, 2)`` () =
+    // Previously a parse error, now parses as f applied to tuple (1, 2).
+    match parseExprStr "f (1, 2)" with
+    | EApp(EVar "f", ETuple [ELit (LInt 1L); ELit (LInt 2L)]) -> ()
+    | e -> failwith $"Expected EApp(f, ETuple [1; 2]), got {e}"
+

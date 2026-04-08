@@ -814,3 +814,44 @@ let ``infer top-level let-tuple destructuring exposes a and b in env`` () =
     match sch.Body with
     | TyFn(TyApp(TyApp(TyName "Tuple", TyName "Int"), _), TyName "Int") -> ()
     | t -> failwith $"expected ((Int, _) -> Int), got {t}"
+
+// --- Phase 7.2.1: surface tuple literal expressions ---
+
+[<Fact>]
+let ``infer let p = (1, 2) gives Tuple[Int][Int]`` () =
+    // ETuple of two ints should infer to TyApp(TyApp(TyName Tuple, Int), Int),
+    // matching the same encoding patternType uses for PTuple.
+    let src = "module M\nlet p = (1, 2)"
+    let tm = inferOk src
+    let sch = schemeOf tm "p"
+    match sch.Body with
+    | TyApp(TyApp(TyName "Tuple", TyName "Int"), TyName "Int") -> ()
+    | t -> failwith $"expected Tuple[Int][Int], got {t}"
+
+[<Fact>]
+let ``infer let pair = (1, "x") in let (a, b) = pair in a + 1`` () =
+    // Heterogeneous tuple literal, then destructure, then arithmetic on `a`.
+    // a must unify to Int via the `+ 1`. End-to-end round trip with PTuple.
+    let src =
+        "module M\n" +
+        "fn run() Int =\n" +
+        "  let pair = (1, \"x\") in\n" +
+        "  let (a, b) = pair in\n" +
+        "  a + 1"
+    let tm = inferOk src
+    let sch = schemeOf tm "run"
+    match sch.Body with
+    | TyName "Int" -> ()  // run() returns Int
+    | t -> failwith $"expected run() : Int, got {t}"
+
+[<Fact>]
+let ``infer literal tuple matches PTuple encoding round-trip`` () =
+    // The whole point: a tuple literal must unify with a PTuple destructure.
+    // If the encodings disagree, this errors out.
+    let src =
+        "module M\n" +
+        "fn fst3(unused Int) Int =\n" +
+        "  let t = (10, 20, 30) in\n" +
+        "  let (a, _, _) = t in a"
+    let tm = inferOk src
+    Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "fst3").Body)

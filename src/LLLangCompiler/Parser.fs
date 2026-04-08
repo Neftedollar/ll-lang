@@ -62,9 +62,39 @@ let rec private parseAtom (c: Ctx) : Result<Expr, string> =
         match parseExprInner c with
         | Error e -> Error e
         | Ok expr ->
-            match skip c RParen with
-            | Error e -> Error e
-            | Ok () -> Ok expr
+            // Phase 7.2.1: tuple literal — `(e1, e2, ..., eN)` produces ETuple.
+            // A bare `(e)` (no comma) stays as the inner expression: parens
+            // are just grouping. Trailing commas like `(a,)` are rejected.
+            if curTok c = Comma then
+                let elems = ResizeArray<Expr>()
+                elems.Add(expr)
+                let mutable cont = true
+                let mutable err : string option = None
+                while cont && curTok c = Comma do
+                    advance c  // consume comma
+                    skipNewlines c
+                    // Reject trailing comma: `(a,)` — Comma followed by RParen.
+                    if curTok c = RParen then
+                        let t = cur c
+                        err <- Some $"Trailing comma in tuple literal at {t.Line}:{t.Col}"
+                        cont <- false
+                    else
+                        match parseExprInner c with
+                        | Error e -> err <- Some e; cont <- false
+                        | Ok e ->
+                            elems.Add(e)
+                            skipNewlines c
+                match err with
+                | Some e -> Error e
+                | None ->
+                    match skip c RParen with
+                    | Error e -> Error e
+                    | Ok () ->
+                        Ok (recordAt c startIdx (ETuple (List.ofSeq elems)))
+            else
+                match skip c RParen with
+                | Error e -> Error e
+                | Ok () -> Ok expr
     | LBrack ->
         advance c
         skipNewlines c
