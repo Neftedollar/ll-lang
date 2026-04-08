@@ -385,3 +385,93 @@ let ``unit tag preserved through polymorphic lambda`` () =
         "let g = f 5.0[Meter]"
     let tm = inferOk src
     Assert.Equal(TyTagged(TyName "Float", UName "Meter"), (schemeOf tm "g").Body)
+
+// --- Task 6: Top-level DFn/DLet/DImpl handling ---
+
+[<Fact>]
+let ``DFn elided return type gets concrete inferred type`` () =
+    let tm = inferOk "module M\nfn inc(x Int) = x + 1"
+    let sch = schemeOf tm "inc"
+    Assert.Equal(TyFn(TyName "Int", TyName "Int"), sch.Body)
+    Assert.Empty(sch.Vars)
+
+[<Fact>]
+let ``DFn declared return type is honoured`` () =
+    let tm = inferOk "module M\nfn inc(x Int) Int = x + 1"
+    Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "inc").Body)
+
+[<Fact>]
+let ``DFn declared return type mismatch yields E001`` () =
+    let errs = inferErrs "module M\nfn wrong(x Int) Str = x + 1"
+    Assert.Contains(errs, fun e -> e.Code = E001)
+
+[<Fact>]
+let ``DFn polymorphic id generalizes to one var`` () =
+    let tm = inferOk "module M\nfn id(x A) A = x"
+    let sch = schemeOf tm "id"
+    Assert.Equal(1, List.length sch.Vars)
+
+[<Fact>]
+let ``DLet top-level polymorphic`` () =
+    let tm = inferOk "module M\nlet id = \\x. x"
+    let sch = schemeOf tm "id"
+    Assert.Equal(1, List.length sch.Vars)
+
+[<Fact>]
+let ``DImpl fn name is mangled and inferred`` () =
+    let src =
+        "module M\n" +
+        "type Maybe A = Some A | None\n" +
+        "trait Functor F =\n" +
+        "  fn map(f A->B)(x F[A]) F[B]\n" +
+        "impl Functor Maybe =\n" +
+        "  fn map(f A->B)(x Maybe[A]) Maybe[B] =\n" +
+        "    | Some a -> Some (f a)\n" +
+        "    | None -> None"
+    let tm = inferOk src
+    Assert.True(Map.containsKey "map_Maybe" tm.Env)
+
+[<Fact>]
+let ``TypedAST has no TyVar placeholder for 01-basics`` () =
+    let tm = inferOk (readValid "01-basics.lll")
+    let rec containsWildcard ty =
+        match ty with
+        | TyVar "?" -> true
+        | TyFn(a, b) | TyApp(a, b) -> containsWildcard a || containsWildcard b
+        | TyTagged(a, _) -> containsWildcard a
+        | _ -> false
+    let rec checkExpr (e: TypedExpr) =
+        if containsWildcard e.Type then failwith $"wildcard found in expr type: {e.Type}"
+        match e.Expr with
+        | TEApp(a, b) -> checkExpr a; checkExpr b
+        | TELam(ps, body) ->
+            for (_, t) in ps do
+                if containsWildcard t then failwith $"wildcard in lambda param: {t}"
+            checkExpr body
+        | TELet(_, sch, e1, e2) ->
+            if containsWildcard sch.Body then failwith $"wildcard in let scheme: {sch.Body}"
+            checkExpr e1
+            Option.iter checkExpr e2
+        | TEIf(a, b, c) -> checkExpr a; checkExpr b; checkExpr c
+        | TEMatch(s, branches) ->
+            checkExpr s
+            for (p, body) in branches do
+                if containsWildcard p.Type then failwith $"wildcard in pattern type: {p.Type}"
+                checkExpr body
+        | TEPipe(a, b) -> checkExpr a; checkExpr b
+        | TETagged(e, _) -> checkExpr e
+        | TEList es | TETuple es -> for e in es do checkExpr e
+        | TELit _ | TEVar _ | TECon _ -> ()
+    for (d, _) in tm.Decls do
+        match d with
+        | TDFn(_, sch, body) ->
+            if containsWildcard sch.Body then failwith $"wildcard in fn scheme: {sch.Body}"
+            checkExpr body
+        | TDLet(_, sch, body) ->
+            if containsWildcard sch.Body then failwith $"wildcard in let scheme: {sch.Body}"
+            checkExpr body
+        | TDImpl(_, _, fns) ->
+            for (_, sch, body) in fns do
+                if containsWildcard sch.Body then failwith $"wildcard in impl scheme: {sch.Body}"
+                checkExpr body
+        | _ -> ()

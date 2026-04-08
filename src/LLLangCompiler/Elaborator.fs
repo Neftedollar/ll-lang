@@ -39,9 +39,11 @@ let private e005 line col paramType argType = {
 /// These are parsed as EApp(EApp(EVar "+", ...), ...) and must not trigger E002
 /// since they are never declared in source modules.
 let private builtinEnv : TypeEnv =
-    [ "+"; "-"; "*"; "/"; "=="; "!="; "<"; ">"; "<="; ">=" ]
-    |> List.map (fun op -> op, TyFn(TyVar "a", TyFn(TyVar "a", TyVar "a")))
-    |> Map.ofList
+    let arithOps = [ "+"; "-"; "*"; "/" ]
+    let cmpOps   = [ "=="; "!="; "<"; ">"; "<="; ">=" ]
+    let arith = arithOps |> List.map (fun op -> op, TyFn(TyVar "a", TyFn(TyVar "a", TyVar "a")))
+    let cmp   = cmpOps   |> List.map (fun op -> op, TyFn(TyVar "a", TyFn(TyVar "a", TyName "Bool")))
+    Map.ofList (arith @ cmp)
 
 /// Build a right-associative chain of TyFn from a list of parameter types plus a return type.
 /// e.g. [T1; T2] ret  →  TyFn(T1, TyFn(T2, ret))

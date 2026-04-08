@@ -401,28 +401,58 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
         ((TDTrait(name, vars, sigs), exported), env)
 
     | DImpl(traitName, implType, fns) ->
-        // Stub for Task 7 — pass through as TDImpl with simple inference
         let inferImplFn (envAcc: Env) (fnsAcc: (TypedFnSig * TypeScheme * TypedExpr) list) (sig_: FnSig) (body: Expr) =
-            let paramEnv = List.fold (fun e (n, ty) -> Map.add n (mono ty) e) envAcc sig_.Params
+            // Normalize type params (TyName X -> TyVar X for single-uppercase vars)
+            let normParams = sig_.Params |> List.map (fun (n, ty) -> n, normalizeTy ty)
+            let normRet = sig_.ReturnType |> Option.map normalizeTy
+            // Collect declared type parameter names for generalization
+            let declaredTyVars =
+                let paramVars = normParams |> List.collect (fun (_, ty) -> collectRigidVars ty)
+                let retVars = normRet |> Option.map collectRigidVars |> Option.defaultValue []
+                (paramVars @ retVars) |> List.distinct |> List.sort
+            let paramEnv = List.fold (fun e (n, ty) -> Map.add n (mono ty) e) envAcc normParams
             let expectedRet =
-                match sig_.ReturnType with
+                match normRet with
                 | Some ty -> ty
                 | None -> freshVar st.Fresh
-            let (s, tau, te) = inferExpr paramEnv st body
-            let sRet = unifyS st (applyType s tau) (applyType s expectedRet)
-            let sAll = compose sRet s
-            let paramTys = sig_.Params |> List.map (fun (_, ty) -> applyType sAll ty)
+            // Handle match bodies (last param is scrutinee)
+            let (sBody, tauBody, teBody) =
+                match body with
+                | EMatch branches when not (List.isEmpty normParams) ->
+                    let lastParam = fst (List.last normParams)
+                    let lastParamTy = snd (List.last normParams)
+                    let beta = freshVar st.Fresh
+                    let (sAll, typedBranches) =
+                        List.fold (fun (sAcc, brsAcc) (pat, branchBody) ->
+                            let (patTy, patBindings) = patternType st paramEnv pat
+                            let su = unifyS st (applyType sAcc patTy) (applyType sAcc lastParamTy)
+                            let envExt = List.fold (fun e (n, t) -> Map.add n (mono t) e) (applyEnv (compose su sAcc) paramEnv) patBindings
+                            let (sb, tauB, teB) = inferExpr envExt st branchBody
+                            let sr = unifyS st (applyType sb tauB) (applyType (compose sb su) beta)
+                            let sStep = compose sr (compose sb (compose su sAcc))
+                            let tp = { Pat = pat; Type = applyType sStep patTy }
+                            (sStep, brsAcc @ [(tp, applyTE sStep teB)])
+                        ) (empty, []) branches
+                    let scrutTE = mkTyped st (TEVar lastParam) (applyType sAll lastParamTy)
+                    let matchTE = mkTyped st (TEMatch(scrutTE, typedBranches)) (applyType sAll beta)
+                    (sAll, applyType sAll beta, matchTE)
+                | _ ->
+                    inferExpr paramEnv st body
+            let sRet = unifyS st (applyType sBody tauBody) (applyType sBody expectedRet)
+            let sAll = compose sRet sBody
+            let paramTys = normParams |> List.map (fun (_, ty) -> applyType sAll ty)
             let retTy = applyType sAll expectedRet
             let fnTy = buildFnType paramTys retTy
-            let sch = generalize (applyEnv sAll envAcc) fnTy
+            let baseSch = generalize (applyEnv sAll envAcc) fnTy
+            let sch = { baseSch with Vars = (declaredTyVars @ baseSch.Vars) |> List.distinct |> List.sort }
             let mangledName = sig_.Name + "_" + implType
             let envNew = Map.add mangledName sch envAcc
             let typedSig : TypedFnSig = {
                 Name = sig_.Name; Constraints = sig_.Constraints
-                Params = sig_.Params |> List.map (fun (n, t) -> n, applyType sAll t)
+                Params = normParams |> List.map (fun (n, t) -> n, applyType sAll t)
                 ReturnType = retTy
             }
-            (envNew, fnsAcc @ [(typedSig, sch, applyTE sAll te)])
+            (envNew, fnsAcc @ [(typedSig, sch, applyTE sAll teBody)])
         let (env2, typedFns) =
             List.fold (fun (envAcc, fnsAcc) (sig_, body) ->
                 inferImplFn envAcc fnsAcc sig_ body
