@@ -748,3 +748,48 @@ let ``multi-line three-arg call with bare atoms`` () =
     | DFn(_, EApp(EApp(EApp(EVar "plus3", EVar "a"), EVar "b"), EVar "c")) -> ()
     | d -> failwith $"Expected DFn with 3-arg plus3 call, got {d}"
 
+// --- Phase 7.3b-fixes bug 3: parenthesised type application as ctor arg ---
+//
+// `type FnDecl = MkFn (Maybe TypeRef)` — inside the parens, juxtaposition
+// means type application, producing the same `TyApp(TyName "Maybe", TyName
+// "TypeRef")` that the bracket form `Maybe[TypeRef]` does. Both surface
+// forms must elaborate to the same AST.
+
+[<Fact>]
+let ``type body: MkFn (Maybe TypeRef) parses as TyApp`` () =
+    let src = "module M\ntype FnDecl = MkFn (Maybe TypeRef)"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DType("FnDecl", [],
+            TBSum [("MkFn", [TyApp(TyName "Maybe", TyName "TypeRef")])]) -> ()
+    | d -> failwith $"Expected TBSum [MkFn (Maybe TypeRef)], got {d}"
+
+[<Fact>]
+let ``type body: MkFn Maybe[TypeRef] still parses as same TyApp (regression)`` () =
+    let src = "module M\ntype FnDecl = MkFn Maybe[TypeRef]"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DType("FnDecl", [],
+            TBSum [("MkFn", [TyApp(TyName "Maybe", TyName "TypeRef")])]) -> ()
+    | d -> failwith $"Expected TBSum [MkFn Maybe[TypeRef]], got {d}"
+
+[<Fact>]
+let ``type body: both forms produce identical AST`` () =
+    let srcParen  = "module M\ntype T = Mk (Maybe Int)"
+    let srcBrack  = "module M\ntype T = Mk Maybe[Int]"
+    let mp = parseModuleStr srcParen
+    let mb = parseModuleStr srcBrack
+    Assert.Equal(fst mp.Decls[0], fst mb.Decls[0])
+
+[<Fact>]
+let ``type body: nested juxtaposition in parens (Result Int Str)`` () =
+    // `(Result Int Str)` → TyApp(TyApp(Result, Int), Str), like
+    // Result[Int][Str] bracket-chain.
+    let src = "module M\ntype Foo = MkFoo (Result Int Str)"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DType("Foo", [],
+            TBSum [("MkFoo",
+                    [TyApp(TyApp(TyName "Result", TyName "Int"), TyName "Str")])]) -> ()
+    | d -> failwith $"Expected TBSum [MkFoo (Result Int Str)], got {d}"
+

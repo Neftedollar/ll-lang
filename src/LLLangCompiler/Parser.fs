@@ -646,13 +646,31 @@ let private parseTypeExpr (c: Ctx) : Result<TypeExpr, string> =
         | TypeId name -> advance c; Ok (TyName name)
         | Ident name -> advance c; Ok (TyVar name)
         | LParen ->
+            // Phase 7.3b bug 3: inside `( ... )` we also accept juxtaposition
+            // as type application — `(Maybe TypeRef)` parses to the same
+            // `TyApp(Maybe, TypeRef)` that `Maybe[TypeRef]` produces. This
+            // is scoped to the parenthesised group (the top-level sum-arm
+            // loop still reads `Rect Float Float` as a ctor with two
+            // independent args). After the first inner type, fold any
+            // additional atom-starting types into a left-associative TyApp
+            // chain until we hit RParen.
             advance c
             match parseTypeExprTop () with
             | Error e -> Error e
-            | Ok te ->
+            | Ok first ->
+                let mutable result = first
+                let mutable jxCont = true
+                while jxCont do
+                    match curTok c with
+                    | TypeId _ | Ident _ | LParen ->
+                        let saved = c.Pos
+                        match parseTypeExprTop () with
+                        | Ok next -> result <- TyApp(result, next)
+                        | Error _ -> c.Pos <- saved; jxCont <- false
+                    | _ -> jxCont <- false
                 match skip c RParen with
                 | Error e -> Error e
-                | Ok () -> Ok te
+                | Ok () -> Ok result
         | t -> Error $"Expected type at {(cur c).Line}:{(cur c).Col}, got {t}"
 
     and parseApp () =
