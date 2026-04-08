@@ -128,6 +128,13 @@ and private emitExpr (indent: int) (te: TypedExpr) : string =
     | TELet(x, _, e, None) ->
         "(let " + safeIdent x + " = " + emitExpr indent e + ")"
 
+    | TELetPat(tp, e, Some body) ->
+        // F# accepts `let <pat> = <e> in <body>` directly for tuple/wildcard.
+        "(let " + emitPattern tp.Pat + " = " + emitExpr indent e + " in\n" + ind + "  " + emitExpr (indent+2) body + ")"
+
+    | TELetPat(tp, e, None) ->
+        "(let " + emitPattern tp.Pat + " = " + emitExpr indent e + ")"
+
     | TEIf(c, t, e) ->
         "(if " + emitExpr indent c + " then " + emitExpr indent t + " else " + emitExpr indent e + ")"
 
@@ -172,6 +179,7 @@ let private containsVar (name: string) (te: TypedExpr) : bool =
         | TEApp(a, b) | TEPipe(a, b) | TECons(a, b) -> walk a || walk b
         | TELam(_, body) | TETagged(body, _) -> walk body
         | TELet(_, _, e1, e2) -> walk e1 || (e2 |> Option.exists walk)
+        | TELetPat(_, e1, e2) -> walk e1 || (e2 |> Option.exists walk)
         | TEIf(c, t, el) -> walk c || walk t || walk el
         | TEMatch(s, brs) | TEMatchOf(s, brs) ->
             walk s || List.exists (fun (_, b) -> walk b) brs
@@ -225,6 +233,9 @@ let private emitDecl (decl: TypedDecl) : string =
 
     | TDLet(x, _, e) ->
         "let " + safeIdent x + " = " + emitExpr 0 e
+
+    | TDLetPat(tp, e) ->
+        "let " + emitPattern tp.Pat + " = " + emitExpr 0 e
 
     | TDImpl(_, typeName, methods) ->
         methods |> List.map (fun (sig_, _, body) ->

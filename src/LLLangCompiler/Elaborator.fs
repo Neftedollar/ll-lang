@@ -195,6 +195,19 @@ let private collectDecls (m: LLModule) : TypeEnv =
                 | _ -> TyVar "?"
             env <- Map.add name ty env
 
+        | DLetPat(pat, _expr) ->
+            // Bind every name introduced by the pattern as a wildcard;
+            // HMInfer will refine to concrete types in pass 2.
+            let rec patVars (p: Pattern) : string list =
+                match p with
+                | PVar n -> [n]
+                | PCon(_, ps) -> ps |> List.collect patVars
+                | PTuple ps -> ps |> List.collect patVars
+                | PCons(h, t) -> patVars h @ patVars t
+                | PLit _ | PWild -> []
+            for n in patVars pat do
+                env <- Map.add n (TyVar "?") env
+
         | DType(typeName, typeParams, TBSum ctors) ->
             // Collect declared type parameter names so we can treat them as TyVar
             let tpNames =
@@ -347,6 +360,26 @@ let rec private typeOf (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
             (bTy, eErrs @ bErrs)
         | None -> (eTy, eErrs)
 
+    | ELetPat(pat, e, bodyOpt) ->
+        // Type-check e, then bind every var from the pattern as a wildcard.
+        // HMInfer does the real work.
+        let rec patVars (p: Pattern) : string list =
+            match p with
+            | PVar n -> [n]
+            | PCon(_, ps) -> ps |> List.collect patVars
+            | PTuple ps -> ps |> List.collect patVars
+            | PCons(h, t) -> patVars h @ patVars t
+            | PLit _ | PWild -> []
+        let (eTy, eErrs) = typeOf e env
+        let env' =
+            patVars pat
+            |> List.fold (fun acc n -> Map.add n (TyVar "?") acc) env
+        match bodyOpt with
+        | Some body ->
+            let (bTy, bErrs) = typeOf body env'
+            (bTy, eErrs @ bErrs)
+        | None -> (eTy, eErrs)
+
     | EMatch(branches) ->
         // Collect all variable names bound by a pattern
         let rec patVars (pat: Pattern) : string list =
@@ -415,6 +448,9 @@ let private checkDecl (decl: Decl) (env: TypeEnv) : LLError list =
     | DLet(_, expr) ->
         snd (typeOf expr env)
 
+    | DLetPat(_, expr) ->
+        snd (typeOf expr env)
+
     | DImpl(_, _, fns) ->
         fns |> List.collect (fun (sigRecord, body) ->
             let localEnv =
@@ -445,6 +481,12 @@ let rec private collectMatches (expr: Expr) : (Pattern * Expr) list list =
     | EIf(cond, t, e) ->
         collectMatches cond @ collectMatches t @ collectMatches e
     | ELet(_, e, bodyOpt) ->
+        let bodyMatches =
+            match bodyOpt with
+            | Some body -> collectMatches body
+            | None -> []
+        collectMatches e @ bodyMatches
+    | ELetPat(_, e, bodyOpt) ->
         let bodyMatches =
             match bodyOpt with
             | Some body -> collectMatches body

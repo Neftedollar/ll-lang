@@ -92,6 +92,9 @@ and private applyTEK (s: Subst) (k: TypedExprKind) : TypedExprKind =
     | TELet(n, sch, e1, e2) ->
         let sch' = { sch with Body = applyType s sch.Body }
         TELet(n, sch', applyTE s e1, e2 |> Option.map (applyTE s))
+    | TELetPat(tp, e1, e2) ->
+        let tp' = { tp with Type = applyType s tp.Type }
+        TELetPat(tp', applyTE s e1, e2 |> Option.map (applyTE s))
     | TEIf(c, t, e) -> TEIf(applyTE s c, applyTE s t, applyTE s e)
     | TEMatch(sc, brs) ->
         TEMatch(applyTE s sc, brs |> List.map (fun (p, b) ->
@@ -226,6 +229,36 @@ let rec private inferExpr (env: Env) (st: InferState) (expr: Expr) : Subst * Typ
         let (s2, tau2, te2) = inferExpr env2 st body
         let sAll = compose s2 s1
         (sAll, tau2, mkTyped st (TELet(x, sch, applyTE s2 te1, Some te2)) tau2)
+
+    | ELetPat(pat, e1, bodyOpt) ->
+        // Infer RHS, derive pattern type via patternType, unify the two,
+        // extend env with each pattern binding (monomorphic — no generalize
+        // since the bound names are projections of a single value).
+        let (s1, tau1, te1) = inferExpr env st e1
+        let env1 = applyEnv s1 env
+        let (patTy, bindings) = patternType st env1 pat
+        let su = unifyS st (applyType s1 patTy) (applyType s1 tau1)
+        let s12 = compose su s1
+        let envWithBindings =
+            List.fold
+                (fun e (n, t) -> Map.add n (mono (applyType s12 t)) e)
+                (applyEnv s12 env)
+                bindings
+        let typedPat = { Pat = pat; Type = applyType s12 patTy }
+        match bodyOpt with
+        | Some body ->
+            let (s2, tau2, te2) = inferExpr envWithBindings st body
+            let sAll = compose s2 s12
+            let resultTy = applyType sAll tau2
+            (sAll,
+             resultTy,
+             mkTyped st (TELetPat(typedPat, applyTE sAll te1, Some te2)) resultTy)
+        | None ->
+            // No body — type is the RHS type (matches ELet semantics).
+            let resultTy = applyType s12 tau1
+            (s12,
+             resultTy,
+             mkTyped st (TELetPat(typedPat, applyTE s12 te1, None)) resultTy)
 
     | EIf(cond, thn, els) ->
         let (s1, tauC, teC) = inferExpr env st cond
@@ -447,6 +480,25 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
         let td = TDLet(x, sch, applyTE s te)
         ((td, exported), env2)
 
+    | DLetPat(pat, expr) ->
+        // Top-level destructuring let. Infer expr, unify with the pattern's
+        // synthesized type, and add each binding to the env as a monomorphic
+        // scheme — bindings can't be generalized independently because they
+        // alias parts of a single value.
+        let (s, tau, te) = inferExpr env st expr
+        let env1 = applyEnv s env
+        let (patTy, bindings) = patternType st env1 pat
+        let su = unifyS st (applyType s patTy) (applyType s tau)
+        let sAll = compose su s
+        let env2 =
+            List.fold
+                (fun e (n, t) -> Map.add n (mono (applyType sAll t)) e)
+                (applyEnv sAll env)
+                bindings
+        let typedPat = { Pat = pat; Type = applyType sAll patTy }
+        let td = TDLetPat(typedPat, applyTE sAll te)
+        ((td, exported), env2)
+
     | DFn(sig_, body) ->
         // Normalize param and return types: TyName X -> TyVar X for type params.
         // `TyVar "?"` marks an untyped slot (e.g. `fn f(p) = ...`) and gets
@@ -663,10 +715,66 @@ let infer (m: LLModule) (env0: Elaborator.TypeEnv) : Result<TypedModule, LLError
         ) ([], envWithTentative) m.Decls
     // Collect final env from accumulated decls
     let finalEnv =
+        // Walk a Pattern and pair each name with the corresponding sub-type
+        // of the resolved pattern type. Used by TDLetPat to expose every
+        // bound name in the final module env.
+        let rec destructure (pat: Pattern) (ty: TypeExpr) : (string * TypeExpr) list =
+            match pat with
+            | PVar n -> [n, ty]
+            | PWild -> []
+            | PLit _ -> []
+            | PTuple subPats ->
+                // Tuples are encoded as TyApp(TyApp(...TyName "Tuple", t1), t2)... .
+                // Unroll right-associatively to extract per-element types.
+                let rec collectTypes acc t =
+                    match t with
+                    | TyApp(inner, last) -> collectTypes (last :: acc) inner
+                    | _ -> acc
+                let elemTys = collectTypes [] ty
+                if List.length elemTys = List.length subPats then
+                    List.zip subPats elemTys
+                    |> List.collect (fun (p, t) -> destructure p t)
+                else
+                    // Fallback: bind every name to the whole type (best-effort).
+                    let rec patNames p =
+                        match p with
+                        | PVar n -> [n]
+                        | PCon(_, ps) -> ps |> List.collect patNames
+                        | PTuple ps -> ps |> List.collect patNames
+                        | PCons(h, t) -> patNames h @ patNames t
+                        | PLit _ | PWild -> []
+                    patNames (PTuple subPats) |> List.map (fun n -> n, ty)
+            | PCons(h, t) ->
+                // Best-effort: head is element type, tail is the list type.
+                match ty with
+                | TyApp(TyName "List", elemTy) ->
+                    destructure h elemTy @ destructure t ty
+                | _ ->
+                    let rec patNames p =
+                        match p with
+                        | PVar n -> [n]
+                        | PCon(_, ps) -> ps |> List.collect patNames
+                        | PTuple ps -> ps |> List.collect patNames
+                        | PCons(h, t) -> patNames h @ patNames t
+                        | PLit _ | PWild -> []
+                    (patNames h @ patNames t) |> List.map (fun n -> n, ty)
+            | PCon(_, _) ->
+                // Best-effort fallback for constructor patterns.
+                let rec patNames p =
+                    match p with
+                    | PVar n -> [n]
+                    | PCon(_, ps) -> ps |> List.collect patNames
+                    | PTuple ps -> ps |> List.collect patNames
+                    | PCons(h, t) -> patNames h @ patNames t
+                    | PLit _ | PWild -> []
+                patNames pat |> List.map (fun n -> n, ty)
         List.fold (fun envAcc (td, _) ->
             match td with
             | TDFn(sig_, sch, _) -> Map.add sig_.Name sch envAcc
             | TDLet(name, sch, _) -> Map.add name sch envAcc
+            | TDLetPat(typedPat, _) ->
+                destructure typedPat.Pat typedPat.Type
+                |> List.fold (fun e (n, t) -> Map.add n (mono t) e) envAcc
             | TDImpl(_, implType, fns) ->
                 List.fold (fun e (sig_: TypedFnSig, sch, _) ->
                     Map.add (sig_.Name + "_" + implType) sch e) envAcc fns

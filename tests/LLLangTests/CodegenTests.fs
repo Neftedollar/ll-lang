@@ -431,6 +431,42 @@ let ``runtime: match-as-expression in let binding`` () =
     let stdout = runLLLangSrc src
     Assert.Contains("zero", stdout)
 
+// --- Phase 7.1.6: let pattern destructuring ---
+
+[<Fact>]
+let ``codegen: nested let-tuple in fn body emits let (a, b) =`` () =
+    // Tuple values enter via fn params; emitted body should use a tuple-pat let.
+    let src =
+        "module M\n" +
+        "fn addPair(p) Int =\n" +
+        "  let (a, b) = p in a + b"
+    let fs = codegenSrc src
+    Assert.Contains("let (a, b) =", fs)
+
+[<Fact>]
+let ``codegen: let wildcard emits let _ =`` () =
+    let src =
+        "module M\n" +
+        "fn f() Int =\n" +
+        "  let _ = 99 in 1"
+    let fs = codegenSrc src
+    Assert.Contains("let _ =", fs)
+
+[<Fact>]
+let ``runtime: let wildcard destructuring discards rhs`` () =
+    // ll-lang has no surface tuple literal, so the cleanest runtime
+    // exercise of let-pat is the wildcard form: bind nothing, evaluate
+    // and discard the RHS, then return the body. End-to-end this
+    // confirms the parser, type inference, and codegen for ELetPat /
+    // TELetPat all line up.
+    let src =
+        "module Tmp.LetWild\n" +
+        "fn run() Int =\n" +
+        "  let _ = 99 in 7\n" +
+        "fn main() = printfn (intToStr (run ()))"
+    let stdout = runLLLangSrc src
+    Assert.Contains("7", stdout)
+
 // --- Phase 7.1.6: multi-line sum type runtime ---
 
 [<Fact>]

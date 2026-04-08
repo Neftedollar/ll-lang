@@ -46,6 +46,7 @@ type Expr =
     | EApp of Expr * Expr                     // f x (left-assoc juxtaposition)
     | ELam of Ident list * Expr               // \x y. e
     | ELet of Ident * Expr * Expr option      // let x = e (in e)?
+    | ELetPat of Pattern * Expr * Expr option // let (a, b) = e (in e)?  / let _ = e ...
     | EIf of Expr * Expr * Expr              // if e then e else e
     | EMatch of (Pattern * Expr) list         // | p -> e (implicit fn-body scrutinee)
     | EMatchOf of Expr * (Pattern * Expr) list // match scrut with | p -> e
@@ -83,6 +84,7 @@ type TypeBody =
 type Decl =
     | DFn of FnSig * Expr
     | DLet of Ident * Expr
+    | DLetPat of Pattern * Expr               // let (a, b) = e  /  let _ = e
     | DType of TypeIdent * TypeParam list * TypeBody
     | DTag of TypeIdent
     | DUnit of TypeIdent

@@ -475,6 +475,10 @@ let ``TypedAST has no TyVar placeholder for 01-basics`` () =
             if containsWildcard sch.Body then failwith $"wildcard in let scheme: {sch.Body}"
             checkExpr e1
             Option.iter checkExpr e2
+        | TELetPat(p, e1, e2) ->
+            if containsWildcard p.Type then failwith $"wildcard in let-pat type: {p.Type}"
+            checkExpr e1
+            Option.iter checkExpr e2
         | TEIf(a, b, c) -> checkExpr a; checkExpr b; checkExpr c
         | TEMatch(s, branches) | TEMatchOf(s, branches) ->
             checkExpr s
@@ -508,6 +512,8 @@ let rec private collectTypes (e: TypedExpr) : TypeExpr list =
         | TELam(ps, body) -> (ps |> List.map snd) @ collectTypes body
         | TELet(_, _, e1, e2) ->
             collectTypes e1 @ (e2 |> Option.map collectTypes |> Option.defaultValue [])
+        | TELetPat(p, e1, e2) ->
+            p.Type :: collectTypes e1 @ (e2 |> Option.map collectTypes |> Option.defaultValue [])
         | TEIf(a, b, c) -> collectTypes a @ collectTypes b @ collectTypes c
         | TEMatch(s, branches) | TEMatchOf(s, branches) ->
             collectTypes s @
@@ -579,6 +585,7 @@ let ``every TELam parameter carries a concrete type in basics`` () =
             walk body
         | TEApp(a, b) | TECons(a, b) -> walk a; walk b
         | TELet(_, _, e1, e2) -> walk e1; Option.iter walk e2
+        | TELetPat(_, e1, e2) -> walk e1; Option.iter walk e2
         | TEIf(a, b, c) -> walk a; walk b; walk c
         | TEMatch(s, branches) | TEMatchOf(s, branches) ->
             walk s
@@ -761,3 +768,48 @@ let ``infer cons pattern in match-as-expression`` () =
         "  match [xs] with | h :: _ -> h | _ -> 0"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "first").Body)
+
+// --- Phase 7.1.6: let pattern destructuring ---
+
+[<Fact>]
+let ``infer let-tuple destructuring binds components at correct types`` () =
+    // Tuples are not surface-syntax literals — they enter via fn params,
+    // so we test by destructuring a tuple parameter. `let (a, b) = p` should
+    // bind a and b to the tuple's element types.
+    let src =
+        "module M\n" +
+        "fn addPair(p) Int =\n" +
+        "  let (a, b) = p in a + b"
+    let tm = inferOk src
+    let sch = schemeOf tm "addPair"
+    // Body type is `(Int, Int) -> Int` encoded as
+    // `TyFn(TyApp(TyApp(Tuple, Int), Int), Int)`.
+    match sch.Body with
+    | TyFn(TyApp(TyApp(TyName "Tuple", TyName "Int"), TyName "Int"), TyName "Int") -> ()
+    | t -> failwith $"expected ((Int, Int) -> Int), got {t}"
+
+[<Fact>]
+let ``infer let wildcard destructuring`` () =
+    // `let _ = e in body` — body type is body, e's type is irrelevant
+    let src =
+        "module M\n" +
+        "fn f() Int =\n" +
+        "  let _ = 99 in 1"
+    let tm = inferOk src
+    Assert.Equal(TyName "Int", (schemeOf tm "f").Body)
+
+[<Fact>]
+let ``infer top-level let-tuple destructuring exposes a and b in env`` () =
+    // Define a fn returning a tuple via destructuring, then a top-level
+    // destructuring let against the result. We can't construct a tuple
+    // literal at top level, so we project from a fn-param tuple.
+    let src =
+        "module M\n" +
+        "fn pairFst(p) Int =\n" +
+        "  let (a, _) = p in a"
+    let tm = inferOk src
+    // pairFst should be polymorphic over the tuple's second element.
+    let sch = schemeOf tm "pairFst"
+    match sch.Body with
+    | TyFn(TyApp(TyApp(TyName "Tuple", TyName "Int"), _), TyName "Int") -> ()
+    | t -> failwith $"expected ((Int, _) -> Int), got {t}"

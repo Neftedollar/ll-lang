@@ -202,22 +202,36 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
             Ok body
     | KwLet ->
         advance c
-        match curTok c with
-        | Ident name ->
-            advance c
-            match skip c Eq with
-            | Error e -> Error e
-            | Ok () ->
+        // Phase 7.1.6: try pattern-first. If the pattern is a bare PVar
+        // we fall back to the existing ELet form so all downstream code
+        // that special-cases ELet (codegen, etc) keeps working.
+        let saved = c.Pos
+        match parsePattern c with
+        | Error _ ->
+            c.Pos <- saved
+            Error $"Expected pattern after 'let' at {(cur c).Line}:{(cur c).Col}"
+        | Ok pat ->
+            // Only accept the pattern if `=` immediately follows; otherwise
+            // restore. This matters for forms like `let x = e` where parsePattern
+            // would succeed greedily on `x` but the standard path is fine.
+            if curTok c <> Eq then
+                c.Pos <- saved
+                Error $"Expected '=' after pattern in let, got {curTok c}"
+            else
+                advance c  // consume =
                 match parseExprInner c with
                 | Error e -> Error e
                 | Ok e1 ->
-                    if curTok c = KwIn then
-                        advance c
-                        match parseExprInner c with
-                        | Ok e2 -> Ok (ELet(name, e1, Some e2))
-                        | Error e -> Error e
-                    else Ok (ELet(name, e1, None))
-        | t -> Error $"Expected identifier after 'let', got {t}"
+                    let body =
+                        if curTok c = KwIn then
+                            advance c
+                            match parseExprInner c with
+                            | Ok e2 -> Some e2
+                            | Error _ -> None
+                        else None
+                    match pat with
+                    | PVar name -> Ok (ELet(name, e1, body))
+                    | _ -> Ok (ELetPat(pat, e1, body))
     | KwIf ->
         advance c
         match parseExprInner c with
@@ -310,14 +324,23 @@ and private parseBlockExpr (c: Ctx) : Result<Expr, string> =
             while curTok c = Newline do advance c
             match curTok c with
             | Dedent | Eof | Bar ->
-                // No continuation — restore position so the caller
-                // still sees the trailing newlines/dedent and return
-                // the bare let.
                 c.Pos <- saved
                 Ok expr
             | _ ->
                 match parseBlockExpr c with
                 | Ok body -> Ok (ELet(name, e1, Some body))
+                | Error e -> Error e
+        | ELetPat(pat, e1, None) ->
+            // Same continuation-handling for the destructuring let form.
+            let saved = c.Pos
+            while curTok c = Newline do advance c
+            match curTok c with
+            | Dedent | Eof | Bar ->
+                c.Pos <- saved
+                Ok expr
+            | _ ->
+                match parseBlockExpr c with
+                | Ok body -> Ok (ELetPat(pat, e1, Some body))
                 | Error e -> Error e
         | _ -> Ok expr
 
@@ -715,16 +738,26 @@ let private parseDecl (c: Ctx) : Result<Decl, string> =
                 | Error e -> Error e
     | KwLet ->
         advance c
-        match curTok c with
-        | Ident name ->
-            advance c
-            match skip c Eq with
-            | Error e -> Error e
-            | Ok () ->
+        // Phase 7.1.6: try pattern-first. PVar falls back to DLet so all
+        // downstream code keeps the regular form; non-trivial patterns
+        // produce DLetPat.
+        let saved = c.Pos
+        match parsePattern c with
+        | Error _ ->
+            c.Pos <- saved
+            Error $"Expected pattern after 'let' at {(cur c).Line}:{(cur c).Col}"
+        | Ok pat ->
+            if curTok c <> Eq then
+                c.Pos <- saved
+                Error $"Expected '=' after pattern in let, got {curTok c}"
+            else
+                advance c
                 match parseExprInner c with
-                | Ok expr -> Ok (DLet(name, expr))
                 | Error e -> Error e
-        | t -> Error $"Expected identifier after 'let', got {t}"
+                | Ok expr ->
+                    match pat with
+                    | PVar name -> Ok (DLet(name, expr))
+                    | _ -> Ok (DLetPat(pat, expr))
     | KwType ->
         advance c
         match curTok c with

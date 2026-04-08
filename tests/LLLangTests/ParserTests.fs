@@ -494,3 +494,47 @@ let ``parse match expression with cons pattern`` () =
                 (PWild, ELit (LInt 0L))]) -> ()
     | e -> failwith $"Expected EMatchOf with PCons branch, got {e}"
 
+// --- Phase 7.1.6: let pattern destructuring ---
+
+[<Fact>]
+let ``parse let with tuple pattern in expression`` () =
+    // let (a, b) = pair in a + b
+    match parseExprStr "let (a, b) = pair in a + b" with
+    | ELetPat(PTuple [PVar "a"; PVar "b"], EVar "pair", Some _) -> ()
+    | e -> failwith $"Expected ELetPat (a, b) = pair in ..., got {e}"
+
+[<Fact>]
+let ``parse let with tuple pattern, no in`` () =
+    match parseExprStr "let (a, b) = pair" with
+    | ELetPat(PTuple [PVar "a"; PVar "b"], EVar "pair", None) -> ()
+    | e -> failwith $"Expected ELetPat (a, b) = pair, got {e}"
+
+[<Fact>]
+let ``parse let with wildcard pattern`` () =
+    match parseExprStr "let _ = e" with
+    | ELetPat(PWild, EVar "e", None) -> ()
+    | e -> failwith $"Expected ELetPat PWild = e, got {e}"
+
+[<Fact>]
+let ``parse let with simple var still produces ELet (not ELetPat)`` () =
+    // Regression: a single PVar should fall back to the existing ELet form.
+    match parseExprStr "let x = 5" with
+    | ELet("x", ELit (LInt 5L), None) -> ()
+    | e -> failwith $"Expected ELet x = 5, got {e}"
+
+[<Fact>]
+let ``parse top-level let with tuple pattern produces DLetPat`` () =
+    let src = "module M\nlet (a, b) = pair"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DLetPat(PTuple [PVar "a"; PVar "b"], EVar "pair") -> ()
+    | d -> failwith $"Expected DLetPat (a, b) = pair, got {d}"
+
+[<Fact>]
+let ``parse top-level let with simple var still produces DLet`` () =
+    let src = "module M\nlet pi = 3.14"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DLet("pi", ELit (LFloat _)) -> ()
+    | d -> failwith $"Expected DLet pi (regression), got {d}"
+

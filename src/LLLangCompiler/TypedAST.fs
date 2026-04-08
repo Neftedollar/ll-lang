@@ -33,6 +33,7 @@ and TypedExprKind =
     | TEApp of TypedExpr * TypedExpr
     | TELam of (Ident * TypeExpr) list * TypedExpr
     | TELet of Ident * TypeScheme * TypedExpr * TypedExpr option
+    | TELetPat of TypedPattern * TypedExpr * TypedExpr option
     | TEIf of TypedExpr * TypedExpr * TypedExpr
     | TEMatch of TypedExpr * (TypedPattern * TypedExpr) list
     | TEMatchOf of TypedExpr * (TypedPattern * TypedExpr) list
@@ -54,6 +55,7 @@ type TypedFnSig = {
 type TypedDecl =
     | TDFn of TypedFnSig * TypeScheme * TypedExpr
     | TDLet of Ident * TypeScheme * TypedExpr
+    | TDLetPat of TypedPattern * TypedExpr
     | TDType of TypeIdent * TypeParam list * TypeBody
     | TDTag of TypeIdent
     | TDUnit of TypeIdent
