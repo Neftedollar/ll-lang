@@ -150,7 +150,7 @@ Source (.lll)
 
 ## Status
 
-**Phases 1–6 complete + Phase 7.1/7.2 (real lexer AND real recursive-descent expression parser, both written in ll-lang itself, with surface tuple literals so parsers can return `(parsed, rest)` directly). 354 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, `let (a, b) = ...` destructuring, multi-line sum types, mutually recursive top-level functions, and a real arithmetic parser (`(1 + (2 * 3))` precedence verified) — see `spec/examples/valid/09-lexer-real.lll` and `11-parser-real.lll`.**
+**Phases 1–6 complete + Phase 7.1/7.2/7.3a (real lexer, real recursive-descent expression parser, AND real type-declaration parser, all written in ll-lang itself, with surface tuple literals so parsers can return `(parsed, rest)` directly). 357 tests passing. Working end-to-end compiler with stdlib, Char/file IO, char literals (`'a'`), indented `let` blocks, tuple patterns, `::` cons in patterns/expressions, `match` in expression position, `let (a, b) = ...` destructuring, multi-line sum types, mutually recursive top-level functions, a real arithmetic parser (`(1 + (2 * 3))` precedence verified), and a real type-declaration parser (four `type` decls round-trip through tokenize → parse → pretty-print) — see `spec/examples/valid/09-lexer-real.lll`, `11-parser-real.lll`, and `12-typeparser-real.lll`.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -162,7 +162,8 @@ Source (.lll)
 | 6 | Standard library — List, Maybe, Result, Str, Math, IO builtins | ✅ Done |
 | 7.1 | Real lexer in ll-lang — `09-lexer-real.lll` | ✅ Done |
 | 7.2 | Recursive-descent expression parser in ll-lang — `11-parser-real.lll` | ✅ Done |
-| 7.3+ | Full ll-lang parser, elaborator, codegen in ll-lang | Planned |
+| 7.3a | Type-declaration parser in ll-lang — `12-typeparser-real.lll` | ✅ Done |
+| 7.3b+ | Fn-decl parser, full expressions, full ll-lang parser/elaborator/codegen in ll-lang | Planned |
 
 ## Getting Started
 
@@ -172,7 +173,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 354 tests
+dotnet test    # 357 tests
 ```
 
 ### Run your first program
@@ -215,7 +216,7 @@ src/LLLangCompiler/        — compiler library (F#)
   Codegen.fs               — F# source emitter
   Compiler.fs              — end-to-end pipeline entry point
 src/LLLangTool/            — `lllc` CLI (build / run)
-tests/LLLangTests/         — xUnit test suite (328 tests)
+tests/LLLangTests/         — xUnit test suite (357 tests)
 ```
 
 ## Roadmap

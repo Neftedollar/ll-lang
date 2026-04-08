@@ -377,3 +377,71 @@ Three compiler bugs were uncovered and fixed in flight:
    2 or more.
 
 Test count: 328 → 331 (corpus theory + 2 new ArithmeticParserTests).
+
+### 2026-04 — Phase 7.3a: type-declaration parser (DONE)
+
+`spec/examples/valid/12-typeparser-real.lll` (217 lines) is a working
+recursive-descent **type-declaration** parser written in ll-lang
+itself. Third self-hosting milestone after the real lexer (7.1) and
+the arithmetic parser (7.2). Together they cover lexing, expression
+parsing, and type-decl parsing — three pieces of the eventual
+ll-lang-in-ll-lang front end.
+
+The parser handles the single-line form
+`type Name P1 P2 = Ctor1 Arg1 Arg2 | Ctor2 | ...` for the input
+
+```
+type Maybe A = Some A | None
+type Result A E = Ok A | Err E
+type Shape = Circle | Rect | Empty
+type Wrapped = MkWrapped Int
+```
+
+and prints each declaration on its own normalised line via `lllc run`:
+
+```
+type Maybe (A) = Some(A) | None
+type Result (A) (E) = Ok(A) | Err(E)
+type Shape = Circle | Rect | Empty
+type Wrapped = MkWrapped(Int)
+```
+
+Type params print one-per-paren so the param/ctor boundary is visually
+obvious; nullary ctors print bare; ctors with args wrap them in
+`(a, b)` form. Single-letter uppercase identifiers are classified as
+type variables, longer ones (`Int`, `Maybe`, ...) as type constructors.
+
+The parser exercises:
+
+- Mutually-recursive top-level fns (`parseTypeDecls` ↔ `parseDeclsClean`
+  ↔ `consDecl`, plus `parseCtors` ↔ `parseCtorsTail`)
+- Surface tuple-literal returns from helper fns
+  (`parseTypeDecl : List Token -> (TypeDecl, List Token)`) without
+  needing the old `MkParsed` ADT wrapper
+- Cons patterns + clause sugar on token streams (`TKwType :: rest`,
+  `TBar :: rest`, `TUpper s :: rest`)
+- ASCII range checks on `charToInt` for an inline `isUpperChar`
+  predicate (ll-lang lacks `&&`, so two nested `if`s suffice)
+
+Two language quirks surfaced (added to the Phase 7.3b backlog):
+
+1. **Clause-sugar bodies with multi-line `let-in` arms get parsed
+   wrong.** A wildcard arm whose body is `let (a, b) = expr in
+   useA useB` ends up reading `a`/`b` as out-of-scope. Workaround:
+   split the multi-line let into a separate single-line helper fn.
+2. **List-literal arms in clause sugar are silently dropped.** Mixing
+   `| TEnd :: _ -> []` and `| [] -> []` and `| _ -> ...` in a single
+   clause-sugar body codegens to a single-arm match (only the first
+   cons arm survives), producing a runtime `MatchFailure`. Workaround:
+   use a positive-only cons pattern (`| TKwType :: _ -> ...`) and let
+   the wildcard handle empty + EOF together.
+3. **`params` is reserved in F#.** A param named `params` in ll-lang
+   round-trips through codegen and triggers FS0046. Workaround: rename
+   to `prms`. Long-term fix: codegen should rewrite reserved names.
+
+Test count: 354 → 357 (corpus theory + 2 new TypeParserTests).
+
+Next slice: **Phase 7.3b — fn-decl parser** (`fn add(a Int)(b Int) Int
+= a + b`), then 7.3c — full expressions (richer than the arithmetic
+subset), then tying lexer + type-decl + fn-decl + expression parsers
+together into a real ll-lang front end written in ll-lang itself.

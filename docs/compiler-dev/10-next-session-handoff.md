@@ -7,39 +7,61 @@ session to pick up without replaying history.
 
 - **main** is at a clean commit, everything pushed to
   `github.com/Neftedollar/ll-lang`.
-- **331 xUnit tests** pass (`dotnet test` from repo root).
+- **357 xUnit tests** pass (`dotnet test` from repo root).
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 done.** ll-lang now hosts both a real
-  lexer (`09-lexer-real.lll`) AND a real recursive-descent expression
-  parser (`11-parser-real.lll`) written in itself. Together they
-  prove the language can express its own front end for an arithmetic
-  subset; scaling up to full ll-lang is Phase 7.3+.
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a done.** ll-lang now hosts a real
+  lexer (`09-lexer-real.lll`), a real recursive-descent expression
+  parser (`11-parser-real.lll`), AND a real type-declaration parser
+  (`12-typeparser-real.lll`) written in itself. Together they prove
+  the language can express three pieces of its own front end (lex,
+  expression parse, type-decl parse); scaling up to a full ll-lang
+  parser-in-itself is Phase 7.3b+.
 - No stale worktrees, no stray branches, no uncommitted changes.
 - `lllc run spec/examples/valid/hello.lll` prints `Hello, ll-lang!`.
 - `lllc run spec/examples/valid/09-lexer-real.lll` prints
   `kw:fn id:add ( id:a ) ( id:b ) = id:a + id:b`.
 - `lllc run spec/examples/valid/11-parser-real.lll` prints
   `(1 + (2 * 3))` (precedence-correct parse of `"1 + 2 * 3"`).
+- `lllc run spec/examples/valid/12-typeparser-real.lll` prints
+  ```
+  type Maybe (A) = Some(A) | None
+  type Result (A) (E) = Ok(A) | Err(E)
+  type Shape = Circle | Rect | Empty
+  type Wrapped = MkWrapped(Int)
+  ```
+  (four `type` decls round-tripped through tokenize → parse → pretty).
 
 ## Immediate next task
 
-**Phase 7.3 — broaden the arithmetic parser into a real ll-lang
-parser**, OR pick one of the high-leverage backlog items below.
-Reasonable next concrete steps:
+**Phase 7.3b — fn-declaration parser in ll-lang**. Mirror the
+type-declaration slice (Phase 7.3a, `12-typeparser-real.lll`) for
+function declarations of the shape
 
-1. Extend `11-parser-real.lll` to handle ll-lang's actual AST: type
-   declarations, fn declarations with patterns, let bindings, match
-   expressions, lambdas. This is a much larger file (probably
-   500-800 lines) and will surface more language gaps.
-2. OR fix the highest-leverage backlog items first:
-   - Add surface tuple-literal expressions (eliminate the `MkParsed`
-     ADT-wrapper workaround everywhere)
-   - Fix `atom[Tag]` ambiguity (parser lookahead beyond `]`)
-   - Ship a Phase 7.2 polish fix: emit codegen prelude block AFTER
-     types but with proper handling for files that don't declare any
-     types (currently the order is fragile)
+```
+fn add(a Int)(b Int) Int = a + b
+fn double(x Int) = x * 2
+```
+
+with the same single-line scope: typed params, optional return type,
+single-expression body limited to identifiers + arithmetic operators.
+After 7.3b, Phase 7.3c picks up richer expression parsing (let, if,
+lambda, match). Phase 7.3d ties lexer + type-decl + fn-decl + expr
+parsers together into a real ll-lang front end written in ll-lang
+itself.
+
+Other high-leverage backlog items can also be picked up first:
+
+- Fix `atom[Tag]` ambiguity (parser lookahead beyond `]`)
+- Codegen polish: emit prelude block AFTER types but handle files
+  that don't declare any types (currently the order is fragile)
+- Fix the clause-sugar quirks surfaced by 7.3a (multi-line `let-in`
+  arms get scoping wrong; `| []` arms get silently dropped when
+  mixed with cons arms — see Phase 7.3a section in
+  `09-self-hosting-roadmap.md`)
+- Codegen rewrite of F# reserved names like `params` →
+  `_params` so user-side `params` doesn't trip FS0046
 
 ## Language gaps (backlog for Phase 7.3+)
 
@@ -165,7 +187,8 @@ is reserved for multi-target Platform mismatches and never fires.
   `System.Diagnostics.Process` launching `lllc run`
 - `StdlibTests.fs`
 - `RealLexerTests.fs`
-- (next: `ArithmeticParserTests.fs`)
+- `ArithmeticParserTests.fs`
+- `TypeParserTests.fs`
 
 Add any new corpus example to the `valid corpus infers ok` theory so
 its inference is smoke-tested automatically.
