@@ -1087,3 +1087,95 @@ Next tick: **Phase 7.5e** — close out Phase 7.5 by shipping whatever
 the remaining backlog item resolves to (likely multi-line fn bodies +
 the cluster of `tag` / `trait` / `impl` / `import` / `export` module-
 level decls in one sweep).
+
+### 2026-04 — Phase 7.5e: tag + import + export decls (DONE)
+
+Fifth and final sub-tick of Phase 7.5. Extends
+[`spec/examples/valid/15-moduleparser-real.lll`](../../spec/examples/valid/15-moduleparser-real.lll)
+**in place** (no sibling file) with three module-level decl forms, the
+lightweight subset of the Phase 7.5 umbrella's remaining "other
+module-level forms" item:
+
+1. **`tag Name` decls.** Bare semantic tag declarations — no body, no
+   params, just the keyword and a single `TUpper`. Mirrors the host
+   compiler's `KwTag` arm in `parseDecl`. Added `TKwTag` to the
+   `Token` union, a `"tag" -> TKwTag` arm to `classifyIdent`, a
+   `DTag Str` variant to `Decl`, and a new `parseTagDecl` helper
+   matching `TKwTag :: TUpper name :: rest -> (DTag name, rest)`.
+2. **`import Foo.Bar.Baz` decls.** Dotted module imports. Added
+   `TKwImport` to the token union, `"import" -> TKwImport` to
+   `classifyIdent`, `DImport Str` to `Decl`, and a new
+   `parseImportDecl` helper that reuses `parseModuleNameTail` — the
+   exact same dotted-path walker `parseModuleHeader` already uses —
+   so the qualified path string is built identically on both sides
+   of the module header / import boundary.
+3. **`export` modifier prefix.** A keyword that turns any existing
+   decl into a publicly-visible `DExport Decl` wrapper. `DExport`
+   is a self-recursive variant on `Decl` — same shape as the
+   existing `EAdd Expr Expr` etc. on `Expr` — chosen over an
+   `exported: Bool` field because wrapping doesn't touch any
+   existing variant shape. Added `TKwExport` to the token union,
+   `"export" -> TKwExport` to `classifyIdent`, `DExport Decl` to
+   `Decl`, and a `TKwExport :: rest -> DExport inner :: ...` arm in
+   `parseDecls` that delegates the inner decl parse to a new
+   `parseOneDecl` helper and wraps the result.
+
+`parseOneDecl` is a local helper that dispatches on the same keyword
+ladder as `parseDecls` but returns exactly one `(Decl, leftover)` pair
+instead of driving the full decl-list recursion. Lets the `export`
+modifier compose with every decl shape without duplicating the
+dispatch ladder.
+
+Pretty printer: `showDecl` grows three new arms:
+
+```
+| DTag name -> strConcat "tag " name
+| DImport path -> strConcat "import " path
+| DExport inner -> strConcat "export " (showDecl inner)
+```
+
+The `DExport` arm recurses back into `showDecl` so the inner decl's
+canonical pretty form stays untouched and the `export ` modifier
+stacks in front of any shape.
+
+The driver now parses five new decls on top of the Phase 7.5d
+baseline:
+
+```
+import Std.List
+import Std.Maybe
+tag UserId
+tag Email
+export fn addOne(x Int) Int = x + 1
+```
+
+and prints
+
+```
+import Std.List
+import Std.Maybe
+tag UserId
+tag Email
+export fn addOne (x: Int) -> Int = (x + 1)
+```
+
+Nineteen pretty-printed lines total now — module header, two imports,
+two tags, three type decls, three module-level `let` decls, one
+exported fn decl, and seven regular fn decls.
+
+File size: 866 → 979 lines (+113). Test count unchanged at 386 (the
+two existing ModuleParserTests absorbed the extended driver — the
+runtime E2E test got an updated `expected` list with five more lines,
+the inference round-trip re-reads straight from disk).
+
+Phase 7.5 progress: 9 of 9 items done. The Phase 7.5 umbrella is
+closed — the `trait` / `impl` module-level decls, multi-line fn
+bodies, multi-line type decls, and list-literal / tuple patterns all
+deliberately move to a separate **Phase 7.6** slice, because each of
+those is much more complex than a flat single-line dispatch arm
+(multi-line signatures, indented fn bodies, layout-sensitive parsing).
+
+Next tick: **Phase 7.6** — pick between multi-line fn bodies + type
+decls, `trait` / `impl` module-level decls, list-literal `[a b c]`
+expression atoms / tuple `(a, b)` patterns, or bootstrapping the
+elaborator-in-ll-lang slice (Stage D in the roadmap).

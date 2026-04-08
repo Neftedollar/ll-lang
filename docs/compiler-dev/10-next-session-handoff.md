@@ -11,26 +11,30 @@ session to pick up without replaying history.
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d done.**
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e done.**
   ll-lang now hosts a real lexer (`09-lexer-real.lll`), a real
   recursive-descent arithmetic parser (`11-parser-real.lll`), a real
   type-declaration parser (`12-typeparser-real.lll`), a real
   fn-declaration parser (`13-fnparser-real.lll`), a real full-expression
   parser (`14-exprparser-real.lll`), AND — as of Phase 7.4 / 7.5a /
-  7.5b / 7.5c / 7.5d — a real full **module parser**
-  (`15-moduleparser-real.lll`, 866 lines) that stitches the previous
+  7.5b / 7.5c / 7.5d / 7.5e — a real full **module parser**
+  (`15-moduleparser-real.lll`, 979 lines) that stitches the previous
   five slices into one recursive-descent front end consuming a whole
-  `module M\n type ...\n let ...\n fn ... = ...` source end-to-end,
-  including module-level `let` decls, `match`-with-explicit-scrutinee,
-  `let name = e1 in e2` chains, `\x. body` lambdas, string literals,
-  `[]` / `h :: t` cons patterns in match arms, **tagged literals**
-  (`"x"[UserId]` as `ETagged`), and **bracket-form parametric ctor
-  args** (`Maybe[Int]` as `TAApp`) — eight of nine items from the
-  Phase 7.5 backlog, closed across Phases 7.5a/7.5b/7.5c/7.5d. "ll-
-  lang has a full front-end in itself" is now one runnable program,
-  not a story spread across four separate slices. Phase 7.5 still has
-  one remaining item (see list below) before the self-hosting
-  elaborator + codegen work begins.
+  `module M\n import ...\n tag ...\n type ...\n let ...\n export fn
+  ...\n fn ... = ...` source end-to-end, including module-level `let`
+  decls, `match`-with-explicit-scrutinee, `let name = e1 in e2` chains,
+  `\x. body` lambdas, string literals, `[]` / `h :: t` cons patterns
+  in match arms, **tagged literals** (`"x"[UserId]` as `ETagged`),
+  **bracket-form parametric ctor args** (`Maybe[Int]` as `TAApp`), and
+  **module-level `tag` / `import` / `export` decls** (`DTag` / `DImport`
+  / `DExport`) — all **nine of nine** items from the Phase 7.5 backlog,
+  closed across Phases 7.5a/7.5b/7.5c/7.5d/7.5e. "ll-lang has a full
+  front-end in itself" is now one runnable program, not a story spread
+  across five separate slices. The Phase 7.5 umbrella is closed; the
+  heavier remaining items (multi-line fn bodies, multi-line type decls,
+  `trait` / `impl` decls, list / tuple patterns) move to a separate
+  Phase 7.6 slice before the self-hosting elaborator + codegen work
+  begins.
 - No stale worktrees, no stray branches, no uncommitted changes.
 - `lllc run spec/examples/valid/hello.lll` prints `Hello, ll-lang!`.
 - `lllc run spec/examples/valid/09-lexer-real.lll` prints
@@ -68,12 +72,17 @@ session to pick up without replaying history.
 - `lllc run spec/examples/valid/15-moduleparser-real.lll` prints
   ```
   module Examples.Bigger
+  import Std.List
+  import Std.Maybe
+  tag UserId
+  tag Email
   type Maybe (A) = Some(A) | None
   type Color = Red | Green | Blue
   type Container = MkBox(Maybe[Int])
   let answer = 42
   let zero = 0
   let uid = ("user-42"[UserId])
+  export fn addOne (x: Int) -> Int = (x + 1)
   fn double (x: Int) -> Int = (x * 2)
   fn classify (x: Int) -> Int = (match x with | 0 -> 0 | _ -> 1)
   fn pickColor (x: Int) -> Color = (if x then Red else Green)
@@ -82,82 +91,62 @@ session to pick up without replaying history.
   fn greet () -> Str = "hello"
   fn classifyXs (xs: Int) -> Int = (match xs with | [] -> 0 | (h :: t) -> 1)
   ```
-  (a whole module — header, three type decls, three module-level `let`
-  decls, seven fn decls covering arithmetic, match-with-explicit-
-  scrutinee, `if-then-else`, let-in chain, lambda-application, string
-  literal, cons-pattern, tagged-literal, and parametric-ctor-arg
-  bodies — round-tripped through tokenize → parseModule → showModule).
-  The `let` decls and `match`-in-fn-body were added in Phase 7.5a on
-  top of the Phase 7.4 baseline; `let-in` chains and `\x. body`
-  lambdas were added in Phase 7.5b; string literals and `[]` / `h :: t`
-  cons patterns were added in Phase 7.5c; tagged literals and
-  parametric ctor args were added in Phase 7.5d.
+  (a whole module — header, two imports, two tags, three type decls,
+  three module-level `let` decls, one exported fn decl, seven regular
+  fn decls covering arithmetic, match-with-explicit-scrutinee, `if-
+  then-else`, let-in chain, lambda-application, string literal, cons-
+  pattern, tagged-literal, and parametric-ctor-arg bodies — round-
+  tripped through tokenize → parseModule → showModule). The `let`
+  decls and `match`-in-fn-body were added in Phase 7.5a on top of the
+  Phase 7.4 baseline; `let-in` chains and `\x. body` lambdas were
+  added in Phase 7.5b; string literals and `[]` / `h :: t` cons
+  patterns were added in Phase 7.5c; tagged literals and parametric
+  ctor args were added in Phase 7.5d; `tag` / `import` / `export`
+  module-level decls were added in Phase 7.5e (closing the Phase 7.5
+  umbrella 9/9).
 
 ## Immediate next task
 
-**Phase 7.5 — extended module parser in ll-lang** (ongoing). Continue
-extending `15-moduleparser-real.lll` **in place** — the same shape
-Phase 7.5a used — to cover the remaining items the Phase 7.4 baseline
-deliberately cut for line-budget reasons. After this, the bootstrap
-compiler's front end is fully expressible in ll-lang and the
-self-hosting translation work (Stage D in the roadmap — elaborator
-and codegen in ll-lang) can begin in earnest.
+**Phase 7.6 — heavier module-parser extensions in ll-lang.** The
+Phase 7.5 umbrella is closed (9/9 items done across 7.5a through
+7.5e). Phase 7.6 picks from the heavier backlog — each item is a
+larger, self-contained slice that doesn't fit the flat single-line
+dispatch pattern Phase 7.5 used. Pick any one (or combine two if they
+compose cleanly) and ship it the same way 7.5a-e shipped: extend
+`15-moduleparser-real.lll` **in place**, update the runtime E2E
+expectation first (TDD), commit as
+`feat(corpus)` + `test(corpus)` + `docs(self-hosting)`.
 
-Scope — **8 of 9 items done in Phases 7.5a + 7.5b + 7.5c + 7.5d
-(struck through); 1 still open**:
+Phase 7.6 candidates, roughly ordered by leverage for self-hosting:
 
-1. ~~**`let` decls at module level.** Added `DLet LetDecl` to `Decl`
-   and a `TKwLet :: _ ->` arm in `parseDecls`. RHS reuses the full
-   `parseExpr` driver. (DONE — Phase 7.5a.)~~
-2. **Multi-line `fn` bodies.** Today 15 only parses single-line
-   bodies (the lexer stops expr parsing at `TNewline` by virtue of
-   `TNewline` not being an atom-starter). A multi-line body needs
-   either layout-sensitive parsing that tracks indentation relative
-   to the `=`, or an explicit terminator. The F# compiler uses
-   layout; the ll-lang mirror should too.
-3. ~~**`let-in` / lambdas in fn bodies.** `parseExpr` now dispatches
-   `TKwLet :: rest -> parseLetIn rest` (single-binder `let name = e1
-   in e2`, right-recursive for chains) and `TBackslash :: rest ->
-   parseLam rest` (single-param `\x. body`, nest for multi-arg). Both
-   forms go through the full `parseExpr` on their sub-expressions so
-   they can contain any other form the grammar accepts. The
-   `parseDecls` `TKwLet :: _` arm is unchanged — context disambiguates
-   between module-level decl and expression-position let-in because
-   the two entry points never overlap on the same token stream. (DONE
-   — Phase 7.5b.)~~
-4. ~~**Cons patterns in `match`.** 15 now accepts `[]` (`PNil`) and
-   `h :: t` (`PCons`, right-associative via recursive `parsePat`).
-   List-literal `[a b c]` and tuple `(a, b)` patterns still stay in
-   Phase 7.5+. (DONE — Phase 7.5c.)~~
-5. ~~**Tagged literals (`"x"[UserId]`).** `parseAtom` now dispatches
-   on the 4-token prefixes
-   `TInt n :: TLBrack :: TUpper ty :: TRBrack :: rest` and
-   `TStr s :: TLBrack :: TUpper ty :: TRBrack :: rest` BEFORE the
-   plain 1-token `EInt` / `EStr` arms, producing `ETagged (EInt n) ty`
-   / `ETagged (EStr s) ty`. Mirrors the host compiler's Phase 7.2.2
-   rule: only int and str literal atoms can take a tag. The pretty
-   printer renders `ETagged e t` as `(<show e>[<t>])`. (DONE — Phase
-   7.5d.)~~
-6. **Other module-level forms.** `tag Name`, `trait ... with ...`,
-   `impl Trait for Type = ...`, `import Foo.Bar`, `export ...`. Each
-   one is a single dispatcher arm plus a small parseX helper.
-7. **Multi-line type decls.** 10-multiline-sum.lll uses the form
-   `type T =\n  | A\n  | B` — 15's `parseCtors` doesn't skip
-   newlines between ctors. Fix: make `parseCtorsTail` / `parseCtor`
-   newline-tolerant.
-8. ~~**Parametric ctor args.** `parseTypeArgs` now delegates to a new
-   `parseOneTypeArg` helper that, after matching a `TUpper` head,
-   calls `parseBrackArgs` to collect zero or more `[typeArg]` bracket
-   groups. Multiple groups (`Result[A][E]`) flatten into one
-   `TAApp head args` ctor; nested inner args (`Foo[Bar[Baz]]`) recurse
-   through `parseOneTypeArg`. Bracket form `Maybe[Int]` was picked over
-   the juxtaposition form `(Maybe Int)` because brackets need no
-   lookahead. The pretty printer's new `showBrackArgs` helper folds
-   `TAApp head args` to `head[a1][a2]...`. (DONE — Phase 7.5d.)~~
-9. ~~**String literals in bodies.** Lifted the `takeStrBody` helper
-   back from 14-exprparser-real.lll, added a `TStr` token, and gave
-   `parseAtom` a `TStr s :: rest -> (EStr s, rest)` arm. The pretty
-   printer renders `EStr s` as `"<s>"`. (DONE — Phase 7.5c.)~~
+1. **`trait` / `impl` module-level decls.** Add `TKwTrait` / `TKwImpl`
+   tokens, `DTrait` / `DImpl` decls, `parseTraitDecl` / `parseImplDecl`
+   helpers. Each needs multi-line signature parsing (trait bodies) and
+   indented fn decl lists (impl bodies) — roughly twice the complexity
+   of the 7.5e `tag` / `import` / `export` trio. Grammar in
+   `spec/grammar.ebnf` lines 172-177.
+2. **Multi-line `fn` bodies.** Layout-sensitive parsing: the body
+   indentation level relative to the `=` determines whether a
+   subsequent token still belongs to the body. The F# host compiler
+   uses synthetic `Indent` / `Dedent` tokens; the ll-lang mirror would
+   need the same. Touches the lexer (to emit layout tokens on newline
+   boundaries) AND the parser (to consume them). Biggest single item.
+3. **Multi-line type decls.** `type T =\n  | A\n  | B`. 15's
+   `parseCtors` doesn't skip newlines between ctors. Fix: make
+   `parseCtorsTail` / `parseCtor` newline-tolerant. Smaller than the
+   fn-body layout item because type decls don't nest expressions.
+4. **List-literal expression atoms + tuple patterns.** `[a b c]` as
+   an `EList Expr*` atom in expression position, and `(a, b)` as a
+   `PTuple Pat Pat` arm in `parsePrimaryPat`. The cons-only subset
+   already shipped in 7.5c; these two round out the list / tuple
+   coverage.
+5. **Starting the elaborator-in-ll-lang slice (Stage D).** The first
+   half of a new file — name resolution, unbound-var detection,
+   declared-type checks — that consumes the `List[Decl]` AST
+   `15-moduleparser-real.lll` already produces and emits an
+   `ElaboratedModule`. Mirrors `src/LLLangCompiler/Elaborator.fs`.
+   Largest item by total line count, but also the highest leverage
+   for the self-hosting goal.
 
 Test the result by round-tripping an actual existing corpus file
 (e.g., `01-basics.lll`, `02-adts.lll`, or even a trimmed variant of
