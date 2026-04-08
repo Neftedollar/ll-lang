@@ -1274,10 +1274,96 @@ Tests: 386 -> 389.
     added to the `valid corpus infers ok` theory.
 
 Next tick: **Phase 7.6b** — extend the elaborator-in-ll-lang with
-**E001 type mismatch detection**. Add a minimal `TypeExpr`, replace
-`Env = MkEnv List[Str]` with `Env = MkEnv List[(Str, TypeExpr)]`,
-thread declared types through fn param collection, add a `typeOf`
-walker that returns `(TypeExpr, List[Str])`, and flag every `EApp`
-whose argument's inferred type doesn't match the function's
-parameter type. Keep scope minimal — no inference, just checking
-against explicit annotations.
+**E003 NonExhaustiveMatch** constructor-coverage detection (keeping
+E001 as a separate Phase 7.6c tick). Add a second collect pass
+building a `TypeName → List[CtorName]` index, walk each `DFn` whose
+body is a top-level clause-sugar `EMatch` whose last-param type is
+in the index, and emit one `E003 NonExhaustiveMatch <type> missing
+<ctor>` per missing ctor — or skip if the fn's arms carry a catch-
+all `PWild` / `PVar` / `PCons`. Mirror the scope limitation the F#
+host elaborator uses at `Elaborator.fs` line 503 area: nested and
+value-position matches are out of scope, same as the host.
+
+### 2026-04 — Phase 7.6b: elaborator slice B — E003 exhaustiveness (DONE)
+
+Second tick of Phase 7.6. Extends [`16-elaborator-real.lll`](../../spec/examples/valid/16-elaborator-real.lll)
+**in place** (328 → 512 lines, +184) with **constructor-coverage
+exhaustiveness detection** over top-level clause-sugar fn bodies.
+Mirrors the F# host elaborator's `exhaustivenessCheck` in
+[`src/LLLangCompiler/Elaborator.fs`](../../src/LLLangCompiler/Elaborator.fs)
+(lines 481-548), including its deliberately-narrow scope: only the
+*direct* top-level `EMatch` of a `DFn` whose last curried param is a
+named sum type is checked.
+
+AST changes:
+- `type Pat` gains `PCon Str` (0-arity ctor pattern; argument patterns
+  are modelled in a later slice).
+- `type Decl` updates `DFn` from `DFn Str List[Str] Expr` to `DFn Str
+  List[Str] Str Expr`, carrying the **last curried param's type name**
+  (empty string `""` = no declared type, skips the check). All
+  existing `DFn` call sites in the hardcoded test module are updated
+  accordingly.
+
+New helpers added alongside `collectDecls` / `checkDecls`:
+
+```lll
+type TypeCtors = MkTypeCtors Str List[Str]
+
+fn collectTypes(decls) -> List[TypeCtors]      -- walks DType bodies
+fn lookupCtors(types)(name) -> List[Str]       -- linear scan by type name
+fn patIsCatchAll(p) -> Bool                    -- PWild / PVar / PCons
+fn armsHaveCatchAll(pats) -> Bool              -- short-circuit over a list
+fn coveredCtors(pats) -> List[Str]             -- collects PCon names
+fn missingCtorErrs(ty)(required)(covered)      -- diff → List[Str]
+fn exhaustivenessDecl(types)(d) -> List[Str]   -- per-decl check
+fn exhaustivenessCheck(types)(decls)           -- top-level entry
+```
+
+The top-level `elaborate` now runs **both** passes (name-resolution
+AND exhaustiveness) and concatenates their error lists — same
+two-pass shape the F# host elaborator uses.
+
+Hardcoded test module extended with:
+
+```
+type Shape = Circle | Rect | Empty
+fn shapeGood(s Shape) = | Circle -> 1 | Rect -> 2 | Empty -> 3  -- clean
+fn shapeBad(s Shape)  = | Circle -> 1 | Rect -> 2               -- E003
+fn shapeWild(s Shape) = | Circle -> 1 | _ -> 0                  -- catch-all
+```
+
+Running the file now prints:
+
+```
+E002 UnboundVar undefinedName
+E002 UnboundVar otherMissing
+E003 NonExhaustiveMatch Shape missing Empty
+```
+
+**Deliberately out of scope** (feature backlog for 7.6c/+):
+
+1. **E001 type checking** — still Phase 7.6c. Adding full declared-
+   type checking requires a `TypeExpr` sum and a `typeOf` walker.
+2. **E004 / E005 unit / tag checks** — Phase 7.6+.
+3. **Nested / value-position matches** — skipped to avoid cascading
+   false positives. Real support needs H-M inference to know nested
+   scrutinee types.
+4. **Ctor arg patterns** — `PCon Str List[Pat]` instead of `PCon Str`.
+   Binders would recurse into arg pats. Not needed for 0-arity ctor
+   coverage.
+5. **Source positions** — errors still emitted without `line:col`.
+6. **Builtin env + parser integration** — still hardcoded.
+
+Tests: 389 (no count change — the existing `ElaboratorRealTests.fs`
+runtime E2E fact was updated in place to assert the new E003 line
+alongside the two E002 lines). The inference round-trip fact is
+unchanged because the extended file still parses + elaborates + HM-
+infers cleanly through the F# host pipeline.
+
+Next tick: **Phase 7.6c** — extend the elaborator-in-ll-lang with
+**E001 type mismatch detection** OR jump straight to full H-M
+inference. Add a minimal `TypeExpr` sum, thread declared types
+through fn param collection via pair-shaped param lists, add a
+`typeOf` walker, and flag every `EApp` whose argument's inferred
+type doesn't match the function's parameter type. Keep scope
+minimal — no inference, just checking against explicit annotations.

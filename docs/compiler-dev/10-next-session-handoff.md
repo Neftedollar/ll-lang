@@ -11,7 +11,7 @@ session to pick up without replaying history.
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a done.**
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b done.**
   ll-lang now hosts a real lexer (`09-lexer-real.lll`), a real
   recursive-descent arithmetic parser (`11-parser-real.lll`), a real
   type-declaration parser (`12-typeparser-real.lll`), a real
@@ -104,43 +104,55 @@ session to pick up without replaying history.
   ctor args were added in Phase 7.5d; `tag` / `import` / `export`
   module-level decls were added in Phase 7.5e (closing the Phase 7.5
   umbrella 9/9).
-- **Phase 7.6a done** — first slice of the ll-lang elaborator lives
-  in [`16-elaborator-real.lll`](../../spec/examples/valid/16-elaborator-real.lll)
-  (328 lines). Two-pass `collectDecls` → `checkDecls` pipeline over
-  a minimal local AST, emitting `E002 UnboundVar <name>` for every
-  free variable in any fn body. Mirrors the shape of the F# host
-  elaborator's `collectDecls` + `checkDecls` in `Elaborator.fs`.
-  Still in scope for future Phase 7.6 slices: E001 type checking
-  (7.6b), E003 exhaustiveness (7.6c), E004 / E005 tag / unit checks,
-  source positions, builtin env, parser integration.
+- **Phase 7.6a + 7.6b done** — the first two slices of the ll-lang
+  elaborator live in [`16-elaborator-real.lll`](../../spec/examples/valid/16-elaborator-real.lll)
+  (512 lines). 7.6a shipped the two-pass `collectDecls` → `checkDecls`
+  pipeline over a minimal local AST, emitting `E002 UnboundVar <name>`
+  for every free variable in any fn body. 7.6b extended it with a
+  **constructor-coverage exhaustiveness** pass — walks each `DFn`
+  whose body is a top-level clause-sugar `EMatch` and whose last
+  param's declared type is a known sum type, then emits `E003
+  NonExhaustiveMatch <type> missing <ctor>` for every ctor not in
+  the arm list. Skips fns whose arms carry a catch-all (`PWild` /
+  `PVar` / `PCons`), mirroring the F# host elaborator's
+  `exhaustivenessCheck` in `Elaborator.fs` lines 481-548. Still in
+  scope for future Phase 7.6 slices: E001 type checking (7.6c),
+  E004 / E005 tag / unit checks, source positions, builtin env,
+  parser integration, ctor-arg patterns.
 - `lllc run spec/examples/valid/16-elaborator-real.lll` prints
   ```
   E002 UnboundVar undefinedName
   E002 UnboundVar otherMissing
+  E003 NonExhaustiveMatch Shape missing Empty
   ```
-  (the hardcoded test module's one intentionally-bad fn
-  `bad(x) = undefinedName + otherMissing`; the other two fns
-  `add` / `useCtor` and the non-fn decls elaborate cleanly).
+  (`bad(x) = undefinedName + otherMissing` fires two E002s;
+  `shapeBad(s Shape) = | Circle -> 1 | Rect -> 2` fires one E003
+  for the missing `Empty` ctor; `add` / `useCtor` / `shapeGood`
+  / `shapeWild` and the non-fn decls all elaborate cleanly).
 
 ## Immediate next task
 
-**Phase 7.6b — elaborator slice B: E001 type mismatch detection in
-ll-lang.** Phase 7.6a shipped the name-resolution spine (`collectDecls`
-→ `checkDecls`, E002-only). The next tick adds the simplest type
-check on top of that spine.
+**Phase 7.6c — elaborator slice C: E001 type mismatch detection in
+ll-lang** (or jump straight to full H-M inference — both are valid
+next steps). Phase 7.6a shipped the name-resolution spine
+(`collectDecls` → `checkDecls`, E002); Phase 7.6b layered on a
+constructor-coverage exhaustiveness pass (E003 over top-level
+clause-sugar matches). The next tick picks up declared-type
+checking.
 
-Shape:
-1. Extend `Env` from `MkEnv List[Str]` to `MkEnv List[(Str, TypeExpr)]`
-   so every declared name carries its declared type.
+Shape (E001 route):
+1. Extend `Env` from `MkEnv List[Str]` to a parallel pair (`Str`
+   name list + `TypeExpr` type list) so every declared name carries
+   its declared type. The existing `DFn Str List[Str] Str Expr`
+   already carries the last-param type; extend it to per-param
+   types or introduce a helper param-type list.
 2. Add a minimal `TypeExpr` sum (`TyName Str` / `TyFn TypeExpr
    TypeExpr` for now — no type vars, no tagged types, no type apps).
-3. Thread annotated fn param types through `collectDecl` / `checkDecl`;
-   `DFn` already carries params, just extend the pair to include a
-   type annotation.
-4. Add a `typeOf (env Env) (e Expr) (TypeExpr, List[Str])` walker
-   mirroring the F# host elaborator's `typeOf`. EApp is the only
-   place that actually type-checks — every other arm just forwards
-   the inferred type and any nested errors.
+3. Thread annotated fn param types through `collectDecl` / `checkDecl`.
+4. Add a `typeOf (env)(e) (TypeExpr, List[Str])` walker mirroring
+   the F# host elaborator's `typeOf`. EApp is the only place that
+   actually type-checks — every other arm just forwards the
+   inferred type and any nested errors.
 5. Flag `EApp f arg` where `arg`'s inferred type doesn't unify with
    `f`'s parameter type, emitting `E001 TypeMismatch <got> <expected>`.
 
@@ -148,8 +160,10 @@ Keep scope minimal: no inference, no polymorphism, no tag propagation,
 no source positions. Just checking explicit annotations against
 inferred literal / variable / fn-call types.
 
-After 7.6b lands, Phase 7.6c picks up E003 exhaustiveness for
-`match` arms.
+Alternative route: **full H-M inference** in ll-lang as one larger
+slice, covering E001 + E006 + E008 at once. Higher leverage for
+self-hosting but also much larger — needs `TypeScheme`, `Subst`,
+`generalize`, `instantiate`, occurs check, and Algorithm W itself.
 
 ### Backlog: heavier module-parser extensions in ll-lang
 
