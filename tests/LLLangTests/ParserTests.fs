@@ -272,6 +272,14 @@ let ``parse 05-modules.lll`` () =
     | Ok _ -> ()
     | Error e -> failwith $"Failed to parse 05-modules.lll: {e}"
 
+[<Fact>]
+let ``parse 10-multiline-sum.lll`` () =
+    let src = readExample "10-multiline-sum.lll"
+    let result = tokenize src |> Result.bind parseModule
+    match result with
+    | Ok _ -> ()
+    | Error e -> failwith $"Failed to parse 10-multiline-sum.lll: {e}"
+
 // --- Integration: invalid examples must PARSE but type-check fails ---
 // (At this stage we only have a parser, not a type checker.
 //  Invalid examples are syntactically valid, so they should parse without error.)

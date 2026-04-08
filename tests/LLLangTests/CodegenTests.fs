@@ -430,3 +430,26 @@ let ``runtime: match-as-expression in let binding`` () =
         "  printfn v"
     let stdout = runLLLangSrc src
     Assert.Contains("zero", stdout)
+
+// --- Phase 7.1.6: multi-line sum type runtime ---
+
+[<Fact>]
+let ``runtime: 10-multiline-sum.lll prints id:foo`` () =
+    let lllPath =
+        System.IO.Path.Combine(
+            __SOURCE_DIRECTORY__,
+            "../../spec/examples/valid/10-multiline-sum.lll")
+    let llcDll =
+        System.IO.Path.Combine(
+            __SOURCE_DIRECTORY__,
+            "../../src/LLLangTool/bin/Debug/net10.0/lllc.dll")
+    let psi = System.Diagnostics.ProcessStartInfo("dotnet", $"\"{llcDll}\" run \"{lllPath}\"")
+    psi.RedirectStandardOutput <- true
+    psi.RedirectStandardError  <- true
+    psi.UseShellExecute        <- false
+    use proc = System.Diagnostics.Process.Start(psi)
+    let stdout = proc.StandardOutput.ReadToEnd()
+    let stderr = proc.StandardError.ReadToEnd()
+    proc.WaitForExit()
+    Assert.True(stdout.Contains("id:foo"),
+                $"Expected stdout to contain 'id:foo'. stdout={stdout} stderr={stderr}")

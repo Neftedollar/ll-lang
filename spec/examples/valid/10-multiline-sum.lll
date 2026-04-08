@@ -1,0 +1,18 @@
+module Examples.MultilineSum
+
+-- Phase 7.1.6: multi-line sum type declaration with indented `|` arms.
+-- Both single-line and multi-line forms produce the same TBSum AST.
+type Token =
+  | TIdent Str
+  | TNum Str
+  | TLParen
+  | TRParen
+
+fn show(t Token) Str =
+  | TIdent s -> strConcat "id:" s
+  | TNum s -> strConcat "num:" s
+  | TLParen -> "("
+  | TRParen -> ")"
+
+fn main() =
+  printfn (show (TIdent "foo"))
