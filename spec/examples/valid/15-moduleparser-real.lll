@@ -1,0 +1,506 @@
+module Examples.ModuleParser
+
+-- Phase 7.4: a real recursive-descent **full module** parser written in
+-- ll-lang itself. Showcase milestone — the first single file that can
+-- consume a whole `module M\n type ... \n fn ... = ...` source end-to-
+-- end and emit a `List[Decl]` AST. Stitches together the four earlier
+-- self-hosting slices:
+--   * 09-lexer-real.lll       — single-pass char tokenizer
+--   * 12-typeparser-real.lll  — single-line sum-type decls
+--   * 13-fnparser-real.lll    — curried typed fn decls + arithmetic body
+--   * 14-exprparser-real.lll  — `if-then-else`, application, var refs
+--
+-- Constrained by design (Phase 7.5's job to extend): no `let` decls at
+-- module level, no `let-in` / `match` / lambda inside fn bodies, no
+-- multi-line bodies, no `tag`, no `import`/`export`, no `trait`/`impl`,
+-- no multi-line type decls, no parametric ctor args (`Maybe[A]`), no
+-- string literals, no cons / tuple / list patterns. What IS covered is
+-- enough to prove the front-end can be a single ll-lang program:
+--   * module header with dot-separated TypeId segments
+--   * multiple single-line sum-type decls with multi-ctor `|` chains
+--   * multiple single-line fn decls with curried typed params, optional
+--     return type, int-literal / var-ref / arithmetic / if-then-else /
+--     application bodies
+--
+-- Grammar (each decl on its own line; `\n` between decls):
+--   module  = 'module' Upper ('.' Upper)* '\n' decls
+--   decls   = decl*
+--   decl    = typeDecl | fnDecl
+--   typeDecl = 'type' Upper param* '=' ctor ('|' ctor)*
+--   param    = single-uppercase-letter (A, B, ...)
+--   ctor     = Upper typeArg*
+--   typeArg  = Upper                  -- TyVar if length 1, else TyCon
+--   fnDecl   = 'fn' lower paramGroup* typeName? '=' expr
+--   paramGroup = '(' lower typeName ')'  |  '(' ')'
+--   expr    = ifExpr | addSub
+--   ifExpr  = 'if' expr 'then' expr 'else' expr
+--   addSub  = mulDiv (('+' | '-') mulDiv)*
+--   mulDiv  = app (('*' | '/') app)*
+--   app     = atom atom*
+--   atom    = int | lower | Upper | '(' expr ')'
+--
+-- The pretty printer produces a deterministic, unambiguous string so the
+-- runtime test can substring-match each line of the expected output.
+
+type Maybe A = Some A | None
+
+type Token =
+  | TKwModule
+  | TKwType
+  | TKwFn
+  | TKwIf
+  | TKwThen
+  | TKwElse
+  | TLower Str
+  | TUpper Str
+  | TInt Int
+  | TLParen
+  | TRParen
+  | TEq
+  | TBar
+  | TDot
+  | TPlus
+  | TMinus
+  | TStar
+  | TSlash
+  | TNewline
+  | TEnd
+
+-- Type-decl AST ------------------------------------------------------------
+
+type TypeArg =
+  | TAVar Str
+  | TACon Str
+
+type Ctor = MkCtor Str List[TypeArg]
+
+type TypeDecl = MkTypeDecl Str List[Str] List[Ctor]
+
+-- Fn-decl + expression AST -------------------------------------------------
+
+type TypeRef = TR Str
+
+type Param = MkParam Str TypeRef
+
+-- Expression grammar for this slice: int literal, var ref (covers both
+-- lowercase identifiers and uppercase constructor references — the
+-- elaborator would distinguish, but for pretty-printing they're the
+-- same leaf), parenthesised grouping, `+ - * /`, `if-then-else`, and
+-- curried juxtaposition application.
+type Expr =
+  | EInt Int
+  | EVar Str
+  | EAdd Expr Expr
+  | ESub Expr Expr
+  | EMul Expr Expr
+  | EDiv Expr Expr
+  | EApp Expr Expr
+  | EIf Expr Expr Expr
+
+type FnDecl = MkFn Str List[Param] Maybe[TypeRef] Expr
+
+-- Module AST ---------------------------------------------------------------
+
+type Decl =
+  | DType TypeDecl
+  | DFn FnDecl
+
+type Module = MkModule Str List[Decl]
+
+-- ---------- Char predicates ---------------------------------------------
+
+-- ASCII uppercase / lowercase tests, same shape as 12/13/14. ll-lang lacks
+-- `&&` so each predicate is two nested `if`s.
+fn isUpperChar(c Char) Bool =
+  let n = charToInt c in
+  if n < 65 then false
+  else if n > 90 then false
+  else true
+
+fn isLowerChar(c Char) Bool =
+  let n = charToInt c in
+  if n < 97 then false
+  else if n > 122 then false
+  else true
+
+fn isIdStart(c Char) Bool =
+  if isUpperChar c then true else isLowerChar c
+
+fn isIdCont(c Char) Bool =
+  if isIdStart c then true else charIsDigit c
+
+-- ---------- Lexer --------------------------------------------------------
+
+-- Greedy take/drop while predicate, shared shape with every earlier slice.
+fn takeWhilePred(p)(cs List[Char]) List[Char] =
+  | c :: rest -> if p c then listAppend [c] (takeWhilePred p rest) else []
+  | _ -> []
+
+fn dropWhilePred(p)(cs List[Char]) List[Char] =
+  | c :: rest -> if p c then dropWhilePred p rest else cs
+  | _ -> []
+
+-- Unwrap `strToInt` into a raw Int; the lexer only calls this on strings
+-- that are already all-digits, so the `None` branch is defensive.
+fn parseIntStr(s Str) Int =
+  match strToInt s with
+    | Some n -> n
+    | None -> 0
+
+-- Classify an identifier: keywords map to TKw*; uppercase-start becomes
+-- TUpper (type / ctor names); lowercase-start becomes TLower (fn names,
+-- params, value vars). This parser never needs distinct `let`/`in`/
+-- `match`/`with` because the constrained body grammar doesn't use them.
+fn classifyIdent(s Str) Token =
+  match s with
+    | "module" -> TKwModule
+    | "type" -> TKwType
+    | "fn" -> TKwFn
+    | "if" -> TKwIf
+    | "then" -> TKwThen
+    | "else" -> TKwElse
+    | _ ->
+      let cs = strChars s in
+      match cs with
+        | c :: _ -> if isUpperChar c then TUpper s else TLower s
+        | _ -> TLower s
+
+fn lexId(cs List[Char]) List[Token] =
+  let idChars = takeWhilePred isIdCont cs in
+  let leftover = dropWhilePred isIdCont cs in
+  let tok = classifyIdent (strFromChars idChars) in
+  listAppend [tok] (lexChars leftover)
+
+fn lexNum(cs List[Char]) List[Token] =
+  let digits = takeWhilePred charIsDigit cs in
+  let leftover = dropWhilePred charIsDigit cs in
+  listAppend [TInt (parseIntStr (strFromChars digits))] (lexChars leftover)
+
+-- Main loop. Newlines are significant (they separate decls); spaces and
+-- tabs are skipped. Every other single-char symbol maps directly to its
+-- token constructor.
+fn lexChars(cs List[Char]) List[Token] =
+  | c :: rest ->
+    if c == '\n' then listAppend [TNewline] (lexChars rest)
+    else if charIsSpace c then lexChars rest
+    else if isIdStart c then lexId cs
+    else if charIsDigit c then lexNum cs
+    else if c == '(' then listAppend [TLParen] (lexChars rest)
+    else if c == ')' then listAppend [TRParen] (lexChars rest)
+    else if c == '=' then listAppend [TEq] (lexChars rest)
+    else if c == '|' then listAppend [TBar] (lexChars rest)
+    else if c == '.' then listAppend [TDot] (lexChars rest)
+    else if c == '+' then listAppend [TPlus] (lexChars rest)
+    else if c == '-' then listAppend [TMinus] (lexChars rest)
+    else if c == '*' then listAppend [TStar] (lexChars rest)
+    else if c == '/' then listAppend [TSlash] (lexChars rest)
+    else lexChars rest
+  | _ -> [TEnd]
+
+fn tokenize(src Str) List[Token] = lexChars (strChars src)
+
+-- ---------- Recursive-descent parser ------------------------------------
+
+-- Skip leading newlines between decls. Blank lines are invisible.
+fn skipNewlines(toks List[Token]) List[Token] =
+  | TNewline :: rest -> skipNewlines rest
+  | _ -> toks
+
+-- Module name tail: `.Upper` segments. Each recursive call prepends the
+-- dot + next segment to the accumulator string, then keeps walking. On
+-- the first non-dot token it stops.
+fn parseModuleNameTail(acc Str)(toks List[Token]) =
+  | TDot :: TUpper seg :: rest ->
+    let acc2 = strConcat (strConcat acc ".") seg in
+    parseModuleNameTail acc2 rest
+  | _ -> (acc, toks)
+
+-- `module Upper (. Upper)*`. Returns (qualified-name, remaining-tokens).
+fn parseModuleHeader(toks List[Token]) =
+  | TKwModule :: TUpper head :: rest ->
+    parseModuleNameTail head rest
+  | _ -> ("?", toks)
+
+-- Top-level driver. Reads the module header, then drives a decl loop.
+fn parseModule(toks List[Token]) Module =
+  let (name, rest) = parseModuleHeader toks in
+  let decls = parseDecls (skipNewlines rest) in
+  MkModule name decls
+
+-- Main decl loop. Cons-pattern fast paths dispatch on the first token.
+-- Anything that isn't `type` or `fn` terminates the loop — TEnd, TNewline
+-- (already skipped), unexpected tokens all fall through to the wildcard.
+fn parseDecls(toks List[Token]) List[Decl] =
+  | TKwType :: _ -> consTypeDecl (parseTypeDecl toks)
+  | TKwFn :: _ -> consFnDecl (parseFnDecl toks)
+  | _ -> []
+
+-- Helper: turn a (TypeDecl, leftover) pair into the recursive list.
+fn consTypeDecl(pair) List[Decl] =
+  let (td, rest) = pair in
+  DType td :: parseDecls (skipNewlines rest)
+
+fn consFnDecl(pair) List[Decl] =
+  let (fd, rest) = pair in
+  DFn fd :: parseDecls (skipNewlines rest)
+
+-- ---------- Type-decl parser (adapted from 12-typeparser-real.lll) ------
+
+-- Single decl: 'type' Upper param* '=' ctor ('|' ctor)*
+fn parseTypeDecl(toks List[Token]) =
+  | TKwType :: TUpper name :: rest ->
+    let (prms, rest2) = parseTypeParams rest in
+    let rest3 = match rest2 with
+      | TEq :: r -> r
+      | _ -> rest2
+    in
+    let (ctors, rest4) = parseCtors rest3 in
+    (MkTypeDecl name prms ctors, rest4)
+  | _ -> (MkTypeDecl "?" [] [], toks)
+
+-- Collect zero or more single-letter uppercase type params, stopping at
+-- TEq (or anything else non-Upper).
+fn parseTypeParams(toks List[Token]) =
+  | TUpper s :: rest ->
+    if strLen s == 1 then
+      let (ps, rest2) = parseTypeParams rest in
+      (s :: ps, rest2)
+    else ([], toks)
+  | _ -> ([], toks)
+
+-- First ctor is mandatory; each subsequent ctor is preceded by `|`.
+fn parseCtors(toks List[Token]) =
+  let (c, rest) = parseCtor toks in
+  parseCtorsTail [c] rest
+
+fn parseCtorsTail(acc List[Ctor])(toks List[Token]) =
+  | TBar :: rest ->
+    let (c, rest2) = parseCtor rest in
+    parseCtorsTail (listAppend acc [c]) rest2
+  | _ -> (acc, toks)
+
+fn parseCtor(toks List[Token]) =
+  | TUpper name :: rest ->
+    let (args, rest2) = parseTypeArgs rest in
+    (MkCtor name args, rest2)
+  | _ -> (MkCtor "?" [], toks)
+
+-- Collect zero or more type args. Stops on TBar / TNewline / TEnd / any
+-- non-Upper token. Single-letter names become TAVar; longer names TACon.
+fn parseTypeArgs(toks List[Token]) =
+  | TUpper s :: rest ->
+    let arg = if strLen s == 1 then TAVar s else TACon s in
+    let (args, rest2) = parseTypeArgs rest in
+    (arg :: args, rest2)
+  | _ -> ([], toks)
+
+-- ---------- Fn-decl parser (adapted from 13-fnparser-real.lll) ----------
+
+-- Single fn decl: 'fn' lower paramGroup* typeName? '=' expr
+fn parseFnDecl(toks List[Token]) =
+  | TKwFn :: TLower name :: rest ->
+    let (prms, rest2) = parseParamGroups rest in
+    let (retTy, rest3) = parseReturnType rest2 in
+    let rest4 = match rest3 with
+      | TEq :: r -> r
+      | _ -> rest3
+    in
+    let (body, rest5) = parseExpr rest4 in
+    (MkFn name prms retTy body, rest5)
+  | _ -> (MkFn "?" [] None (EInt 0), toks)
+
+-- Zero or more param groups. `()` produces no params; `(name Type)` adds
+-- a MkParam to the running list.
+fn parseParamGroups(toks List[Token]) =
+  | TLParen :: TRParen :: rest -> ([], rest)
+  | TLParen :: TLower pname :: TUpper tname :: TRParen :: rest ->
+    let (ps, rest2) = parseParamGroups rest in
+    (MkParam pname (TR tname) :: ps, rest2)
+  | _ -> ([], toks)
+
+-- Optional return type: a TUpper immediately before `=` becomes
+-- Some (TR name), anything else stays None.
+fn parseReturnType(toks List[Token]) =
+  | TUpper tname :: rest -> (Some (TR tname), rest)
+  | _ -> (None, toks)
+
+-- ---------- Expression parser (subset of 14-exprparser-real.lll) -------
+
+-- Decide whether a token can start an atom. Used by parseApp to know
+-- when to stop collecting arguments in a juxtaposition chain. Only
+-- atom-starters here: TInt, TLower, TUpper, TLParen. Newlines and
+-- keywords fall through to `false` so the application layer stops
+-- cleanly at decl boundaries and before `then`/`else` tokens.
+fn isAtomStart(t Token) Bool =
+  | TInt _ -> true
+  | TLower _ -> true
+  | TUpper _ -> true
+  | TLParen -> true
+  | _ -> false
+
+-- Top-level expression dispatcher. Only one special form in this slice:
+-- `if`. Everything else falls through to the arithmetic / application
+-- cascade. `let-in` and `match` are Phase 7.5's job.
+fn parseExpr(toks List[Token]) =
+  | TKwIf :: rest -> parseIf rest
+  | _ -> parseAddSub toks
+
+-- `if c then a else b`. Each of the three sub-expressions is parsed via
+-- the full parseExpr so nested `if`s work naturally.
+fn parseIf(toks List[Token]) =
+  let (c, rest) = parseExpr toks in
+  let rest2 = match rest with
+    | TKwThen :: r -> r
+    | _ -> rest
+  in
+  let (a, rest3) = parseExpr rest2 in
+  let rest4 = match rest3 with
+    | TKwElse :: r -> r
+    | _ -> rest3
+  in
+  let (b, rest5) = parseExpr rest4 in
+  (EIf c a b, rest5)
+
+-- Arithmetic precedence cascade, same shape as 13/14.
+fn parseAddSub(toks List[Token]) =
+  let (e, rest) = parseMulDiv toks in
+  parseAddSubTail e rest
+
+fn parseAddSubTail(lhs Expr)(toks List[Token]) =
+  | TPlus :: rest ->
+    let (r, rest2) = parseMulDiv rest in
+    parseAddSubTail (EAdd lhs r) rest2
+  | TMinus :: rest ->
+    let (r, rest2) = parseMulDiv rest in
+    parseAddSubTail (ESub lhs r) rest2
+  | _ -> (lhs, toks)
+
+fn parseMulDiv(toks List[Token]) =
+  let (e, rest) = parseApp toks in
+  parseMulDivTail e rest
+
+fn parseMulDivTail(lhs Expr)(toks List[Token]) =
+  | TStar :: rest ->
+    let (r, rest2) = parseApp rest in
+    parseMulDivTail (EMul lhs r) rest2
+  | TSlash :: rest ->
+    let (r, rest2) = parseApp rest in
+    parseMulDivTail (EDiv lhs r) rest2
+  | _ -> (lhs, toks)
+
+-- Application layer: left-associative juxtaposition. Collects atom args
+-- while the head token is an atom-starter.
+fn parseApp(toks List[Token]) =
+  let (e, rest) = parseAtom toks in
+  parseAppTail e rest
+
+fn parseAppTail(lhs Expr)(toks List[Token]) =
+  match toks with
+    | t :: _ ->
+      if isAtomStart t then
+        let (arg, rest) = parseAtom toks in
+        parseAppTail (EApp lhs arg) rest
+      else (lhs, toks)
+    | _ -> (lhs, toks)
+
+-- Atom: int, lower / upper variable reference, parenthesised expr.
+-- Anything unexpected falls through to a defensive `EInt 0`.
+fn parseAtom(toks List[Token]) =
+  | TInt n :: rest -> (EInt n, rest)
+  | TLower s :: rest -> (EVar s, rest)
+  | TUpper s :: rest -> (EVar s, rest)
+  | TLParen :: rest ->
+    let (e, rest2) = parseExpr rest in
+    match rest2 with
+      | TRParen :: rest3 -> (e, rest3)
+      | _ -> (e, rest2)
+  | _ -> (EInt 0, toks)
+
+-- ---------- Pretty printer ----------------------------------------------
+
+-- Render a TypeArg as its bare name; type vars and type cons are
+-- disambiguated by the wrapping context.
+fn showTypeArg(a TypeArg) Str =
+  | TAVar s -> s
+  | TACon s -> s
+
+-- Render a list of args as `(a1, a2)` or empty string for no args.
+fn showArgs(args List[TypeArg]) Str =
+  if listIsEmpty args then ""
+  else
+    let inner = listFold (\acc a. if strLen acc == 0 then showTypeArg a else strConcat (strConcat acc ", ") (showTypeArg a)) "" args in
+    strConcat (strConcat "(" inner) ")"
+
+fn showCtor(c Ctor) Str =
+  | MkCtor name args -> strConcat name (showArgs args)
+
+fn showCtors(cs List[Ctor]) Str =
+  listFold (\acc c. if strLen acc == 0 then showCtor c else strConcat (strConcat acc " | ") (showCtor c)) "" cs
+
+-- Render the type-param list as ` (A) (B)` with a leading space, or empty.
+fn showTypeParams(ps List[Str]) Str =
+  listFold (\acc p. strConcat (strConcat acc " (") (strConcat p ")")) "" ps
+
+fn showTypeDecl(d TypeDecl) Str =
+  | MkTypeDecl name prms ctors ->
+    let head = strConcat (strConcat "type " name) (showTypeParams prms) in
+    strConcat (strConcat head " = ") (showCtors ctors)
+
+-- Fn-decl pretty printer, matching the shape used by 13-fnparser-real.lll.
+fn showTypeRef(t TypeRef) Str =
+  | TR s -> s
+
+fn showParam(p Param) Str =
+  | MkParam n t -> strConcat (strConcat (strConcat "(" n) ": ") (strConcat (showTypeRef t) ")")
+
+fn showFnParams(ps List[Param]) Str =
+  if listIsEmpty ps then " ()"
+  else listFold (\acc p. strConcat (strConcat acc " ") (showParam p)) "" ps
+
+fn showReturn(r Maybe[TypeRef]) Str =
+  match r with
+    | Some t -> showTypeRef t
+    | None -> "?"
+
+-- Fully-parenthesised expression pretty-printer, matching 13/14's shape
+-- so the runtime test can substring-match each body.
+fn showExpr(e Expr) Str =
+  | EInt n -> intToStr n
+  | EVar s -> s
+  | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " + ") (showExpr r)) ")"
+  | ESub l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " - ") (showExpr r)) ")"
+  | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " * ") (showExpr r)) ")"
+  | EDiv l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " / ") (showExpr r)) ")"
+  | EApp f x -> strConcat (strConcat (strConcat (strConcat "(" (showExpr f)) " ") (showExpr x)) ")"
+  | EIf c a b ->
+    let p1 = strConcat "(if " (showExpr c) in
+    let p2 = strConcat (strConcat p1 " then ") (showExpr a) in
+    strConcat (strConcat (strConcat p2 " else ") (showExpr b)) ")"
+
+fn showFnDecl(d FnDecl) Str =
+  | MkFn name prms ret body ->
+    let headPart = strConcat (strConcat "fn " name) (showFnParams prms) in
+    let arrowPart = strConcat (strConcat headPart " -> ") (showReturn ret) in
+    strConcat (strConcat arrowPart " = ") (showExpr body)
+
+fn showDecl(d Decl) Str =
+  | DType td -> showTypeDecl td
+  | DFn fd -> showFnDecl fd
+
+-- Render a list of decls joined by `\n`, matching the input layout.
+fn showDecls(ds List[Decl]) Str =
+  listFold (\acc d. if strLen acc == 0 then showDecl d else strConcat (strConcat acc "\n") (showDecl d)) "" ds
+
+fn showModule(m Module) Str =
+  | MkModule name decls ->
+    let header = strConcat "module " name in
+    if listIsEmpty decls then header
+    else strConcat (strConcat header "\n") (showDecls decls)
+
+-- ---------- Driver -------------------------------------------------------
+
+fn main() =
+  let src = "module Examples.Toy\ntype Maybe A = Some A | None\ntype Color = Red | Green | Blue\nfn double(x Int) Int = x * 2\nfn pickColor(x Int) Color = if x then Red else Green\nfn answer() Int = 42" in
+  let toks = tokenize src in
+  let mod = parseModule toks in
+  printfn (showModule mod)
