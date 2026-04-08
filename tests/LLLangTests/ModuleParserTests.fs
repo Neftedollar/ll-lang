@@ -54,24 +54,30 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
-    // The parser walks
-    //   "module Examples.Toy\n
+    // Phase 7.5a extends the driver to also cover `let` decls at module
+    // level and `match`-with-explicit-scrutinee inside `fn` bodies:
+    //   "module Examples.Bigger\n
     //    type Maybe A = Some A | None\n
     //    type Color = Red | Green | Blue\n
+    //    let answer = 42\n
+    //    let zero = 0\n
     //    fn double(x Int) Int = x * 2\n
-    //    fn pickColor(x Int) Color = if x then Red else Green\n
-    //    fn answer() Int = 42"
+    //    fn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\n
+    //    fn pickColor(x Int) Color = if x then Red else Green"
     // and pretty-prints the whole module deterministically: the module
-    // header on its own line, each type/fn decl normalised to the form
+    // header on its own line, each type/let/fn decl normalised to the form
     // used by 12/13/14 (ctor args in parens; fn params space-separated;
-    // body expressions fully parenthesised).
+    // body expressions fully parenthesised; let decls as `let name = expr`;
+    // match in expression position as `(match scrut with | p -> e | ...)`).
     let expected =
-        [ "module Examples.Toy"
+        [ "module Examples.Bigger"
           "type Maybe (A) = Some(A) | None"
           "type Color = Red | Green | Blue"
+          "let answer = 42"
+          "let zero = 0"
           "fn double (x: Int) -> Int = (x * 2)"
-          "fn pickColor (x: Int) -> Color = (if x then Red else Green)"
-          "fn answer () -> Int = 42" ]
+          "fn classify (x: Int) -> Int = (match x with | 0 -> 0 | _ -> 1)"
+          "fn pickColor (x: Int) -> Color = (if x then Red else Green)" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),
