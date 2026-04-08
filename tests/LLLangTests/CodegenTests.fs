@@ -63,3 +63,55 @@ let ``TDType record type emits record syntax`` () =
 let ``TDTag emits nothing`` () =
     let src = "module M\ntag Meter"
     Assert.DoesNotContain("Meter", codegenSrc src)
+
+// ---------- Task 3: expression emission ----------
+
+[<Fact>]
+let ``TELit int emits int64 literal`` () =
+    Assert.Contains("42L", codegenSrc "module M\nlet x = 42")
+
+[<Fact>]
+let ``TELit float emits float literal`` () =
+    Assert.Contains("3.14", codegenSrc "module M\nlet x = 3.14")
+
+[<Fact>]
+let ``TELit string emits quoted string`` () =
+    Assert.Contains("\"hi\"", codegenSrc "module M\nlet x = \"hi\"")
+
+[<Fact>]
+let ``TELit bool true emits true`` () =
+    Assert.Contains("true", codegenSrc "module M\nlet x = true")
+
+[<Fact>]
+let ``TEApp binary add emits infix`` () =
+    let fs = codegenSrc "module M\nfn add(a Int)(b Int) Int = a + b"
+    Assert.Contains("let add a b =", fs)
+    Assert.Contains("(a + b)", fs)
+
+[<Fact>]
+let ``TEApp binary equality emits F# = operator`` () =
+    Assert.Contains("(a = b)", codegenSrc "module M\nfn eq(a Int)(b Int) Bool = a == b")
+
+[<Fact>]
+let ``TEApp binary inequality emits F# <> operator`` () =
+    Assert.Contains("(a <> b)", codegenSrc "module M\nfn neq(a Int)(b Int) Bool = a != b")
+
+[<Fact>]
+let ``TELam emits fun syntax`` () =
+    Assert.Contains("(fun x -> x)", codegenSrc "module M\nlet f = \\x. x")
+
+[<Fact>]
+let ``TEIf emits if-then-else`` () =
+    let fs = codegenSrc "module M\nfn abs(x Int) = if x < 0 then 0 else x"
+    Assert.Contains("then 0L", fs)
+    Assert.Contains("else x", fs)
+
+[<Fact>]
+let ``TDFn with no params emits let without parens`` () =
+    Assert.Contains("let greeting =", codegenSrc "module M\nfn greeting = \"hello\"")
+
+[<Fact>]
+let ``TDLet emits let binding`` () =
+    let fs = codegenSrc "module M\nlet pi = 3.14159"
+    Assert.Contains("let pi =", fs)
+    Assert.Contains("3.14159", fs)
