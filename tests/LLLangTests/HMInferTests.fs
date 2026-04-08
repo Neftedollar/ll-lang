@@ -239,6 +239,24 @@ let ``infer char literal`` () =
     Assert.Equal(TyName "Char", (schemeOf tm "c").Body)
 
 [<Fact>]
+let ``infer indented let without in: multi-line fn body`` () =
+    let src = "module M\nfn f() =\n  let x = 1\n  let y = 2\n  x + y"
+    let tm = inferOk src
+    // Body should infer as Int
+    let sch = schemeOf tm "f"
+    match sch.Body with
+    | TyFn(_, TyName "Int") | TyName "Int" -> ()
+    | t -> failwith $"expected Int return, got {t}"
+
+[<Fact>]
+let ``infer indented let: single vs multi-line give same type`` () =
+    let singleLine = "module M\nfn g() = let x = 1 in let y = 2 in x + y"
+    let multiLine  = "module M\nfn g() =\n  let x = 1\n  let y = 2\n  x + y"
+    let t1 = (schemeOf (inferOk singleLine) "g").Body
+    let t2 = (schemeOf (inferOk multiLine)  "g").Body
+    Assert.Equal(t1, t2)
+
+[<Fact>]
 let ``infer fn with declared params and elided return`` () =
     let tm = inferOk "module M\nfn inc(x Int) = x + 1"
     let sch = schemeOf tm "inc"

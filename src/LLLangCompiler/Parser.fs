@@ -87,7 +87,10 @@ and private parseApp (c: Ctx) : Result<Expr, string> =
         let mutable result = first
         let mutable cont = true
         while cont do
-            skipNewlines c
+            // Do NOT skip newlines here: newlines terminate an application
+            // in expression position so that indented `let` chains can be
+            // parsed correctly. Multi-line applications must be wrapped in
+            // parens.
             match curTok c with
             | IntLit _ | FloatLit _ | StrLit _ | CharLit _ | KwTrue | KwFalse
             | Ident _ | TypeId _ | LParen | LBrack ->
@@ -169,6 +172,19 @@ and private parsePipe (c: Ctx) : Result<Expr, string> =
 and private parseExprInner (c: Ctx) : Result<Expr, string> =
     skipNewlines c
     match curTok c with
+    | Indent ->
+        // Expression position opens an indented block (e.g. body of `else`
+        // on its own line). Inside the block, a sequence of `let` bindings
+        // without the `in` keyword is folded into nested ELets whose body
+        // is the remainder of the block — see `parseBlockExpr`.
+        advance c
+        skipNewlines c
+        match parseBlockExpr c with
+        | Error e -> Error e
+        | Ok body ->
+            skipNewlines c
+            skip c Dedent |> ignore
+            Ok body
     | KwLet ->
         advance c
         match curTok c with
@@ -192,12 +208,15 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
         match parseExprInner c with
         | Error e -> Error e
         | Ok cond ->
+            skipNewlines c
             match skip c KwThen with
             | Error e -> Error e
             | Ok () ->
                 match parseExprInner c with
                 | Error e -> Error e
                 | Ok thenE ->
+                    // Allow `else` on the next line (common multi-line form).
+                    skipNewlines c
                     match skip c KwElse with
                     | Error e -> Error e
                     | Ok () ->
@@ -219,6 +238,39 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
             | Ok body -> Ok (ELam(List.ofSeq parms, body))
             | Error e -> Error e
     | _ -> parsePipe c
+
+/// Parse an expression inside an indented block. If the parsed expression
+/// is a bare `let name = e` (without `in`) AND there is more content on
+/// subsequent lines at the same indent (i.e. no DEDENT/EOF in the way),
+/// treat the rest of the block as the body: produces nested ELets.
+/// This lets users write
+///   let x = 1
+///   let y = 2
+///   x + y
+/// instead of the chained `let ... in ... let ... in ...` single-liner.
+and private parseBlockExpr (c: Ctx) : Result<Expr, string> =
+    match parseExprInner c with
+    | Error e -> Error e
+    | Ok expr ->
+        match expr with
+        | ELet(name, e1, None) ->
+            // Peek past any trailing newlines. If the next token is a
+            // valid continuation (not Dedent/Eof/top-level-decl), parse
+            // it as the body of this let.
+            let saved = c.Pos
+            while curTok c = Newline do advance c
+            match curTok c with
+            | Dedent | Eof | Bar ->
+                // No continuation — restore position so the caller
+                // still sees the trailing newlines/dedent and return
+                // the bare let.
+                c.Pos <- saved
+                Ok expr
+            | _ ->
+                match parseBlockExpr c with
+                | Ok body -> Ok (ELet(name, e1, Some body))
+                | Error e -> Error e
+        | _ -> Ok expr
 
 /// Parse an expression from a token list. Returns (expr, remaining tokens).
 let parseExpr (tokens: Tok list) : Result<Expr * Tok list, string> =
@@ -430,7 +482,7 @@ let private parseFnBody (c: Ctx) : Result<Expr, string> =
         let result =
             match curTok c with
             | Bar -> parseMatchBranches c
-            | _ -> parseExprInner c
+            | _ -> parseBlockExpr c  // Phase 6.7: allow indented let-chains
         skipNewlines c
         skip c Dedent |> ignore
         result

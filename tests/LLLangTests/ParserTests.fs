@@ -269,3 +269,58 @@ let ``arithmetic precedence: mul binds tighter than add`` () =
     match parseExprStr "a + b * c" with
     | EApp(EApp(EVar "+", EVar "a"), EApp(EApp(EVar "*", EVar "b"), EVar "c")) -> ()
     | e -> failwith $"Wrong precedence: {e}"
+
+// --- Phase 6.7: indented let without 'in' ---
+
+/// Extract fn body expr from a module with a single fn.
+let private fnBody (m: LLModule) : Expr =
+    match fst m.Decls[0] with
+    | DFn(_, body) -> body
+    | d -> failwith $"Expected DFn, got {d}"
+
+[<Fact>]
+let ``indented let without in: single-line with 'in' baseline`` () =
+    let src = "module M\nfn f() = let x = 1 in let y = 2 in x + y"
+    let m = parseModuleStr src
+    match fnBody m with
+    | ELet("x", ELit(LInt 1L), Some(ELet("y", ELit(LInt 2L), Some(_)))) -> ()
+    | e -> failwith $"Expected nested ELets, got {e}"
+
+[<Fact>]
+let ``indented let without in: multi-line no 'in' keyword`` () =
+    // fn f() =
+    //   let x = 1
+    //   let y = 2
+    //   x + y
+    let src = "module M\nfn f() =\n  let x = 1\n  let y = 2\n  x + y"
+    let m = parseModuleStr src
+    match fnBody m with
+    | ELet("x", ELit(LInt 1L), Some(ELet("y", ELit(LInt 2L), Some(_)))) -> ()
+    | e -> failwith $"Expected nested ELets, got {e}"
+
+[<Fact>]
+let ``indented let inside else branch`` () =
+    // fn f() =
+    //   if true then 1
+    //   else
+    //     let x = 2
+    //     let y = 3
+    //     x + y
+    let src = "module M\nfn f() =\n  if true then 1\n  else\n    let x = 2\n    let y = 3\n    x + y"
+    let m = parseModuleStr src
+    match fnBody m with
+    | EIf(_, _, ELet("x", ELit(LInt 2L), Some(ELet("y", ELit(LInt 3L), Some _)))) -> ()
+    | e -> failwith $"Expected EIf with ELet-chain else, got {e}"
+
+[<Fact>]
+let ``module-level multiple lets still parse as siblings`` () =
+    // Regression: two top-level DLet decls, NOT a nested let
+    let src = "module M\nlet a = 1\nlet b = 2"
+    let m = parseModuleStr src
+    Assert.Equal(2, m.Decls.Length)
+    match fst m.Decls[0] with
+    | DLet("a", ELit(LInt 1L)) -> ()
+    | d -> failwith $"Expected DLet a = 1, got {d}"
+    match fst m.Decls[1] with
+    | DLet("b", ELit(LInt 2L)) -> ()
+    | d -> failwith $"Expected DLet b = 2, got {d}"

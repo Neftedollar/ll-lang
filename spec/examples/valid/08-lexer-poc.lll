@@ -12,9 +12,9 @@ fn classify(c Char) Token =
   if charIsDigit c then TNum (strFromChars [c])
   else if charIsAlpha c then TIdent (strFromChars [c])
   else if charIsSpace c then TSpace
-  else if charToInt c == 40 then TLParen
-  else if charToInt c == 41 then TRParen
-  else if charToInt c == 43 then TPlus
+  else if c == '(' then TLParen
+  else if c == ')' then TRParen
+  else if c == '+' then TPlus
   else TUnknown
 
 fn tokenName(t Token) Str =
