@@ -445,3 +445,93 @@ Next slice: **Phase 7.3b — fn-decl parser** (`fn add(a Int)(b Int) Int
 = a + b`), then 7.3c — full expressions (richer than the arithmetic
 subset), then tying lexer + type-decl + fn-decl + expression parsers
 together into a real ll-lang front end written in ll-lang itself.
+
+### 2026-04 — Phase 7.3b: fn-declaration parser (DONE)
+
+`spec/examples/valid/13-fnparser-real.lll` (270 lines) is a working
+recursive-descent **fn-declaration** parser written in ll-lang itself.
+Fourth self-hosting milestone after the real lexer (7.1), the
+arithmetic parser (7.2), and the type-decl parser (7.3a). Together
+they cover four of the five front-end pieces needed for an
+ll-lang-in-ll-lang compiler — only the full expression parser (7.3c,
+adding `if`/`let`/`match`/lambdas on top of the arithmetic subset)
+remains before every surface form the F# front end parses has a
+mirror implementation in ll-lang.
+
+The parser handles the single-line form
+`fn Name(p1 T1)(p2 T2) ... RetTy? = bodyExpr` for the input
+
+```
+fn add(a Int)(b Int) Int = a + b
+fn double(x Int) = x * 2
+fn const(a Int)(b Int) Int = a
+fn answer() Int = 42
+```
+
+and prints each declaration on its own normalised line via `lllc run`:
+
+```
+fn add (a: Int) (b: Int) -> Int = (a + b)
+fn double (x: Int) -> ? = (x * 2)
+fn const (a: Int) (b: Int) -> Int = a
+fn answer () -> Int = 42
+```
+
+Curried param groups print space-separated as `(name: Type)`; nullary
+fns print `()`; missing return types print as `?`; binary body ops are
+fully parenthesised; leaves (variables, literals) print bare. The
+body-expression grammar is a strict subset of 11-parser-real.lll's:
+integer literals, variable references, and `+` / `-` / `*` / `/` with
+the usual precedence. `if` / `let` / `match` / lambdas are Phase
+7.3c's job.
+
+The parser exercises:
+
+- A 7-way mutually-recursive fn group (`parseFnDecls` ↔
+  `parseDeclsClean` ↔ `consDecl` ↔ `parseFnDecl`, plus the
+  five-way expression parser `parseExpr`/`parseExprTail`/`parseTerm`/
+  `parseTermTail`/`parseFactor` reused from 11-parser-real.lll with
+  a TLower-variable leaf added to `parseFactor`)
+- A four-field ADT (`FnDecl`) carrying `Str`, `List[Param]`,
+  `Maybe[TypeRef]`, and `Expr` — the first corpus file that uses
+  the bracket syntax `Maybe[TypeRef]` inside a constructor signature
+  (parens `(Maybe TypeRef)` don't parse as a single ctor arg; see
+  gap 4 below)
+- Optional return-type parsing by looking for a `TUpper` token
+  immediately before `=` — a clean example of "Maybe from lookahead"
+- Surface tuple returns from every parser helper
+  (`parseFnDecl : List Token -> (FnDecl, List Token)`)
+
+Three language gaps surfaced (these become Phase 7.3c
+prerequisites):
+
+1. **List-literal elements parse as atoms, not applications.** Writing
+   `[TNum numVal]` in an expression position parses as a two-element
+   list `[TNum, numVal]` rather than the one-element list
+   `[TNum numVal]`. Workaround: let-bind the application first
+   (`let tok = TNum numVal in listAppend [tok] ...`). The list-literal
+   parser in `Parser.fs` calls `parseTagged` per element, which stops
+   at `parseAtom`, so juxtaposition-application is lost. Fix: switch
+   the list-literal element parser to `parseApp`, or require commas.
+2. **Deeply-nested multi-line `strConcat` chains confuse `parseApp`.**
+   A `strConcat` applied across multiple newline-indented arguments
+   loses the application shape and elaborates as if `strConcat` were
+   used unapplied, producing `TyFn(Str, TyFn(Str, Str)) vs Str`.
+   Workaround: use single-line `strConcat` calls or pipe through
+   `let` intermediates. Likely root cause: indentation-sensitive
+   application termination in `parseApp`.
+3. **Parenthesised type application as a ctor arg rejects juxtaposition.**
+   `type FnDecl = MkFn ... (Maybe TypeRef) ...` treats the inside of
+   the parens as `parseTypeExprTop`, which only applies types via
+   `[…]` brackets, so `Maybe TypeRef` inside parens errors out and
+   the ctor silently drops the arg. Workaround: write `Maybe[TypeRef]`
+   without parens. Fix: inside `parseBase`'s paren branch, accept
+   the surface `List`-style application grammar instead of the
+   stricter `parseTypeExprTop`.
+
+Test count: 362 → 365 (corpus theory + 2 new FnParserTests).
+
+Next slice: **Phase 7.3c — full expression parser** (adds `if` /
+`let` / `match` / lambda on top of the arithmetic subset), then
+tying lexer + type-decl + fn-decl + full-expression parsers together
+into the first ll-lang front end written in ll-lang itself.

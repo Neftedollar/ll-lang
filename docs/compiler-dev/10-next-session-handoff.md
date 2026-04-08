@@ -7,17 +7,18 @@ session to pick up without replaying history.
 
 - **main** is at a clean commit, everything pushed to
   `github.com/Neftedollar/ll-lang`.
-- **357 xUnit tests** pass (`dotnet test` from repo root).
+- **365 xUnit tests** pass (`dotnet test` from repo root).
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a done.** ll-lang now hosts a real
-  lexer (`09-lexer-real.lll`), a real recursive-descent expression
-  parser (`11-parser-real.lll`), AND a real type-declaration parser
-  (`12-typeparser-real.lll`) written in itself. Together they prove
-  the language can express three pieces of its own front end (lex,
-  expression parse, type-decl parse); scaling up to a full ll-lang
-  parser-in-itself is Phase 7.3b+.
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b done.** ll-lang now hosts a
+  real lexer (`09-lexer-real.lll`), a real recursive-descent expression
+  parser (`11-parser-real.lll`), a real type-declaration parser
+  (`12-typeparser-real.lll`), AND a real fn-declaration parser
+  (`13-fnparser-real.lll`) written in itself. Together they prove the
+  language can express four of the five pieces of its own front end
+  (lex, expression parse, type-decl parse, fn-decl parse); scaling up
+  to a full ll-lang parser-in-itself is Phase 7.3c+.
 - No stale worktrees, no stray branches, no uncommitted changes.
 - `lllc run spec/examples/valid/hello.lll` prints `Hello, ll-lang!`.
 - `lllc run spec/examples/valid/09-lexer-real.lll` prints
@@ -32,36 +33,43 @@ session to pick up without replaying history.
   type Wrapped = MkWrapped(Int)
   ```
   (four `type` decls round-tripped through tokenize → parse → pretty).
+- `lllc run spec/examples/valid/13-fnparser-real.lll` prints
+  ```
+  fn add (a: Int) (b: Int) -> Int = (a + b)
+  fn double (x: Int) -> ? = (x * 2)
+  fn const (a: Int) (b: Int) -> Int = a
+  fn answer () -> Int = 42
+  ```
+  (four `fn` decls with curried typed params and optional return
+  types round-tripped through tokenize → parse → pretty).
 
 ## Immediate next task
 
-**Phase 7.3b — fn-declaration parser in ll-lang**. Mirror the
-type-declaration slice (Phase 7.3a, `12-typeparser-real.lll`) for
-function declarations of the shape
+**Phase 7.3c — full expression parser in ll-lang**. Extend the
+arithmetic-subset body grammar from `11-parser-real.lll` (reused for
+the body of `13-fnparser-real.lll`) to the full ll-lang expression
+language: `let` / `let-in`, `if`-`then`-`else`, `match ... with`,
+lambdas (`\x. body`), function application, cons `::` expressions,
+list literals. After 7.3c, Phase 7.3d ties lexer + type-decl +
+fn-decl + full-expression parsers together into the first ll-lang
+front end written in ll-lang itself.
 
-```
-fn add(a Int)(b Int) Int = a + b
-fn double(x Int) = x * 2
-```
+Before 7.3c the three language gaps surfaced by 7.3b are worth
+fixing (see Phase 7.3b section in `09-self-hosting-roadmap.md`):
 
-with the same single-line scope: typed params, optional return type,
-single-expression body limited to identifiers + arithmetic operators.
-After 7.3b, Phase 7.3c picks up richer expression parsing (let, if,
-lambda, match). Phase 7.3d ties lexer + type-decl + fn-decl + expr
-parsers together into a real ll-lang front end written in ll-lang
-itself.
+1. List-literal elements parse as atoms instead of applications, so
+   `[TNum numVal]` becomes a two-element list. Needs `parseApp` or
+   comma separators in the list-literal parser.
+2. Multi-line `strConcat` chains trip application termination in
+   `parseApp` under deeply-nested indentation.
+3. Parenthesised type application as a ctor arg (`(Maybe TypeRef)`)
+   rejects juxtaposition; only `Maybe[TypeRef]` bracket form works.
 
 Other high-leverage backlog items can also be picked up first:
 
 - Fix `atom[Tag]` ambiguity (parser lookahead beyond `]`)
 - Codegen polish: emit prelude block AFTER types but handle files
   that don't declare any types (currently the order is fragile)
-- Fix the clause-sugar quirks surfaced by 7.3a (multi-line `let-in`
-  arms get scoping wrong; `| []` arms get silently dropped when
-  mixed with cons arms — see Phase 7.3a section in
-  `09-self-hosting-roadmap.md`)
-- Codegen rewrite of F# reserved names like `params` →
-  `_params` so user-side `params` doesn't trip FS0046
 
 ## Language gaps (backlog for Phase 7.3+)
 
@@ -189,6 +197,7 @@ is reserved for multi-target Platform mismatches and never fires.
 - `RealLexerTests.fs`
 - `ArithmeticParserTests.fs`
 - `TypeParserTests.fs`
+- `FnParserTests.fs`
 
 Add any new corpus example to the `valid corpus infers ok` theory so
 its inference is smoke-tested automatically.
