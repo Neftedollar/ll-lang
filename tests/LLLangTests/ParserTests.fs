@@ -701,3 +701,50 @@ let ``list literal: cons of ctor-app as head element`` () =
         EVar "xs") -> ()
     | e -> failwith $"Expected listAppend [TNum 42] xs, got {e}"
 
+// --- Phase 7.3b-fixes bug 2: multi-line application chains ---
+//
+// A function call that spans multiple indented lines is an application, not
+// a bare value. Each continuation line sits at strictly greater indentation
+// than the call position and becomes an additional curried argument.
+
+[<Fact>]
+let ``multi-line strConcat chain parses as nested EApp`` () =
+    let src =
+        "module M\n" +
+        "fn show(x Str)(y Str)(z Str) Str =\n" +
+        "  strConcat\n" +
+        "    (strConcat x y)\n" +
+        "    z\n"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(_, body) ->
+        match body with
+        | EApp(EApp(EVar "strConcat",
+                    EApp(EApp(EVar "strConcat", EVar "x"), EVar "y")),
+               EVar "z") -> ()
+        | e -> failwith $"Expected nested EApp of strConcat, got {e}"
+    | d -> failwith $"Expected DFn, got {d}"
+
+[<Fact>]
+let ``single-line strConcat chain still works (regression)`` () =
+    let src = "module M\nfn f(a Str)(b Str)(c Str) Str = strConcat a (strConcat b c)"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(_, EApp(EApp(EVar "strConcat", EVar "a"),
+                  EApp(EApp(EVar "strConcat", EVar "b"), EVar "c"))) -> ()
+    | d -> failwith $"Expected DFn, got {d}"
+
+[<Fact>]
+let ``multi-line three-arg call with bare atoms`` () =
+    let src =
+        "module M\n" +
+        "fn g(a Int)(b Int)(c Int) Int =\n" +
+        "  plus3\n" +
+        "    a\n" +
+        "    b\n" +
+        "    c\n"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(_, EApp(EApp(EApp(EVar "plus3", EVar "a"), EVar "b"), EVar "c")) -> ()
+    | d -> failwith $"Expected DFn with 3-arg plus3 call, got {d}"
+

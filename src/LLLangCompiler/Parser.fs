@@ -160,10 +160,18 @@ and private parseApp (c: Ctx) : Result<Expr, string> =
         let mutable result = first
         let mutable cont = true
         while cont do
-            // Do NOT skip newlines here: newlines terminate an application
-            // in expression position so that indented `let` chains can be
-            // parsed correctly. Multi-line applications must be wrapped in
-            // parens.
+            // Do NOT skip newlines here in the inline branch: newlines
+            // terminate an application in expression position so that
+            // indented `let` chains can be parsed correctly.
+            //
+            // Phase 7.3b bug 2: a multi-line call is opened by a Newline+
+            // Indent sequence on the line right after the function position.
+            // When we see that shape AND the indented block begins with an
+            // atom-starting token, treat the whole block as a continuation-
+            // argument list for `result`, collect every atom it contains
+            // (across inner newlines at the same block level), consume the
+            // matching Dedent, then resume the outer loop in case there are
+            // still more args on the parent line after the Dedent.
             match curTok c with
             | IntLit _ | FloatLit _ | StrLit _ | CharLit _ | KwTrue | KwFalse
             | Ident _ | TypeId _ | LParen | LBrack ->
@@ -174,6 +182,52 @@ and private parseApp (c: Ctx) : Result<Expr, string> =
                     // which is where `E001 TypeMismatch` wants to point.
                     result <- recordAt c argIdx (EApp(result, arg))
                 | Error _ -> cont <- false
+            | Newline ->
+                // Peek past any newlines to see if we're at a multi-line
+                // continuation block (Indent + atom). If not, rewind.
+                let saved = c.Pos
+                while curTok c = Newline do advance c
+                if curTok c = Indent then
+                    advance c
+                    while curTok c = Newline do advance c
+                    let isAtomStart =
+                        match curTok c with
+                        | IntLit _ | FloatLit _ | StrLit _ | CharLit _
+                        | KwTrue | KwFalse | Ident _ | TypeId _
+                        | LParen | LBrack -> true
+                        | _ -> false
+                    if isAtomStart then
+                        // Consume every atom in the block as a continuation
+                        // argument. Newlines between atoms are transparent
+                        // inside the block (same indent level = no nested
+                        // Indent/Dedent). Stop at Dedent — that's the block
+                        // boundary — or at any non-atom token.
+                        let mutable blockCont = true
+                        while blockCont do
+                            while curTok c = Newline do advance c
+                            match curTok c with
+                            | IntLit _ | FloatLit _ | StrLit _ | CharLit _
+                            | KwTrue | KwFalse | Ident _ | TypeId _
+                            | LParen | LBrack ->
+                                let argIdx = c.Pos
+                                match parseTagged c with
+                                | Ok arg ->
+                                    result <- recordAt c argIdx (EApp(result, arg))
+                                | Error _ -> blockCont <- false
+                            | _ -> blockCont <- false
+                        while curTok c = Newline do advance c
+                        // Consume the Dedent that closes the continuation
+                        // block. If it's missing something has gone wrong
+                        // upstream; fall back to stopping the outer loop.
+                        match skip c Dedent with
+                        | Ok () -> ()
+                        | Error _ -> cont <- false
+                    else
+                        c.Pos <- saved
+                        cont <- false
+                else
+                    c.Pos <- saved
+                    cont <- false
             | _ -> cont <- false
         Ok result
 
