@@ -85,18 +85,16 @@ let private collectDecls (m: LLModule) : TypeEnv =
             addFnSig sigRecord None
 
         | DLet(name, expr) ->
-            let tyOpt =
+            let ty =
                 match expr with
-                | ELit(LInt _)   -> Some (TyName "Int")
-                | ELit(LFloat _) -> Some (TyName "Float")
-                | ELit(LStr _)   -> Some (TyName "Str")
-                | ETagged(ELit(LInt _),   tag) -> Some (TyTagged(TyName "Int",   UName tag))
-                | ETagged(ELit(LFloat _), tag) -> Some (TyTagged(TyName "Float", UName tag))
-                | ETagged(ELit(LStr _),   tag) -> Some (TyTagged(TyName "Str",   UName tag))
-                | _ -> None
-            match tyOpt with
-            | Some ty -> env <- Map.add name ty env
-            | None    -> ()
+                | ELit(LInt _)   -> TyName "Int"
+                | ELit(LFloat _) -> TyName "Float"
+                | ELit(LStr _)   -> TyName "Str"
+                | ETagged(ELit(LInt _),   tag) -> TyTagged(TyName "Int",   UName tag)
+                | ETagged(ELit(LFloat _), tag) -> TyTagged(TyName "Float", UName tag)
+                | ETagged(ELit(LStr _),   tag) -> TyTagged(TyName "Str",   UName tag)
+                | _ -> TyVar "?"
+            env <- Map.add name ty env
 
         | DType(typeName, typeParams, TBSum ctors) ->
             // Collect declared type parameter names so we can treat them as TyVar
@@ -114,11 +112,17 @@ let private collectDecls (m: LLModule) : TypeEnv =
                 | TyFn(a, b)  -> TyFn(subst a, subst b)
                 | TyTagged(a, u) -> TyTagged(subst a, u)
                 | other -> other
+            // Build the fully-applied return type, e.g. Maybe[A] for type Maybe A
+            let retTy =
+                List.fold (fun acc tp ->
+                    match tp with
+                    | TPBare n | TPPhantom n -> TyApp(acc, TyVar n)
+                ) (TyName typeName) typeParams
             for (ctorName, argTypes) in ctors do
                 let ty =
                     match argTypes with
-                    | [] -> TyName typeName
-                    | _  -> buildFnType (argTypes |> List.map subst) (TyName typeName)
+                    | [] -> retTy
+                    | _  -> buildFnType (argTypes |> List.map subst) retTy
                 env <- Map.add ctorName ty env
 
         | DImpl(_traitName, implType, fns) ->

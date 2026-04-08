@@ -305,3 +305,83 @@ let ``heterogeneous list yields E001`` () =
 let ``tagged literal preserves tag`` () =
     let tm = inferOk "module M\nlet d = 5.0[Meter]"
     Assert.Equal(TyTagged(TyName "Float", UName "Meter"), (schemeOf tm "d").Body)
+
+// --- Task 5: Let-generalization + Match + Patterns ---
+
+[<Fact>]
+let ``let-generalization: polymorphic let used at two types`` () =
+    let src =
+        "module M\n" +
+        "let id2 = \\x. x\n" +
+        "let a = id2 1\n" +
+        "let b = id2 \"s\""
+    let tm = inferOk src
+    Assert.Equal(TyName "Int", (schemeOf tm "a").Body)
+    Assert.Equal(TyName "Str", (schemeOf tm "b").Body)
+
+[<Fact>]
+let ``instantiation is fresh per use`` () =
+    let src =
+        "module M\n" +
+        "let id = \\x. x\n" +
+        "let pair = id id"
+    let tm = inferOk src
+    Assert.NotNull(schemeOf tm "pair")
+
+[<Fact>]
+let ``nested let captures outer variable`` () =
+    let src =
+        "module M\n" +
+        "let outer = \\x. (let inner = \\y. x in inner)"
+    let tm = inferOk src
+    let sch = schemeOf tm "outer"
+    Assert.InRange(List.length sch.Vars, 1, 2)
+
+[<Fact>]
+let ``match on Maybe with Some and None branches unify`` () =
+    let src =
+        "module M\n" +
+        "type Maybe A = Some A | None\n" +
+        "fn unwrap(m Maybe[Int]) Int =\n" +
+        "  | Some n -> n\n" +
+        "  | None -> 0"
+    let tm = inferOk src
+    let sch = schemeOf tm "unwrap"
+    Assert.Equal(TyFn(TyApp(TyName "Maybe", TyName "Int"), TyName "Int"), sch.Body)
+
+[<Fact>]
+let ``match branch type mismatch yields E001`` () =
+    let src =
+        "module M\n" +
+        "type Maybe A = Some A | None\n" +
+        "fn unwrap(m Maybe[Int]) Int =\n" +
+        "  | Some n -> n\n" +
+        "  | None -> \"oops\""
+    let errs = inferErrs src
+    Assert.Contains(errs, fun e -> e.Code = E001)
+
+[<Fact>]
+let ``value restriction not applied: polymorphic lambda reused`` () =
+    let src =
+        "module M\n" +
+        "let f = \\x. x\n" +
+        "let a = f 1\n" +
+        "let b = f true"
+    let tm = inferOk src
+    Assert.Equal(TyName "Int", (schemeOf tm "a").Body)
+    Assert.Equal(TyName "Bool", (schemeOf tm "b").Body)
+
+[<Fact>]
+let ``occurs check fires from self-application`` () =
+    let src = "module M\nlet bad = \\x. x x"
+    let errs = inferErrs src
+    Assert.Contains(errs, fun e -> e.Code = E008)
+
+[<Fact>]
+let ``unit tag preserved through polymorphic lambda`` () =
+    let src =
+        "module M\n" +
+        "let f = \\x. x\n" +
+        "let g = f 5.0[Meter]"
+    let tm = inferOk src
+    Assert.Equal(TyTagged(TyName "Float", UName "Meter"), (schemeOf tm "g").Body)
