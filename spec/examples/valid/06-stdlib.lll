@@ -1,0 +1,14 @@
+module Examples.Stdlib
+
+type Maybe A = Some A | None
+
+fn double(x Int) Int = x * 2
+
+fn sumList(xs List[Int]) Int = listFold (\acc. \x. acc + x) 0 xs
+
+fn doubleAll(xs List[Int]) List[Int] = listMap double xs
+
+fn nameLen(name Str) Int = strLen name
+
+fn main() =
+  printfn "stdlib example"

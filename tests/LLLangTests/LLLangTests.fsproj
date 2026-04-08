@@ -23,5 +23,6 @@
     <Compile Include="ElaboratorTests.fs" />
     <Compile Include="HMInferTests.fs" />
     <Compile Include="CodegenTests.fs" />
+    <Compile Include="StdlibTests.fs" />
   </ItemGroup>
 </Project>
