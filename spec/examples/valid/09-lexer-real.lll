@@ -37,26 +37,20 @@ fn keywordOrIdent(s Str) Token =
     | "else" -> TElse
     | _ -> TIdent s
 
--- Prepend a single token to a list. We can't write the more idiomatic
--- `listAppend [TPlus] xs` directly because the parser misinterprets a
--- bracketed type-constructor that immediately follows another atom as a
--- tagged literal (`atom[Tag]`). Wrapping the cons in this helper sidesteps
--- the ambiguity: inside `pre`, the bracketed expression contains the
--- lowercase variable `t`, which is unambiguous.
-fn pre(t Token)(ts List[Token]) List[Token] = listAppend [t] ts
-
 -- Lex an identifier (already verified the head char is alpha): collect the
 -- identifier prefix, classify it as a keyword or `TIdent`, and continue.
 fn lexId(cs List[Char]) List[Token] =
   let idChars = takeWhilePred isIdCont cs in
   let leftover = dropWhilePred isIdCont cs in
-  pre (keywordOrIdent (strFromChars idChars)) (lexChars leftover)
+  let tok = keywordOrIdent (strFromChars idChars) in
+  listAppend [tok] (lexChars leftover)
 
 -- Lex a multi-digit integer (already verified the head char is a digit).
 fn lexNum(cs List[Char]) List[Token] =
   let digits = takeWhilePred charIsDigit cs in
   let leftover = dropWhilePred charIsDigit cs in
-  pre (TInt (strFromChars digits)) (lexChars leftover)
+  let tok = TInt (strFromChars digits) in
+  listAppend [tok] (lexChars leftover)
 
 -- Lex a single-char operator / punctuation token via inline match.
 fn lexOp(c Char)(rest List[Char]) List[Token] =
@@ -71,7 +65,7 @@ fn lexOp(c Char)(rest List[Char]) List[Token] =
     | '(' -> TLParen
     | ')' -> TRParen
     | _ -> TUnknown (strFromChars [c])
-  in pre tok (lexChars rest)
+  in listAppend [tok] (lexChars rest)
 
 -- Main lexer loop on a list of chars. Cons-pattern destructures the
 -- input directly; the empty case returns an empty token list.
