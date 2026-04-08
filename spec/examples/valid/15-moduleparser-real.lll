@@ -1,24 +1,34 @@
 module Examples.ModuleParser
 
--- Phase 7.4 / 7.5a: a real recursive-descent **full module** parser
--- written in ll-lang itself. Showcase milestone — the first single file
--- that can consume a whole `module M\n type ...\n let ... \n fn ... = ...`
+-- Phase 7.4 / 7.5a / 7.5b: a real recursive-descent **full module**
+-- parser written in ll-lang itself. Showcase milestone — the first single
+-- file that can consume a whole `module M\n type ...\n let ... \n fn ... = ...`
 -- source end-to-end and emit a `List[Decl]` AST. Stitches together the
 -- earlier self-hosting slices:
 --   * 09-lexer-real.lll       — single-pass char tokenizer
 --   * 12-typeparser-real.lll  — single-line sum-type decls
 --   * 13-fnparser-real.lll    — curried typed fn decls + arithmetic body
---   * 14-exprparser-real.lll  — `if-then-else`, `match`, var refs
+--   * 14-exprparser-real.lll  — `if-then-else`, `match`, var refs,
+--                               `let-in` chains, lambdas
 --
 -- Phase 7.5a added `let name = expr` decls at module level and a
 -- `match scrut with | pat -> body | ...` special form inside fn bodies
 -- (lifting the match machinery from 14-exprparser-real.lll).
 --
--- Still constrained (Phase 7.5's remaining seven items): no `let-in`
--- chains / lambdas inside fn bodies, no multi-line bodies, no
--- `tag`/`trait`/`impl`/`import`, no multi-line type decls, no parametric
--- ctor args (`Maybe[A]`), no string literals, no cons / tuple / list
--- patterns in match arms (only int lit / var / wildcard).
+-- Phase 7.5b added two more expression forms inside fn bodies:
+-- `\x. body` lambdas and `let name = e1 in e2` let-in chains. Both
+-- dispatch from `parseExpr`, so either can nest inside any other
+-- expression form the grammar already accepts. Note: `TKwLet` is now
+-- ambiguous at dispatch time — `parseDecls` consumes it as a module-
+-- level decl, `parseExpr` (invoked from inside an fn body) consumes it
+-- as an expression let-in. Context disambiguates cleanly because the
+-- two entry points are independent.
+--
+-- Still constrained (Phase 7.5's remaining five items): no multi-line
+-- fn bodies, no `tag`/`trait`/`impl`/`import`, no multi-line type
+-- decls, no parametric ctor args (`Maybe[A]`), no string literals, no
+-- cons / tuple / list patterns in match arms (only int lit / var /
+-- wildcard).
 --
 -- What IS covered is enough to prove the front-end can be a single
 -- ll-lang program:
@@ -27,7 +37,7 @@ module Examples.ModuleParser
 --   * multiple module-level `let name = expr` decls
 --   * multiple single-line fn decls with curried typed params, optional
 --     return type, int-literal / var-ref / arithmetic / if-then-else /
---     match-with-scrutinee / application bodies
+--     match-with-scrutinee / let-in / lambda / application bodies
 --
 -- Grammar (each decl on its own line; `\n` between decls):
 --   module   = 'module' Upper ('.' Upper)* '\n' decls
@@ -40,9 +50,11 @@ module Examples.ModuleParser
 --   letDecl  = 'let' lower '=' expr
 --   fnDecl   = 'fn' lower paramGroup* typeName? '=' expr
 --   paramGroup = '(' lower typeName ')'  |  '(' ')'
---   expr     = ifExpr | matchExpr | addSub
+--   expr     = ifExpr | matchExpr | letInExpr | lamExpr | addSub
 --   ifExpr   = 'if' expr 'then' expr 'else' expr
 --   matchExpr = 'match' expr 'with' ('|' pat '->' addSub)+
+--   letInExpr = 'let' lower '=' expr 'in' expr
+--   lamExpr  = '\' lower '.' expr
 --   pat      = int | lower | '_'
 --   addSub   = mulDiv (('+' | '-') mulDiv)*
 --   mulDiv   = app (('*' | '/') app)*
@@ -62,6 +74,7 @@ type Token =
   | TKwThen
   | TKwElse
   | TKwLet
+  | TKwIn
   | TKwMatch
   | TKwWith
   | TLower Str
@@ -72,6 +85,7 @@ type Token =
   | TEq
   | TBar
   | TDot
+  | TBackslash
   | TArrow
   | TUnder
   | TPlus
@@ -123,6 +137,8 @@ type Expr =
   | EMul Expr Expr
   | EDiv Expr Expr
   | EApp Expr Expr
+  | ELam Str Expr
+  | ELetIn Str Expr Expr
   | EIf Expr Expr Expr
   | EMatch Expr List[Pat] List[Expr]
 
@@ -184,8 +200,8 @@ fn parseIntStr(s Str) Int =
 -- Classify an identifier: keywords map to TKw*; uppercase-start becomes
 -- TUpper (type / ctor names); lowercase-start becomes TLower (fn names,
 -- params, value vars). Phase 7.5a adds `let` (module-level decls) and
--- `match` / `with` (match-as-expression inside fn bodies). `in` is still
--- not needed because let-in chains inside fn bodies are still Phase 7.5+.
+-- `match` / `with` (match-as-expression inside fn bodies). Phase 7.5b
+-- adds `in` (let-in chains inside fn bodies, dispatched from parseExpr).
 fn classifyIdent(s Str) Token =
   match s with
     | "module" -> TKwModule
@@ -195,6 +211,7 @@ fn classifyIdent(s Str) Token =
     | "then" -> TKwThen
     | "else" -> TKwElse
     | "let" -> TKwLet
+    | "in" -> TKwIn
     | "match" -> TKwMatch
     | "with" -> TKwWith
     | _ ->
@@ -226,7 +243,8 @@ fn lexMinusOrArrow(cs List[Char]) List[Token] =
 -- Main loop. Newlines are significant (they separate decls); spaces and
 -- tabs are skipped. Every other single-char symbol maps directly to its
 -- token constructor. Phase 7.5a adds `_` → TUnder (wildcard pattern) and
--- the two-char `->` arrow via the `lexMinusOrArrow` helper.
+-- the two-char `->` arrow via the `lexMinusOrArrow` helper. Phase 7.5b
+-- adds `\` → TBackslash (lambda-intro) — `.` → TDot was already here.
 fn lexChars(cs List[Char]) List[Token] =
   | c :: rest ->
     if c == '\n' then listAppend [TNewline] (lexChars rest)
@@ -238,6 +256,7 @@ fn lexChars(cs List[Char]) List[Token] =
     else if c == '=' then listAppend [TEq] (lexChars rest)
     else if c == '|' then listAppend [TBar] (lexChars rest)
     else if c == '.' then listAppend [TDot] (lexChars rest)
+    else if c == '\\' then listAppend [TBackslash] (lexChars rest)
     else if c == '_' then listAppend [TUnder] (lexChars rest)
     else if c == '+' then listAppend [TPlus] (lexChars rest)
     else if c == '-' then lexMinusOrArrow rest
@@ -405,14 +424,45 @@ fn isAtomStart(t Token) Bool =
   | TLParen -> true
   | _ -> false
 
--- Top-level expression dispatcher. Phase 7.5a adds `match` as a second
--- special form alongside `if`. Everything else falls through to the
--- arithmetic / application cascade. `let-in` and lambdas are still
--- Phase 7.5+.
+-- Top-level expression dispatcher. Phase 7.5a added `match` as a second
+-- special form alongside `if`. Phase 7.5b adds `let-in` (`TKwLet`) and
+-- lambda (`TBackslash`) as two more special forms — both dispatched
+-- here so they can nest freely inside any other expression. Note: the
+-- top-level `parseDecls` has its own `TKwLet :: _` arm for module-level
+-- `let name = expr` decls (no `in` required). At expression position,
+-- the same token starts a let-in chain via `parseLetIn`. The two entry
+-- points are independent so the context naturally disambiguates.
 fn parseExpr(toks List[Token]) =
   | TKwIf :: rest -> parseIf rest
   | TKwMatch :: rest -> parseMatch rest
+  | TKwLet :: rest -> parseLetIn rest
+  | TBackslash :: rest -> parseLam rest
   | _ -> parseAddSub toks
+
+-- `let name = e1 in e2`. Single-binder let-in. Chains are expressed by
+-- nesting another `let ... in ...` in the `e2` slot (right-recursive).
+-- Both `e1` and `e2` are parsed via the full `parseExpr` so any
+-- expression form the fn-body grammar accepts (including nested lambdas
+-- and further let-in chains) works on either side.
+fn parseLetIn(toks List[Token]) =
+  | TLower name :: TEq :: rest ->
+    let (e1, rest2) = parseExpr rest in
+    let rest3 = match rest2 with
+      | TKwIn :: r -> r
+      | _ -> rest2
+    in
+    let (e2, rest4) = parseExpr rest3 in
+    (ELetIn name e1 e2, rest4)
+  | _ -> (EInt 0, toks)
+
+-- `\x. body`. Single-param lambda; multi-param is expressed by nesting
+-- (`\x. \y. body`). The body is parsed at full `parseExpr` level so it
+-- can contain any expression form the grammar accepts.
+fn parseLam(toks List[Token]) =
+  | TLower name :: TDot :: rest ->
+    let (body, rest2) = parseExpr rest in
+    (ELam name body, rest2)
+  | _ -> (EInt 0, toks)
 
 -- `if c then a else b`. Each of the three sub-expressions is parsed via
 -- the full parseExpr so nested `if`s work naturally.
@@ -623,6 +673,11 @@ fn showExpr(e Expr) Str =
   | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " * ") (showExpr r)) ")"
   | EDiv l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " / ") (showExpr r)) ")"
   | EApp f x -> strConcat (strConcat (strConcat (strConcat "(" (showExpr f)) " ") (showExpr x)) ")"
+  | ELam n body -> strConcat (strConcat (strConcat (strConcat "(fun " n) " -> ") (showExpr body)) ")"
+  | ELetIn n e1 e2 ->
+    let p1 = strConcat (strConcat "(let " n) " = " in
+    let p2 = strConcat (strConcat p1 (showExpr e1)) " in " in
+    strConcat (strConcat p2 (showExpr e2)) ")"
   | EIf c a b ->
     let p1 = strConcat "(if " (showExpr c) in
     let p2 = strConcat (strConcat p1 " then ") (showExpr a) in
@@ -660,7 +715,7 @@ fn showModule(m Module) Str =
 -- ---------- Driver -------------------------------------------------------
 
 fn main() =
-  let src = "module Examples.Bigger\ntype Maybe A = Some A | None\ntype Color = Red | Green | Blue\nlet answer = 42\nlet zero = 0\nfn double(x Int) Int = x * 2\nfn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\nfn pickColor(x Int) Color = if x then Red else Green" in
+  let src = "module Examples.Bigger\ntype Maybe A = Some A | None\ntype Color = Red | Green | Blue\nlet answer = 42\nlet zero = 0\nfn double(x Int) Int = x * 2\nfn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\nfn pickColor(x Int) Color = if x then Red else Green\nfn shift(x Int) Int = let y = x + 1 in y * 2\nfn applyDouble(x Int) Int = (\\y. y * 2) x" in
   let toks = tokenize src in
   let mod = parseModule toks in
   printfn (showModule mod)
