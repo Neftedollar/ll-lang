@@ -210,6 +210,38 @@ let ``E004 corpus`` () = expectError E004 "E004-unit-mismatch.lll"
 [<Fact>]
 let ``E005 corpus`` () = expectError E005 "E005-tag-violation.lll"
 
+// --- Phase 7.2: Non-zero error positions ---
+// Regression guard: errors must carry real line:col from the source token,
+// not the hardcoded 0:0 placeholder that used to leak out of the elaborator.
+
+[<Fact>]
+let ``E002 unbound var has non-zero line`` () =
+    let src = "module M\nfn f = undefinedVar"
+    let errs = elab src
+    let e2 = errs |> List.filter (fun e -> e.Code = E002)
+    Assert.NotEmpty(e2)
+    Assert.All(e2, fun e -> Assert.True(e.Line > 0, $"expected Line>0, got {e.Line}:{e.Col} / {e.Message}"))
+
+[<Fact>]
+let ``E001 type mismatch has non-zero line`` () =
+    let src = "module M\nfn f(x Str) Str = x\nlet bad = f 42"
+    let errs = elab src
+    let e1 = errs |> List.filter (fun e -> e.Code = E001)
+    Assert.NotEmpty(e1)
+    Assert.All(e1, fun e -> Assert.True(e.Line > 0, $"expected Line>0, got {e.Line}:{e.Col} / {e.Message}"))
+
+[<Fact>]
+let ``E003 nonexhaustive match has non-zero line`` () =
+    let src =
+        "module M\n" +
+        "type Shape = Circle Float | Rect Float Float\n" +
+        "fn area(s Shape) Float =\n" +
+        "  | Circle r -> 3.14159"
+    let errs = elab src
+    let e3 = errs |> List.filter (fun e -> e.Code = E003)
+    Assert.NotEmpty(e3)
+    Assert.All(e3, fun e -> Assert.True(e.Line > 0, $"expected Line>0, got {e.Line}:{e.Col} / {e.Message}"))
+
 // --- Regression: valid corpus ---
 
 [<Fact>]
