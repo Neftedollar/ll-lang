@@ -45,10 +45,25 @@ module Examples.ModuleParser
 -- and `EStr`; `parseTypeArgs` was split into `parseOneTypeArg` +
 -- `parseBrackArgs` so bracket groups can chain and nest.
 --
--- Still constrained (Phase 7.5's remaining one-or-two items): no multi-
--- line fn bodies, no `tag`/`trait`/`impl`/`import`/`export` module-
--- level decls, no multi-line type decls, no list-literal expression
--- atoms (`[a b c]` in expression position), no tuple patterns.
+-- Phase 7.5e adds three more module-level decl forms — closing out the
+-- last item on the Phase 7.5 umbrella: bare **`tag Name`** decls
+-- (`DTag`, no body, no params), dotted **`import Foo.Bar.Baz`** decls
+-- (`DImport`, path built via the same `parseModuleNameTail` helper the
+-- module header uses), and an **`export`** modifier prefix that wraps
+-- any existing decl in a new `DExport` variant. The lexer gains three
+-- keywords `tag` / `import` / `export`; `parseDecls` grows three new
+-- dispatch arms (the `export` arm reads the next decl via a new
+-- `parseOneDecl` helper and wraps the result in `DExport`); the
+-- pretty-printer gains three trivial arms (`tag <name>`, `import
+-- <path>`, `export <show inner>`). `trait` / `impl` decls are
+-- deliberately NOT in this slice — they're much more complex
+-- (multi-line signatures + indented fn bodies) and live in a separate
+-- Phase 7.6 slice.
+--
+-- Still constrained: no multi-line fn bodies, no `trait`/`impl`
+-- module-level decls, no multi-line type decls, no list-literal
+-- expression atoms (`[a b c]` in expression position), no tuple
+-- patterns.
 --
 -- What IS covered is enough to prove the front-end can be a single
 -- ll-lang program:
@@ -62,7 +77,10 @@ module Examples.ModuleParser
 -- Grammar (each decl on its own line; `\n` between decls):
 --   module   = 'module' Upper ('.' Upper)* '\n' decls
 --   decls    = decl*
---   decl     = typeDecl | letDecl | fnDecl
+--   decl     = typeDecl | letDecl | fnDecl | tagDecl | importDecl
+--            | 'export' decl
+--   tagDecl  = 'tag' Upper
+--   importDecl = 'import' Upper ('.' Upper)*
 --   typeDecl = 'type' Upper param* '=' ctor ('|' ctor)*
 --   param    = single-uppercase-letter (A, B, ...)
 --   ctor     = Upper typeArg*
@@ -100,6 +118,9 @@ type Token =
   | TKwIn
   | TKwMatch
   | TKwWith
+  | TKwTag
+  | TKwImport
+  | TKwExport
   | TLower Str
   | TUpper Str
   | TInt Int
@@ -188,10 +209,25 @@ type FnDecl = MkFn Str List[Param] Maybe[TypeRef] Expr
 
 -- Module AST ---------------------------------------------------------------
 
+-- Phase 7.5e adds three more decl variants:
+--   * `DTag name` for bare `tag UserId` decls (semantic tag
+--     declaration, no body, no params);
+--   * `DImport path` for `import Std.List` decls, where `path` is the
+--     dot-joined qualified module name (built by walking the sequence
+--     of `TUpper` / `TDot` tokens exactly like `parseModuleHeader`);
+--   * `DExport inner` — a wrapper marking the inner decl as publicly
+--     visible. The `export` keyword is a modifier prefix on top of any
+--     existing decl (`export fn ...`, `export type ...`, `export let
+--     ...`), so `DExport` just holds a nested `Decl`. Picked over an
+--     `exported: Bool` field on each variant because wrapping doesn't
+--     touch any existing variant shape.
 type Decl =
   | DType TypeDecl
   | DLet LetDecl
   | DFn FnDecl
+  | DTag Str
+  | DImport Str
+  | DExport Decl
 
 type Module = MkModule Str List[Decl]
 
@@ -240,6 +276,10 @@ fn parseIntStr(s Str) Int =
 -- params, value vars). Phase 7.5a adds `let` (module-level decls) and
 -- `match` / `with` (match-as-expression inside fn bodies). Phase 7.5b
 -- adds `in` (let-in chains inside fn bodies, dispatched from parseExpr).
+-- Phase 7.5e adds `tag` / `import` / `export` — three new module-level
+-- decl forms (a bare `tag Name` decl, a dotted `import Foo.Bar` decl,
+-- and an `export` modifier prefix that wraps any existing decl in a
+-- `DExport` variant).
 fn classifyIdent(s Str) Token =
   match s with
     | "module" -> TKwModule
@@ -252,6 +292,9 @@ fn classifyIdent(s Str) Token =
     | "in" -> TKwIn
     | "match" -> TKwMatch
     | "with" -> TKwWith
+    | "tag" -> TKwTag
+    | "import" -> TKwImport
+    | "export" -> TKwExport
     | _ ->
       let cs = strChars s in
       match cs with
@@ -362,13 +405,23 @@ fn parseModule(toks List[Token]) Module =
   MkModule name decls
 
 -- Main decl loop. Cons-pattern fast paths dispatch on the first token.
--- Anything that isn't `type`, `let`, or `fn` terminates the loop — TEnd,
--- TNewline (already skipped), unexpected tokens all fall through to the
--- wildcard. Phase 7.5a adds the `let` arm.
+-- Anything that isn't `type`, `let`, `fn`, `tag`, `import`, or `export`
+-- terminates the loop — TEnd, TNewline (already skipped), unexpected
+-- tokens all fall through to the wildcard. Phase 7.5a added the `let`
+-- arm; Phase 7.5e adds three more: `tag Name`, `import Foo.Bar`, and
+-- the `export` modifier prefix. The `export` arm parses the remainder
+-- of the token stream as any regular decl via `parseOneDecl` and wraps
+-- the result in `DExport` — this keeps the modifier composable with
+-- every existing decl form without duplicating the dispatch ladder.
 fn parseDecls(toks List[Token]) List[Decl] =
   | TKwType :: _ -> consTypeDecl (parseTypeDecl toks)
   | TKwLet :: _ -> consLetDecl (parseLetDecl toks)
   | TKwFn :: _ -> consFnDecl (parseFnDecl toks)
+  | TKwTag :: _ -> consDecl (parseTagDecl toks)
+  | TKwImport :: _ -> consDecl (parseImportDecl toks)
+  | TKwExport :: rest ->
+    let (inner, rest2) = parseOneDecl rest in
+    DExport inner :: parseDecls (skipNewlines rest2)
   | _ -> []
 
 -- Helper: turn a (TypeDecl, leftover) pair into the recursive list.
@@ -384,6 +437,57 @@ fn consLetDecl(pair) List[Decl] =
 fn consFnDecl(pair) List[Decl] =
   let (fd, rest) = pair in
   DFn fd :: parseDecls (skipNewlines rest)
+
+-- Phase 7.5e: generic `(Decl, leftover) -> List[Decl]` cons helper for
+-- parsers that already return a fully-constructed `Decl` (tag and
+-- import decls build `DTag` / `DImport` directly, unlike the type /
+-- let / fn paths whose helpers return the inner decl body).
+fn consDecl(pair) List[Decl] =
+  let (d, rest) = pair in
+  d :: parseDecls (skipNewlines rest)
+
+-- Phase 7.5e: parse exactly one decl, returning `(Decl, leftover)`.
+-- Used by the `TKwExport :: rest` arm in `parseDecls` to consume the
+-- decl that follows an `export` keyword without recursing into the
+-- full decl-list loop. Dispatches on the same keyword ladder as
+-- `parseDecls` and returns the single parsed decl + whatever tokens
+-- are left. `export export ...` falls through to a defensive `DTag
+-- "?"` arm — the grammar forbids stacking, and an error there would
+-- immediately surface at the next parseDecls call.
+fn parseOneDecl(toks List[Token]) =
+  | TKwType :: _ ->
+    let (td, rest) = parseTypeDecl toks in
+    (DType td, rest)
+  | TKwLet :: _ ->
+    let (ld, rest) = parseLetDecl toks in
+    (DLet ld, rest)
+  | TKwFn :: _ ->
+    let (fd, rest) = parseFnDecl toks in
+    (DFn fd, rest)
+  | TKwTag :: _ -> parseTagDecl toks
+  | TKwImport :: _ -> parseImportDecl toks
+  | _ -> (DTag "?", toks)
+
+-- ---------- Tag-decl parser (Phase 7.5e) --------------------------------
+
+-- Single `tag Name` decl. No body, no params — just the keyword and a
+-- single TUpper. Mirrors the host compiler's KwTag arm in parseDecl.
+fn parseTagDecl(toks List[Token]) =
+  | TKwTag :: TUpper name :: rest -> (DTag name, rest)
+  | _ -> (DTag "?", toks)
+
+-- ---------- Import-decl parser (Phase 7.5e) -----------------------------
+
+-- Single `import Foo.Bar.Baz` decl. The dotted tail is collected by
+-- `parseModuleNameTail` — the same helper `parseModuleHeader` uses, so
+-- the qualified path string is built exactly the same way on both
+-- sides. Stores the path as one dot-joined string, matching how the
+-- pretty printer later renders it.
+fn parseImportDecl(toks List[Token]) =
+  | TKwImport :: TUpper head :: rest ->
+    let (path, rest2) = parseModuleNameTail head rest in
+    (DImport path, rest2)
+  | _ -> (DImport "?", toks)
 
 -- ---------- Let-decl parser (Phase 7.5a) --------------------------------
 
@@ -842,10 +946,19 @@ fn showLetDecl(d LetDecl) Str =
   | MkLet name body ->
     strConcat (strConcat (strConcat "let " name) " = ") (showExpr body)
 
+-- Phase 7.5e: `DTag` / `DImport` / `DExport` pretty-printer arms. The
+-- `DExport inner` wrapper recurses back into `showDecl` so the inner
+-- decl's canonical pretty form stays untouched and the `export `
+-- modifier stacks in front of any shape — `export fn ...`, `export
+-- type ...`, `export let ...`, even `export tag ...` / `export import
+-- ...` if the grammar ever wants it.
 fn showDecl(d Decl) Str =
   | DType td -> showTypeDecl td
   | DLet ld -> showLetDecl ld
   | DFn fd -> showFnDecl fd
+  | DTag name -> strConcat "tag " name
+  | DImport path -> strConcat "import " path
+  | DExport inner -> strConcat "export " (showDecl inner)
 
 -- Render a list of decls joined by `\n`, matching the input layout.
 fn showDecls(ds List[Decl]) Str =
@@ -860,7 +973,7 @@ fn showModule(m Module) Str =
 -- ---------- Driver -------------------------------------------------------
 
 fn main() =
-  let src = "module Examples.Bigger\ntype Maybe A = Some A | None\ntype Color = Red | Green | Blue\ntype Container = MkBox Maybe[Int]\nlet answer = 42\nlet zero = 0\nlet uid = \"user-42\"[UserId]\nfn double(x Int) Int = x * 2\nfn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\nfn pickColor(x Int) Color = if x then Red else Green\nfn shift(x Int) Int = let y = x + 1 in y * 2\nfn applyDouble(x Int) Int = (\\y. y * 2) x\nfn greet() Str = \"hello\"\nfn classifyXs(xs Int) Int = match xs with | [] -> 0 | h :: t -> 1" in
+  let src = "module Examples.Bigger\nimport Std.List\nimport Std.Maybe\ntag UserId\ntag Email\ntype Maybe A = Some A | None\ntype Color = Red | Green | Blue\ntype Container = MkBox Maybe[Int]\nlet answer = 42\nlet zero = 0\nlet uid = \"user-42\"[UserId]\nexport fn addOne(x Int) Int = x + 1\nfn double(x Int) Int = x * 2\nfn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\nfn pickColor(x Int) Color = if x then Red else Green\nfn shift(x Int) Int = let y = x + 1 in y * 2\nfn applyDouble(x Int) Int = (\\y. y * 2) x\nfn greet() Str = \"hello\"\nfn classifyXs(xs Int) Int = match xs with | [] -> 0 | h :: t -> 1" in
   let toks = tokenize src in
   let mod = parseModule toks in
   printfn (showModule mod)
