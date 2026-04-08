@@ -4,58 +4,38 @@ module Examples.RealLexer
 --
 -- Strictly more than 08-lexer-poc.lll: groups multi-char identifiers and
 -- multi-digit integers, recognises a small set of keywords and operators,
--- and emits a flat List Token. The traditional `c :: rest` cons-pattern is
--- not yet supported by the parser, so we deconstruct the input list with
--- listHead / listTail (returning Maybe) and small wrapper helpers.
+-- and emits a flat List Token. Phase 7.1.5 simplified the original
+-- listHead/listTail-with-Maybe wrapper helpers down to direct `c :: rest`
+-- cons patterns and inline `match` expressions.
 --
 -- This is the first step toward Phase 7 self-hosting: prove the language
 -- can express its own lexer in idiomatic ll-lang.
 
-type Maybe A = Some A | None
-
 type Token = TIdent Str | TInt Str | TLet | TFn | TIf | TThen | TElse | TPlus | TMinus | TStar | TSlash | TEq | TLt | TGt | TLParen | TRParen | TUnknown Str
-
--- Maybe deconstruction helpers (no list cons patterns yet)
-fn unwrapCharOrSpace(mc Maybe[Char]) Char =
-  | Some c -> c
-  | None -> ' '
-
-fn unwrapTailOrEmpty(mt Maybe[List[Char]]) List[Char] =
-  | Some t -> t
-  | None -> []
-
-fn headChar(cs List[Char]) Char = unwrapCharOrSpace (listHead cs)
-fn tailChars(cs List[Char]) List[Char] = unwrapTailOrEmpty (listTail cs)
 
 -- Char predicates
 fn isIdStart(c Char) Bool = charIsAlpha c
 fn isIdCont(c Char) Bool = if charIsAlpha c then true else charIsDigit c
 
--- Greedy take/drop while predicate. We compute the prefix and the leftover
--- as two passes; this is the only way to thread state through a list
--- without tuple destructuring on let-bindings.
+-- Greedy take/drop while predicate, written directly on cons cells.
 fn takeWhilePred(p)(cs List[Char]) List[Char] =
-  if listIsEmpty cs then []
-  else
-    let c = headChar cs in
-    if p c then listAppend [c] (takeWhilePred p (tailChars cs))
-    else []
+  | c :: rest -> if p c then listAppend [c] (takeWhilePred p rest) else []
+  | _ -> []
 
 fn dropWhilePred(p)(cs List[Char]) List[Char] =
-  if listIsEmpty cs then []
-  else
-    let c = headChar cs in
-    if p c then dropWhilePred p (tailChars cs)
-    else cs
+  | c :: rest -> if p c then dropWhilePred p rest else cs
+  | _ -> []
 
--- Classify an identifier string as a keyword or generic identifier.
+-- Classify an identifier string as a keyword or generic identifier,
+-- using a match-as-expression on the string.
 fn keywordOrIdent(s Str) Token =
-  if s == "let" then TLet
-  else if s == "fn" then TFn
-  else if s == "if" then TIf
-  else if s == "then" then TThen
-  else if s == "else" then TElse
-  else TIdent s
+  match s with
+    | "let" -> TLet
+    | "fn" -> TFn
+    | "if" -> TIf
+    | "then" -> TThen
+    | "else" -> TElse
+    | _ -> TIdent s
 
 -- Prepend a single token to a list. We can't write the more idiomatic
 -- `listAppend [TPlus] xs` directly because the parser misinterprets a
@@ -78,28 +58,30 @@ fn lexNum(cs List[Char]) List[Token] =
   let leftover = dropWhilePred charIsDigit cs in
   pre (TInt (strFromChars digits)) (lexChars leftover)
 
--- Lex a single-char operator / punctuation token.
+-- Lex a single-char operator / punctuation token via inline match.
 fn lexOp(c Char)(rest List[Char]) List[Token] =
-  if c == '+' then pre TPlus (lexChars rest)
-  else if c == '-' then pre TMinus (lexChars rest)
-  else if c == '*' then pre TStar (lexChars rest)
-  else if c == '/' then pre TSlash (lexChars rest)
-  else if c == '=' then pre TEq (lexChars rest)
-  else if c == '<' then pre TLt (lexChars rest)
-  else if c == '>' then pre TGt (lexChars rest)
-  else if c == '(' then pre TLParen (lexChars rest)
-  else if c == ')' then pre TRParen (lexChars rest)
-  else pre (TUnknown (strFromChars [c])) (lexChars rest)
+  let tok = match c with
+    | '+' -> TPlus
+    | '-' -> TMinus
+    | '*' -> TStar
+    | '/' -> TSlash
+    | '=' -> TEq
+    | '<' -> TLt
+    | '>' -> TGt
+    | '(' -> TLParen
+    | ')' -> TRParen
+    | _ -> TUnknown (strFromChars [c])
+  in pre tok (lexChars rest)
 
--- Main lexer loop on a list of chars. Returns a List Token.
+-- Main lexer loop on a list of chars. Cons-pattern destructures the
+-- input directly; the empty case returns an empty token list.
 fn lexChars(cs List[Char]) List[Token] =
-  if listIsEmpty cs then []
-  else
-    let c = headChar cs in
-    if charIsSpace c then lexChars (tailChars cs)
+  | c :: rest ->
+    if charIsSpace c then lexChars rest
     else if isIdStart c then lexId cs
     else if charIsDigit c then lexNum cs
-    else lexOp c (tailChars cs)
+    else lexOp c rest
+  | _ -> []
 
 fn tokenize(src Str) List[Token] = lexChars (strChars src)
 
