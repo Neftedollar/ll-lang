@@ -150,7 +150,7 @@ Source (.lll)
 
 ## Status
 
-**Phases 1–6 complete. 219 tests passing. Working end-to-end compiler with stdlib.**
+**Phases 1–6 complete. 244 tests passing. Working end-to-end compiler with stdlib, Char/file IO, and a lexer proof-of-concept written in ll-lang itself.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -170,7 +170,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 219 tests
+dotnet test    # 244 tests
 ```
 
 ### Run your first program
@@ -213,13 +213,12 @@ src/LLLangCompiler/        — compiler library (F#)
   Codegen.fs               — F# source emitter
   Compiler.fs              — end-to-end pipeline entry point
 src/LLLangTool/            — `lllc` CLI (build / run)
-tests/LLLangTests/         — xUnit test suite (191 tests)
+tests/LLLangTests/         — xUnit test suite (244 tests)
 ```
 
 ## Roadmap
 
-- **Phase 6** — Standard library: `List`, `Maybe`, `Result`, `Str`, `Math`, IO primitives
-- **Phase 7** — Self-hosting: rewrite the ll-lang compiler in ll-lang itself
+- **Phase 7** — Self-hosting: rewrite the ll-lang compiler in ll-lang itself. The lexer PoC in `spec/examples/valid/08-lexer-poc.lll` is the starting point.
 - **Multi-target** — TypeScript / Python / JVM / LLVM backends after self-hosting
 
 ## Design Philosophy
