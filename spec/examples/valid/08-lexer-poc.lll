@@ -1,0 +1,34 @@
+module Examples.LexerPoC
+
+-- Phase 6.5: tiny char-classifying "lexer" written in ll-lang itself.
+-- Demonstrates the new char/string stdlib. Each input character is mapped
+-- to a one-character Token; we then render the tokens as a comma-joined
+-- string. Multi-character grouping (real lexing) is a Phase 7 task — see
+-- the language gaps surfaced in the report.
+
+type Token = TIdent Str | TNum Str | TLParen | TRParen | TPlus | TSpace | TUnknown
+
+fn classify(c Char) Token =
+  if charIsDigit c then TNum (strFromChars [c])
+  else if charIsAlpha c then TIdent (strFromChars [c])
+  else if charIsSpace c then TSpace
+  else if charToInt c == 40 then TLParen
+  else if charToInt c == 41 then TRParen
+  else if charToInt c == 43 then TPlus
+  else TUnknown
+
+fn tokenName(t Token) Str =
+  | TIdent s -> strConcat "id:" s
+  | TNum n -> strConcat "n:" n
+  | TLParen -> "("
+  | TRParen -> ")"
+  | TPlus -> "+"
+  | TSpace -> "_"
+  | TUnknown -> "?"
+
+fn joinTokens(toks List[Token]) Str =
+  listFold (\acc. \t. if strLen acc == 0 then tokenName t else strConcat (strConcat acc ",") (tokenName t)) "" toks
+
+fn main() =
+  let toks = listMap classify (strChars "ab 12 (x+y)") in
+  printfn (joinTokens toks)

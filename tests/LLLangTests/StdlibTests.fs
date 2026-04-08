@@ -314,3 +314,37 @@ let ``listAt only emitted when user declares Maybe`` () =
     Assert.DoesNotContain("let listAt", withoutMaybe)
     let withMaybe = codegenSrc "module M\ntype Maybe A = Some A | None\nlet x = 1"
     Assert.Contains("let listAt", withMaybe)
+
+// ---- Phase 6.5: end-to-end runtime tests ----
+
+let private runLll (relPath: string) : string * string =
+    let lllPath =
+        System.IO.Path.Combine(
+            __SOURCE_DIRECTORY__,
+            "../../spec/examples/valid/" + relPath)
+    let llcDll =
+        System.IO.Path.Combine(
+            __SOURCE_DIRECTORY__,
+            "../../src/LLLangTool/bin/Debug/net10.0/llc.dll")
+    let psi = System.Diagnostics.ProcessStartInfo("dotnet", $"\"{llcDll}\" run \"{lllPath}\"")
+    psi.RedirectStandardOutput <- true
+    psi.RedirectStandardError  <- true
+    psi.UseShellExecute        <- false
+    use proc = System.Diagnostics.Process.Start(psi)
+    let stdout = proc.StandardOutput.ReadToEnd()
+    let stderr = proc.StandardError.ReadToEnd()
+    proc.WaitForExit()
+    (stdout, stderr)
+
+[<Fact>]
+let ``07-text-processing prints 5`` () =
+    let (stdout, stderr) = runLll "07-text-processing.lll"
+    Assert.True(stdout.Contains("5"),
+                $"Expected stdout to contain '5'. stdout={stdout} stderr={stderr}")
+
+[<Fact>]
+let ``08-lexer-poc runs and emits joined token names`` () =
+    let (stdout, stderr) = runLll "08-lexer-poc.lll"
+    // Expected output for input "ab 12 (x+y)"
+    Assert.True(stdout.Contains("id:a") && stdout.Contains("n:1") && stdout.Contains("(") && stdout.Contains("+"),
+                $"Expected lexer output. stdout={stdout} stderr={stderr}")
