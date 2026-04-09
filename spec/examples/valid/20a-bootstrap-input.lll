@@ -1,0 +1,5 @@
+module Examples.Clean
+type Maybe A = Some A | None
+fn inc(x Int) Int = x + 1
+fn greet() Str = "hello"
+fn main() Int = inc 1
