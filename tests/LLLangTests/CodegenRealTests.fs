@@ -61,16 +61,22 @@ let ``19-codegen-real.lll runs and emits F# source lines for each TDFn`` () =
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
-    // Four TDFn shapes exercised by `main`:
-    //   inc     — TEAdd + TEVar + TEInt
-    //   greet   — TEStr + empty-params branch
-    //   addOne  — TELet (with nested TEAdd / TEVar / TEInt)
-    //   callInc — TEApp + TEVar
+    // Seven TDFn shapes exercised by `main`:
+    //   inc      — TEAdd + TEVar + TEInt (Phase 7.8a)
+    //   greet    — TEStr + empty-params branch (Phase 7.8a)
+    //   addOne   — TELet (with nested TEAdd / TEVar / TEInt) (Phase 7.8a)
+    //   callInc  — TEApp + TEVar (Phase 7.8a)
+    //   choose   — TEIf (Phase 7.8b)
+    //   double   — TELam bound at top level (Phase 7.8b)
+    //   classify — TEMatch with PInt + PWild + TEStr branches (Phase 7.8b)
     let expected =
         [ "let inc x = (x + 1L)"
           "let greet = \"hello\""
           "let addOne x = (let y = (x + 1L) in y)"
-          "let callInc x = (inc x)" ]
+          "let callInc x = (inc x)"
+          "let choose b = (if b then 1L else 2L)"
+          "let double = (fun x -> (x + x))"
+          "let classify x = (match x with | 0L -> \"zero\" | _ -> \"other\")" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),
