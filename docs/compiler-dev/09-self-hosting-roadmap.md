@@ -1773,6 +1773,134 @@ error reporting, and the occurs check (`e008`). After 7.7d the HM
 spine is feature-complete enough to host polymorphic stdlib
 functions like `listMap` / `maybeMap` in later slices.
 
+### 2026-04 — Phase 7.7d: HM inference slice D — occurs + Result + EMatch + let-gen (DONE) — Phase 7.7 COMPLETE
+
+Final tick of **Phase 7.7**. Extends
+[`18-hminfer-real.lll`](../../spec/examples/valid/18-hminfer-real.lll)
+in place from 616 to 1010 lines (+394). Lands all four outstanding
+HM closers in a single slice and marks **Phase 7.7 complete**.
+
+**New shape (on top of Phase 7.7c)**:
+
+```lll
+type Outcome A = OkR A | ErrR Str      -- Result-like error carrier
+type Pat = PInt Int | PVar Str | PWild  -- EMatch pattern AST
+type TypeScheme = MkScheme List[Str] TypeExpr  -- ∀ vars. body
+
+type Expr =
+  | ... (EInt/EStr/EBool/EVar/EAdd/EApp/ELam/ELet/EIf)
+  | EMatch Expr List[Pat] List[Expr]    -- new
+
+type Env = MkEnv List[Str] List[TypeScheme]    -- was List[TypeExpr]
+```
+
+**The four features**:
+
+1. **Occurs check** — new `occursIn v t` walker called from
+   `unifyVar`'s bind arm, so `unify a (a -> Int)` now emits an
+   `E008 InfiniteType` diagnostic instead of silently constructing a
+   circular substitution. Mirrors the F# host's `occurs` in
+   [`HMInfer.fs`](../../src/LLLangCompiler/HMInfer.fs) line 52 area.
+
+2. **Result-threaded errors** — `unify` now returns `Outcome[Subst]`
+   (was `Maybe[Subst]`), and `inferExpr` returns `Outcome[InferResult]`
+   (was raw `InferResult` with `TyName "ERROR"` sentinel). Every
+   helper threads errors via nested `match ... with | OkR ... | ErrR
+   m -> ErrR m`. t10/t15/t19 now print the real
+   `E001 TypeMismatch Int vs Str` instead of just `ERROR`.
+
+   Named `Outcome` (not `Result`) because the codegen prelude
+   auto-emits `resultMap` / `resultBind` / `resultMapErr` bindings
+   whenever a module declares `type Result` — and those assume a
+   two-param `type Result A E = Ok A | Err E`, whereas this slice
+   only needs a one-param error-is-always-Str carrier.
+
+3. **EMatch inference** — new `EMatch Expr List[Pat] List[Expr]`
+   constructor (parallel-list branches, same trick as `Subst` /
+   `Env`) and a `Pat` AST with `PInt` / `PVar` / `PWild`. The
+   `inferMatch` helper family walks pat/body pairs in lockstep:
+   derives `patTy` per pattern (`PInt -> Int`, `PVar -> fresh α +
+   env extend`, `PWild -> fresh`), unifies with the scrutinee type,
+   infers the body under the extended env, and unifies each branch
+   type with a shared `β`. Returns `applyType sFinal β`.
+
+4. **Let-generalization** — introduces `TypeScheme` and wires it
+   into `Env`, `envLookup`, `envExtend`, `applyEnv`, `inferVar`, and
+   `inferLet`. Key pieces:
+
+   * `mono t` wraps a raw type as `MkScheme [] t`. Used by
+     `envExtend` (which still takes `TypeExpr` for the common
+     lambda-param / PVar case) and the Env-in-`main` helper calls.
+   * `envExtendScheme` takes a full scheme. Used only by `inferLet`.
+   * `applyEnv` now walks schemes via `applyScheme`, which removes
+     the scheme's quantified vars from the substitution's domain
+     before applying. Built on a new `substRemoveAll` /
+     `substRemove` / `substRemoveLists` helper family.
+   * `ftvType` / `ftvScheme` / `ftvEnv` compute free type variables.
+     All `TyVar` names are treated as free in this slice (no
+     flex/rigid split).
+   * `generalize e t` = `MkScheme (dedup(ftvType t) - ftvEnv e) t`.
+   * `instantiate n sch` allocates one fresh `$k` per quantifier via
+     `freshSubstFor` and applies the resulting subst to the scheme
+     body. Threads the counter.
+   * `inferVar` now instantiates the looked-up scheme.
+   * `inferLetBody` calls `generalize env2 t1` before extending, so
+     polymorphic bindings like `let id = \x. x in ...` get scheme
+     `∀ $0. $0 -> $0` and each use instantiates fresh.
+
+**New test cases** (on top of t1-t15):
+
+```
+t16 infer (\f. \x. f x) : (($1 -> $2) -> ($1 -> $2))
+t17 unify a (a -> Int) infinite
+t18 infer (match 1 | 0 -> "zero" | _ -> "other") : Str
+t19 infer (match 1 | 0 -> "zero" | 1 -> 42) : ERROR E001 TypeMismatch Str vs Int
+t20 infer (match 1 | x -> x + 1) : Int
+t21 infer (let id = \x. x in id 5) : Int
+t22 infer (let id = \x. x in let i = id 5 in id "hi") : Str
+```
+
+* **t16** exercises the compose-subst chain through a nested lambda
+  (higher-order function) without needing let-gen.
+* **t17** is the occurs-check demo — `unify a (TyFn a Int)` fires
+  `E008`; `runTest` peeks at the `ErrR` message prefix and prints
+  `infinite` instead of the generic `mismatch`.
+* **t18** is a simple `EMatch` on an `Int` scrutinee returning `Str`
+  uniformly across both arms.
+* **t19** demonstrates the Result-threaded error shape: branch
+  mismatch (Str in arm 0, Int in arm 1) surfaces the real E001.
+* **t20** exercises the `PVar` binder — the branch env is extended
+  with `x : fresh α`, and the body `x + 1` pins α to `Int`.
+* **t21** is the basic let-bound lambda (works with or without
+  let-gen; included as a sanity check).
+* **t22** is the canonical let-gen demo — without generalization,
+  `id`'s type gets pinned at `Int -> Int` after the first use, and
+  `id "hi"` fails E001; with generalization, each use instantiates a
+  fresh scheme var so the whole expression types at `Str`.
+
+**Out of scope** (later slices or deferred):
+
+1. Multi-param lambda — still single-`Str` param; curry on the call
+   site.
+2. TypedAST round-trip — `inferExpr` still returns a triple
+   `(TypeExpr, Subst, Int)` wrapped in `Outcome`, not a full
+   `TypedExpr` walk.
+3. Trait dispatch / type classes.
+4. Wiring into `17-pipeline-real.lll` — still standalone.
+5. Tagged types (`TyTagged`) and unit-mismatch E004/E005 errors.
+6. Rigid-var flex/rigid split — all `TyVar`s are treated as flex.
+
+Tests: 398 (unchanged vs Phase 7.7c / 7.8a). The runtime E2E fact in
+`HMInferRealTests.fs` updated to assert all twenty-two lines appear
+in stdout; the inference round-trip fact still passes unchanged.
+
+**Phase 7.7 closes out here.** The self-host HM inference spine now
+covers: unify with occurs check, algorithm-W over every basic Expr
+shape (including EMatch), Result-threaded diagnostics (E001 / E002 /
+E008), and let-generalization. Next umbrella: **Phase 7.9** —
+assemble `bootstrap/compiler.lll` from the lex / parse / elaborate /
+HM / codegen slices, or continue Phase 7.8 with more codegen work.
+
 ### 2026-04 — Phase 7.8a: codegen slice A — TExpr + showTExpr + showDecl (DONE)
 
 First tick of **Phase 7.8** — the **back end** of the compiler,

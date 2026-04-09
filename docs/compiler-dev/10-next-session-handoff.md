@@ -11,7 +11,7 @@ session to pick up without replaying history.
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b + 7.7c + 7.8a done.**
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b + 7.7c + 7.7d + 7.8a done. Phase 7.7 is COMPLETE.**
   ll-lang now hosts a real lexer (`09-lexer-real.lll`), a real
   recursive-descent arithmetic parser (`11-parser-real.lll`), a real
   type-declaration parser (`12-typeparser-real.lll`), a real
@@ -150,10 +150,10 @@ session to pick up without replaying history.
   (hardcoded source: `module M\ntype Shape = Circle | Rect\nfn
   good(x Int) Int = x + 1\nfn bad(x Int) Int = undefinedName\nfn
   shapeBad(s Shape) Int = match s with | 0 -> 1`).
-- **Phase 7.7a + 7.7b + 7.7c done** — the first three slices of
-  **Hindley-Milner inference in ll-lang itself** live in
-  [`18-hminfer-real.lll`](../../spec/examples/valid/18-hminfer-real.lll)
-  (616 lines). 7.7a shipped a minimal `TypeExpr` (TyName / TyVar /
+- **Phase 7.7a + 7.7b + 7.7c + 7.7d done — Phase 7.7 is COMPLETE** —
+  the full **Hindley-Milner inference spine in ll-lang itself** lives
+  in [`18-hminfer-real.lll`](../../spec/examples/valid/18-hminfer-real.lll)
+  (~1010 lines). 7.7a shipped a minimal `TypeExpr` (TyName / TyVar /
   TyFn), a parallel-list `Subst`, an `applyType` walker, and a
   `unify : TypeExpr -> TypeExpr -> Maybe[Subst]` mirroring the F# host's
   `HMInfer.unify` in `src/LLLangCompiler/HMInfer.fs` line 63 area.
@@ -163,17 +163,29 @@ session to pick up without replaying history.
   `EAdd` / `EApp`), an `InferResult = MkInferResult TypeExpr Subst Int`
   three-field carrier, and `inferExpr env n e` covering every arm
   (literal / var lookup / EAdd unify-both-with-Int / EApp fresh-beta
-  + unify-with-TyFn). 7.7c adds three new `Expr` variants — `ELam Str
-  Expr`, `ELet Str Expr Expr`, `EIf Expr Expr Expr` — plus an
-  `applyEnv : Subst -> Env -> Env` helper and three new `inferExpr`
-  arm chains following Algorithm W for lambda / let-in-mono /
-  if-then-else. Each arm of `unify`, `inferExpr`, and the three new
-  variants is split into its own helper to keep `match` nesting one
-  level deep. Deliberately still out of scope after 7.7c:
-  polymorphism / let-generalization / type schemes, occurs check,
-  `EMatch` inference, real `Result[_, LLError]` error reporting
-  (sentinel `TyName "ERROR"` stands in), multi-param lambda, and
-  wiring into `17-pipeline-real.lll`.
+  + unify-with-TyFn). 7.7c added three structural `Expr` variants —
+  `ELam Str Expr`, `ELet Str Expr Expr`, `EIf Expr Expr Expr` — plus
+  an `applyEnv : Subst -> Env -> Env` helper. **7.7d closes out all
+  four remaining HM closers**: (1) occurs check — `unifyVar` now
+  calls `occursIn v t` before binding and emits `E008 InfiniteType`
+  on circular substitutions; (2) Result-threaded errors — new
+  `type Outcome A = OkR A | ErrR Str` carrier replaces the `TyName
+  "ERROR"` sentinel, so `unify` returns `Outcome[Subst]` and
+  `inferExpr` returns `Outcome[InferResult]` with real E001/E002/E008
+  diagnostics; (3) `EMatch` inference — new `EMatch Expr List[Pat]
+  List[Expr]` constructor and `Pat = PInt Int | PVar Str | PWild`,
+  with an `inferMatch` helper family that walks parallel pat/body
+  lists, derives patTy per pattern, unifies with scrutinee, infers
+  body, unifies with shared β; (4) let-generalization — new
+  `type TypeScheme = MkScheme List[Str] TypeExpr`, `Env` now stores
+  schemes, `inferLet` calls `generalize env t1` before extending,
+  `inferVar` calls `instantiate n sch` on lookup. New helpers:
+  `ftvType` / `ftvScheme` / `ftvEnv` / `generalize` / `instantiate` /
+  `freshSubstFor` / `applyScheme` / `substRemove*` /
+  `listContainsStr` / `listDiffStr` / `listDedupStr`. Deliberately
+  still out of scope after 7.7d: multi-param lambda, TypedAST
+  round-trip, trait dispatch, wiring into `17-pipeline-real.lll`,
+  tagged types (TyTagged) and E004/E005, flex/rigid TyVar split.
 - `lllc run spec/examples/valid/18-hminfer-real.lll` prints
   ```
   t1 unify Int Int ok
@@ -185,18 +197,26 @@ session to pick up without replaying history.
   t7 infer (1 + 2) : Int
   t8 infer x in env : Int
   t9 infer (double 5) in env : Int
-  t10 infer (double "x") in env : ERROR
+  t10 infer (double "x") in env : ERROR E001 TypeMismatch Int vs Str
   t11 infer (\x. x) : ($0 -> $0)
   t12 infer (\x. x + 1) : (Int -> Int)
   t13 infer (let x = 5 in x + 1) : Int
   t14 infer (if true then 1 else 2) : Int
-  t15 infer (if true then 1 else "x") : ERROR
+  t15 infer (if true then 1 else "x") : ERROR E001 TypeMismatch Int vs Str
+  t16 infer (\f. \x. f x) : (($1 -> $2) -> ($1 -> $2))
+  t17 unify a (a -> Int) infinite
+  t18 infer (match 1 | 0 -> "zero" | _ -> "other") : Str
+  t19 infer (match 1 | 0 -> "zero" | 1 -> 42) : ERROR E001 TypeMismatch Str vs Int
+  t20 infer (match 1 | x -> x + 1) : Int
+  t21 infer (let id = \x. x in id 5) : Int
+  t22 infer (let id = \x. x in let i = id 5 in id "hi") : Str
   ```
-  (five hardcoded `unify` cases — three success / "ok bound" lines
-  and two mismatch lines — plus ten hardcoded `inferExpr` cases:
-  literal, addition, var lookup, application success, application
-  mismatch, identity lambda, lambda-with-body, mono let-in, if-int-
-  int, and if-int-str mismatch).
+  (five `unify` cases t1-t5; ten basic `inferExpr` cases t6-t15;
+  higher-order lambda t16; occurs-check E008 t17; EMatch success
+  t18 + branch mismatch t19 + PVar-binding t20; basic let-bound
+  lambda t21 + polymorphic double-use of `id` t22 — the canonical
+  let-gen demo that only type-checks when `id` is generalized to
+  `∀ $0. $0 -> $0` and each use instantiates fresh).
 - **Phase 7.8a done** — first slice of **F# codegen written in
   ll-lang itself** lives in
   [`19-codegen-real.lll`](../../spec/examples/valid/19-codegen-real.lll)
@@ -229,8 +249,11 @@ session to pick up without replaying history.
 
 ## Immediate next task
 
-Pick one of two paths — both unblocked now that Phase 7.8a landed
-and all four compiler stages have ll-lang representations:
+Phase 7.7 closed out in 7.7d. With the HM spine feature-complete and
+Phase 7.8a already landing the codegen shell, the next natural step is
+either **Phase 7.8b** (more codegen shapes) or **Phase 7.9** (wire the
+five self-host slices into a single `bootstrap/compiler.lll`) — the
+latter is now unblocked because 7.7d removed the last HM prerequisite.
 
 ### Option A: **Phase 7.8b — extend codegen with TELam + TEIf + TEMatch**
 
@@ -266,9 +289,9 @@ emits F# source:
   * `09-lexer-real.lll` — `tokenize`
   * `15-moduleparser-real.lll` — `parseModule`
   * `17-pipeline-real.lll` — `elaborate` (already wraps 15 + 16)
-  * `18-hminfer-real.lll` — `inferExpr` (needs Phase 7.7d for
-    polymorphism + error reporting, so Option B is currently blocked
-    on 7.7d completing first)
+  * `18-hminfer-real.lll` — `inferExpr` (Phase 7.7d closed, so this
+    prerequisite is unblocked; the HM spine now covers occurs check,
+    Result-threaded errors, EMatch, and let-generalization)
   * `19-codegen-real.lll` — `showDecl`
 
 A new `bootstrap/compiler.lll` imports the five modules and defines
@@ -279,9 +302,8 @@ source and asserting the emitted F# source compiles under the F#
 host.
 
 Recommended order: **Option A first** (7.8b) to harden the codegen
-spine, **then Phase 7.7d** (polymorphism + error reporting to unblock
-integration), **then Option B** (7.9) once all three prerequisites
-are in.
+spine, **then Option B** (7.9) once all three prerequisites are in
+(7.7d is already done, so the HM blocker is gone).
 
 ### Backlog: heavier module-parser extensions in ll-lang
 
