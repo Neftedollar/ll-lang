@@ -1340,3 +1340,68 @@ let ``20-bootstrap-compiler.lll resolves strChars/strFromChars/intToStr/charIsSp
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll desugars clause-sugar fn bodies (Phase 7.10g)`` () =
+    // Phase 7.10g: the bootstrap's `parseFnDecl` called `parseExpr`
+    // directly on the fn body, and `parseExpr` had no `TBar :: _`
+    // dispatch — so any fn whose body used clause-sugar
+    //   fn f(x T) U =
+    //     | Pat1 -> body1
+    //     | Pat2 -> body2
+    // fell through to `parseCompare -> ... -> parseAtom`, saw the
+    // leading `TBar` as an unknown atom, and returned `(EInt 0, toks)`
+    // with zero tokens consumed. Every clause-sugar fn in the
+    // bootstrap's own source silently became `fn f args = 0`. The
+    // 7.10f fixpoint probe surfaced this as `E002 UnboundVar lexChars`
+    // x2 because the two surviving references live in explicit-match
+    // fn bodies; every other caller of `lexChars` had its body rewritten
+    // to `EInt 0` and the reference vanished along with it.
+    //
+    // Fix: a new `parseFnBody` helper called between `parseFnDecl` and
+    // `parseExpr`. If the token stream (after `skipNewlines`) starts
+    // with `TBar`, it calls `parseArms` and constructs `EMatch
+    // lastParamVar pats bodies` — mirroring the host compiler's Phase
+    // 4 elaborator clause-sugar desugaring (which scrutinises the
+    // LAST curried param). Otherwise falls through to `parseExpr`.
+    //
+    // Fixture `20w-bootstrap-input-clause.lll` exercises
+    //   fn first(xs List[Int]) Int =
+    //     | x :: _ -> x
+    //     | _ -> 0
+    // Pre-fix, the bootstrap emits `let first xs = 0L` (clause sugar
+    // dropped). Post-fix, it emits a real `match xs with ...`.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let clausePath =
+        Path.Combine(repoRoot, "spec/examples/valid/20w-bootstrap-input-clause.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
+    Assert.True(File.Exists clausePath, $"missing fixture: {clausePath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(clausePath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO `error`; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let first" || stdout.Contains "let rec first",
+            $"expected emitted F# to contain `let first` or `let rec first`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "match",
+            $"expected emitted F# to contain `match` (proving desugaring emitted a match expr); stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
