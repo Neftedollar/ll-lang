@@ -1,16 +1,25 @@
 # Elaborator
 
-File: `src/LLLangCompiler/Elaborator.fs` (~370 lines).
+File: `src/LLLangCompiler/Elaborator.fs` (~630 lines).
 
 The elaborator is a pre-inference pass that does:
 
-1. Name resolution (module-level).
-2. Declared-type checking (`E001`, `E004`, `E005`).
-3. Exhaustiveness of pattern matches (`E003`).
+1. Module-level rewrites: `TyApp(T, TyVar t)` for any declared `tag t`
+   is rewritten to `TyTagged(T, UName t)`.
+2. Name resolution (module-level).
+3. Declared-type checking (`E001`, `E002`, `E004`, `E005`).
+4. Exhaustiveness of pattern matches (`E003`).
 
-It runs after parsing and before H-M inference. Its output — a
-`TypeEnv : Map<string, TypeExpr>` — becomes the initial environment for
-`HMInfer.fromElaboratorEnv`.
+It runs after parsing and before H-M inference. Its signature is:
+
+```fsharp
+val elaborate : PosMap -> LLModule -> Result<LLModule * TypeEnv, LLError list>
+```
+
+On success it returns both the rewritten module and the enriched
+`TypeEnv : Map<string, TypeExpr>`. The `TypeEnv` becomes the initial
+environment for `HMInfer.fromElaboratorEnv`, and the `PosMap` is
+threaded in so error emitters can look up real `line:col`.
 
 ## Core types
 
@@ -34,26 +43,46 @@ reserved in the design spec but has no runtime path.
 
 ### Pass 1: `collectDecls`
 
-Walks every `Decl` and populates the `TypeEnv`. Starts with `builtinEnv`
-containing:
+Walks every `Decl` and populates the `TypeEnv`. Starts with `builtinEnv`,
+which covers all of the Phase 6 stdlib as well as the built-in operators:
 
 ```fsharp
 let arithOps = [ "+"; "-"; "*"; "/" ]
 let cmpOps   = [ "=="; "!="; "<"; ">"; "<="; ">=" ]
 // Each arith op: a -> a -> a
 // Each cmp op:   a -> a -> Bool
-// printfn: Str -> Unit
+// printfn / print:      Str -> Unit
+// math:                 abs, absf, sqrt, min, max
+// list:                 listLen, listMap, listFilter, listFold,
+//                       listHead, listTail, listReverse, listAppend,
+//                       listConcat, listIsEmpty, listAt
+// maybe:                maybeMap, maybeBind, maybeWithDefault
+// result:               resultMap, resultBind, resultMapErr
+// str / char:           strLen, strConcat, strTrim, strContains,
+//                       strToInt, strChars, charToInt, intToChar,
+//                       intToStr, strSlice, strIndexOf, strSplit,
+//                       strFromChars, strReverse,
+//                       charIsDigit, charIsAlpha, charIsSpace
+// file IO:              readFile, writeFile, fileExists
+// process:              exit
 ```
 
-These are wildcard-polymorphic (TyVar "a"), which lets the elaborator
-accept them without triggering E002 — they aren't declared in source.
+Arith and comparison ops are wildcard-polymorphic (`TyVar "a"`), which
+lets the elaborator accept them without triggering E002 — they aren't
+declared in source. The matching runtime bindings for the stdlib live
+in `Codegen.fsharpPreludeCore` (plus the conditional `fsharpPreludeMaybe`
+and `fsharpPreludeResult` blocks, emitted only when the user declares
+`type Maybe` / `type Result`).
 
 For each declaration:
 
 - `DFn(sig, _body)` — add the curried function type to the env.
 - `DLet(name, expr)` — inspect the literal-only initializer to infer
-  a shallow type (int/float/str or their tagged variants). Anything
-  more complex becomes `TyVar "?"` (a wildcard).
+  a shallow type (int/float/str/char, bool via the KwTrue/KwFalse
+  surface, or their tagged variants). Anything more complex becomes
+  `TyVar "?"` (a wildcard) and is refined by HMInfer.
+- `DLetPat(pat, _expr)` — bind every name introduced by the pattern as
+  `TyVar "?"`; HMInfer refines to concrete types.
 - `DType(name, params, TBSum ctors)` — add one entry per constructor,
   with a curried function type from the constructor args to the fully
   applied type (e.g. `type Maybe A = Some A | None` gives
@@ -138,8 +167,10 @@ scope and the first-param heuristic doesn't apply).
   you write `| _ -> default`, the check still complains about missing
   constructors unless one of them is also named. This is a known bug
   tracked for fix.
-- Line/col info in elaborator errors is currently `0:0` — positions
-  are not threaded from the AST yet.
+- Line/col info for most elaborator errors is now threaded through the
+  parser's `PosMap` side-table (look for `posOf pm node` in
+  `typeOf`). A few synthesized error sites still fall back to `0:0`
+  when the AST node has no recorded position.
 
 ## Bridge to H-M
 
