@@ -1,0 +1,3 @@
+module Examples.Clean
+fn useIt(s Str) Int = let x = strToInt s in 0
+fn main() Int = useIt "42"

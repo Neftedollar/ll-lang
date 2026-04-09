@@ -1178,3 +1178,44 @@ let ``20-bootstrap-compiler.lll emits if expression in match arm body (Phase 7.1
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll resolves strToInt via stdlibNames (Phase 7.10c)`` () =
+    // Phase 7.10c: the bootstrap's `stdlibNames` mirror list omitted
+    // `strToInt` — the host elaborator knows it as a builtin, and the
+    // bootstrap's own source already uses it inside `lexNum`, but
+    // running the bootstrap on any user program that calls `strToInt`
+    // surfaced `E002 UnboundVar strToInt`. Same shape as the 7.9p/7.9r
+    // slices (`charToInt` / `charIsDigit`): add the bare name to the
+    // flat name list so the minimal HM pass accepts it.
+    //
+    // Fixture `20t-bootstrap-input-strtoint.lll` calls `strToInt` from
+    // a user fn body. Pre-fix, the elaborator emits
+    // `E002 UnboundVar strToInt`; post-fix, the elaborator accepts the
+    // name and codegen emits a `let useIt` plus the `[<EntryPoint>]`
+    // main wrapper.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let strToIntPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20t-bootstrap-input-strtoint.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists strToIntPath, $"missing fixture: {strToIntPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(strToIntPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002 UnboundVar strToInt",
+            $"expected NO E002 UnboundVar strToInt; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec useIt" || stdout.Contains "let useIt",
+            $"expected emitted F# to contain `let useIt` or `let rec useIt`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
