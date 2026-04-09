@@ -3565,3 +3565,134 @@ error messages (which need embedded newlines) and any
 fixture that stringifies ll-lang source with
 backslashes. Bool type promotion (Phase 7.9k, still
 pending) remains deferred.
+
+### 2026-04 — Phase 7.9m: string literal escapes (DONE)
+
+Thirteenth tick of **Phase 7.9**. Direct follow-up to
+7.9j's char literal escape slice, which explicitly
+deferred the string-literal analogue. Before this
+slice, the bootstrap compiler's `takeStrBody` copied
+string bodies verbatim until the first unescaped `"`,
+so `"say \"hi\""` terminated at the first `\"`
+leaving `hi\"\n"` as a mangled tail that the outer
+lexer re-tokenised as stray identifiers + operators.
+And even if the lexer had decoded escapes, `emitStr`
+was just `strConcat "\"" (strConcat s "\"")` — it
+injected the raw decoded bytes (e.g. a literal
+newline) directly into the emitted F# source,
+breaking the host compile. Both sites needed to move
+in lockstep. Hard blocker for the self-host fixpoint
+because the bootstrap's own source composes output
+via `strConcat` calls that contain `"\n"` / `" in "`
+/ `"let "` fragments with embedded escapes.
+
+**Changes:**
+
+* `takeStrBody` extended: detects `\` inside the
+  string body and delegates to a new helper
+  `takeStrBodyEsc`, which consumes the next char,
+  decodes it via `decodeEscape` (reused from 7.9j),
+  and recurses back into `takeStrBody` to keep
+  collecting. The plain-char path and the closing
+  `"` termination are unchanged.
+* `decodeEscape` extended with one new arm:
+  `else if c == '"' then '"'`, closing the fourth
+  escape needed for string literals. The other four
+  cases (`n`, `t`, `\\`, `'`) are reused unchanged
+  from 7.9j's char-escape slice.
+* New helper `fn encodeStrEscape(c Char) Str` mirrors
+  7.9j's `emitChar` but for string-context escape
+  set (uses `\"` instead of `\'`): `'\n'` → `"\\n"`,
+  `'\t'` → `"\\t"`, `'\\'` → `"\\\\"`, `'"'` →
+  `"\\\""`, everything else wrapped verbatim via
+  `strFromChars`.
+* New helper `fn emitStrBody(cs List[Char]) Str`
+  walks a decoded char list via `listFold` and
+  concatenates each char's `encodeStrEscape`
+  encoding. Same `listFold` pattern as `showParams`,
+  `showCtors`, etc.
+* `emitStr` rewritten to route through `emitStrBody`:
+  `strConcat "\"" (strConcat (emitStrBody (strChars
+  s)) "\"")`. Before this slice it was a raw verbatim
+  wrap; the 7.9b comment admitting "a real
+  implementation would escape `\"` / `\\` / `\n`" is
+  now redundant and was replaced with the 7.9m
+  round-trip note.
+* New fixture `20k-bootstrap-input-str-esc.lll`
+  exercises all three critical escapes in one
+  literal: `fn greet() Str = "say \"hi\"\n"`. The
+  escaped quotes force the lexer's escape path (else
+  the string terminates early → `E002 UnboundVar hi`)
+  and the `\n` forces the emitter's re-encoding path
+  (else a raw newline gets injected mid-literal).
+* New regression test in `BootstrapCompilerTests.fs`
+  swaps the 20a input for 20k, runs the bootstrap
+  compiler, and asserts (a) no `E002` / `E001` /
+  `error`, (b) emitted F# contains `let greet` /
+  `let rec greet`, `[<EntryPoint>]`, and the literal
+  substring `"say \"hi\"\n"`. Same swap/restore
+  pattern as 7.9h / 7.9i / 7.9j.
+* `showExpr`'s `EStr s` arm (debug pretty-printer)
+  was left unchanged — it's dead code at runtime
+  (`main` calls `emitModule`, not `showModule`), and
+  updating it would expand the diff without
+  functional benefit.
+
+**Deliberately out of scope:**
+
+* **`\r` / `\0` / `\u....`** — only the four escapes
+  actually used in bootstrap source strings (`\n`,
+  `\t`, `\\`, `\"`) are supported. Adding the others
+  is a one-line extension to `decodeEscape` +
+  `encodeStrEscape` when the bootstrap or fixtures
+  grow a need.
+* **Multi-line raw strings** — no `"""..."""` raw
+  literal support; the only mechanism for embedding a
+  newline is the `\n` escape.
+* **Unterminated string diagnostic** — an unclosed
+  `"` still silently drops off the end of the
+  stream, matching the leniency of the rest of the
+  lexer.
+* **`showStr` symmetric update** — the 20-file's
+  `showExpr` pretty-printer has an `EStr s ->
+  strConcat (strConcat "\"" s) "\""` arm that now
+  suffers the same raw-injection bug as pre-7.9m
+  `emitStr`. Deliberately skipped because `showExpr`
+  is never called at runtime (dead code kept for
+  reference alongside `showDecl` / `showModule`).
+  Would be a one-liner to fix if the debug printer
+  path is ever reintroduced.
+
+Tests: 411 → 412 (+1 for the string escape
+regression test).
+
+**Surprise:** the initial RED fixture used
+`"hello\nworld"`, and the test still **passed**
+against the unfixed bootstrap. Reason: the
+unfixed `takeStrBody` was lenient enough to pass the
+raw `\` + `n` pair through verbatim, and the unfixed
+`emitStr` then wrapped it in quotes, so the F# output
+literally contained `"hello\nworld"` — the exact
+string the test was asserting on. The assertion was
+true for the wrong reason. The fix required a
+fixture that uses an escaped `"` (which the unfixed
+lexer can't handle — it terminates the string at the
+first unescaped `"` and re-lexes the rest as garbage
+identifiers). `"say \"hi\"\n"` produces `E002
+UnboundVar hi` pre-fix and round-trips cleanly
+post-fix. Good reminder that a RED fixture has to
+actually trip a **behavioural** difference between
+pre- and post-fix, not just be syntactically
+distinct.
+
+Next tick: **Phase 7.9n** — unknown-char lexer
+diagnostic, per issue #7. The bootstrap's `lexChars`
+catch-all arm silently drops any char it doesn't
+recognise, so typos like `let x = @y` or `(x + $)`
+produce no diagnostic and parse as though the offending
+char weren't there. This is the last of the known
+lexer leniency bugs worth fixing before the self-host
+fixpoint (Phase 7.10). Bool type promotion (Phase
+7.9k, issue #6) remains deferred — it's an inference
+pass change, not a lexer/parser/codegen slice, and
+fits better into the Phase 7.10 fixpoint pass.
