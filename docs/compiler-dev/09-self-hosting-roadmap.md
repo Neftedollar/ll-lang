@@ -4342,3 +4342,121 @@ arm body can be an `if-then-else`, `takeIdCont` /
 all emit real bodies and the probe should jump
 significantly past the 126-line wall.
 
+## Phase 7.10b — If/let in match arm bodies
+
+**Slice:** fix `parseArmBody` in the bootstrap
+compiler to dispatch `TKwIf` and `TKwLet` at the
+top before falling through to `parseCompare`. This
+is a surgical, one-function change that unblocks
+the `takeIdCont` / `dropIdCont` / `takeDigit` /
+`dropDigit` family of lex helpers whose arm bodies
+are `if isIdCont c then listAppend [c] (takeIdCont
+rest) else []`.
+
+Pre-fix, `parseArmBody` was a straight alias for
+`parseCompare`, which SKIPS the special-form
+dispatch (`parseIf` / `parseLetIn` / `parseMatch`
+/ `parseLam`) that lives in `parseExpr`. An arm
+body starting with `if` hit `parseCompare →
+parseAddSub → ... → parseAtom`, which has no
+`TKwIf` arm, fell into the wildcard `(EInt 0,
+toks)`, and the token stream desynced — the body
+became literal `0` and every subsequent decl
+silently dropped out.
+
+The original comment on `parseArmBody` justified
+the `parseCompare` constraint as protection
+against nested `match` in arm bodies accidentally
+grabbing a sibling `| ...` arm — but explicitly
+noted the constraint was "safe because 15's match
+bodies never themselves contain bare `let` / `match`
+/ lambdas (those are Phase 7.5+)". By 7.10b the
+bootstrap's own source routinely uses `if` and
+`let` inside arm bodies (the lex helper family
+above), so the constraint had to be relaxed. The
+**surgical fix** dispatches `TKwIf` and `TKwLet`
+explicitly at the top of `parseArmBody` while
+leaving `parseMatch` / `parseLam` behind
+`parseCompare` — preserving the nested-match
+safety guarantee and keeping scope tight to the
+two forms actually needed.
+
+**Change site (1):**
+
+```
+fn parseArmBody(toks List[Token]) =
+  | TKwIf :: rest -> parseIf rest
+  | TKwLet :: rest -> parseLetIn rest
+  | _ -> parseCompare toks
+```
+
+**Fixture + test:**
+`20s-bootstrap-input-arm-if.lll` exercises
+
+```
+fn describe(n Int) Int =
+  match n with
+    | 0 -> if 1 == 1 then 10 else 20
+    | _ -> 30
+fn main() Int = describe 0
+```
+
+Pre-fix, `describe` emitted as `(match n with | 0L
+-> 0L)` — the `if` body was dropped to `EInt 0`,
+and the `| _` wildcard arm was silently consumed
+by the desync. Post-fix, the emitted F# contains
+the proper `if ... then 10L else 20L` form and
+both match arms are preserved. Regression test
+`20-bootstrap-compiler.lll emits if expression in
+match arm body (Phase 7.10b)` asserts the emitted
+F# contains `if `, `10L`, `20L`, `describe`, and
+`[<EntryPoint>]`.
+
+**Fixpoint-probe confirmation:**
+
+| Metric | Before 7.10b | After 7.10b |
+|---|---|---|
+| stdout bytes | 2764 | 153 |
+| stdout lines | 126 | 5 |
+| errors reported | 0 | 1 (`E002 UnboundVar strToInt`) |
+| halt point | `takeIdCont` body emits as `-> 0L` (silent garbage) | bootstrap's own elaborator flags real unbound var |
+| main branch taken | `printfn (emitModule mod)` | `printfn (showErrs errs)` |
+
+The byte count SHRANK from 2764 to 153, but this
+is actually the single most significant step
+forward in Phase 7: the bootstrap is now
+functioning as a real compiler. Pre-fix, the
+parser silently emitted 126 lines of malformed F#
+because desynced arm bodies produced `EInt 0`
+ASTs that the elaborator couldn't even see — so
+`errs` came back empty and `main` took the
+`printfn (emitModule mod)` branch. Post-fix, the
+parser correctly consumes every arm body in the
+lex helper family, the elaborator now has a
+well-formed AST, and IT (correctly) flags
+`strToInt` — a genuinely undefined reference in
+the bootstrap's own source — as unbound. `main`
+takes the `printfn (showErrs errs)` branch and
+stops.
+
+**Next blocker:** **Phase 7.10c** — the bootstrap
+references `strToInt` in `parseIntStr` (line 378
+of `20-bootstrap-compiler.lll`) but `strToInt` is
+not declared anywhere in the bootstrap's stdlib.
+The host stdlib provides it via runtime.fs, but
+the bootstrap needs an explicit extern/declared
+binding (or a self-written implementation) so the
+elaborator recognises it. The simplest fix is
+probably to add a stub `fn strToInt(s Str)
+Maybe[Int] = None` to the bootstrap's prelude
+(it's only used defensively — the lexer guards
+the call with an all-digits check) OR to declare
+it as a builtin like the other stdlib names
+already threaded through `elaborate`'s initial
+environment. After 7.10c lands, the elaborator
+should return empty and `main` will flip back to
+the emit branch — hopefully producing a
+significantly larger output than the pre-7.10a
+2726-byte baseline, with emission flowing into
+the `parseIntStr` / `classifyId` / `lex*` family.
+
