@@ -1219,3 +1219,52 @@ let ``20-bootstrap-compiler.lll resolves strToInt via stdlibNames (Phase 7.10c)`
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll supports string literal patterns (Phase 7.10d)`` () =
+    // Phase 7.10d: the bootstrap's `Pat` type and `parsePrimaryPat` /
+    // `showPat` / `patBinders` / `patIsCatchAll` / `emitPat` cascade
+    // did not handle `PStr Str` — a string literal as a match pattern.
+    // Arms like `| "module" -> TKwModule` fell through to `PWild` in
+    // `parsePrimaryPat` (the catch-all `| _ -> (PWild, toks)`) which
+    // collapsed later arms into a single wildcard. This blocks the
+    // fixpoint probe at `classifyIdent` in 20-bootstrap-compiler.lll.
+    //
+    // Fixture `20u-bootstrap-input-str-pat.lll` matches a `Str` scrut
+    // against `"one"` / `"two"` / `_`. Pre-fix, the bootstrap drops
+    // both literal arms; post-fix, `| "one"` and `| "two"` appear
+    // verbatim in the emitted F#.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let strPatPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20u-bootstrap-input-str-pat.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists strPatPath, $"missing fixture: {strPatPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(strPatPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO `error`; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "| \"one\"",
+            $"expected emitted F# to contain `| \"one\"`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "| \"two\"",
+            $"expected emitted F# to contain `| \"two\"`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)

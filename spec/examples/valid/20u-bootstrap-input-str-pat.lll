@@ -1,0 +1,7 @@
+module Examples.Clean
+fn kind(s Str) Int =
+  match s with
+    | "one" -> 1
+    | "two" -> 2
+    | _ -> 0
+fn main() Int = kind "two"
