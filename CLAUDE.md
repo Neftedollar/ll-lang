@@ -1,7 +1,7 @@
 # ll-lang — Compiler
 
 Language: F#  
-Target: .NET 8  
+Target: .NET 10 (preview, nullness enabled)  
 Build: `dotnet build`  
 Test: `dotnet test`
 
