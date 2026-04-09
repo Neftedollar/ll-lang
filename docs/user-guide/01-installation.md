@@ -27,7 +27,8 @@ Optional: run the test suite.
 dotnet test
 ```
 
-325 tests should pass.
+All tests should pass. The suite grows with each phase; a clean build on
+main should report zero failures.
 
 ## Hello, ll-lang
 
