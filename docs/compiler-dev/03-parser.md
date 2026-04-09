@@ -1,10 +1,11 @@
 # Parser
 
-File: `src/LLLangCompiler/Parser.fs` (~690 lines).
+File: `src/LLLangCompiler/Parser.fs` (~1230 lines).
 
 A hand-written recursive-descent parser with a mutable cursor over a
-`Tok array`. The `private Ctx` record holds the token array and a
-mutable position index:
+`Tok array`. The `private Ctx` record holds the token array, a mutable
+position index, and a `PosMap` side-table for attaching source
+positions to AST nodes:
 
 ```fsharp
 type private Ctx = {
@@ -22,15 +23,20 @@ one token (`| Error _ -> advance c  // skip bad token`).
 Climbing chain, from lowest to highest binding:
 
 ```
-parseExprInner          -- let, if, \lambda, else delegate to parsePipe
+parseExprInner          -- let, if, match, \lambda, else delegate to parsePipe
     parsePipe           -- ->  (left-associative)
         parseCmp        -- < > <= >= == !=
-            parseAdd    -- + -
-                parseMul        -- * /
-                    parseApp    -- juxtaposition (function application)
-                        parseTagged   -- atom[Tag]
-                            parseAtom -- literal, ident, paren, list
+            parseCons   -- ::  (right-associative)
+                parseAdd        -- + -
+                    parseMul    -- * /
+                        parseApp        -- juxtaposition (function application)
+                            parseTagged -- atom[Tag]
+                                parseAtom -- literal, ident, paren, list
 ```
+
+`parseBlockExpr` is a layout-aware wrapper used for bodies where an
+`Indent`-terminated block of statements (`let ... let ... expr`) is
+allowed. It delegates to `parseExprInner` for each statement.
 
 Binary operators are desugared on the fly into nested `EApp` nodes:
 
@@ -49,7 +55,7 @@ start one:
 ```fsharp
 while cont do
     match curTok c with
-    | IntLit _ | FloatLit _ | StrLit _ | KwTrue | KwFalse
+    | IntLit _ | FloatLit _ | StrLit _ | CharLit _ | KwTrue | KwFalse
     | Ident _ | TypeId _ | LParen | LBrack -> ... EApp(result, arg)
     | _ -> cont <- false
 ```
@@ -145,7 +151,10 @@ parameter list, inferred return type". The resulting `FnSig` has
 6. Terminate on `Eof`.
 
 Output: `LLModule { Path; Imports; Decls }` where `Decls` is a list of
-`(Decl * bool)` (the boolean is `isExported`).
+`(Decl * bool)` (the boolean is `isExported`). Two public entry points
+exist: `parseModule` (returns just the module) and
+`parseModuleWithPos` (returns the module plus the populated `PosMap`
+that the elaborator and HMInfer read when emitting errors).
 
 ## Declaration dispatch
 
@@ -154,12 +163,16 @@ Output: `LLModule { Path; Imports; Decls }` where `Decls` is a list of
 | Keyword    | AST node                                    |
 |------------|---------------------------------------------|
 | `fn`       | `DFn(FnSig, Expr)`                          |
-| `let`      | `DLet(Ident, Expr)`                         |
+| `let`      | `DLet(Ident, Expr)` for simple `let x = e`, `DLetPat(Pattern, Expr)` otherwise |
 | `type`     | `DType(TypeIdent, TypeParam list, TypeBody)` |
 | `tag`      | `DTag(TypeIdent)`                           |
 | `unit`     | `DUnit(TypeIdent)`                          |
 | `trait`    | `DTrait(TypeIdent, Ident list, FnSig list)` |
 | `impl`     | `DImpl(TypeIdent, TypeIdent, (FnSig * Expr) list)` |
+
+`let` is parsed pattern-first: a bare `PVar` falls back to `DLet` so
+all existing code paths keep working, while non-trivial patterns
+(tuples, cons, constructors) produce `DLetPat`.
 
 ## Type body parsing
 
@@ -176,14 +189,20 @@ field was a bare wrapped type, it falls back to `TBWrapped`.
 
 ## Pattern parsing
 
-`parsePattern` handles:
+`parsePattern` is split into two levels:
 
-- `TypeId (args ...)` — constructor pattern. Subpatterns are atoms only
-  (variables, literals, wildcards, or parenthesized patterns).
-- `Ident` → `PVar`
-- `Underscore` → `PWild`
-- Literals (`IntLit`, `FloatLit`, `StrLit`, `KwTrue`, `KwFalse`) → `PLit`
-- `(pat)` → parenthesized inner pattern
+- `parsePatCons` — top-level, handles right-associative `::`
+  (`h :: t`) producing `PCons(h, t)`.
+- `parsePatAtom` — atoms:
+  - `TypeId (args ...)` — constructor pattern `PCon(name, args)`.
+  - `Ident` → `PVar`
+  - `Underscore` → `PWild`
+  - Literals (`IntLit`, `FloatLit`, `StrLit`, `CharLit`, `KwTrue`,
+    `KwFalse`) → `PLit`
+  - `(pat)` → parenthesized inner pattern; `(p1, p2, ..., pN)` becomes
+    `PTuple`.
+  - `[]` → empty-list pattern, emitted as `PCon("[]", [])` so downstream
+    pattern emission can special-case it back to F#'s `[]`.
 
 Constructor subpatterns do not themselves accept constructor args without
 parens — to nest constructors you must write `Some (Cons x xs)`.
