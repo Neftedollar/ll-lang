@@ -1474,7 +1474,7 @@ let ``20-bootstrap-compiler.lll emits tuple literal expressions (Phase 7.10q)`` 
 // These document the remaining gaps between compiler_1.fs (F# host output)
 // and compiler_2.fs (bootstrap output) that must be closed for the fixpoint.
 
-[<Fact(Skip = "Phase 7.10r blocker — prelude parity not yet implemented: bootstrap only emits 6 stdlib bindings, but listFold/listReverse/etc. are needed by compiler_2.fs")>]
+[<Fact>]
 let ``20y-bootstrap-input-prelude.lll: bootstrap prelude contains listFold and listReverse (Phase 7.10r blocker 1)`` () =
     // Blocker 1: Prelude parity.
     // The bootstrap emits only 6 stdlib bindings in its prelude
@@ -1524,7 +1524,7 @@ let ``20y-bootstrap-input-prelude.lll: bootstrap prelude contains listFold and l
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
 
-[<Fact(Skip = "Phase 7.10r blocker — binding count parity not yet implemented: compiler_1.fs emits 275 bindings, compiler_2.fs emits 238 (37 missing)")>]
+[<Fact>]
 let ``20y-bootstrap-input-mutrec.lll: mutually recursive fns across type boundary produce correct let-rec grouping (Phase 7.10r blocker 2)`` () =
     // Blocker 2: Binding count parity.
     // compiler_1.fs (F# host compiling the bootstrap) emits 275 bindings;
@@ -1577,7 +1577,7 @@ let ``20y-bootstrap-input-mutrec.lll: mutually recursive fns across type boundar
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
 
-[<Fact(Skip = "Phase 7.10r blocker — format parity not yet implemented: bootstrap emits fns as single lines, F# host emits multi-line with blank separators")>]
+[<Fact>]
 let ``20y-bootstrap-input-fmt.lll: each fn in a multi-fn module is emitted on its own separate line (Phase 7.10r blocker 3)`` () =
     // Blocker 3: Format parity.
     // For byte-identical fixpoint, compiler_1.fs and compiler_2.fs must
