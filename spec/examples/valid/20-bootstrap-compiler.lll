@@ -211,6 +211,7 @@ type Token =
   | TLBrack
   | TRBrack
   | TEq
+  | TEqEq
   | TBar
   | TDot
   | TBackslash
@@ -276,6 +277,7 @@ type Expr =
   | ESub Expr Expr
   | EMul Expr Expr
   | EDiv Expr Expr
+  | EEq Expr Expr
   | EApp Expr Expr
   | ELam Str Expr
   | ELetIn Str Expr Expr
@@ -426,6 +428,16 @@ fn lexMinusOrArrow(cs List[Char]) List[Token] =
     else listAppend [TMinus] (lexChars cs)
   | _ -> [TMinus]
 
+-- Phase 7.9f: handle `=` vs `==`. Main loop already consumed the first
+-- `=` before calling this helper. If the next char is also `=`, emit a
+-- single `TEqEq` and recurse past both. Otherwise emit `TEq` and
+-- re-lex starting at the current head (don't drop the non-`=` char).
+fn lexEqOrEqEq(cs List[Char]) List[Token] =
+  | c :: rest ->
+    if c == '=' then listAppend [TEqEq] (lexChars rest)
+    else listAppend [TEq] (lexChars cs)
+  | _ -> [TEq]
+
 -- Main loop. Newlines are significant (they separate decls); spaces and
 -- tabs are skipped. Every other single-char symbol maps directly to its
 -- token constructor. Phase 7.5a adds `_` → TUnder (wildcard pattern) and
@@ -442,7 +454,7 @@ fn lexChars(cs List[Char]) List[Token] =
     else if c == ')' then listAppend [TRParen] (lexChars rest)
     else if c == '[' then listAppend [TLBrack] (lexChars rest)
     else if c == ']' then listAppend [TRBrack] (lexChars rest)
-    else if c == '=' then listAppend [TEq] (lexChars rest)
+    else if c == '=' then lexEqOrEqEq rest
     else if c == '|' then listAppend [TBar] (lexChars rest)
     else if c == '.' then listAppend [TDot] (lexChars rest)
     else if c == '\\' then listAppend [TBackslash] (lexChars rest)
@@ -756,7 +768,7 @@ fn parseExpr(toks List[Token]) =
   | TKwMatch :: rest -> parseMatch rest
   | TKwLet :: rest -> parseLetIn rest
   | TBackslash :: rest -> parseLam rest
-  | _ -> parseAddSub toks
+  | _ -> parseCompare toks
 
 -- `let name = e1 in e2`. Single-binder let-in. Chains are expressed by
 -- nesting another `let ... in ...` in the `e2` slot (right-recursive).
@@ -846,7 +858,7 @@ fn parseArm(toks List[Token]) =
 -- trailing `| ...` as part of a nested match — safe because 15's match
 -- bodies never themselves contain bare `let`/`match`/lambdas (those are
 -- Phase 7.5+).
-fn parseArmBody(toks List[Token]) = parseAddSub toks
+fn parseArmBody(toks List[Token]) = parseCompare toks
 
 -- Primary pattern: int literal, lowercase var binder, wildcard `_`,
 -- or empty-list `[]`. The recursive `parsePat` calls this once, then
@@ -871,6 +883,22 @@ fn parsePat(toks List[Token]) =
       let (tail, rest3) = parsePat rest2 in
       (PCons p tail, rest3)
     | _ -> (p, rest)
+
+-- Phase 7.9f: comparison precedence layer. Looser than `+/-`, so the
+-- cascade goes parseExpr -> parseCompare -> parseAddSub -> parseMulDiv
+-- -> parseApp -> parseAtom. Only `==` (TEqEq) in this slice; `<`, `>`,
+-- `!=` stay in Phase 7.9g+. Left-associative via the tail helper, same
+-- shape as parseAddSubTail.
+fn parseCompare(toks List[Token]) =
+  let (e, rest) = parseAddSub toks in
+  parseCompareTail e rest
+
+fn parseCompareTail(lhs Expr)(toks List[Token]) =
+  match toks with
+    | TEqEq :: r ->
+      let (rhs, rest2) = parseAddSub r in
+      parseCompareTail (EEq lhs rhs) rest2
+    | _ -> (lhs, toks)
 
 -- Arithmetic precedence cascade, same shape as 13/14.
 fn parseAddSub(toks List[Token]) =
@@ -1038,6 +1066,7 @@ fn showExpr(e Expr) Str =
   | ESub l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " - ") (showExpr r)) ")"
   | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " * ") (showExpr r)) ")"
   | EDiv l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " / ") (showExpr r)) ")"
+  | EEq l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " == ") (showExpr r)) ")"
   | EApp f x -> strConcat (strConcat (strConcat (strConcat "(" (showExpr f)) " ") (showExpr x)) ")"
   | ELam n body -> strConcat (strConcat (strConcat (strConcat "(fun " n) " -> ") (showExpr body)) ")"
   | ELetIn n e1 e2 ->
@@ -1147,6 +1176,7 @@ fn checkExpr(env Env)(e Expr) List[Str] =
   | ESub l r -> listAppend (checkExpr env l) (checkExpr env r)
   | EMul l r -> listAppend (checkExpr env l) (checkExpr env r)
   | EDiv l r -> listAppend (checkExpr env l) (checkExpr env r)
+  | EEq l r -> listAppend (checkExpr env l) (checkExpr env r)
   | EApp f x -> listAppend (checkExpr env f) (checkExpr env x)
   | ELam param body ->
     let env2 = envAdd env param in
@@ -1449,6 +1479,7 @@ fn inferExprType(env TypeEnv)(e Expr) TypeExpr =
   | ESub _ _ -> TyName "Int"
   | EMul _ _ -> TyName "Int"
   | EDiv _ _ -> TyName "Int"
+  | EEq _ _ -> TyName "Bool"
   | EIf _ thn _ -> inferExprType env thn
   | _ -> TyVar "?"
 
@@ -1512,6 +1543,10 @@ fn typeCheck(env TypeEnv)(e Expr) List[Str] =
     let lErrs = typeCheck env l in
     let rErrs = typeCheck env r in
     listAppend here (listAppend lErrs rErrs)
+  | EEq l r ->
+    let lErrs = typeCheck env l in
+    let rErrs = typeCheck env r in
+    listAppend lErrs rErrs
   | EApp f x ->
     listAppend (typeCheck env f) (typeCheck env x)
   | ELam _ body -> typeCheck env body
@@ -1674,6 +1709,7 @@ fn emitExpr(e Expr) Str =
   | ESub l r -> emitBin l r " - "
   | EMul l r -> emitBin l r " * "
   | EDiv l r -> emitBin l r " / "
+  | EEq l r -> emitBin l r " = "
   | EApp f x -> emitApp f x
   | ELam x body -> emitLam x body
   | ELetIn n e1 e2 -> emitLetIn n e1 e2

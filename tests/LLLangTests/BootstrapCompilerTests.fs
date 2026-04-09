@@ -230,8 +230,8 @@ let ``20-bootstrap-compiler.lll accepts == operator in fn body (Phase 7.9f)`` ()
             stdout.Contains "[<EntryPoint>]",
             $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
         Assert.True(
-            stdout.Contains "(1 = 1)",
-            $"expected emitted F# to contain `(1 = 1)`; stdout:\n{combined}")
+            stdout.Contains "(1L = 1L)",
+            $"expected emitted F# to contain `(1L = 1L)`; stdout:\n{combined}")
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
