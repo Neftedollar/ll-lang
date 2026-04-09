@@ -1000,12 +1000,22 @@ fn parseArm(toks List[Token]) =
   | _ -> ((PWild, EInt 0), toks)
 
 -- Arm bodies stop at the next `|` (start of sibling arm) or at TNewline
--- / TEnd (decl boundary). Parsing at the `parseAddSub` level rather than
--- full `parseExpr` prevents an arm body from accidentally grabbing a
--- trailing `| ...` as part of a nested match — safe because 15's match
--- bodies never themselves contain bare `let`/`match`/lambdas (those are
--- Phase 7.5+).
-fn parseArmBody(toks List[Token]) = parseCompare toks
+-- / TEnd (decl boundary). Parsing at the `parseCompare` level rather
+-- than full `parseExpr` prevents an arm body from accidentally grabbing
+-- a trailing `| ...` as part of a nested match. Phase 7.10b: the
+-- bootstrap's own source now uses `if ... then ... else ...` and
+-- `let x = ... in ...` directly inside arm bodies (e.g. `takeIdCont`:
+-- `| c :: rest -> if isIdCont c then listAppend [c] (takeIdCont rest)
+-- else []`), so we dispatch `TKwIf` / `TKwLet` explicitly at the top
+-- and fall through to `parseCompare` otherwise. `TKwMatch` and
+-- `TBackslash` are deliberately NOT dispatched here: a nested `match`
+-- inside an arm body is still the ambiguous case the original
+-- constraint existed to guard against, and the bootstrap never puts a
+-- bare lambda in arm-body position.
+fn parseArmBody(toks List[Token]) =
+  | TKwIf :: rest -> parseIf rest
+  | TKwLet :: rest -> parseLetIn rest
+  | _ -> parseCompare toks
 
 -- Phase 7.9l: eagerly consume a sequence of atomic sub-patterns (var
 -- binder, wildcard, int literal, or empty-list `[]`) until the next
