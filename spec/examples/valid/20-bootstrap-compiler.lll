@@ -396,6 +396,15 @@ fn parseIntStr(s Str) Int =
 -- decl forms (a bare `tag Name` decl, a dotted `import Foo.Bar` decl,
 -- and an `export` modifier prefix that wraps any existing decl in a
 -- `DExport` variant).
+-- Phase 7.10i: extract the nested match on `strChars s` into a dedicated
+-- helper so the outer arm body reduces to a single call. The bootstrap's
+-- `parseArmBody` deliberately doesn't dispatch `TKwMatch`, so every
+-- nested-match site in an arm body needs to live in its own fn.
+fn classifyIdentByHead(s Str)(cs List[Char]) Token =
+  match cs with
+    | c :: _ -> if isUpperChar c then TUpper s else TLower s
+    | _ -> TLower s
+
 fn classifyIdent(s Str) Token =
   match s with
     | "module" -> TKwModule
@@ -411,11 +420,7 @@ fn classifyIdent(s Str) Token =
     | "tag" -> TKwTag
     | "import" -> TKwImport
     | "export" -> TKwExport
-    | _ ->
-      let cs = strChars s in
-      match cs with
-        | c :: _ -> if isUpperChar c then TUpper s else TLower s
-        | _ -> TLower s
+    | _ -> classifyIdentByHead s (strChars s)
 
 fn lexId(cs List[Char]) List[Token] =
   let idChars = takeIdCont cs in
