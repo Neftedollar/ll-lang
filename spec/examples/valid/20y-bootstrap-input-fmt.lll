@@ -1,0 +1,5 @@
+module Examples.FmtTest
+fn inc(n Int) Int = n + 1
+fn dec(n Int) Int = n + -1
+fn double(n Int) Int = n + n
+fn main() Int = inc 1

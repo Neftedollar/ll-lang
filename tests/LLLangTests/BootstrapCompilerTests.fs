@@ -1469,3 +1469,164 @@ let ``20-bootstrap-compiler.lll emits tuple literal expressions (Phase 7.10q)`` 
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+// Phase 7.10r blocker tests — skipped until each blocker is resolved.
+// These document the remaining gaps between compiler_1.fs (F# host output)
+// and compiler_2.fs (bootstrap output) that must be closed for the fixpoint.
+
+[<Fact(Skip = "Phase 7.10r blocker — prelude parity not yet implemented: bootstrap only emits 6 stdlib bindings, but listFold/listReverse/etc. are needed by compiler_2.fs")>]
+let ``20y-bootstrap-input-prelude.lll: bootstrap prelude contains listFold and listReverse (Phase 7.10r blocker 1)`` () =
+    // Blocker 1: Prelude parity.
+    // The bootstrap emits only 6 stdlib bindings in its prelude
+    // (print, printfn, readFile, strConcat, strLen, listAppend at
+    // minimum) but the bootstrap's own compiled output (compiler_2.fs)
+    // calls listFold, listReverse, listIsEmpty, strChars, strFromChars,
+    // intToStr, charToInt, charIsDigit, charIsSpace — none of which
+    // appear in the emitted prelude. When compiler_2.fs is then compiled
+    // by F# and run, it fails with UnboundVar-style errors.
+    //
+    // Desired behaviour: the bootstrap's `emitPrelude` function emits ALL
+    // stdlib builtins that appear in `stdlibNames` so that any program
+    // the bootstrap compiles is self-contained.
+    //
+    // This test runs the bootstrap on `20y-bootstrap-input-prelude.lll`
+    // (a module that calls `listFold` and `listReverse`) and asserts that
+    // the emitted F# prelude contains definitions for both functions.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let preludePath =
+        Path.Combine(repoRoot, "spec/examples/valid/20y-bootstrap-input-prelude.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath,   $"missing fixture: {inputPath}")
+    Assert.True(File.Exists preludePath, $"missing fixture: {preludePath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(preludePath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar; combined:\n{combined}")
+        // The emitted prelude must contain listFold and listReverse so
+        // that a downstream F# compiler can compile the output without
+        // missing-binding errors.
+        Assert.True(
+            stdout.Contains "listFold",
+            $"expected emitted prelude to define `listFold`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "listReverse",
+            $"expected emitted prelude to define `listReverse`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
+
+[<Fact(Skip = "Phase 7.10r blocker — binding count parity not yet implemented: compiler_1.fs emits 275 bindings, compiler_2.fs emits 238 (37 missing)")>]
+let ``20y-bootstrap-input-mutrec.lll: mutually recursive fns across type boundary produce correct let-rec grouping (Phase 7.10r blocker 2)`` () =
+    // Blocker 2: Binding count parity.
+    // compiler_1.fs (F# host compiling the bootstrap) emits 275 bindings;
+    // compiler_2.fs (bootstrap compiling itself) emits only 238 — a
+    // difference of 37. The suspected cause is that the bootstrap's
+    // `emitStep` resets the pending-fn accumulator whenever it sees a
+    // `DType` decl, while the F# host compiler's grouping logic does
+    // not. This causes the bootstrap to split `let rec ... and ...`
+    // blocks that the host compiler keeps joined, producing more
+    // singleton `let` bindings and a different total count.
+    //
+    // Desired behaviour: a run of fn decls interrupted only by a type
+    // decl should still be emitted as a single `let rec ... and ...`
+    // group (or at minimum produce the same binding count as the host).
+    //
+    // This test runs the bootstrap on `20y-bootstrap-input-mutrec.lll`
+    // (three mutually recursive fns) and asserts the emitted F# wraps
+    // all three in one `let rec / and / and` block.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let mutrecPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20y-bootstrap-input-mutrec.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
+    Assert.True(File.Exists mutrecPath, $"missing fixture: {mutrecPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(mutrecPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar; combined:\n{combined}")
+        // All three non-main fns must appear in a single let-rec block:
+        // `let rec isEven ... \nand isOdd ... \nand parity ...`
+        Assert.True(
+            stdout.Contains "let rec isEven",
+            $"expected emitted F# to contain `let rec isEven`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "and isOdd",
+            $"expected emitted F# to contain `and isOdd` (same rec group); stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "and parity",
+            $"expected emitted F# to contain `and parity` (same rec group); stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
+
+[<Fact(Skip = "Phase 7.10r blocker — format parity not yet implemented: bootstrap emits fns as single lines, F# host emits multi-line with blank separators")>]
+let ``20y-bootstrap-input-fmt.lll: each fn in a multi-fn module is emitted on its own separate line (Phase 7.10r blocker 3)`` () =
+    // Blocker 3: Format parity.
+    // For byte-identical fixpoint, compiler_1.fs and compiler_2.fs must
+    // produce the same whitespace layout. The F# host compiler's
+    // `emitGroupedDecls` emits a blank line between each top-level block
+    // AND emits each `and` clause on its own line with consistent
+    // indentation. The bootstrap's current emission concatenates
+    // everything inline (each fn body on a single line, minimal spacing).
+    //
+    // Desired behaviour: the bootstrap emits each fn declaration on its
+    // own line, separated from the next by a blank line — matching the
+    // host's output format.
+    //
+    // This test runs the bootstrap on `20y-bootstrap-input-fmt.lll`
+    // (four non-main fns + main) and asserts:
+    //   1. `inc`, `dec`, `double` appear in the output on separate lines
+    //      (i.e. the output contains at least two newlines between them)
+    //   2. The `and` keyword for each continuation fn starts at the
+    //      beginning of its own line (`\nand `)
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let fmtPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20y-bootstrap-input-fmt.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists fmtPath,   $"missing fixture: {fmtPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(fmtPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec inc",
+            $"expected emitted F# to contain `let rec inc`; stdout:\n{combined}")
+        // Each `and` clause must start on its own line so the output
+        // is multi-line (matches the host compiler's format).
+        Assert.True(
+            stdout.Contains "\nand dec",
+            $"expected `and dec` to start on its own line (`\\nand dec`); stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "\nand double",
+            $"expected `and double` to start on its own line (`\\nand double`); stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)

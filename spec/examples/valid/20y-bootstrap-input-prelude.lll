@@ -1,0 +1,4 @@
+module Examples.PreludeTest
+fn sumList(xs List[Int]) Int = listFold (\acc x. acc + x) 0 xs
+fn revList(xs List[Int]) List[Int] = listReverse xs
+fn main() Int = listFold (\acc x. acc + x) 0 (revList [1 2 3])
