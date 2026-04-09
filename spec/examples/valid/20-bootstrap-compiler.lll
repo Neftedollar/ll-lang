@@ -493,12 +493,26 @@ fn lexColonOrCons(cs List[Char]) List[Token] =
     else lexChars cs
   | _ -> [TEnd]
 
--- Handle `-` vs `->`: peek the next char to decide between TMinus and
--- TArrow. `->` is used by match arms (`| pat -> body`); 15 only had
--- TMinus before Phase 7.5a. Lifted from 14-exprparser-real.lll.
+-- Handle `-` vs `->` vs `--`: peek the next char to decide between
+-- TMinus, TArrow, and a line comment. `->` is used by match arms
+-- (`| pat -> body`); 15 only had TMinus before Phase 7.5a. Phase 7.9n
+-- adds the `--` line-comment arm: if the char after `-` is another
+-- `-`, hand off to `skipLineComment` which consumes everything up to
+-- (and including) the next `\n`, then resumes `lexChars` on what
+-- follows. Without this, a single commented line desyncs `parseDecls`
+-- and silently drops every subsequent decl — fatal for fixpoint
+-- since the bootstrap's own source begins with ~190 lines of
+-- `-- header comment` before the first real decl.
+fn skipLineComment(cs List[Char]) List[Token] =
+  | c :: rest ->
+    if c == '\n' then listAppend [TNewline] (lexChars rest)
+    else skipLineComment rest
+  | _ -> [TEnd]
+
 fn lexMinusOrArrow(cs List[Char]) List[Token] =
   | c :: rest ->
     if c == '>' then listAppend [TArrow] (lexChars rest)
+    else if c == '-' then skipLineComment rest
     else listAppend [TMinus] (lexChars cs)
   | _ -> [TMinus]
 
