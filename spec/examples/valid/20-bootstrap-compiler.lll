@@ -258,6 +258,7 @@ type Param = MkParam Str TypeRef
 -- Phase 7.5+'s backlog.
 type Pat =
   | PInt Int
+  | PStr Str
   | PVar Str
   | PWild
   | PNil
@@ -1053,6 +1054,7 @@ fn parseCtorArgs(name Str)(toks List[Token]) =
 -- Phase 7.5+.
 fn parsePrimaryPat(toks List[Token]) =
   | TInt n :: rest -> (PInt n, rest)
+  | TStr s :: rest -> (PStr s, rest)
   | TUnder :: rest -> (PWild, rest)
   | TLBrack :: TRBrack :: rest -> (PNil, rest)
   | TLower s :: rest -> (PVar s, rest)
@@ -1244,6 +1246,7 @@ fn showReturn(r Maybe[TypeRef]) Str =
 -- as `(Name arg1 arg2)`, a space before each arg).
 fn showPat(p Pat) Str =
   | PInt n -> intToStr n
+  | PStr s -> strConcat (strConcat "\"" s) "\""
   | PVar s -> s
   | PWild -> "_"
   | PNil -> "[]"
@@ -1368,6 +1371,7 @@ fn envAddAll(env Env)(names List[Str]) Env =
 -- left-to-right order via `patBindersList`.
 fn patBinders(p Pat) List[Str] =
   | PInt _ -> []
+  | PStr _ -> []
   | PWild -> []
   | PNil -> []
   | PVar name -> [name]
@@ -1541,6 +1545,7 @@ fn patIsCatchAll(p Pat) Bool =
   | PVar _ -> true
   | PCons _ _ -> true
   | PCon _ _ -> false
+  | PStr _ -> false
   | _ -> false
 
 fn armsHaveCatchAll(pats List[Pat]) Bool =
@@ -1942,6 +1947,7 @@ fn showErrs(errs List[Str]) Str =
 -- prefixed by a single space.
 fn emitPat(p Pat) Str =
   | PInt n -> strConcat (intToStr n) "L"
+  | PStr s -> strConcat (strConcat "\"" s) "\""
   | PVar x -> x
   | PWild -> "_"
   | PNil -> "[]"
