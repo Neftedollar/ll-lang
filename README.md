@@ -19,7 +19,7 @@ Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting 
 
 ## Status
 
-Working end-to-end compiler with a **437-test** suite, written in F# / .NET 10. All 8 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins) → module system.
+Working end-to-end compiler with a **454-test** suite, written in F# / .NET 10. All 9 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins) → module system → MCP server.
 
 **Bootstrap: COMPLETE (Phase 7.10).** `compiler₁.fs == compiler₂.fs` — ll-lang compiles itself.
 
@@ -42,7 +42,7 @@ Working end-to-end compiler with a **437-test** suite, written in F# / .NET 10. 
 
 The module parser (979 lines of ll-lang) consumes `module M \n import ... \n tag ... \n type ... \n let ... \n fn ... = ...` and pretty-prints a `List[Decl]` AST — **real proof that ll-lang can express its own front-end**. The elaborator slice (512 lines) walks a hardcoded `List[Decl]` AST with a two-pass `collectDecls` → `checkDecls` pipeline plus an exhaustiveness pass, and emits `E002 UnboundVar <name>` for every free variable and `E003 NonExhaustiveMatch <type> missing <ctor>` for every clause-sugar match that doesn't cover its sum type — mirroring the F# host elaborator's name-resolution + constructor-coverage semantics. The pipeline slice (~1500 lines) stitches the two halves into one program: a source string goes in, `tokenize` + `parseModule` + `elaborate` runs back-to-back, and the resulting error list is printed. **Showcase milestone** — first time two compiler layers authored in ll-lang share a single AST and run back-to-back on a real source string.
 
-**Phase 7 complete** — bootstrap fixpoint achieved (2026-04-09). **Phase 8 complete** — module system with `ll.toml`, multi-file builds, `lllc new`.
+**Phase 7 complete** — bootstrap fixpoint achieved (2026-04-09). **Phase 8 complete** — module system with `ll.toml`, multi-file builds, `lllc new`. **Phase 9 complete** — MCP server (`lllc mcp`) with 8 tools for LLM clients.
 
 | Phase | Description | Status |
 |---|---|---|
@@ -54,6 +54,7 @@ The module parser (979 lines of ll-lang) consumes `module M \n import ... \n tag
 | 6 | Stdlib (~50 builtins) | ✅ |
 | **7** | **Bootstrap fixpoint** — ll-lang compiles itself (`compiler₁.fs == compiler₂.fs`) | ✅ |
 | **8** | **Module system** — `ll.toml`, multi-file builds, `lllc new`, topo-sort, E020/E024 | ✅ |
+| **9** | **MCP server** — `lllc mcp` stdio server with 8 tools for Claude Code / Cursor / Zed | ✅ |
 | **7.1 – 7.5** | **ll-lang front-end in ll-lang** (lexer + 4 parser slices + full module parser, 979 lines) | ✅ |
 | **7.6a + 7.6b** | **Elaborator slices A + B in ll-lang** (name resolution + E002 unbound-var; constructor-coverage exhaustiveness + E003 non-exhaustive match, 512 lines) | ✅ |
 | **7.6 integration** | **Parser + elaborator pipeline in one ll-lang program** (`17-pipeline-real.lll`, ~1500 lines) | ✅ |
@@ -92,7 +93,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 437 tests
+dotnet test    # 454 tests
 ```
 
 ### Run your first program

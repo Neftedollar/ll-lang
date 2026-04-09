@@ -194,9 +194,39 @@ Two entry points:
   pipeline: runs `compile` on each topo-sorted file, concatenates via
   `Codegen.emitProjectModules`.
 
+### `src/LLLangTool/Mcp.fs` — MCP server (Phase 9)
+
+An in-process Model Context Protocol server that exposes the ll-lang
+compiler to LLM clients (Claude Code, Cursor, Zed) via 8 structured
+tools over stdio:
+
+| Tool | What it does |
+|------|-------------|
+| `compile_file` | Full pipeline → `{ok, errors[], fsharp?}` |
+| `check_file` | Lex→parse→elaborate→infer (no codegen) → `{ok, errors[]}` |
+| `run_file` | Compile + `dotnet fsi` → `{exit_code, stdout, stderr, errors[]}` |
+| `list_errors` | All E001–E025 codes with names and descriptions |
+| `lookup_error` | One code → description + minimal repro from `spec/examples/invalid/` |
+| `stdlib_search` | Substring search over ~50 stdlib entries → `[{name, signature, module, scope}]` |
+| `grammar_lookup` | Rule name → EBNF production from `spec/grammar.ebnf` |
+| `project_info` | Walk to `ll.toml` → `{root, manifest, modules[], deps[], platform_use[]}` |
+
+Uses `FsMcp.Core` + `FsMcp.Server` (same packages as the `age-mcp` server
+in this repo). Entry: `Mcp.runServer ()` blocks on stdio until the client
+disconnects.
+
+**Client config** (add to `~/.config/claude/mcp.json` or Cursor settings):
+```json
+{
+  "mcpServers": {
+    "ll-lang": { "command": "lllc", "args": ["mcp"] }
+  }
+}
+```
+
 ### `src/LLLangTool/Program.fs` — CLI
 
-The `lllc` driver. Four commands:
+The `lllc` driver. Five commands:
 
 - `build <file.lll>` — single-file mode.
 - `build [dir]` — project mode (reads `ll.toml`, writes `bin/<name>.fs`).
@@ -204,6 +234,7 @@ The `lllc` driver. Four commands:
   `[<EntryPoint>]`, appending `main [||] |> exit`) and shells out to
   `dotnet fsi`.
 - `new <name>` — scaffold project directory structure.
+- `mcp` — launch MCP stdio server (blocks until stdin closes).
 
 ## F# compile order
 

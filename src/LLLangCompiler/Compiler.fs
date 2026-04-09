@@ -12,6 +12,22 @@ open LLLang.ProjectLoader
 let private wrapErr (msg: string) : LLError list =
     [{ Code = E001; Line = 0; Col = 0; Message = msg }]
 
+/// Check a ll-lang source string: lex → parse → elaborate → infer, skip codegen.
+/// Returns Ok () on success, Error es on any error.
+let check (src: string) : Result<unit, LLError list> =
+    match tokenize src with
+    | Error e -> Error (wrapErr e)
+    | Ok toks ->
+        match parseModuleWithPos toks with
+        | Error e -> Error (wrapErr e)
+        | Ok (m, pm) ->
+            match elaborate pm m with
+            | Error es -> Error es
+            | Ok (m', env) ->
+                match infer pm m' env with
+                | Error es -> Error es
+                | Ok _ -> Ok ()
+
 /// Full pipeline: ll-lang source string → F# source string.
 /// Threads a PosMap side-table from the parser through the elaborator and
 /// HMInfer so that error messages carry real line:col from the source

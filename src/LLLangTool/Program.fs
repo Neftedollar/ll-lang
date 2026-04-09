@@ -143,10 +143,12 @@ let main (argv: string[]) : int =
             1
     | [| "run"; path |] -> cmdRun path
     | [| "new"; name |] -> cmdNew name
+    | [| "mcp" |] -> Mcp.runServer (); 0
     | _ ->
         eprintfn "Usage:"
         eprintfn "  lllc build <file.lll>     compile single file"
         eprintfn "  lllc build [dir]          compile project (reads ll.toml)"
         eprintfn "  lllc run   <file.lll>     compile and run single file"
         eprintfn "  lllc new   <name>         scaffold new project"
+        eprintfn "  lllc mcp                  run MCP server (stdio transport)"
         1

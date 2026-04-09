@@ -36,5 +36,6 @@
     <Compile Include="CodegenRealTests.fs" />
     <Compile Include="BootstrapCompilerTests.fs" />
     <Compile Include="ModuleSystemTests.fs" />
+    <Compile Include="McpTests.fs" />
   </ItemGroup>
 </Project>
