@@ -206,6 +206,7 @@ type Token =
   | TUpper Str
   | TInt Int
   | TStr Str
+  | TChar Char
   | TLParen
   | TRParen
   | TLBrack
@@ -273,6 +274,7 @@ type Pat =
 type Expr =
   | EInt Int
   | EStr Str
+  | EChar Char
   | EVar Str
   | ETagged Expr Str
   | EAdd Expr Expr
@@ -414,6 +416,23 @@ fn lexStr(cs List[Char]) List[Token] =
   let (body, leftover) = takeStrBody cs in
   listAppend [TStr (strFromChars body)] (lexChars leftover)
 
+-- Phase 7.9i: lex a single-char literal `'c'`. The opening `'` has
+-- already been consumed. Consume one content char, expect the
+-- closing `'`, and emit a `TChar ch` token. No escape handling in
+-- this slice — `'\n'` / `'\\'` / `'\''` stay in Phase 7.9j. If the
+-- closing `'` is missing (unterminated), silently fall through and
+-- re-lex from the saved position, matching the leniency of the
+-- catch-all `else lexChars rest` arm in `lexChars`.
+fn lexCharLit(cs List[Char]) List[Token] =
+  match cs with
+    | ch :: rest ->
+      match rest with
+        | c :: r ->
+          if c == '\'' then listAppend [TChar ch] (lexChars r)
+          else lexChars cs
+        | _ -> lexChars cs
+    | _ -> []
+
 -- Handle `:` vs `::`: peek the next char to decide. Only `::` is a
 -- valid token in this grammar (cons pattern separator); a bare `:` is
 -- not used anywhere, so it falls through silently.
@@ -454,6 +473,7 @@ fn lexChars(cs List[Char]) List[Token] =
     else if isIdStart c then lexId cs
     else if charIsDigit c then lexNum cs
     else if c == '"' then lexStr rest
+    else if c == '\'' then lexCharLit rest
     else if c == '(' then listAppend [TLParen] (lexChars rest)
     else if c == ')' then listAppend [TRParen] (lexChars rest)
     else if c == '[' then listAppend [TLBrack] (lexChars rest)
@@ -756,6 +776,7 @@ fn parseReturnType(toks List[Token]) =
 fn isAtomStart(t Token) Bool =
   | TInt _ -> true
   | TStr _ -> true
+  | TChar _ -> true
   | TLower _ -> true
   | TUpper _ -> true
   | TLParen -> true
@@ -971,6 +992,7 @@ fn parseAtom(toks List[Token]) =
   | TStr s :: TLBrack :: TUpper ty :: TRBrack :: rest -> (ETagged (EStr s) ty, rest)
   | TInt n :: rest -> (EInt n, rest)
   | TStr s :: rest -> (EStr s, rest)
+  | TChar c :: rest -> (EChar c, rest)
   | TLower s :: rest -> (EVar s, rest)
   | TUpper s :: rest -> (EVar s, rest)
   | TLParen :: rest ->
@@ -1072,6 +1094,7 @@ fn showArms(pats List[Pat])(bodies List[Expr]) Str =
 fn showExpr(e Expr) Str =
   | EInt n -> intToStr n
   | EStr s -> strConcat (strConcat "\"" s) "\""
+  | EChar c -> strConcat (strConcat "'" (strFromChars [c])) "'"
   | EVar s -> s
   | ETagged inner t -> strConcat (strConcat (strConcat (strConcat "(" (showExpr inner)) "[") t) "])"
   | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " + ") (showExpr r)) ")"
@@ -1180,6 +1203,7 @@ fn paramNames(ps List[Param]) List[Str] =
 fn checkExpr(env Env)(e Expr) List[Str] =
   | EInt _ -> []
   | EStr _ -> []
+  | EChar _ -> []
   | EVar name ->
     if envHas env name then []
     else
@@ -1489,6 +1513,7 @@ fn typeEq(a TypeExpr)(b TypeExpr) Bool =
 fn inferExprType(env TypeEnv)(e Expr) TypeExpr =
   | EInt _ -> TyName "Int"
   | EStr _ -> TyName "Str"
+  | EChar _ -> TyName "Char"
   | EVar name -> typeEnvLookup env name
   | ETagged inner _ -> inferExprType env inner
   | EAdd _ _ -> TyName "Int"
@@ -1539,6 +1564,7 @@ fn checkIfBranches(env TypeEnv)(thn Expr)(els Expr) List[Str] =
 fn typeCheck(env TypeEnv)(e Expr) List[Str] =
   | EInt _ -> []
   | EStr _ -> []
+  | EChar _ -> []
   | EVar _ -> []
   | ETagged inner _ -> typeCheck env inner
   | EAdd l r ->
@@ -1729,6 +1755,7 @@ fn emitStr(s Str) Str = strConcat "\"" (strConcat s "\"")
 fn emitExpr(e Expr) Str =
   | EInt n -> emitInt n
   | EStr s -> emitStr s
+  | EChar c -> strConcat (strConcat "'" (strFromChars [c])) "'"
   | EVar x -> x
   | ETagged inner _ -> emitExpr inner
   | EAdd l r -> emitBin l r " + "
