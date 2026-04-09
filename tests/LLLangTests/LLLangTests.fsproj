@@ -33,5 +33,6 @@
     <Compile Include="ElaboratorRealTests.fs" />
     <Compile Include="PipelineRealTests.fs" />
     <Compile Include="HMInferRealTests.fs" />
+    <Compile Include="CodegenRealTests.fs" />
   </ItemGroup>
 </Project>
