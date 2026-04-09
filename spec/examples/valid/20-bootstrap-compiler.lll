@@ -920,6 +920,25 @@ fn parseParamGroups(toks List[Token]) =
     in
     let (ps, rest4) = parseParamGroups rest3 in
     (MkParam pname (TR tname) :: ps, rest4)
+  -- Phase 7.10p: underscore-prefixed unused param `(_name Type)`. The
+  -- lexer splits `_ignored` into `TUnder :: TLower "ignored"` (since
+  -- `isIdStart` only accepts ASCII letters and `_` alone is the wildcard
+  -- token). Accept that two-token head here and synthesize a param
+  -- named `_pname` so the emitted F# binding has the right arity. The
+  -- bootstrap's own source uses this shape for `stdlibNames(_ignored
+  -- Int)` and `emitPrelude(_ignored Int)`; pre-fix, both fn decls fell
+  -- through the wildcard arm below, produced an empty param list, and
+  -- desynced `parseFnDecl` into an `EInt 0` body — which then leaked
+  -- the list-literal body into the subsequent decl stream, dropping
+  -- ~83 decls from the fixpoint probe output.
+  | TLParen :: TUnder :: TLower pname :: TUpper tname :: rest ->
+    let rest2 = parseSkipBrackType rest in
+    let rest3 = match rest2 with
+      | TRParen :: r -> r
+      | _ -> rest2
+    in
+    let (ps, rest4) = parseParamGroups rest3 in
+    (MkParam (strConcat "_" pname) (TR tname) :: ps, rest4)
   -- Phase 7.10h: untyped param `(pname)`. The bootstrap's own source
   -- uses this form for pair-accepting helpers (`consTypeDecl(pair)`
   -- etc.) where the host compiler infers the type via HM. Store a
