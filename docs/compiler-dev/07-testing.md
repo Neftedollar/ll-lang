@@ -2,16 +2,39 @@
 
 Project: `tests/LLLangTests/LLLangTests.fsproj` — xUnit 2.6.3.
 
-325 tests across five files, each file corresponding to one compiler
-pass:
+415 tests across seventeen files. The main per-pass files cover the
+host F# compiler, and a matching set of `*RealTests.fs` plus the
+dedicated parser slices cover the self-hosted bootstrap compiler
+corpus (`spec/examples/valid/20-bootstrap-compiler.lll` and its
+incremental ancestors). `BootstrapCompilerTests.fs` runs the
+bootstrap compiler end-to-end via `System.Diagnostics.Process`.
 
-| File                   | Lines | Covers                                   |
-|------------------------|-------|------------------------------------------|
-| `LexerTests.fs`        |  ~    | `Lexer.fs` — tokens, INDENT/DEDENT       |
-| `ParserTests.fs`       |  ~    | `Parser.fs` — every decl and expr form   |
-| `ElaboratorTests.fs`   |  ~    | `Elaborator.fs` — E001-E005, exhaustiveness |
-| `HMInferTests.fs`      |  ~    | `HMInfer.fs`, `Types.fs` — unification, generalize, E008 |
-| `CodegenTests.fs`      |  ~    | `Codegen.fs` — emitted F# shape          |
+Host compiler coverage:
+
+| File                     | Covers                                      |
+|--------------------------|---------------------------------------------|
+| `LexerTests.fs`          | `Lexer.fs` — tokens, INDENT/DEDENT          |
+| `ParserTests.fs`         | `Parser.fs` — every decl and expr form      |
+| `ElaboratorTests.fs`     | `Elaborator.fs` — E001-E005, exhaustiveness |
+| `HMInferTests.fs`        | `HMInfer.fs`, `Types.fs` — unification, generalize, E008 |
+| `CodegenTests.fs`        | `Codegen.fs` — emitted F# shape             |
+| `StdlibTests.fs`         | Stdlib builtins resolve + infer + run       |
+
+Bootstrap / self-hosting corpus coverage:
+
+| File                      | Drives                                                 |
+|---------------------------|--------------------------------------------------------|
+| `RealLexerTests.fs`       | `09-lexer-real.lll`                                    |
+| `ArithmeticParserTests.fs`| `11-parser-real.lll`                                   |
+| `TypeParserTests.fs`      | `12-typeparser-real.lll`                               |
+| `FnParserTests.fs`        | `13-fnparser-real.lll`                                 |
+| `ExprParserTests.fs`      | `14-exprparser-real.lll`                               |
+| `ModuleParserTests.fs`    | `15-moduleparser-real.lll`                             |
+| `ElaboratorRealTests.fs`  | `16-elaborator-real.lll`                               |
+| `PipelineRealTests.fs`    | `17-pipeline-real.lll`                                 |
+| `HMInferRealTests.fs`     | `18-hminfer-real.lll`                                  |
+| `CodegenRealTests.fs`     | `19-codegen-real.lll`                                  |
+| `BootstrapCompilerTests.fs` | `20-bootstrap-compiler.lll` (end-to-end self-host)   |
 
 ## Running
 
@@ -21,8 +44,11 @@ dotnet test --filter LexerTests        # one file
 dotnet test --filter "ClassName.Method" # one test
 ```
 
-Tests are pure in-memory — no temp files, no subprocess — so the whole
-suite finishes in a few seconds.
+Most tests are pure in-memory — no temp files, no subprocess. The
+`*RealTests.fs` and `BootstrapCompilerTests.fs` suites are the
+exception: they shell out to `lllc run` via
+`System.Diagnostics.Process` to execute compiled F# and compare
+stdout. The full suite finishes in ~40s on a warm build.
 
 ## Helper patterns
 
@@ -189,5 +215,5 @@ assertion explicitly.
 ## CI
 
 `.github/workflows/build.yml` (referenced in the README badge) runs
-`dotnet build` followed by `dotnet test`. All 325 tests must pass on
+`dotnet build` followed by `dotnet test`. All 415 tests must pass on
 merges to `main`.
