@@ -647,7 +647,9 @@ fn parseImportDecl(toks List[Token]) =
 -- grammar accepts (int lit, arithmetic, if-then-else, match, ...).
 fn parseLetDecl(toks List[Token]) =
   | TKwLet :: TLower name :: TEq :: rest ->
-    let (body, rest2) = parseExpr rest in
+    -- Phase 7.9.newlines: tolerate `let x =\n  expr` module-level decls.
+    let rest0 = skipNewlines rest in
+    let (body, rest2) = parseExpr rest0 in
     (MkLet name body, rest2)
   | _ -> (MkLet "?" (EInt 0), toks)
 
@@ -740,7 +742,7 @@ fn parseFnDecl(toks List[Token]) =
     let (prms, rest2) = parseParamGroups rest in
     let (retTy, rest3) = parseReturnType rest2 in
     let rest4 = match rest3 with
-      | TEq :: r -> r
+      | TEq :: r -> skipNewlines r
       | _ -> rest3
     in
     let (body, rest5) = parseExpr rest4 in
@@ -836,9 +838,13 @@ fn parseExpr(toks List[Token]) =
 -- and further let-in chains) works on either side.
 fn parseLetIn(toks List[Token]) =
   | TLower name :: TEq :: rest ->
-    let (e1, rest2) = parseExpr rest in
+    -- Phase 7.9.newlines (#8): `let x =\n  rhs` and `in\n  body` both
+    -- need to tolerate a `TNewline` before their sub-expression, so
+    -- we `skipNewlines` before each `parseExpr` call below.
+    let rest0 = skipNewlines rest in
+    let (e1, rest2) = parseExpr rest0 in
     let rest3 = match rest2 with
-      | TKwIn :: r -> r
+      | TKwIn :: r -> skipNewlines r
       | _ -> rest2
     in
     let (e2, rest4) = parseExpr rest3 in
@@ -890,13 +896,20 @@ fn parseMatch(toks List[Token]) =
 -- step cons'es onto both at once. The outer result is still a 2-tuple
 -- `(result, leftover)` like every other parseX helper.
 fn parseArms(toks List[Token]) =
-  | TBar :: _ ->
-    let (armPair, rest) = parseArm toks in
-    let (p, b) = armPair in
-    let (moreLists, rest2) = parseArms rest in
-    let (ps, bs) = moreLists in
-    ((p :: ps, b :: bs), rest2)
-  | _ -> (([], []), toks)
+  -- Phase 7.9.newlines (#12): a multi-line match body has `TNewline`
+  -- tokens between arms (and before the first arm), so peek for the
+  -- leading `TBar` only AFTER skipping newlines. Otherwise the first
+  -- `TNewline :: TBar :: _` falls through to the `(([], []), toks)`
+  -- branch and silently drops every subsequent arm.
+  let toks2 = skipNewlines toks in
+  match toks2 with
+    | TBar :: _ ->
+      let (armPair, rest) = parseArm toks2 in
+      let (p, b) = armPair in
+      let (moreLists, rest2) = parseArms rest in
+      let (ps, bs) = moreLists in
+      ((p :: ps, b :: bs), rest2)
+    | _ -> (([], []), toks2)
 
 -- Single arm. Assumes the leading `|` is still on the front. Returns
 -- `((pat, body), leftover)` so the caller can destructure cleanly.
