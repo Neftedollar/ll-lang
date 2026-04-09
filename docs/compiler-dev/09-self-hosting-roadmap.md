@@ -2098,3 +2098,108 @@ Next tick: **Phase 7.8c** — extend `19-codegen-real.lll` with
 HM / codegen slices into a single end-to-end program. All four
 compiler stages now have ll-lang representations covering every
 basic control-flow shape; 7.9 finally proves the pipeline composes.
+
+### 2026-04 — Phase 7.8c: codegen slice C — TDType sum-type emission (DONE)
+
+Third tick of Phase 7.8. Extends `19-codegen-real.lll` in place with
+top-level **sum-type declaration** emission, so the ll-lang codegen
+now emits F# discriminated unions alongside the existing fn decls.
+
+Extended file:
+[`19-codegen-real.lll`](../../spec/examples/valid/19-codegen-real.lll)
+(341 → 546 lines, +205).
+
+**New shapes**:
+
+```lll
+type TypeArg =
+  | TAName Str    -- concrete: "Int", "Str", "Bool", or user ADT name
+  | TAVar Str     -- single-letter type var: "A", "B"
+
+type Ctor = MkCtor Str List[TypeArg]
+
+type TDecl =
+  | TDFn Str List[Str] TExpr           -- Phase 7.8a/b
+  | TDType Str List[Str] List[Ctor]    -- NEW: sum-type decl
+
+fn showTypeParam(p Str) Str                -- "'A"
+fn showTypeArg(a TypeArg) Str              -- Int -> int64, A -> 'A, ...
+fn showTypeArgName(n Str) Str              -- primitive name mapping
+fn showCtorArgs(args List[TypeArg]) Str    -- " * "-joined arg body
+fn showCtor(c Ctor) Str                    -- one "    | Name of ..." line
+fn showCtors(cs List[Ctor]) Str            -- newline-joined arms
+fn showTypeParams(ps List[Str]) Str        -- "<'A, 'B>" header segment
+fn showTypeDecl(name Str)(tps List[Str])(ctors List[Ctor]) Str
+```
+
+**Design notes**:
+
+* **Primitive name mapping** mirrors the host's `emitType` in
+  `Codegen.fs` line 51 area: `Int` → `int64`, `Str` → `string`,
+  `Bool` → `bool`; every other `TAName` passes through verbatim.
+  `Float`/`Unit`/`Char` are still out of scope — none of the
+  hardcoded test cases use them.
+* **Multi-line emission** is safe for type decls because they sit at
+  module level — F# has no offside-rule trouble between sibling
+  `    | ctor` lines once they're left-anchored. This is the first
+  time the file emits multi-line output; `TEMatch` still uses the
+  single-line form because it can be embedded in any parent
+  expression position.
+* **`showDecl` becomes a dispatcher** with two arms (`TDFn` →
+  `showFnDecl`, `TDType` → `showTypeDecl`), so the outer match stays
+  one level deep. Same trick as the rest of the file.
+* **List-literal construction workaround** — the three new TDType
+  decls in `main` need the same let-bind-each-element dance as the
+  existing `classifyPats` / `classifyBodies` do, because list-literal
+  elements that start with a TypeId ctor app parse as a single
+  curried ctor call. Every `MkCtor`, `TAVar`, and `TAName` is let-
+  bound before being placed in a `[...]` literal.
+
+`main` gains three new TDType decls:
+
+```
+type Maybe<'A> =
+    | Some of 'A
+    | None
+type Shape =
+    | Circle
+    | Rect of int64 * int64
+    | Empty
+type Pair<'A, 'B> =
+    | MkPair of 'A * 'B
+```
+
+`Maybe` covers the parametric-header branch (`<'A>`) and mixes an
+arg-bearing ctor with a nullary ctor. `Shape` covers the monomorphic
+branch (no `<>`) and exercises the `" * "` join in `showCtorArgs` via
+the two-arg `Rect` ctor. `Pair` covers the two-type-param header
+branch (`<'A, 'B>`), exercising the `", "` join in
+`showTypeParamsBody` plus the `TAVar` arm of `showTypeArg`.
+
+**Still deliberately out of scope** (carved out for 7.8d+):
+
+1. **Record (`TBRecord`) and wrapped (`TBWrapped`) type bodies** —
+   only sum bodies are supported in 7.8c.
+2. **Parametric type applications in ctor args** — `Some (Maybe A)`
+   is deliberately out; only flat `TAName` / `TAVar` single-segment
+   args are supported.
+3. **F# prelude block** — Phase 7.8d.
+4. **`let rec ... and ...` grouping / `[<EntryPoint>]` on `main`** —
+   Phase 7.8e.
+5. **Constructor-application (`TECon`) emission** — still a separate
+   slice.
+6. **Integration with `18-hminfer-real.lll`'s TypedAST** — still a
+   separate tick once both sides stabilise.
+
+Tests: 398 → 398 (no new facts — the existing `runs and emits F#
+source lines for each TDFn` fact in `CodegenRealTests.fs` grows its
+expected-substring list from 7 to 16 to cover the three new type
+decls and their header / arm lines).
+
+Next tick: **Phase 7.8d** — add the F# prelude block to the codegen
+output (the stdlib shim in `Codegen.fs` `fsharpPrelude*`), OR
+**Phase 7.9** — assemble `bootstrap/compiler.lll` by stitching the
+five self-host slices into a single end-to-end program. 7.8c's
+sum-type emission is now in place, so a trimmed `module M\ntype T =
+...\nfn main() = ...` example can round-trip through the ll-lang
+codegen without needing a host fallback for type decls.
