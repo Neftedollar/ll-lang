@@ -156,6 +156,44 @@ let ``20-bootstrap-compiler.lll actually reads its source from 20a-bootstrap-inp
             File.Move(backupPath, inputPath)
 
 [<Fact>]
+let ``20-bootstrap-compiler.lll accepts stdlib builtin strConcat in fn body (Phase 7.9e)`` () =
+    // Phase 7.9e: before the fix, `elaborate` started with an empty
+    // `MkEnv []` env, so any fn body that called a stdlib builtin like
+    // `strConcat` / `listMap` / `readFile` fired `E002 UnboundVar
+    // <name>`. The fix seeds `env0` with the stdlib builtin names via
+    // a new `stdlibNames` helper. This test swaps the 20a input for a
+    // variant that exercises `strConcat "hi " n` in a fn body and
+    // asserts the pipeline reaches the codegen pass.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let stdlibInputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20c-bootstrap-input-stdlib.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath,       $"missing fixture: {inputPath}")
+    Assert.True(File.Exists stdlibInputPath, $"missing fixture: {stdlibInputPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(stdlibInputPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar error; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let greet n",
+            $"expected emitted F# to contain `let greet n`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "strConcat",
+            $"expected emitted F# to reference strConcat; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
+
+[<Fact>]
 let ``20-bootstrap-compiler.lll parses Maybe[Int] return type and emits main (bracket-form types in fn signatures)`` () =
     // Phase 7.9d: the bootstrap compiler's parseParamGroups /
     // parseReturnType only accepted bare `Upper` type names. A fn with

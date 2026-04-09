@@ -1,0 +1,3 @@
+module Examples.Clean
+fn greet(n Str) Str = strConcat "hi " n
+fn main() Int = 1
