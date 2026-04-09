@@ -11,7 +11,7 @@ session to pick up without replaying history.
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b + 7.7c + 7.7d + 7.8a + 7.8b + 7.8c done. Phase 7.7 is COMPLETE.**
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b + 7.7c + 7.7d + 7.8a + 7.8b + 7.8c + 7.8d done. Phase 7.7 is COMPLETE.**
   ll-lang now hosts a real lexer (`09-lexer-real.lll`), a real
   recursive-descent arithmetic parser (`11-parser-real.lll`), a real
   type-declaration parser (`12-typeparser-real.lll`), a real
@@ -217,10 +217,11 @@ session to pick up without replaying history.
   lambda t21 + polymorphic double-use of `id` t22 — the canonical
   let-gen demo that only type-checks when `id` is generalized to
   `∀ $0. $0 -> $0` and each use instantiates fresh).
-- **Phase 7.8a+b+c done** — **F# codegen written in ll-lang itself**
+- **Phase 7.8a+b+c+d done** — **F# codegen written in ll-lang itself**
   lives in
   [`19-codegen-real.lll`](../../spec/examples/valid/19-codegen-real.lll)
-  (546 lines; 212 after 7.8a, 341 after 7.8b, 546 after 7.8c). Phase
+  (683 lines; 212 after 7.8a, 341 after 7.8b, 546 after 7.8c, 683
+  after 7.8d). Phase
   7.8a added a tiny `TExpr` / `TDecl` AST (TEInt / TEStr / TEVar /
   TEAdd / TEApp / TELet; `TDFn Str List[Str] TExpr`) and a
   `showTExpr` / `showDecl` family that walks it and emits F# source
@@ -243,70 +244,108 @@ session to pick up without replaying history.
   fine here because type decls sit at module level (no F# offside-
   rule trouble on sibling `    | ctor` lines). Primitive name
   mapping mirrors the host's `emitType` (Int → int64, Str → string,
-  Bool → bool). **Milestone**: all four compiler stages (lex →
-  parse → elaborate → HM-infer → codegen) now have ll-lang
+  Bool → bool). **Phase 7.8d added the module header + F# stdlib
+  prelude block**: new `Module = MkModule Str List[TDecl]` ADT, a
+  `fsharpPrelude(_ignored Int) Str` helper emitting a 5-binding
+  subset (`listMap`, `listLen`, `strLen`, `strConcat`, `print`)
+  wrapped in the canonical
+  `// --- ll-lang stdlib prelude (auto-generated) ---` /
+  `// --- end prelude ---` banner, a `showModule` / `showModuleBody`
+  walker, and a `joinBlocks` fold ("\n\n"-separated). `main` now
+  wraps all ten decls in a single `MkModule "Examples.Generated"
+  ...` value (types first, fns after) and `printfn`s its
+  `showModule` rendering. **Milestone**: all four compiler stages
+  (lex → parse → elaborate → HM-infer → codegen) now have ll-lang
   representations covering every basic control-flow shape **plus
-  sum-type declaration emission**, unblocking the future
-  `bootstrap/compiler.lll` integration for files with user type
-  decls. Deliberately still out of scope after 7.8c: F# prelude
-  block (7.8d), mutual-recursion grouping / `[<EntryPoint>]` main
-  (7.8e), record / wrapped type bodies, parametric type applications
-  in ctor args, multi-line match emission, keyword-safe ident
-  rewriting, `TypeScheme`-carrying TypedAST, and consuming the
-  output of `18-hminfer-real.lll`.
+  sum-type declaration emission plus a complete F# module shell
+  (header + prelude)**, unblocking the future `bootstrap/compiler.lll`
+  integration for files with user type decls that need to compile
+  standalone. Deliberately still out of scope after 7.8d: mutual-
+  recursion grouping / `[<EntryPoint>]` main (7.8e), record /
+  wrapped type bodies, parametric type applications in ctor args,
+  multi-line match emission, keyword-safe ident rewriting,
+  `TypeScheme`-carrying TypedAST, conditional Maybe/Result prelude
+  sections, the full ~30-binding `fsharpPreludeCore`, and consuming
+  the output of `18-hminfer-real.lll`.
 - `lllc run spec/examples/valid/19-codegen-real.lll` prints
   ```
-  let inc x = (x + 1L)
-  let greet = "hello"
-  let addOne x = (let y = (x + 1L) in y)
-  let callInc x = (inc x)
-  let choose b = (if b then 1L else 2L)
-  let double = (fun x -> (x + x))
-  let classify x = (match x with | 0L -> "zero" | _ -> "other")
+  module Examples.Generated
+
+  // --- ll-lang stdlib prelude (auto-generated) ---
+  let listMap f xs = List.map f xs
+  let listLen (xs: 'a list) : int64 = int64 (List.length xs)
+  let strLen (s: string) : int64 = int64 s.Length
+  let strConcat (a: string) (b: string) = a + b
+  let print (s: string) = System.Console.Write(s)
+  // --- end prelude ---
+
   type Maybe<'A> =
       | Some of 'A
       | None
+
   type Shape =
       | Circle
       | Rect of int64 * int64
       | Empty
+
   type Pair<'A, 'B> =
       | MkPair of 'A * 'B
+
+  let inc x = (x + 1L)
+
+  let greet = "hello"
+
+  let addOne x = (let y = (x + 1L) in y)
+
+  let callInc x = (inc x)
+
+  let choose b = (if b then 1L else 2L)
+
+  let double = (fun x -> (x + x))
+
+  let classify x = (match x with | 0L -> "zero" | _ -> "other")
   ```
-  (seven hardcoded `TDFn`s + three hardcoded `TDType`s — Phase 7.8a
-  covers `inc` / `greet` / `addOne` / `callInc`; Phase 7.8b covers
-  `choose` (TEIf), `double` (TELam bound as a top-level value), and
-  `classify` (TEMatch with PInt + PWild + TEStr branches); Phase
-  7.8c covers `Maybe` (parametric header, mixed arg/nullary ctors),
-  `Shape` (monomorphic, multi-arg ctor exercising the ` * ` join),
-  and `Pair` (two-param header exercising the `, ` join)).
+  (a full F# source file shell — Phase 7.8d added the
+  `module Examples.Generated` header and the 5-binding stdlib prelude
+  block; seven hardcoded `TDFn`s + three hardcoded `TDType`s inside —
+  Phase 7.8a covers `inc` / `greet` / `addOne` / `callInc`; Phase
+  7.8b covers `choose` (TEIf), `double` (TELam bound as a top-level
+  value), and `classify` (TEMatch with PInt + PWild + TEStr
+  branches); Phase 7.8c covers `Maybe` (parametric header, mixed
+  arg/nullary ctors), `Shape` (monomorphic, multi-arg ctor
+  exercising the ` * ` join), and `Pair` (two-param header
+  exercising the `, ` join)).
 
 ## Immediate next task
 
-Phase 7.7 closed out in 7.7d, and Phase 7.8a/b/c have now landed
-every basic expression shape + sum-type declaration emission on the
-ll-lang codegen side. The next natural step is either **Phase 7.8d**
-(F# prelude block emission — the stdlib shim that every compiled
-file prepends so `printfn` / `strConcat` / etc. resolve at runtime)
-or **Phase 7.9** (wire the five self-host slices into a single
-`bootstrap/compiler.lll`) — both are unblocked, with 7.8c removing
-the TDType gap that was the last argument for doing 7.8 before 7.9.
+Phase 7.7 closed out in 7.7d, and Phases 7.8a/b/c/d have now landed
+every basic expression shape, sum-type declaration emission, **and
+a complete F# module shell (module header + stdlib prelude block)**
+on the ll-lang codegen side. The next natural step is either **Phase
+7.8e** (mutual-recursion `let rec ... and ...` grouping +
+`[<EntryPoint>]` on `main`) or **Phase 7.9** (wire the five
+self-host slices into a single `bootstrap/compiler.lll`) — both are
+unblocked, with 7.8d removing the prelude-block gap that was the
+last argument for doing 7.8 before 7.9.
 
-### Option A: **Phase 7.8d — F# prelude block emission**
+### Option A: **Phase 7.8e — let-rec grouping + EntryPoint**
 
-Extend `19-codegen-real.lll` in place with a new `prelude : Str`
-constant (or `fn emitPrelude() Str = ...` helper) that produces the
-F# runtime shim every compiled file needs. The host keeps this in
-`Codegen.fs` `fsharpPrelude*` and emits it unconditionally at the
-top of every `.fs` file. Minimum viable slice: hardcode the subset
-of the host prelude the ll-lang codegen actually exercises
-(`printfn` wrapper, `strConcat`, `intToStr`, maybe `listMap` /
-`listFold`), then prepend it in `main` before the fn/type decls.
-Out of scope for 7.8d: conditional prelude emission (Maybe/Result-
-dependent sections), keyword-safe ident rewriting, and the full
-~50-builtin stdlib shim.
+Extend `19-codegen-real.lll` in place with a mutual-recursion
+grouping pass (`let rec ... and ...` for consecutive fn decls that
+reference each other) and a `[<EntryPoint>]` attribute on any
+`TDFn "main" [] body`. The host keeps both in `Codegen.fs`
+`groupDecls` / `emitDeclGroup` / `isMainFn`. Minimum viable slice:
+just detect the main fn and emit the attribute; add a simple
+recursion-detection helper (`containsVar`) and switch pairs of
+cross-referencing fns to `let rec name1 ... and name2 ...`. Out of
+scope for 7.8e: full recursion SCC analysis beyond pairs,
+keyword-safe ident rewriting, and conditional prelude sections.
 
-### Option B: **Phase 7.9 — assemble `bootstrap/compiler.lll`**
+### Option B: **Phase 7.8d (DONE in this tick) — F# prelude block emission**
+
+Completed 2026-04-08. See roadmap for details.
+
+### Option C: **Phase 7.9 — assemble `bootstrap/compiler.lll`**
 
 Stitch the five existing self-hosted slices into a single end-to-end
 program that reads source text, runs it through every stage, and
@@ -326,15 +365,13 @@ the compiler a minimal `module Hello\nfn main() = printfn "hi"`
 source and asserting the emitted F# source compiles under the F#
 host.
 
-Recommended order: **Option A first** (7.8d) to finish out the
-prelude-block gap so the codegen emits fully self-contained F#
-files, **then Option B** (7.9) once the codegen can handle a
-minimal but realistic `module M\n type T = ...\n fn main() = ...`
-shape end-to-end. 7.7d + 7.8c are already done, so both the HM
-blocker and the TDType blocker for 7.9 are gone — the only
-remaining argument for doing 7.9 first is that 7.8d's prelude slice
-isn't strictly required to compose the pipeline (the F# host can
-still supply the prelude at the outer boundary).
+Recommended order: **Option C next** (7.9) — 7.7d + 7.8c + 7.8d are
+all done, so the HM blocker, TDType blocker, and prelude-block gap
+for `bootstrap/compiler.lll` are all gone. Option A (7.8e) is
+polish that doesn't block 7.9 (the F# host already handles mutual
+recursion for the scaffolding; a minimal `bootstrap/compiler.lll`
+can build without `let rec ... and ...` grouping by relying on the
+top-down ordering of independent fn decls).
 
 ### Backlog: heavier module-parser extensions in ll-lang
 

@@ -2203,3 +2203,90 @@ five self-host slices into a single end-to-end program. 7.8c's
 sum-type emission is now in place, so a trimmed `module M\ntype T =
 ...\nfn main() = ...` example can round-trip through the ll-lang
 codegen without needing a host fallback for type decls.
+
+### 2026-04 — Phase 7.8d: codegen slice D — module header + F# prelude (DONE)
+
+Fourth tick of Phase 7.8. Extends `19-codegen-real.lll` in place with
+a `module <path>` header and a minimal F# stdlib prelude block, so the
+ll-lang codegen now emits something that's structurally a complete F#
+source file instead of a loose sequence of `let` / `type` decls.
+
+Extended file:
+[`19-codegen-real.lll`](../../spec/examples/valid/19-codegen-real.lll)
+(546 → 683 lines, +137).
+
+**New shapes**:
+
+```lll
+type Module = MkModule Str List[TDecl]
+
+fn fsharpPrelude(_ignored Int) Str      -- 5-binding subset of fsharpPreludeCore
+fn showModule(m Module) Str             -- full-file emitter
+fn showModuleBody(path Str)(decls List[TDecl]) Str  -- split helper
+fn joinBlocks(xs List[Str]) Str         -- "\n\n"-joined fold
+```
+
+**Design notes**:
+
+* **Prelude content** mirrors a 5-binding subset of the host's
+  `fsharpPreludeCore` in `Codegen.fs` line 380 area: `listMap`,
+  `listLen`, `strLen`, `strConcat`, `print`. Wrapped in the canonical
+  `// --- ll-lang stdlib prelude (auto-generated) ---` /
+  `// --- end prelude ---` banner so the output looks like a shrunken
+  version of the host's prelude block. Phase 7.8e+ grows this to the
+  full ~30-binding core plus conditional Maybe/Result sections.
+* **`fsharpPrelude` takes a dummy `Int` arg** (and callers pass `0`)
+  because the module parser doesn't yet accept `fnName ()` as a call
+  expression. A constant binding would be cleaner but ll-lang doesn't
+  have `let` at module level for arbitrary expressions in this file's
+  dialect, and a zero-param fn would need the `()` call syntax to
+  invoke.
+* **`showModule` dispatches through `showModuleBody`** to keep its
+  outer match one level deep, same trick as the rest of the file. The
+  body helper emits `module <path>` + prelude + decl block glued with
+  blank-line separators via the new `joinBlocks` fold (same shape as
+  `joinLines`, `"\n\n"` separator instead of `"\n"`).
+* **`main` reorders decls** — types first (Maybe, Shape, Pair), then
+  fns (inc, greet, addOne, callInc, choose, double, classify) — so
+  the output mirrors the host's `emitModule` layout. The ll-lang
+  `showModule` itself doesn't sort by kind; it trusts the caller.
+  Phase 7.8e may add an automatic kind-aware split once mutual-
+  recursion grouping lands.
+* **Flat prelude (no conditional sections)** — the host's
+  `assemblePrelude` only emits `fsharpPreludeMaybe` / `fsharpPreludeResult`
+  when the user declares `Maybe` / `Result` types. This slice always
+  emits the same 5-line core because the test cases don't exercise
+  Maybe/Result-dependent bindings and because conditional emission
+  would need the decl list scanned twice.
+
+`main` now wraps its ten hardcoded decls in a single `MkModule
+"Examples.Generated" ...` value and `printfn`s its `showModule`
+rendering.
+
+**Still deliberately out of scope** (carved out for 7.8e+):
+
+1. **Conditional Maybe/Result prelude sections** — the host's
+   `assemblePrelude` emits these only when the user declares `Maybe`/
+   `Result` types. This slice keeps the prelude unconditional and
+   always 5-line.
+2. **Full ~30-binding `fsharpPreludeCore`** — math / char / file IO /
+   stringly helpers are out of scope for this minimum-viable slice.
+3. **`[<EntryPoint>]` attribute on `main`** — Phase 7.8e.
+4. **Mutually-recursive `let rec ... and ...` grouping** — Phase 7.8e.
+5. **Type-decl-first reordering inside `showModule`** — Phase 7.8e
+   (currently the caller has to hand-order types before fns).
+6. **Integration with any pipeline** — standalone demo only.
+
+Tests: 398 → 398 (no new facts — the existing `runs and emits F#
+source lines for each TDFn` fact in `CodegenRealTests.fs` grows its
+expected-substring list from 16 to 24 to cover the `module` header,
+the prelude banner lines, and the five prelude body bindings).
+
+Next tick: **Phase 7.8e** — `let rec ... and ...` mutual-recursion
+grouping + `[<EntryPoint>]` attribute on `main`, OR **Phase 7.9** —
+assemble `bootstrap/compiler.lll` by stitching the five self-host
+slices into a single end-to-end program. The codegen side now emits
+a complete F# file shape (module header + prelude + types + fns),
+so a trimmed `module M\ntype T = ...\nfn main() = ...` example can
+round-trip through the ll-lang codegen and compile standalone
+without any host-side assembly.
