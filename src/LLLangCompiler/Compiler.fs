@@ -28,11 +28,11 @@ let check (src: string) : Result<unit, LLError list> =
                 | Error es -> Error es
                 | Ok _ -> Ok ()
 
-/// Full pipeline: ll-lang source string → F# source string.
-/// Threads a PosMap side-table from the parser through the elaborator and
-/// HMInfer so that error messages carry real line:col from the source
-/// (instead of the old 0:0 placeholder).
-let compile (src: string) : Result<string, LLError list> =
+/// Compilation target.
+type Target = FSharp | TypeScript | Python
+
+/// Run the pipeline through H-M inference and apply the given emitter.
+let private compileSrc (emitter: TypedModule -> string) (src: string) : Result<string, LLError list> =
     match tokenize src with
     | Error e -> Error (wrapErr e)
     | Ok toks ->
@@ -44,7 +44,29 @@ let compile (src: string) : Result<string, LLError list> =
             | Ok (m', env) ->
                 match infer pm m' env with
                 | Error es -> Error es
-                | Ok tm -> Ok (emit tm)
+                | Ok tm -> Ok (emitter tm)
+
+/// Full pipeline: ll-lang source string → F# source string.
+/// Threads a PosMap side-table from the parser through the elaborator and
+/// HMInfer so that error messages carry real line:col from the source
+/// (instead of the old 0:0 placeholder).
+let compile (src: string) : Result<string, LLError list> =
+    compileSrc emit src
+
+/// Compile to TypeScript source.
+let compileToTS (src: string) : Result<string, LLError list> =
+    compileSrc LLLang.CodegenTS.emit src
+
+/// Compile to Python source.
+let compileToPy (src: string) : Result<string, LLError list> =
+    compileSrc LLLang.CodegenPy.emit src
+
+/// Compile to any target.
+let compileTarget (target: Target) (src: string) : Result<string, LLError list> =
+    match target with
+    | FSharp     -> compile src
+    | TypeScript -> compileToTS src
+    | Python     -> compileToPy src
 
 /// Compile a single LoadedFile. Each file is compiled independently;
 /// F# handles cross-module type resolution in the concatenated output.

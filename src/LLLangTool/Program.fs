@@ -4,20 +4,39 @@ open System
 open System.IO
 open System.Diagnostics
 open LLLang.Elaborator
+open LLLang.Compiler
 open LLLang.ProjectLoader
 
 let private printErrors (es: LLError list) =
     for e in es do
         eprintfn "%s" e.Message
 
-/// Build: compile file.lll → file.fs. Returns exit code.
-let private cmdBuild (path: string) : int =
+/// Parse --target flag from args list. Returns (target, remaining args).
+let private parseTarget (args: string list) : Target * string list =
+    match args with
+    | "--target" :: t :: rest ->
+        let tgt =
+            match t.ToLower() with
+            | "ts" | "typescript" -> TypeScript
+            | "py" | "python"     -> Python
+            | _                   -> FSharp
+        tgt, rest
+    | _ -> FSharp, args
+
+/// Extension for each compilation target.
+let private targetExt = function
+    | FSharp     -> ".fs"
+    | TypeScript -> ".ts"
+    | Python     -> ".py"
+
+/// Build: compile file.lll → file.<ext>. Returns exit code.
+let private cmdBuild (path: string) (target: Target) : int =
     try
         let src = File.ReadAllText(path)
-        match LLLang.Compiler.compile src with
-        | Ok fs ->
-            let outPath = Path.ChangeExtension(path, ".fs")
-            File.WriteAllText(outPath, fs)
+        match compileTarget target src with
+        | Ok out ->
+            let outPath = Path.ChangeExtension(path, targetExt target)
+            File.WriteAllText(outPath, out)
             let stem = Path.GetFileName(outPath)
             printfn "Built %s" stem
             0
@@ -132,23 +151,34 @@ let private cmdNew (name: string) : int =
 
 [<EntryPoint>]
 let main (argv: string[]) : int =
-    match argv with
-    | [| "build"; path |] when path.EndsWith(".lll") -> cmdBuild path
-    | [| "build"; dir  |] -> cmdBuildProject (Path.GetFullPath dir)
-    | [| "build" |] ->
-        match findProjectRoot (Directory.GetCurrentDirectory()) with
-        | Some root -> cmdBuildProject root
-        | None ->
-            eprintfn "lllc: no ll.toml found. Use 'lllc new <name>' to create a project."
+    let args = List.ofArray argv
+    match args with
+    | "build" :: rest ->
+        let (target, rest2) = parseTarget rest
+        match rest2 with
+        | [path] when path.EndsWith(".lll") -> cmdBuild path target
+        | [dir] -> cmdBuildProject (Path.GetFullPath dir)
+        | [] ->
+            match findProjectRoot (Directory.GetCurrentDirectory()) with
+            | Some root -> cmdBuildProject root
+            | None ->
+                eprintfn "lllc: no ll.toml found. Use 'lllc new <name>' to create a project."
+                1
+        | _ ->
+            eprintfn "lllc: unrecognized build arguments"
             1
-    | [| "run"; path |] -> cmdRun path
-    | [| "new"; name |] -> cmdNew name
-    | [| "mcp" |] -> Mcp.runServer (); 0
+    | ["run"; path] -> cmdRun path
+    | ["new"; name] -> cmdNew name
+    | ["mcp"] -> Mcp.runServer (); 0
     | _ ->
         eprintfn "Usage:"
-        eprintfn "  lllc build <file.lll>     compile single file"
-        eprintfn "  lllc build [dir]          compile project (reads ll.toml)"
-        eprintfn "  lllc run   <file.lll>     compile and run single file"
-        eprintfn "  lllc new   <name>         scaffold new project"
-        eprintfn "  lllc mcp                  run MCP server (stdio transport)"
+        eprintfn "  lllc build [--target fs|ts|py] <file.lll>  compile single file"
+        eprintfn "  lllc build [--target fs|ts|py] [dir]       compile project (reads ll.toml)"
+        eprintfn "  lllc run   <file.lll>                      compile and run single file"
+        eprintfn "  lllc new   <name>                          scaffold new project"
+        eprintfn "  lllc mcp                                   run MCP server (stdio transport)"
+        eprintfn ""
+        eprintfn "  --target fs   emit F# (default)"
+        eprintfn "  --target ts   emit TypeScript"
+        eprintfn "  --target py   emit Python"
         1

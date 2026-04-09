@@ -37,5 +37,7 @@
     <Compile Include="BootstrapCompilerTests.fs" />
     <Compile Include="ModuleSystemTests.fs" />
     <Compile Include="McpTests.fs" />
+    <Compile Include="CodegenTSTests.fs" />
+    <Compile Include="CodegenPyTests.fs" />
   </ItemGroup>
 </Project>
