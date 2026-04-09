@@ -1580,8 +1580,18 @@ fn hmCheck(decls List[Decl]) List[Str] =
 -- are emitted in a stable order: E002 (name resolution) first, then
 -- E003 (exhaustiveness), then E001 (HM type mismatches) — matching
 -- the expected stdout of the runtime test.
+-- Phase 7.9e: seed the elaborator env with the stdlib builtin names the
+-- bootstrap compiler itself relies on, so `fn greet(n Str) Str =
+-- strConcat "hi " n` no longer fires `E002 UnboundVar strConcat`. The
+-- list mirrors the host's `Elaborator.fs` builtin table — if a name is
+-- callable from the real ll-lang compiler, it should be callable from
+-- the self-hosted compiler's input programs too. Still a flat name
+-- list (no types) — the minimal HM pass in `hmCheck` skips unknowns.
+fn stdlibNames(_ignored Int) List[Str] =
+  ["strConcat" "strLen" "print" "printfn" "listMap" "listLen" "listAppend" "listIsEmpty" "listFold" "readFile"]
+
 fn elaborate(decls List[Decl]) List[Str] =
-  let env0 = MkEnv [] in
+  let env0 = MkEnv (stdlibNames 0) in
   let env = collectDecls env0 decls in
   let types = collectTypes decls in
   let nameErrs = checkDecls env decls in
