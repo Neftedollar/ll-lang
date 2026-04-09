@@ -693,7 +693,7 @@ fn parseTypeDecl(toks List[Token]) =
   | TKwType :: TUpper name :: rest ->
     let (prms, rest2) = parseTypeParams rest in
     let rest3 = match rest2 with
-      | TEq :: r -> r
+      | TEq :: r -> skipNewlines r
       | _ -> rest2
     in
     let (ctors, rest4) = parseCtors rest3 in
@@ -711,15 +711,24 @@ fn parseTypeParams(toks List[Token]) =
   | _ -> ([], toks)
 
 -- First ctor is mandatory; each subsequent ctor is preceded by `|`.
+-- Phase 7.9o: tolerate multi-line form with newlines before/between
+-- ctors and an optional leading `|` before the first ctor.
 fn parseCtors(toks List[Token]) =
-  let (c, rest) = parseCtor toks in
+  let toks2 = skipNewlines toks in
+  let toks3 = match toks2 with
+    | TBar :: r -> skipNewlines r
+    | _ -> toks2
+  in
+  let (c, rest) = parseCtor toks3 in
   parseCtorsTail [c] rest
 
 fn parseCtorsTail(acc List[Ctor])(toks List[Token]) =
-  | TBar :: rest ->
-    let (c, rest2) = parseCtor rest in
-    parseCtorsTail (listAppend acc [c]) rest2
-  | _ -> (acc, toks)
+  match skipNewlines toks with
+    | TBar :: rest ->
+      let rest2 = skipNewlines rest in
+      let (c, rest3) = parseCtor rest2 in
+      parseCtorsTail (listAppend acc [c]) rest3
+    | _ -> (acc, toks)
 
 fn parseCtor(toks List[Token]) =
   | TUpper name :: rest ->
