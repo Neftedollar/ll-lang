@@ -2003,3 +2003,98 @@ with the remaining TExpr shapes (TELam, TEIf, TEMatch) and optional
 by stitching 09 / 15 / 17 / 18 / 19 into a single end-to-end program
 that consumes source text and emits F# source. Pick one; slice B
 keeps the codegen spine evolving, 7.9 proves the pipeline composes.
+
+### 2026-04 — Phase 7.8b: codegen slice B — TELam + TEIf + TEMatch (DONE)
+
+Second tick of Phase 7.8. Extends `19-codegen-real.lll` in place with
+the three control-flow expression shapes `18-hminfer-real.lll`
+already handles on the front-end side, so the ll-lang codegen has
+parity with HM inference over every basic `Expr` variant.
+
+Extended file:
+[`19-codegen-real.lll`](../../spec/examples/valid/19-codegen-real.lll)
+(212 → 341 lines, +129).
+
+**New shapes**:
+
+```lll
+type Pat =
+  | PInt Int | PVar Str | PWild
+
+type TExpr =
+  | ...                                   -- Phase 7.8a shapes
+  | TELam Str TExpr                       -- NEW: (fun x -> body)
+  | TEIf TExpr TExpr TExpr                -- NEW: (if c then t else e)
+  | TEMatch TExpr List[Pat] List[TExpr]   -- NEW: parallel pats/bodies
+
+fn showLam(x Str)(body TExpr) Str        -- "(fun <x> -> <body>)"
+fn showIf(c TExpr)(t TExpr)(e TExpr) Str -- "(if <c> then <t> else <e>)"
+fn showMatch(scr TExpr)(ps List[Pat])(bs List[TExpr]) Str
+  -- "(match <scr> with | <p1> -> <b1> | <p2> -> <b2>)"  -- single line
+fn showPat(p Pat) Str                    -- "<n>L" / "<x>" / "_"
+fn showArms(ps List[Pat])(bs List[TExpr]) Str
+  -- walks parallel lists in lockstep via showArmsCons helper
+```
+
+**Design notes**:
+
+* **Parallel pat/body lists** for `TEMatch` mirror
+  `18-hminfer-real.lll`'s `EMatch Expr List[Pat] List[Expr]` encoding
+  — same reason: the ll-lang surface has no tuples so you can't pair
+  `(Pat, Expr)` at construction time. `showArms` / `showArmsCons`
+  walk both lists in lockstep, same trick as
+  `18-hminfer-real.lll`'s `inferMatchBranches`.
+* **Single-line match emission** joins all arms with spaces
+  (`| p1 -> b1 | p2 -> b2`) — mirrors the host's `TEMatchOf` arm in
+  `Codegen.fs` line 201 area. Multi-line match would need indentation
+  tracking this slice still dodges; single-line form works in any
+  expression position at the cost of long lines.
+* **`TELam` as a top-level value**: `double` is emitted as
+  `let double = (fun x -> (x + x))` rather than `let double x = ...`
+  — the `showFnDecl` zero-params branch and `showLam` compose
+  naturally. The F# output is equivalent (both curry to
+  `int64 -> int64`) and this exercises `TELam` without needing a new
+  `TDecl` variant.
+* Every new `showTExpr` arm is still split into its own helper so the
+  dispatcher `match` stays one level deep — same trick as the rest
+  of the file.
+
+`main` gains three new `TDFn`s, one per new form:
+
+```
+let choose b = (if b then 1L else 2L)
+let double = (fun x -> (x + x))
+let classify x = (match x with | 0L -> "zero" | _ -> "other")
+```
+
+`choose` exercises `TEIf` with an if-expression body; `double`
+exercises `TELam` bound as a zero-params `TDFn` value; `classify`
+exercises `TEMatch` with a `PInt` literal branch, a `PWild` wildcard
+branch, and parallel-list construction (list-literal elements that
+start with a TypeId ctor app are let-bound individually to dodge
+the `[PInt 0 PWild]` curried-ctor-app parse ambiguity — same
+workaround `18-hminfer-real.lll`'s t18 uses).
+
+**Still deliberately out of scope** (carved out for 7.8c+):
+
+1. **Constructor-application (`TECon`) emission** — the host's
+   multi-arg tuple-form path for ctor apps is a separate slice.
+2. **`TDType` emission** — Phase 7.8c.
+3. **F# prelude block** — Phase 7.8d.
+4. **`let rec ... and ...` grouping / `[<EntryPoint>]` on `main`** —
+   Phase 7.8e.
+5. **Multi-line match emission** — still dodged; single-line form
+   covers every test case and embeds cleanly in any parent position.
+6. **Integration with `18-hminfer-real.lll`'s TypedAST** — still a
+   separate tick once both sides stabilise.
+
+Tests: 398 → 398 (no new facts — the existing `runs and emits F#
+source lines for each TDFn` fact in `CodegenRealTests.fs` grows its
+expected-substring list from 4 to 7 to cover the three new shapes).
+
+Next tick: **Phase 7.8c** — extend `19-codegen-real.lll` with
+`TDType` (sum-type) emission, OR **Phase 7.9** — assemble
+`bootstrap/compiler.lll` by stitching the lex / parse / elaborate /
+HM / codegen slices into a single end-to-end program. All four
+compiler stages now have ll-lang representations covering every
+basic control-flow shape; 7.9 finally proves the pipeline composes.

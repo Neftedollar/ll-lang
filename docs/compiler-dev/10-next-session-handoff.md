@@ -11,7 +11,7 @@ session to pick up without replaying history.
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b + 7.7c + 7.7d + 7.8a done. Phase 7.7 is COMPLETE.**
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b + 7.7c + 7.7d + 7.8a + 7.8b done. Phase 7.7 is COMPLETE.**
   ll-lang now hosts a real lexer (`09-lexer-real.lll`), a real
   recursive-descent arithmetic parser (`11-parser-real.lll`), a real
   type-declaration parser (`12-typeparser-real.lll`), a real
@@ -217,69 +217,78 @@ session to pick up without replaying history.
   lambda t21 + polymorphic double-use of `id` t22 — the canonical
   let-gen demo that only type-checks when `id` is generalized to
   `∀ $0. $0 -> $0` and each use instantiates fresh).
-- **Phase 7.8a done** — first slice of **F# codegen written in
-  ll-lang itself** lives in
+- **Phase 7.8a+b done** — **F# codegen written in ll-lang itself**
+  lives in
   [`19-codegen-real.lll`](../../spec/examples/valid/19-codegen-real.lll)
-  (212 lines). Defines a tiny `TExpr` / `TDecl` AST (TEInt / TEStr /
-  TEVar / TEAdd / TEApp / TELet; `TDFn Str List[Str] TExpr`) and a
-  `showTExpr` / `showDecl` family that walks it and emits F# source
-  strings, mirroring the F# host's
+  (341 lines, was 212 after 7.8a). Phase 7.8a added a tiny
+  `TExpr` / `TDecl` AST (TEInt / TEStr / TEVar / TEAdd / TEApp /
+  TELet; `TDFn Str List[Str] TExpr`) and a `showTExpr` / `showDecl`
+  family that walks it and emits F# source strings, mirroring the
+  F# host's
   [`Codegen.fs`](../../src/LLLangCompiler/Codegen.fs) `emitExpr` /
-  `emitDecl` for the supported shapes. Each arm is split into its
-  own helper to keep `match` nesting one level deep — same trick as
-  `18-hminfer-real.lll`'s `unify` / `inferExpr` spines. **Milestone**:
-  all four compiler stages (lex → parse → elaborate → HM-infer →
-  codegen) now have ll-lang representations, unblocking the future
-  `bootstrap/compiler.lll` integration. Deliberately still out of
-  scope after 7.8a: TELam / TEIf / TEMatch emission, F# prelude
-  block, mutual-recursion grouping, `[<EntryPoint>]` main special
-  case, keyword-safe ident rewriting, `TypeScheme`-carrying TypedAST,
-  and consuming the output of `18-hminfer-real.lll`.
+  `emitDecl`. Phase 7.8b then added the three control-flow shapes:
+  `TELam Str TExpr` / `TEIf TExpr TExpr TExpr` /
+  `TEMatch TExpr List[Pat] List[TExpr]` with a `Pat = PInt Int |
+  PVar Str | PWild` ADT and `showLam` / `showIf` / `showMatch` /
+  `showPat` / `showArms` helpers. The match form is **single-line**
+  (`(match x with | 0L -> "zero" | _ -> "other")`) — same trick as
+  the host's `TEMatchOf` arm in `Codegen.fs` line 201 area — to
+  dodge F# offside-rule trouble in nested positions. Every new arm
+  is split into its own helper so the dispatcher's `match` stays
+  one level deep. **Milestone**: all four compiler stages (lex →
+  parse → elaborate → HM-infer → codegen) now have ll-lang
+  representations covering every basic control-flow shape,
+  unblocking the future `bootstrap/compiler.lll` integration.
+  Deliberately still out of scope after 7.8b: `TDType` sum-type
+  emission (7.8c), F# prelude block (7.8d), mutual-recursion
+  grouping / `[<EntryPoint>]` main (7.8e), multi-line match
+  emission, keyword-safe ident rewriting, `TypeScheme`-carrying
+  TypedAST, and consuming the output of `18-hminfer-real.lll`.
 - `lllc run spec/examples/valid/19-codegen-real.lll` prints
   ```
   let inc x = (x + 1L)
   let greet = "hello"
   let addOne x = (let y = (x + 1L) in y)
   let callInc x = (inc x)
+  let choose b = (if b then 1L else 2L)
+  let double = (fun x -> (x + x))
+  let classify x = (match x with | 0L -> "zero" | _ -> "other")
   ```
-  (four hardcoded `TDFn`s — one per supported TExpr shape — emitted
-  as F# source strings: `inc` covers TEAdd + TEVar + TEInt; `greet`
-  covers TEStr and the empty-params branch; `addOne` covers TELet
-  with nested TEAdd; `callInc` covers TEApp).
+  (seven hardcoded `TDFn`s — one per supported TExpr shape —
+  emitted as F# source strings: Phase 7.8a covers `inc` /
+  `greet` / `addOne` / `callInc`; Phase 7.8b covers `choose`
+  (TEIf), `double` (TELam bound as a top-level value), and
+  `classify` (TEMatch with PInt + PWild + TEStr branches)).
 
 ## Immediate next task
 
 Phase 7.7 closed out in 7.7d. With the HM spine feature-complete and
-Phase 7.8a already landing the codegen shell, the next natural step is
-either **Phase 7.8b** (more codegen shapes) or **Phase 7.9** (wire the
+Phase 7.8a/b already landing the codegen shell with every basic
+expression shape (TEInt / TEStr / TEVar / TEAdd / TEApp / TELet +
+TELam / TEIf / TEMatch), the next natural step is either
+**Phase 7.8c** (TDType sum-type emission) or **Phase 7.9** (wire the
 five self-host slices into a single `bootstrap/compiler.lll`) — the
 latter is now unblocked because 7.7d removed the last HM prerequisite.
 
-### Option A: **Phase 7.8b — extend codegen with TELam + TEIf + TEMatch**
+### Option A: **Phase 7.8c — extend codegen with TDType sum-type emission**
 
-Extend `19-codegen-real.lll` in place with the remaining TExpr
-shapes. The host's `emitExpr` already shows the inline-form recipes
-for each (line 158 for `TELam`, line 180 for `TEIf`, line 194 for
-`TEMatch`). Keep the same helper-split pattern so `match` nesting
-stays one level deep.
-
-Shape (Phase 7.8b):
-1. Add `TELam Str TExpr`, `TEIf TExpr TExpr TExpr`, and
-   `TEMatch TExpr List[TArm]` constructors to `TExpr`. `TArm` is a
-   parallel-list pair `MkArm Str TExpr` for now (pattern is a bare
-   ctor name, same shortcut as `16-elaborator-real.lll`).
-2. Add `showLam` / `showIf` / `showMatch` helpers, one per new
-   ctor, emitting the host's inline forms:
-   ```
-   (fun x -> <body>)
-   (if <c> then <t> else <e>)
-   (match <scrut> with | p1 -> e1 | p2 -> e2)
-   ```
-3. Add three new hardcoded TDFn test cases to `main` covering each
-   new shape. Update the runtime E2E expectation.
-4. Optionally add `TDType Str List[TCtor]` — ADT emission via
-   `type X = | C1 | C2 of arg * arg` — mirroring `Codegen.fs`
-   `TDType` arm. Out of scope if the slice gets long.
+Extend `19-codegen-real.lll` in place with `TDType Str List[TCtor]`
+ADT emission, mirroring `Codegen.fs` `TDType` arm line 247 area.
+`TCtor` is a parallel-list pair `MkCtor Str List[TType]` (ctor name
++ arg-type list). Output form:
+```
+type Shape = | Circle | Rect of int64 * int64 | Empty
+```
+Single-line form to stay consistent with the rest of the file and
+dodge F# offside trouble. `TType` can start as a flat enum
+(`TTInt / TTStr / TTVar Str / TTApp Str`) — a minimal slice of the
+host's `TypeExpr` sufficient for the hardcoded test cases. Add a
+`showType` helper (dispatcher + one arm per `TType` ctor) and a
+`showCtors` helper (single-line ` | ` join over the parallel list).
+Add two or three new hardcoded `TDType` test cases to `main` — e.g.
+`type Shape = Circle | Rect Int Int | Empty` — covering a bare
+ctor, a curried-arg ctor, and a multi-arg ctor (which must emit as
+F#'s tuple-arg form `Rect of int64 * int64`).
 
 ### Option B: **Phase 7.9 — assemble `bootstrap/compiler.lll`**
 
@@ -301,9 +310,14 @@ the compiler a minimal `module Hello\nfn main() = printfn "hi"`
 source and asserting the emitted F# source compiles under the F#
 host.
 
-Recommended order: **Option A first** (7.8b) to harden the codegen
-spine, **then Option B** (7.9) once all three prerequisites are in
-(7.7d is already done, so the HM blocker is gone).
+Recommended order: **Option A first** (7.8c) to finish out the
+`TDType` gap in the codegen spine so sum-type round-tripping works,
+**then Option B** (7.9) once the codegen can handle a minimal but
+realistic `module M\n type T = ...\n fn main() = ...` shape end-to-
+end. 7.7d is already done, so the HM blocker for 7.9 is gone — the
+only remaining argument for doing 7.9 first is that 7.8c's `TDType`
+slice isn't strictly required to compose the pipeline on a type-
+free example.
 
 ### Backlog: heavier module-parser extensions in ll-lang
 
