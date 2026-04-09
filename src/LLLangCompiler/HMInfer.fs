@@ -493,8 +493,21 @@ and private patternType (st: InferState) (env: Env) (pat: Pattern) : TypeExpr * 
                 | TyFn(a, b) -> let (args, ret) = unrollFn b in (a :: args, ret)
                 | _ -> ([], ty)
             let (expectedArgTys, retTy) = unrollFn conTy
+            // Check for over-application: more argument patterns than the
+            // constructor accepts. This would previously be silently accepted
+            // because the extra patterns were paired with a fresh unconstrained
+            // type variable via the `@ [freshVar]` padding. Now we detect the
+            // arity mismatch and report E001 TypeMismatch.
+            let nExpected = List.length expectedArgTys
+            let nActual   = List.length argPats
+            if nActual > nExpected then
+                st.Errors <- st.Errors @ [e001 (sprintf "constructor %s (arity %d)" name nExpected)
+                                                (sprintf "applied to %d argument(s)" nActual)]
+            // Only zip the patterns that have a corresponding expected type;
+            // extra patterns (over-application) are skipped — the error above
+            // already records the problem.
             let bindings =
-                List.zip argPats (List.truncate (List.length argPats) (expectedArgTys @ [freshVar st.Fresh]))
+                List.zip (List.truncate nExpected argPats) expectedArgTys
                 |> List.collect (fun (subPat, expTy) ->
                     let (actualTy, bs) = patternType st env subPat
                     ignore (unifyS st actualTy expTy)

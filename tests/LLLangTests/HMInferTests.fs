@@ -919,3 +919,49 @@ let ``Bug2: list-literal pattern [x] binds head and matches single-elem list`` (
         "  | _ -> 0"
     let tm = inferOk src
     Assert.Equal(TyFn(TyApp(TyName "List", TyName "Int"), TyName "Int"), (schemeOf tm "head1").Body)
+
+// --- Issue #23: patternType over-applied constructor bugs -----------------
+
+[<Fact>]
+let ``Issue23: Some applied to two args is an error`` () =
+    // `Some` takes exactly one argument. `Some x y` is over-applied and
+    // must produce an E001 TypeMismatch, not silently succeed.
+    let src =
+        "module M\n" +
+        "type Option[A] = None | Some A\n" +
+        "fn bad(o Option[Int]) Int =\n" +
+        "  | Some x y -> x\n" +
+        "  | None -> 0"
+    let errs = inferErrs src
+    Assert.NotEmpty(errs)
+    Assert.True(errs |> List.exists (fun e -> e.Code = E001),
+                sprintf "expected E001 error, got: %A" errs)
+
+[<Fact>]
+let ``Issue23: None applied to one arg is an error`` () =
+    // `None` takes no arguments. `None x` is over-applied and must
+    // produce an E001 TypeMismatch.
+    let src =
+        "module M\n" +
+        "type Option[A] = None | Some A\n" +
+        "fn bad(o Option[Int]) Int =\n" +
+        "  | None x -> 0\n" +
+        "  | Some v -> v"
+    let errs = inferErrs src
+    Assert.NotEmpty(errs)
+    Assert.True(errs |> List.exists (fun e -> e.Code = E001),
+                sprintf "expected E001 error, got: %A" errs)
+
+[<Fact>]
+let ``Issue23: valid Option patterns still typecheck correctly`` () =
+    // Regression guard: fixing the over-application bug must not break
+    // valid constructor patterns with exactly the right number of args.
+    let src =
+        "module M\n" +
+        "type Option[A] = None | Some A\n" +
+        "fn extract(o Option[Int]) Int =\n" +
+        "  | Some x -> x\n" +
+        "  | None -> 0"
+    let tm = inferOk src
+    Assert.Equal(TyFn(TyApp(TyName "Option", TyName "Int"), TyName "Int"),
+                 (schemeOf tm "extract").Body)
