@@ -1016,14 +1016,40 @@ fn parseLetIn(toks List[Token]) =
     (ELetIn name e1 e2, rest4)
   | _ -> (EInt 0, toks)
 
--- `\x. body`. Single-param lambda; multi-param is expressed by nesting
--- (`\x. \y. body`). The body is parsed at full `parseExpr` level so it
--- can contain any expression form the grammar accepts.
+-- `\x. body` or multi-param `\x y z. body`. Multi-param lambdas desugar
+-- to nested ELams via `wrapLamParams` (right-fold: `\x y z. body` ->
+-- `ELam x (ELam y (ELam z body))`). The body is parsed at full
+-- `parseExpr` level so it can contain any expression form the grammar
+-- accepts.
+--
+-- Phase 7.10k: before the fix the single-arm pattern `TLower name ::
+-- TDot :: rest` rejected every multi-param surface lambda, falling
+-- through to the `_` catch-all which silently returned `(EInt 0,
+-- toks)` and left the entire `\acc a. ...` unconsumed on the token
+-- stream. The bootstrap's own source (20-bootstrap-compiler.lll) uses
+-- `\acc x.` in every `listFold` call, so the fixpoint probe surfaced
+-- this gap as `E002 UnboundVar acc` / `E002 UnboundVar a` — the first
+-- two stray `EVar`s the subsequent `parseApp` walker picked up off the
+-- abandoned token prefix. Fix: delegate to `parseLamParams` which
+-- accumulates `TLower` names until it hits `TDot`, then rewraps the
+-- parsed body via `wrapLamParams`.
+fn parseLamParams(acc List[Str])(toks List[Token]) =
+  match toks with
+    | TLower name :: rest -> parseLamParams (listAppend acc [name]) rest
+    | _ -> (acc, toks)
+
+fn wrapLamParams(params List[Str])(body Expr) Expr =
+  match params with
+    | p :: rest -> ELam p (wrapLamParams rest body)
+    | _ -> body
+
 fn parseLam(toks List[Token]) =
-  | TLower name :: TDot :: rest ->
-    let (body, rest2) = parseExpr rest in
-    (ELam name body, rest2)
-  | _ -> (EInt 0, toks)
+  let (params, rest) = parseLamParams [] toks in
+  match rest with
+    | TDot :: rest2 ->
+      let (body, rest3) = parseExpr rest2 in
+      (wrapLamParams params body, rest3)
+    | _ -> (EInt 0, toks)
 
 -- `if c then a else b`. Each of the three sub-expressions is parsed via
 -- the full parseExpr so nested `if`s work naturally. Phase 7.9q adds
