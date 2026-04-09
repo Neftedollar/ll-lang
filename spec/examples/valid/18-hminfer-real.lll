@@ -317,30 +317,50 @@ fn runTest(label Str)(t1 TypeExpr)(t2 TypeExpr) Str =
 fn joinLines(xs List[Str]) Str =
   listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n") s) "" xs
 
--- ---------- Env (Phase 7.7b) --------------------------------------------
+-- ---------- TypeScheme / Env (Phase 7.7b, schemes in 7.7d) --------------
 
--- Typing environment: parallel `List[Str]` names + `List[TypeExpr]`
--- types, exactly mirroring `Subst`. Same rationale too — tuples-in-list
--- have surface-syntax friction, so two parallel lists it is.
-type Env = MkEnv List[Str] List[TypeExpr]
+-- Polymorphic type scheme: `MkScheme vars body` represents
+-- `∀ vars. body`. A monomorphic type has `vars = []`. Added in 7.7d to
+-- enable let-generalization (`let id = \x. x in id 5` now types at
+-- `Int` because `id` is generalized to `∀ a. a -> a` and instantiated
+-- fresh at the use site).
+type TypeScheme = MkScheme List[Str] TypeExpr
+
+-- Typing environment: parallel `List[Str]` names + `List[TypeScheme]`
+-- schemes. Same parallel-list trick as `Subst`. Before 7.7d this stored
+-- raw `TypeExpr` — now it stores schemes so `ELet` can generalize.
+type Env = MkEnv List[Str] List[TypeScheme]
 
 -- Zero-arg constructor pattern: dummy `Int` param at the call site
 -- (`emptyEnv 0`), same trick as `emptySubst`.
 fn emptyEnv(u Int) Env = MkEnv [] []
 
--- Extend an env with a new binding. New entries go at the head so
--- `envLookup` finds the most recently bound name first (classic
--- lexical shadowing).
+-- Wrap a raw `TypeExpr` as a monomorphic scheme (no quantifiers). Used
+-- by lambda-param / match-PVar binders where the binder type is a
+-- fresh unification variable that must NOT be generalized (HM's
+-- "value restriction" proxy).
+fn mono(t TypeExpr) TypeScheme = MkScheme [] t
+
+-- Extend an env with a new monomorphic binding. New entries go at the
+-- head so `envLookup` finds the most recently bound name first
+-- (classic lexical shadowing).
 fn envExtend(e Env)(name Str)(t TypeExpr) Env =
   match e with
-    | MkEnv ks vs -> MkEnv (name :: ks) (t :: vs)
+    | MkEnv ks vs -> MkEnv (name :: ks) (mono t :: vs)
+
+-- Extend an env with a polymorphic scheme. Used only by `inferLet`
+-- after `generalize` produces the scheme for the bound `e1`.
+fn envExtendScheme(e Env)(name Str)(sch TypeScheme) Env =
+  match e with
+    | MkEnv ks vs -> MkEnv (name :: ks) (sch :: vs)
 
 -- Linear lookup, same shape as `lookupSubst` / `lookupSubstLists`.
-fn envLookup(e Env)(name Str) Maybe[TypeExpr] =
+-- Returns `Some scheme`; callers instantiate fresh at the use site.
+fn envLookup(e Env)(name Str) Maybe[TypeScheme] =
   match e with
     | MkEnv ks vs -> envLookupLists ks vs name
 
-fn envLookupLists(keys List[Str])(vals List[TypeExpr])(name Str) Maybe[TypeExpr] =
+fn envLookupLists(keys List[Str])(vals List[TypeScheme])(name Str) Maybe[TypeScheme] =
   match keys with
     | k :: ks ->
       match vals with
@@ -350,15 +370,47 @@ fn envLookupLists(keys List[Str])(vals List[TypeExpr])(name Str) Maybe[TypeExpr]
         | _ -> None
     | _ -> None
 
--- Walk an `Env`'s value list and apply `s` to every binding's type.
--- Mirrors the F# host's `applyEnv` in `src/LLLangCompiler/Types.fs`.
--- Phase 7.7c uses it in the `ELet` and `EIf` arms so bindings emitted
--- while inferring earlier sub-expressions are visible to later ones.
--- Mono-typed only — no `applyScheme` / quantified-var skipping; the
--- existing `Env` stores raw `TypeExpr` not `TypeScheme`.
+-- Walk an `Env`'s scheme list and apply `s` to every scheme's body.
+-- Mirrors `Types.applyEnv`. Quantified vars in each scheme are removed
+-- from the substitution's domain before applying (so `∀ a. a -> a`
+-- doesn't get `a` substituted if `a` happens to be in `s`).
 fn applyEnv(s Subst)(e Env) Env =
   match e with
-    | MkEnv ks vs -> MkEnv ks (applyTypeList s vs)
+    | MkEnv ks vs -> MkEnv ks (applySchemeList s vs)
+
+fn applySchemeList(s Subst)(schs List[TypeScheme]) List[TypeScheme] =
+  match schs with
+    | sc :: rest -> applyScheme s sc :: applySchemeList s rest
+    | _ -> []
+
+fn applyScheme(s Subst)(sch TypeScheme) TypeScheme =
+  match sch with
+    | MkScheme vars body ->
+      let sRestricted = substRemoveAll s vars in
+      MkScheme vars (applyType sRestricted body)
+
+-- Remove a list of keys from a `Subst`. Used by `applyScheme` so
+-- quantified vars in a scheme shadow the subst.
+fn substRemoveAll(s Subst)(ks List[Str]) Subst =
+  match ks with
+    | k :: rest -> substRemoveAll (substRemove s k) rest
+    | _ -> s
+
+fn substRemove(s Subst)(name Str) Subst =
+  match s with
+    | MkSubst keys vals -> substRemoveLists keys vals name
+
+fn substRemoveLists(keys List[Str])(vals List[TypeExpr])(name Str) Subst =
+  match keys with
+    | k :: ks ->
+      match vals with
+        | v :: vs ->
+          if k == name then MkSubst ks vs
+          else
+            match substRemoveLists ks vs name with
+              | MkSubst ks2 vs2 -> MkSubst (k :: ks2) (v :: vs2)
+        | _ -> MkSubst [] []
+    | _ -> MkSubst [] []
 
 -- Map `applyType s` over a list of `TypeExpr`. Written as an explicit
 -- recursive walk rather than `listMap` because the corpus file doesn't
@@ -368,6 +420,87 @@ fn applyTypeList(s Subst)(ts List[TypeExpr]) List[TypeExpr] =
   match ts with
     | t :: rest -> applyType s t :: applyTypeList s rest
     | _ -> []
+
+-- ---------- ftv / generalize / instantiate (Phase 7.7d) -----------------
+
+-- String-list membership. Used by `ftvEnv` / `generalize` to compute
+-- list differences. Written out rather than routed through stdlib's
+-- `listContains` to keep the file dependency-closed.
+fn listContainsStr(x Str)(xs List[Str]) Bool =
+  match xs with
+    | y :: rest -> if x == y then true else listContainsStr x rest
+    | _ -> false
+
+-- List difference: xs minus ys. Preserves order of xs.
+fn listDiffStr(xs List[Str])(ys List[Str]) List[Str] =
+  match xs with
+    | x :: rest ->
+      if listContainsStr x ys then listDiffStr rest ys
+      else x :: listDiffStr rest ys
+    | _ -> []
+
+-- Deduplicate a string list, keeping first occurrences.
+fn listDedupStr(xs List[Str]) List[Str] =
+  match xs with
+    | x :: rest ->
+      let tail = listDedupStr rest in
+      if listContainsStr x tail then tail else x :: tail
+    | _ -> []
+
+-- Free type variables of a `TypeExpr`. All `TyVar` names are treated as
+-- free (this slice doesn't distinguish flex `$0` from rigid `a`; every
+-- TyVar is bindable). Results may contain duplicates — caller dedups.
+fn ftvType(t TypeExpr) List[Str] =
+  match t with
+    | TyName _ -> []
+    | TyVar v -> [v]
+    | TyFn a b -> listAppend (ftvType a) (ftvType b)
+
+-- Free type variables of a `TypeScheme`: ftv(body) minus the
+-- quantified vars.
+fn ftvScheme(sch TypeScheme) List[Str] =
+  match sch with
+    | MkScheme vars body -> listDiffStr (ftvType body) vars
+
+-- Free type variables of an `Env`: union of `ftvScheme` over every
+-- binding. Walks the scheme list directly because the parallel-list
+-- Env doesn't expose a value iterator.
+fn ftvEnv(e Env) List[Str] =
+  match e with
+    | MkEnv _ vs -> ftvSchemeList vs
+
+fn ftvSchemeList(schs List[TypeScheme]) List[Str] =
+  match schs with
+    | sc :: rest -> listAppend (ftvScheme sc) (ftvSchemeList rest)
+    | _ -> []
+
+-- `generalize env t`: produce `MkScheme (ftv(t) - ftv(env)) t`. Quant
+-- order is first-seen in the body walk.
+fn generalize(e Env)(t TypeExpr) TypeScheme =
+  let tFtv = listDedupStr (ftvType t) in
+  let envFtv = ftvEnv e in
+  let quant = listDiffStr tFtv envFtv in
+  MkScheme quant t
+
+-- `instantiate n sch`: allocate a fresh unification var for each
+-- quantifier, substitute into the scheme body, return the instantiated
+-- type and the updated fresh counter.
+fn instantiate(n Int)(sch TypeScheme) =
+  match sch with
+    | MkScheme vars body ->
+      let (subst, n1) = freshSubstFor vars n in
+      (applyType subst body, n1)
+
+-- Build a `Subst` that maps each `vars[i]` to a fresh `$n+i`. Threads
+-- the counter and returns `(subst, newCounter)`.
+fn freshSubstFor(vars List[Str])(n Int) =
+  match vars with
+    | v :: rest ->
+      let (fresh, n1) = freshVar n in
+      let (tailSubst, n2) = freshSubstFor rest n1 in
+      match tailSubst with
+        | MkSubst ks vs -> (MkSubst (v :: ks) (fresh :: vs), n2)
+    | _ -> (emptySubst 0, n)
 
 -- ---------- Expr AST (Phase 7.7b) ---------------------------------------
 
@@ -458,10 +591,16 @@ fn inferExpr(env Env)(n Int)(e Expr) Outcome[InferResult] =
     | EIf cond thn els -> inferIf env n cond thn els
     | EMatch scr pats bodies -> inferMatch env n scr pats bodies
 
--- `EVar`: env lookup, E002 on miss.
+-- `EVar`: env lookup then instantiate the scheme with fresh vars.
+-- Phase 7.7d change: lookup returns `Maybe[TypeScheme]`, not
+-- `Maybe[TypeExpr]`; `instantiate` replaces each quantifier with a
+-- fresh flex var so polymorphic bindings (`let id = \x. x in ...`)
+-- get fresh use-site types.
 fn inferVar(env Env)(n Int)(name Str) Outcome[InferResult] =
   match envLookup env name with
-    | Some t -> OkR (MkInferResult t (emptySubst 0) n)
+    | Some sch ->
+      let (t, n1) = instantiate n sch in
+      OkR (MkInferResult t (emptySubst 0) n1)
     | _ -> ErrR (strConcat "E002 UnboundVar " name)
 
 -- `EAdd`: destructure the left-hand result, pass to `inferAddR`.
@@ -557,11 +696,12 @@ fn inferLamOk(alpha TypeExpr)(bRes InferResult) InferResult =
       let paramTy = applyType sBody alpha in
       MkInferResult (TyFn paramTy tBody) sBody nBody
 
--- `ELet name e1 e2`: infer `e1`, extend the env with `(name : τ1)` under
--- the resulting subst, infer `e2`, return `τ2` under `compose s2 s1`.
--- NO let-generalization yet — `name` is bound to the raw monomorphic
--- `τ1`. Let-gen (type schemes) would touch `Env`, `envLookup`, and
--- every `envExtend` call site; left out of 7.7d for scope.
+-- `ELet name e1 e2`: infer `e1`, generalize τ1 over vars not free in
+-- the env-after-s1, extend the env with the scheme, infer `e2`, return
+-- `τ2` under `compose s2 s1`. Phase 7.7d: the `generalize` call enables
+-- polymorphic let-bound identifiers — `let id = \x. x in id 5` now
+-- types at `Int` because `id`'s scheme is `∀ $0. $0 -> $0` and gets
+-- instantiated to `$1 -> $1` at the use site.
 fn inferLet(env Env)(n Int)(name Str)(e1 Expr)(e2 Expr) Outcome[InferResult] =
   match inferExpr env n e1 with
     | OkR r1 -> inferLetOk env name r1 e2
@@ -571,11 +711,13 @@ fn inferLetOk(env Env)(name Str)(r1 InferResult)(e2 Expr) Outcome[InferResult] =
   match r1 with
     | MkInferResult t1 s1 n1 -> inferLetBody env s1 n1 name t1 e2
 
--- Body half of `ELet`: extends the env with the (applied) binding and
--- recurses into `e2`, then composes the subst.
+-- Body half of `ELet`: applies `s1` to the env, generalizes the bound
+-- type against that env, extends with the resulting scheme, recurses
+-- into `e2`, and composes the subst.
 fn inferLetBody(env Env)(s1 Subst)(n Int)(name Str)(t1 TypeExpr)(e2 Expr) Outcome[InferResult] =
   let env2 = applyEnv s1 env in
-  let env3 = envExtend env2 name t1 in
+  let sch = generalize env2 t1 in
+  let env3 = envExtendScheme env2 name sch in
   match inferExpr env3 n e2 with
     | OkR r2 -> OkR (inferLetCompose s1 r2)
     | ErrR m -> ErrR m
@@ -837,5 +979,32 @@ fn main() =
   let line18 = runInferTest "t18" "(match 1 | 0 -> \"zero\" | _ -> \"other\")" (emptyEnv 0) matchStrExpr in
   let line19 = runInferTest "t19" "(match 1 | 0 -> \"zero\" | 1 -> 42)" (emptyEnv 0) matchBadExpr in
   let line20 = runInferTest "t20" "(match 1 | x -> x + 1)" (emptyEnv 0) matchBindExpr in
-  let lines = [line1 line2 line3 line4 line5 line6 line7 line8 line9 line10 line11 line12 line13 line14 line15 line16 line17 line18 line19 line20] in
+  -- t21: `let id = \x. x in id 5` -> Int.
+  -- Works with or without let-gen — included here as the basic
+  -- let-bound lambda case. The deeper test is t22 below.
+  let letIdExpr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EInt 5)) in
+  -- t22: `let id = \x. x in if true then id 1 else id "hi"` — requires
+  -- let-gen to type-check. Without generalization the first use pins
+  -- `id : Int -> Int`, the second use then hits an E001 on `id "hi"`.
+  -- With let-gen, each use instantiates a fresh scheme variable, so
+  -- the if's then-branch types at Int and the else-branch at Str; the
+  -- outer `EIf` then fails (deliberately) at branch-unify with the
+  -- real E001 — that's different from the "id pinned at Int -> Int"
+  -- error and serves as the let-gen demo. We split this into t22a and
+  -- t22b: t22a uses `id 5` (monomorphic use) and t22b uses both
+  -- `id 5` and `id "hi"` concatenated via a separate let binding that
+  -- type-checks only under let-gen.
+  --   t22: `let id = \x. x in let i = id 5 in id "hi"` -> Str
+  -- With let-gen: id has scheme `∀ $0. $0 -> $0`. `id 5` instantiates
+  -- to `Int -> Int`, so `i : Int`. `id "hi"` instantiates fresh to
+  -- `Str -> Str`, so the whole expression types at `Str`. Without
+  -- let-gen, `id 5` pins id to `Int -> Int`, and `id "hi"` then
+  -- fails E001 at the second use.
+  let letIdUseInt = EApp (EVar "id") (EInt 5) in
+  let letIdUseStr = EApp (EVar "id") (EStr "hi") in
+  let letIdInner = ELet "i" letIdUseInt letIdUseStr in
+  let letIdPoly = ELet "id" (ELam "x" (EVar "x")) letIdInner in
+  let line21 = runInferTest "t21" "(let id = \\x. x in id 5)" (emptyEnv 0) letIdExpr in
+  let line22 = runInferTest "t22" "(let id = \\x. x in let i = id 5 in id \"hi\")" (emptyEnv 0) letIdPoly in
+  let lines = [line1 line2 line3 line4 line5 line6 line7 line8 line9 line10 line11 line12 line13 line14 line15 line16 line17 line18 line19 line20 line21 line22] in
   printfn (joinLines lines)
