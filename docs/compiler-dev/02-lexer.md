@@ -1,6 +1,6 @@
 # Lexer
 
-File: `src/LLLangCompiler/Lexer.fs` (~150 lines).
+File: `src/LLLangCompiler/Lexer.fs` (~185 lines).
 Token definitions: `src/LLLangCompiler/Token.fs`.
 
 The lexer is a single-pass character scanner that produces a
@@ -13,10 +13,12 @@ type Token =
     | KwFn | KwLet | KwIn | KwType | KwTag | KwUnit
     | KwTrait | KwImpl | KwImport | KwExport | KwModule
     | KwIf | KwThen | KwElse | KwTrue | KwFalse
+    | KwMatch | KwWith
     | Ident of string
     | TypeId of string
     | IntLit of int64 | FloatLit of float | StrLit of string
-    | Arrow | Backslash | Dot | Comma | Colon
+    | CharLit of char
+    | Arrow | Backslash | Dot | Comma | Colon | ColonColon
     | Eq | Bar | LBrack | RBrack | LParen | RParen
     | Plus | Minus | Star | Slash | Caret
     | Lt | Gt | Le | Ge | EqEq | Neq
@@ -43,6 +45,7 @@ let private keywords =
         "import", KwImport; "export", KwExport; "module", KwModule
         "if", KwIf; "then", KwThen; "else", KwElse
         "true", KwTrue; "false", KwFalse
+        "match", KwMatch; "with", KwWith
     ]
 ```
 
@@ -55,13 +58,14 @@ lowercase (`Ident`). This keeps the parser free of case checks.
 
 ## Two-character operators
 
-Two-character operators (`->`, `<=`, `>=`, `==`, `!=`) are checked with
-`peek()` before single-character operators. Order matters: `<` must fall
-through to `<=` being tried first.
+Two-character operators (`->`, `<=`, `>=`, `==`, `!=`, `::`) are checked
+with `peek()` before single-character operators. Order matters: `<` must
+fall through to `<=` being tried first.
 
 ```fsharp
 | '-' when peek() = '>' -> let t = mk Arrow in advance(); advance(); result.Add(t); scan()
 | '<' when peek() = '=' -> let t = mk Le in advance(); advance(); result.Add(t); scan()
+| ':' when peek() = ':' -> let t = mk ColonColon in advance(); advance(); result.Add(t); scan()
 ...
 | '-' -> add Minus; advance(); scan()
 | '<' -> add Lt; advance(); scan()
@@ -69,14 +73,51 @@ through to `<=` being tried first.
 
 Note: `Arrow` is used for both the type arrow (`Int -> Bool`) and the pipe
 operator (`e -> f`). Disambiguation happens in the parser based on
-context.
+context. `ColonColon` is the list-cons operator used both in expressions
+(`x :: xs`) and patterns.
 
 ## String literals
 
 Standard escape handling: `\n`, `\t`, `\"`, `\\` are unescaped inline.
-Unrecognized escapes (`\x`) are passed through as-is. Unterminated string
-throws inside `scan()`, which the top-level `try` converts into
-`Error ex.Message`.
+Unrecognized escapes (`\x`) pass the escaped character through as-is.
+Unterminated string throws inside `scan()`, which the top-level `try`
+converts into `Error ex.Message`.
+
+## Char literals
+
+Single-quoted char literals (`'a'`, `'\n'`) produce `CharLit of char`.
+The escape set is: `\n`, `\t`, `\r`, `\\`, `\'`, `\"`, `\0`. Any other
+backslash sequence raises an `Invalid char escape` error. An
+unterminated or missing-closing-quote char literal also errors out.
+
+```fsharp
+| '\'' ->
+    advance()  // consume opening '
+    let ch =
+        if source[pos] = '\\' then
+            advance()
+            match source[pos] with
+            | 'n' -> '\n' | 't' -> '\t' | 'r' -> '\r'
+            | '\\' -> '\\' | '\'' -> '\'' | '"' -> '"'
+            | '0' -> '\000'
+            | other -> failwith $"Invalid char escape '\\{other}'"
+        else source[pos]
+    ...
+```
+
+## Line comments
+
+`--` starts a comment that runs to the end of the line. The scanner
+consumes characters until the next `\n` without emitting a token:
+
+```fsharp
+| '-' when peek() = '-' ->
+    while pos < source.Length && source[pos] <> '\n' do advance()
+    scan()
+```
+
+Comment-only lines are also treated as non-significant by the indent
+handler so they do not fire spurious DEDENTs inside a block.
 
 ## Layout tokens (INDENT / DEDENT)
 
