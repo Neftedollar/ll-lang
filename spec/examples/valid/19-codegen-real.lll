@@ -68,9 +68,29 @@ module Examples.CodegenReal
 --     51 area: Int -> int64 / Str -> string / Bool -> bool; every
 --     other name passes through as-is.
 --
+-- Phase 7.8d scope ("slice D" — F# module header + stdlib prelude block):
+--   * New `Module = MkModule Str List[TDecl]` ADT pairing a dotted
+--     module path with the list of decls that belong in it — a
+--     stand-in for the host's `TypedModule`.
+--   * New `fsharpPrelude : Int -> Str` helper emitting a minimal
+--     5-binding subset of the host's `fsharpPreludeCore` (listMap,
+--     listLen, strLen, strConcat, print) wrapped in the canonical
+--     `// --- ll-lang stdlib prelude (auto-generated) ---` /
+--     `// --- end prelude ---` banner. Takes a dummy `Int` arg
+--     because ll-lang's surface doesn't yet accept `fn name ()`
+--     as a call expression.
+--   * New `showModule : Module -> Str` walker (plus a
+--     `showModuleBody` split helper) that emits the full F# file
+--     shape: `module <path>` header, blank line, prelude block,
+--     blank line, decls rendered via `showDecl` and joined with
+--     blank-line separators.
+--   * New `joinBlocks : List[Str] -> Str` blank-line-joined fold
+--     (same shape as `joinLines` but with `"\n\n"` separator).
+--   * `main` now builds a single `MkModule "Examples.Generated" ...`
+--     value instead of printing each decl individually, and
+--     `printfn`s its `showModule` rendering.
+--
 -- Out of scope (later slices in the Phase 7.8 umbrella):
---   * F# prelude block (the stdlib shim in `Codegen.fs` `fsharpPrelude*`)
---     — Phase 7.8d.
 --   * Multi-line match emission and constructor-application / tagged-
 --     type (`TECon`) emission — a later slice.
 --   * Mutual-recursion grouping (`let rec ... and ...`) and
@@ -79,6 +99,13 @@ module Examples.CodegenReal
 --     sum bodies are supported in 7.8c.
 --   * Parametric type applications in ctor args (`Some (Maybe A)`) —
 --     only flat TAName / TAVar single-segment args are supported.
+--   * Conditional Maybe/Result prelude sections — the host's
+--     `assemblePrelude` emits these only when the user declares the
+--     corresponding types. This slice's flat 5-line subset has no
+--     user-type dependencies so it's always safe to emit.
+--   * Full ~30-binding `fsharpPreludeCore` (math / char / file IO /
+--     stringly helpers) — out of scope for this minimum-viable slice;
+--     will land alongside `bootstrap/compiler.lll` in Phase 7.9+.
 --   * Real `TypeScheme`-carrying TypedAST — this slice just walks a
 --     plain `TExpr`/`TDecl` without touching type info.
 --   * Consuming the output of `18-hminfer-real.lll` — integration is
@@ -98,24 +125,43 @@ module Examples.CodegenReal
 --   TDType "Shape" []    [MkCtor "Circle" [], MkCtor "Rect" [TAName "Int", TAName "Int"], MkCtor "Empty" []]  -- 7.8c
 --   TDType "Pair"  ["A" "B"] [MkCtor "MkPair" [TAVar "A", TAVar "B"]]  -- 7.8c
 --
--- Expected stdout (one F# source block per decl, joined with "\n"
--- via `joinLines` so `fn main` has a single-expression body):
---   let inc x = (x + 1L)
---   let greet = "hello"
---   let addOne x = (let y = (x + 1L) in y)
---   let callInc x = (inc x)
---   let choose b = (if b then 1L else 2L)
---   let double = (fun x -> (x + x))
---   let classify x = (match x with | 0L -> "zero" | _ -> "other")
+-- Expected stdout (Phase 7.8d: wrapped in a full F# module shell with
+-- `module` header + stdlib prelude block, then types + fns):
+--   module Examples.Generated
+--
+--   // --- ll-lang stdlib prelude (auto-generated) ---
+--   let listMap f xs = List.map f xs
+--   let listLen (xs: 'a list) : int64 = int64 (List.length xs)
+--   let strLen (s: string) : int64 = int64 s.Length
+--   let strConcat (a: string) (b: string) = a + b
+--   let print (s: string) = System.Console.Write(s)
+--   // --- end prelude ---
+--
 --   type Maybe<'A> =
 --       | Some of 'A
 --       | None
+--
 --   type Shape =
 --       | Circle
 --       | Rect of int64 * int64
 --       | Empty
+--
 --   type Pair<'A, 'B> =
 --       | MkPair of 'A * 'B
+--
+--   let inc x = (x + 1L)
+--
+--   let greet = "hello"
+--
+--   let addOne x = (let y = (x + 1L) in y)
+--
+--   let callInc x = (inc x)
+--
+--   let choose b = (if b then 1L else 2L)
+--
+--   let double = (fun x -> (x + x))
+--
+--   let classify x = (match x with | 0L -> "zero" | _ -> "other")
 
 -- ---------- Maybe -------------------------------------------------------
 
@@ -195,6 +241,20 @@ type Ctor = MkCtor Str List[TypeArg]
 type TDecl =
   | TDFn Str List[Str] TExpr
   | TDType Str List[Str] List[Ctor]
+
+-- ---------- Module (Phase 7.8d) -----------------------------------------
+
+-- A full F# output unit: dotted module path + the list of decls that
+-- belong in it. Mirrors the host's `TypedModule` pairing of `Path` and
+-- `Decls`, minus every type-scheme / import / tag field this slice
+-- doesn't need. `showModule` walks this value to emit a complete F#
+-- source file: `module <path>` header, blank line, stdlib prelude
+-- block, blank line, then each decl rendered via `showDecl` and
+-- separated by blank lines. Phase 7.8d keeps the prelude unconditional
+-- (no Maybe/Result dependency tracking) and skips the `[<EntryPoint>]`
+-- attribute and `let rec ... and ...` grouping — those land in Phase
+-- 7.8e.
+type Module = MkModule Str List[TDecl]
 
 -- ---------- Expression emission -----------------------------------------
 
@@ -473,6 +533,74 @@ fn showTypeDecl(name Str)(tps List[Str])(ctors List[Ctor]) Str =
 fn joinLines(xs List[Str]) Str =
   listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n") s) "" xs
 
+-- Blank-line-joined variant: walks a `List[Str]` of already-emitted
+-- source blocks and glues them with `"\n\n"` separators. Used by
+-- `showModule` so the header, prelude block, and per-decl renderings
+-- all sit on their own F# source "paragraph". Same shape as
+-- `joinLines`, just a different separator.
+fn joinBlocks(xs List[Str]) Str =
+  listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n\n") s) "" xs
+
+-- ---------- F# stdlib prelude (Phase 7.8d) ------------------------------
+
+-- Minimal 5-line subset of the host's `fsharpPreludeCore` in
+-- `src/LLLangCompiler/Codegen.fs` line 380 area. The host prelude
+-- exposes ~30 bindings; this slice picks just enough to demonstrate
+-- the shape (listMap, listLen, strLen, strConcat, print). Phase 7.8e+
+-- grows this out to the full ~30-line core plus conditional
+-- Maybe/Result sections. Building it by `joinLines`-folding a
+-- hardcoded line list avoids needing multi-line string literals —
+-- same trick as every other string-assembly helper in this file.
+--
+-- Lines rendered (in order):
+--   // --- ll-lang stdlib prelude (auto-generated) ---
+--   let listMap f xs = List.map f xs
+--   let listLen (xs: 'a list) : int64 = int64 (List.length xs)
+--   let strLen (s: string) : int64 = int64 s.Length
+--   let strConcat (a: string) (b: string) = a + b
+--   let print (s: string) = System.Console.Write(s)
+--   // --- end prelude ---
+--
+-- Implemented as a single-param fn taking an ignored `Int` (instead
+-- of a zero-param `()` fn) because the module parser doesn't yet
+-- accept `fnName ()` as an expression — callers pass `0` and the
+-- body discards it.
+fn fsharpPrelude(_ignored Int) Str =
+  let l1 = "// --- ll-lang stdlib prelude (auto-generated) ---" in
+  let l2 = "let listMap f xs = List.map f xs" in
+  let l3 = "let listLen (xs: 'a list) : int64 = int64 (List.length xs)" in
+  let l4 = "let strLen (s: string) : int64 = int64 s.Length" in
+  let l5 = "let strConcat (a: string) (b: string) = a + b" in
+  let l6 = "let print (s: string) = System.Console.Write(s)" in
+  let l7 = "// --- end prelude ---" in
+  let preludeLines = [l1 l2 l3 l4 l5 l6 l7] in
+  joinLines preludeLines
+
+-- ---------- Module emission (Phase 7.8d) --------------------------------
+
+-- Walk a `Module` and render a full F# source file: header, blank line,
+-- prelude, blank line, decls separated by blank lines. Mirrors the F#
+-- host's `emitModule` in `src/LLLangCompiler/Codegen.fs` line 454 area,
+-- minus the mutual-recursion grouping (7.8e), conditional prelude
+-- (host's `assemblePrelude`), and type-decl-first reordering (host
+-- emits types before the prelude so the prelude can reference user
+-- Maybe/Result ctors — this slice just walks decls in their declared
+-- order because the minimal prelude has no user-type dependencies).
+fn showModule(m Module) Str =
+  match m with
+    | MkModule path decls -> showModuleBody path decls
+
+-- Split helper so `showModule`'s outer match stays one level deep.
+-- Emits `module <path>`, then the prelude block, then every decl
+-- rendered via `showDecl`, all glued with blank-line separators.
+fn showModuleBody(path Str)(decls List[TDecl]) Str =
+  let header = strConcat "module " path in
+  let prelude = fsharpPrelude 0 in
+  let declLines = listMap showDecl decls in
+  let declBlock = joinBlocks declLines in
+  let parts = [header prelude declBlock] in
+  joinBlocks parts
+
 -- ---------- main --------------------------------------------------------
 
 fn main() =
@@ -541,6 +669,15 @@ fn main() =
   let pairMk = MkCtor "MkPair" pairArgs in
   let pairCtors = [pairMk] in
   let d10 = TDType "Pair" ["A" "B"] pairCtors in
-  let decls = [d1 d2 d3 d4 d5 d6 d7 d8 d9 d10] in
-  let lines = listMap showDecl decls in
-  printfn (joinLines lines)
+  -- Phase 7.8d: wrap the ten decls in a `Module` value and render via
+  -- `showModule`, which prepends the `module Examples.Generated`
+  -- header and the F# stdlib prelude block before walking the decls.
+  -- Types come before fns in the list so the output mirrors the
+  -- host's `emitModule` layout (types first, prelude next, fns last).
+  -- This slice doesn't bother splitting the decl list by kind inside
+  -- `showModule`; it just trusts the caller to order them correctly.
+  -- Phase 7.8e+ may add a kind-aware sort once mutual-recursion
+  -- grouping lands.
+  let allDecls = [d8 d9 d10 d1 d2 d3 d4 d5 d6 d7] in
+  let m = MkModule "Examples.Generated" allDecls in
+  printfn (showModule m)
