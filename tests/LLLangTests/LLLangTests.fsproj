@@ -39,5 +39,6 @@
     <Compile Include="McpTests.fs" />
     <Compile Include="CodegenTSTests.fs" />
     <Compile Include="CodegenPyTests.fs" />
+    <Compile Include="CodegenJavaTests.fs" />
   </ItemGroup>
 </Project>

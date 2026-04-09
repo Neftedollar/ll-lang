@@ -29,7 +29,7 @@ let check (src: string) : Result<unit, LLError list> =
                 | Ok _ -> Ok ()
 
 /// Compilation target.
-type Target = FSharp | TypeScript | Python
+type Target = FSharp | TypeScript | Python | Java
 
 /// Run the pipeline through H-M inference and apply the given emitter.
 let private compileSrc (emitter: TypedModule -> string) (src: string) : Result<string, LLError list> =
@@ -61,12 +61,17 @@ let compileToTS (src: string) : Result<string, LLError list> =
 let compileToPy (src: string) : Result<string, LLError list> =
     compileSrc LLLang.CodegenPy.emit src
 
+/// Compile to Java source.
+let compileToJava (src: string) : Result<string, LLError list> =
+    compileSrc LLLang.CodegenJava.emit src
+
 /// Compile to any target.
 let compileTarget (target: Target) (src: string) : Result<string, LLError list> =
     match target with
     | FSharp     -> compile src
     | TypeScript -> compileToTS src
     | Python     -> compileToPy src
+    | Java       -> compileToJava src
 
 /// Compile a single LoadedFile. Each file is compiled independently;
 /// F# handles cross-module type resolution in the concatenated output.

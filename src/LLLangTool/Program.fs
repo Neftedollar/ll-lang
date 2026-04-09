@@ -19,6 +19,7 @@ let private parseTarget (args: string list) : Target * string list =
             match t.ToLower() with
             | "ts" | "typescript" -> TypeScript
             | "py" | "python"     -> Python
+            | "java" | "jvm"      -> Java
             | _                   -> FSharp
         tgt, rest
     | _ -> FSharp, args
@@ -28,6 +29,7 @@ let private targetExt = function
     | FSharp     -> ".fs"
     | TypeScript -> ".ts"
     | Python     -> ".py"
+    | Java       -> ".java"
 
 /// Build: compile file.lll → file.<ext>. Returns exit code.
 let private cmdBuild (path: string) (target: Target) : int =
@@ -181,4 +183,5 @@ let main (argv: string[]) : int =
         eprintfn "  --target fs   emit F# (default)"
         eprintfn "  --target ts   emit TypeScript"
         eprintfn "  --target py   emit Python"
+        eprintfn "  --target java emit Java"
         1

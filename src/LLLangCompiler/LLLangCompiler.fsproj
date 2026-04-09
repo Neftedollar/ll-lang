@@ -17,6 +17,7 @@
     <Compile Include="Codegen.fs" />
     <Compile Include="CodegenTS.fs" />
     <Compile Include="CodegenPy.fs" />
+    <Compile Include="CodegenJava.fs" />
     <Compile Include="Manifest.fs" />
     <Compile Include="ProjectLoader.fs" />
     <Compile Include="Compiler.fs" />
