@@ -1012,3 +1012,56 @@ let ``20-bootstrap-compiler.lll parses multi-line if-then-else and keeps emittin
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll resolves charIsDigit via stdlibNames (Phase 7.9r)`` () =
+    // Phase 7.9r: after 7.9q cleared the parser blocker by adding
+    // newline tolerance to `parseIf`, the fixpoint probe revealed
+    // four remaining `E002 UnboundVar` errors:
+    //   E002 UnboundVar charIsDigit
+    //   E002 UnboundVar p
+    //   E002 UnboundVar cs
+    //   E002 UnboundVar List
+    //
+    // This slice clears the first one (`charIsDigit`). The bootstrap
+    // compiler's own source uses `charIsDigit` (the host elaborator
+    // knows it as a builtin) but the bootstrap's mirror `stdlibNames`
+    // list did not include it. Same shape as the 7.9p `charToInt`
+    // fix: add the bare name to the flat name list, the minimal HM
+    // pass accepts it, and the elaborator stops emitting E002 for
+    // user programs that call `charIsDigit`.
+    //
+    // Fixture `20p-bootstrap-input-digit.lll` calls `charIsDigit`
+    // from a user fn body inside an `if`. Before the fix, running
+    // the bootstrap on this fixture surfaces
+    // `E002 UnboundVar charIsDigit`; after the fix, the elaborator
+    // accepts the name and the codegen pass emits a `let isNum`
+    // plus the `[<EntryPoint>]` main wrapper.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let digitPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20p-bootstrap-input-digit.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists digitPath, $"missing fixture: {digitPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(digitPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002 UnboundVar charIsDigit",
+            $"expected NO E002 UnboundVar charIsDigit; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec isNum" || stdout.Contains "let isNum",
+            $"expected emitted F# to contain `let isNum` or `let rec isNum`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "charIsDigit",
+            $"expected emitted F# to contain `charIsDigit`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
