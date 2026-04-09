@@ -10,19 +10,19 @@ returns `Result<_, LLError list>`.
 .lll source (string)
         │
         ▼
-   Lexer.tokenize          Tok list with INDENT/DEDENT
+   Lexer.tokenize                 Tok list with INDENT/DEDENT
         │
         ▼
-   Parser.parseModule      LLModule : AST
+   Parser.parseModuleWithPos      LLModule : AST + PosMap
         │
         ▼
-   Elaborator.elaborate    TypeEnv + E001..E005 checks
+   Elaborator.elaborate           (LLModule', TypeEnv) + E001..E005 checks
         │
         ▼
-   HMInfer.infer           TypedModule : typed AST + Env + dispatch map
+   HMInfer.infer                  TypedModule : typed AST + Env + dispatch map
         │
         ▼
-   Codegen.emit            F# source string
+   Codegen.emit                   F# source string
         │
         ▼
   .fs file  →  dotnet fsi  (lllc run)
@@ -31,6 +31,10 @@ returns `Result<_, LLError list>`.
 
 The entry point `Compiler.compile : string -> Result<string, LLError list>`
 chains the five stages together. Any stage can short-circuit with `Error`.
+A `PosMap` side-table (see `AST.fs`) is populated by the parser and
+threaded through the elaborator and inference passes so that every
+error carries a real `line:col` from the source (instead of the historic
+`0:0` placeholder).
 
 ## Module-by-module
 
@@ -65,28 +69,37 @@ built left-to-right; units are a separate `UnitExpr` tree nested inside
 ### `Parser.fs` — recursive descent
 
 Mutable `Ctx` cursor over a `Tok array`. Hand-written precedence climbing:
-`parseAtom < parseTagged < parseApp < parseMul < parseAdd < parseCmp <
-parsePipe`. Higher-level constructs (`parseExprInner`) handle `let`, `if`,
-and lambda.
+`parseAtom < parseTagged < parseApp < parseMul < parseAdd < parseCons <
+parseCmp < parsePipe`. Higher-level constructs (`parseExprInner`,
+`parseBlockExpr`) handle `let`, `if`, `match`, and lambda. The parser
+exposes two top-level entries: `parseModule` (plain) and
+`parseModuleWithPos` (same, but also returns the populated `PosMap`).
 
 See [03-parser](03-parser.md).
 
 ### `Elaborator.fs` — declared-type checking pass
 
-Three sub-passes:
+Four sub-passes:
 
-1. `collectDecls` — walks decls, populates `TypeEnv : Map<string, TypeExpr>`
-   with builtins, let-binding types (from literal inspection), function
-   signatures, and sum-type constructors.
-2. `checkDecls` — traverses function bodies calling `typeOf`, which walks
+1. `rewriteTagsInModule` — rewrites `TyApp(T, TyVar t)` to
+   `TyTagged(T, UName t)` for every declared `tag` so that HMInfer sees
+   the tagged form directly.
+2. `collectDecls` — walks decls, populates `TypeEnv : Map<string, TypeExpr>`
+   with a large `builtinEnv` (arith/cmp ops plus the Phase 6 stdlib:
+   math, list, maybe, result, str, char, file IO, process), let-binding
+   types (from literal inspection), function signatures, and sum-type
+   constructors.
+3. `checkDecls` — traverses function bodies calling `typeOf`, which walks
    expressions and compares declared vs actual types for each application.
-   Emits E001/E004/E005 via `classifyMismatch`.
-3. `exhaustivenessCheck` — for every `DFn` whose first param type is a
+   Emits E001/E002/E004/E005 via `classifyMismatch` and carries positions
+   from the parser's `PosMap`.
+4. `exhaustivenessCheck` — for every `DFn` whose first param type is a
    named sum type, verifies that every `EMatch` branch list covers every
    constructor. Emits E003 for missing constructors.
 
-Uses structural type equality with `TyVar` as a wildcard. Returns an
-enriched `TypeEnv` that feeds into H-M.
+Uses structural type equality with `TyVar` as a wildcard. Returns both
+the rewritten `LLModule` and the enriched `TypeEnv`:
+`elaborate : PosMap -> LLModule -> Result<LLModule * TypeEnv, LLError list>`.
 
 See [04-elaborator](04-elaborator.md).
 
@@ -131,8 +144,10 @@ See [06-codegen](06-codegen.md).
 
 ### `Compiler.fs` — pipeline glue
 
-Twelve lines. Tokenize, parseModule, elaborate, infer, emit. Any failure
-short-circuits with `Error`.
+~30 lines. Tokenize → `parseModuleWithPos` → `elaborate pm m` →
+`infer pm m' env` → `emit`. Any failure short-circuits with `Error`.
+The `PosMap` `pm` from the parser is threaded through the elaborator
+and inference so emitted errors carry source positions.
 
 ### `src/LLLangTool/Program.fs` — CLI
 
