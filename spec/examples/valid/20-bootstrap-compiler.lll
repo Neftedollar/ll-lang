@@ -1425,19 +1425,27 @@ fn showPatArgs(ps List[Pat]) Str =
 fn showArm(p Pat)(body Expr) Str =
   strConcat (strConcat (strConcat "| " (showPat p)) " -> ") (showExpr body)
 
+-- Phase 7.10l: the inner `match bodies with` inside `showArms`'s outer
+-- arm body hits the bootstrap's "nested match in arm body" ambiguity
+-- (parseArmBody deliberately doesn't dispatch `TKwMatch`). Extract the
+-- inner split into its own helper so each arm body of the outer match
+-- is a single call — same pattern as `classifyIdentByHead` /
+-- `lexCharEscAfter` from earlier phases.
+fn showArmsCons(p Pat)(ps List[Pat])(bodies List[Expr]) Str =
+  match bodies with
+    | b :: bs ->
+      let head = showArm p b in
+      let tail = showArms ps bs in
+      if strLen tail == 0 then head
+      else strConcat (strConcat head " ") tail
+    | _ -> ""
+
 -- Walk the two parallel lists in lockstep to produce `| pat -> body`
 -- chunks joined by single spaces. The invariant `length pats == length
 -- bodies` is maintained by `parseArms`.
 fn showArms(pats List[Pat])(bodies List[Expr]) Str =
   match pats with
-    | p :: ps ->
-      match bodies with
-        | b :: bs ->
-          let head = showArm p b in
-          let tail = showArms ps bs in
-          if strLen tail == 0 then head
-          else strConcat (strConcat head " ") tail
-        | _ -> ""
+    | p :: ps -> showArmsCons p ps bodies
     | _ -> ""
 
 -- Fully-parenthesised expression pretty-printer, matching 13/14's shape
