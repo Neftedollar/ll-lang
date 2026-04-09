@@ -291,6 +291,12 @@ type Expr =
   | EApp Expr Expr
   | ELam Str Expr
   | ELetIn Str Expr Expr
+  -- Phase 7.10h: 2-element tuple-destructuring let-in.
+  -- `let (a, b) = rhs in body` — added so the bootstrap can parse its
+  -- own source, which uses this form heavily (parseX helpers returning
+  -- `(result, leftover)` pairs). Emitted by `parseLetIn` when it sees
+  -- `TLParen :: TLower a :: TLower b :: TRParen :: TEq :: ...`.
+  | ELetInTup2 Str Str Expr Expr
   | EIf Expr Expr Expr
   | EMatch Expr List[Pat] List[Expr]
   | ENil
@@ -472,14 +478,21 @@ fn decodeEscape(c Char) Char =
 -- consumed; `cs` points at the escape content char. Consume the
 -- content char, decode it, expect the closing `'`, and emit a
 -- `TChar (decodeEscape esc)` token. Missing closing quote → drop.
+-- Phase 7.10h: split the nested-match shape into a one-arg helper
+-- so the bootstrap's own parser doesn't have to handle `match` inside
+-- a clause-sugar arm body (its `parseArmBody` deliberately doesn't
+-- dispatch `TKwMatch` — that arm is the "inner match would swallow
+-- outer arms" ambiguity case).
+fn lexCharEscAfter(esc Char)(rest List[Char])(cs List[Char]) List[Token] =
+  match rest with
+    | c :: r ->
+      if c == '\'' then listAppend [TChar (decodeEscape esc)] (lexChars r)
+      else lexChars cs
+    | _ -> lexChars cs
+
 fn lexCharEsc(cs List[Char]) List[Token] =
   match cs with
-    | esc :: rest ->
-      match rest with
-        | c :: r ->
-          if c == '\'' then listAppend [TChar (decodeEscape esc)] (lexChars r)
-          else lexChars cs
-        | _ -> lexChars cs
+    | esc :: rest -> lexCharEscAfter esc rest cs
     | _ -> []
 
 -- Phase 7.9i: lex a single-char literal `'c'`. The opening `'` has
@@ -490,16 +503,19 @@ fn lexCharEsc(cs List[Char]) List[Token] =
 -- is missing (unterminated), silently fall through and re-lex from
 -- the saved position, matching the leniency of the catch-all
 -- `else lexChars rest` arm in `lexChars`.
+-- Phase 7.10h: mirror of `lexCharEscAfter` for the unescaped case.
+fn lexCharLitAfter(ch Char)(rest List[Char])(cs List[Char]) List[Token] =
+  match rest with
+    | c :: r ->
+      if c == '\'' then listAppend [TChar ch] (lexChars r)
+      else lexChars cs
+    | _ -> lexChars cs
+
 fn lexCharLit(cs List[Char]) List[Token] =
   match cs with
     | ch :: rest ->
       if ch == '\\' then lexCharEsc rest
-      else
-        match rest with
-          | c :: r ->
-            if c == '\'' then listAppend [TChar ch] (lexChars r)
-            else lexChars cs
-          | _ -> lexChars cs
+      else lexCharLitAfter ch rest cs
     | _ -> []
 
 -- Handle `:` vs `::`: peek the next char to decide. Only `::` is a
@@ -889,6 +905,13 @@ fn parseParamGroups(toks List[Token]) =
     in
     let (ps, rest4) = parseParamGroups rest3 in
     (MkParam pname (TR tname) :: ps, rest4)
+  -- Phase 7.10h: untyped param `(pname)`. The bootstrap's own source
+  -- uses this form for pair-accepting helpers (`consTypeDecl(pair)`
+  -- etc.) where the host compiler infers the type via HM. Store a
+  -- dummy `TR "?"` so the rest of the pipeline doesn't care.
+  | TLParen :: TLower pname :: TRParen :: rest ->
+    let (ps, rest2) = parseParamGroups rest in
+    (MkParam pname (TR "?") :: ps, rest2)
   | _ -> ([], toks)
 
 -- Optional return type: a `TUpper` immediately before `=` becomes
@@ -941,6 +964,24 @@ fn parseExpr(toks List[Token]) =
 -- expression form the fn-body grammar accepts (including nested lambdas
 -- and further let-in chains) works on either side.
 fn parseLetIn(toks List[Token]) =
+  -- Phase 7.10h: 2-element tuple-destructuring let form
+  -- `let (a, b) = rhs in body`. Commas are lexed as nothing (the
+  -- catch-all in `lexChars` silently skips `,`), so the opening tuple
+  -- pattern tokenises as `TLParen :: TLower a :: TLower b :: TRParen ::
+  -- TEq :: rhs ...`. Without this arm, `parseLetIn` fell through to
+  -- the wildcard, returned `(EInt 0, toks)` without consuming, and the
+  -- outer parseArms desynced on the leftover `TLParen` — silently
+  -- dropping every decl after the offending fn. First occurrence is
+  -- `takeStrBody` at line 433.
+  | TLParen :: TLower a :: TLower b :: TRParen :: TEq :: rest ->
+    let rest0 = skipNewlines rest in
+    let (e1, rest2) = parseExpr rest0 in
+    let rest3 = match rest2 with
+      | TKwIn :: r -> skipNewlines r
+      | _ -> rest2
+    in
+    let (e2, rest4) = parseExpr rest3 in
+    (ELetInTup2 a b e1 e2, rest4)
   | TLower name :: TEq :: rest ->
     -- Phase 7.9.newlines (#8): `let x =\n  rhs` and `in\n  body` both
     -- need to tolerate a `TNewline` before their sub-expression, so
@@ -1133,21 +1174,36 @@ fn parsePat(toks List[Token]) =
 -- `!=` stay in Phase 7.9g+. Left-associative via the tail helper, same
 -- shape as parseAddSubTail.
 fn parseCompare(toks List[Token]) =
-  let (e, rest) = parseAddSub toks in
+  let (e, rest) = parseCons toks in
   parseCompareTail e rest
 
 fn parseCompareTail(lhs Expr)(toks List[Token]) =
   match toks with
     | TEqEq :: r ->
-      let (rhs, rest2) = parseAddSub r in
+      let (rhs, rest2) = parseCons r in
       parseCompareTail (EEq lhs rhs) rest2
     | TLt :: r ->
-      let (rhs, rest2) = parseAddSub r in
+      let (rhs, rest2) = parseCons r in
       parseCompareTail (ELt lhs rhs) rest2
     | TGt :: r ->
-      let (rhs, rest2) = parseAddSub r in
+      let (rhs, rest2) = parseCons r in
       parseCompareTail (EGt lhs rhs) rest2
     | _ -> (lhs, toks)
+
+-- Phase 7.10h: expression-level cons `::`. Right-associative, tighter
+-- than comparison but looser than arithmetic, so `1 + 2 :: rest`
+-- parses as `(1 + 2) :: rest` and `x :: y :: rest` folds right as
+-- `ECons x (ECons y rest)`. Needed for the self-host fixpoint — the
+-- bootstrap's own `takeStrBody` / `parseCtors` / `parseArms` return
+-- `(head :: tail, leftover)` pairs which the expression parser had no
+-- way to consume before this slice.
+fn parseCons(toks List[Token]) =
+  let (head, rest) = parseAddSub toks in
+  match rest with
+    | TColonColon :: rest2 ->
+      let (tail, rest3) = parseCons rest2 in
+      (ECons head tail, rest3)
+    | _ -> (head, rest)
 
 -- Arithmetic precedence cascade, same shape as 13/14.
 fn parseAddSub(toks List[Token]) =
@@ -1352,6 +1408,11 @@ fn showExpr(e Expr) Str =
     let p1 = strConcat (strConcat "(let " n) " = " in
     let p2 = strConcat (strConcat p1 (showExpr e1)) " in " in
     strConcat (strConcat p2 (showExpr e2)) ")"
+  | ELetInTup2 a b e1 e2 ->
+    let p1 = strConcat (strConcat "(let (" a) ", " in
+    let p2 = strConcat (strConcat p1 b) ") = " in
+    let p3 = strConcat (strConcat p2 (showExpr e1)) " in " in
+    strConcat (strConcat p3 (showExpr e2)) ")"
   | EIf c a b ->
     let p1 = strConcat "(if " (showExpr c) in
     let p2 = strConcat (strConcat p1 " then ") (showExpr a) in
@@ -1476,6 +1537,12 @@ fn checkExpr(env Env)(e Expr) List[Str] =
     let rhsErrs = checkExpr env rhs in
     let env2 = envAdd env name in
     let bodyErrs = checkExpr env2 body in
+    listAppend rhsErrs bodyErrs
+  | ELetInTup2 a b rhs body ->
+    let rhsErrs = checkExpr env rhs in
+    let env2 = envAdd env a in
+    let env3 = envAdd env2 b in
+    let bodyErrs = checkExpr env3 body in
     listAppend rhsErrs bodyErrs
   | EIf cnd thn els ->
     let ce = checkExpr env cnd in
@@ -1868,6 +1935,8 @@ fn typeCheck(env TypeEnv)(e Expr) List[Str] =
   | ELam _ body -> typeCheck env body
   | ELetIn _ rhs body ->
     listAppend (typeCheck env rhs) (typeCheck env body)
+  | ELetInTup2 _ _ rhs body ->
+    listAppend (typeCheck env rhs) (typeCheck env body)
   | EIf c t el ->
     let ce = typeCheck env c in
     let te = typeCheck env t in
@@ -2078,6 +2147,7 @@ fn emitExpr(e Expr) Str =
   | EApp f x -> emitApp f x
   | ELam x body -> emitLam x body
   | ELetIn n e1 e2 -> emitLetIn n e1 e2
+  | ELetInTup2 a b e1 e2 -> emitLetInTup2 a b e1 e2
   | EIf c t el -> emitIfExpr c t el
   | EMatch scr ps bs -> emitMatchExpr scr ps bs
   | ENil -> "[]"
@@ -2106,6 +2176,19 @@ fn emitLam(x Str)(body Expr) Str =
 -- `Codegen.fs` line 162 area emission).
 fn emitLetIn(n Str)(e1 Expr)(e2 Expr) Str =
   strConcat "(let " (strConcat n (strConcat " = " (strConcat (emitExpr e1) (strConcat " in " (strConcat (emitExpr e2) ")")))))
+
+-- Phase 7.10h: `ELetInTup2 a b e1 e2` -> `(let (<a>, <b>) = <e1> in <e2>)`.
+-- F# native tuple-destructuring let. Used by every parseX helper that
+-- returns a `(result, leftover)` pair.
+fn emitLetInTup2(a Str)(b Str)(e1 Expr)(e2 Expr) Str =
+  let head = strConcat "(let (" a in
+  let head2 = strConcat head ", " in
+  let head3 = strConcat head2 b in
+  let head4 = strConcat head3 ") = " in
+  let head5 = strConcat head4 (emitExpr e1) in
+  let head6 = strConcat head5 " in " in
+  let head7 = strConcat head6 (emitExpr e2) in
+  strConcat head7 ")"
 
 -- `EIf c t e` -> `(if <c> then <t> else <e>)`. Unconditionally
 -- parenthesised so the if embeds cleanly in any parent expression.
