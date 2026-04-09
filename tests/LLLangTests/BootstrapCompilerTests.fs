@@ -357,9 +357,12 @@ let ``20-bootstrap-compiler.lll accepts true and false literals in fn body (Phas
     // Single-line fn bodies only: the bootstrap parser's `parseLetIn`
     // doesn't tolerate a `TNewline` between `in` and the body expr
     // (unrelated multi-line bug, out of scope for this slice).
-    // Asserts codegen reaches the F# output (contains `let choose`,
-    // `let main`, `[<EntryPoint>]`, and both `true` and `false` as
-    // substrings).
+    // Asserts codegen reaches the F# output (contains `let rec
+    // choose`, `and flag`, `let main`, `[<EntryPoint>]`, and both
+    // `true` and `false` as substrings). The `let rec` / `and` spine
+    // is an incidental consequence of the 7.8e mutual-recursion
+    // grouping — any run of two or more consecutive non-`main` fn
+    // decls gets wrapped in a single `let rec ... and ...` block.
     let inputPath =
         Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
     let boolPath =
@@ -382,8 +385,11 @@ let ``20-bootstrap-compiler.lll accepts true and false literals in fn body (Phas
             combined.Contains "error",
             $"expected NO error output; combined:\n{combined}")
         Assert.True(
-            stdout.Contains "let choose",
-            $"expected emitted F# to contain `let choose`; stdout:\n{combined}")
+            stdout.Contains "let rec choose",
+            $"expected emitted F# to contain `let rec choose`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "and flag",
+            $"expected emitted F# to contain `and flag`; stdout:\n{combined}")
         Assert.True(
             stdout.Contains "let main",
             $"expected emitted F# to contain `let main`; stdout:\n{combined}")

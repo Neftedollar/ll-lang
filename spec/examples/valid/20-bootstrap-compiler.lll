@@ -1649,7 +1649,7 @@ fn hmCheck(decls List[Decl]) List[Str] =
 -- the self-hosted compiler's input programs too. Still a flat name
 -- list (no types) — the minimal HM pass in `hmCheck` skips unknowns.
 fn stdlibNames(_ignored Int) List[Str] =
-  ["strConcat" "strLen" "print" "printfn" "listMap" "listLen" "listAppend" "listIsEmpty" "listFold" "readFile"]
+  ["strConcat" "strLen" "print" "printfn" "listMap" "listLen" "listAppend" "listIsEmpty" "listFold" "readFile" "true" "false"]
 
 fn elaborate(decls List[Decl]) List[Str] =
   let env0 = MkEnv (stdlibNames 0) in
