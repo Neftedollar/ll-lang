@@ -238,6 +238,63 @@ let ``20-bootstrap-compiler.lll accepts == operator in fn body (Phase 7.9f)`` ()
             File.Move(backupPath, inputPath)
 
 [<Fact>]
+let ``20-bootstrap-compiler.lll accepts < and > operators in fn body (Phase 7.9g)`` () =
+    // Phase 7.9g: before the fix, the bootstrap compiler's lexer had
+    // no `TLt` / `TGt` tokens, so a fn body like
+    // `if n < 0 then 0 - n else n` could not parse. The fix adds two
+    // single-char tokens `TLt` / `TGt` in the `lexChars` main loop
+    // (no helper needed — no two-char forms in this slice, and the
+    // `-` vs `->` collision is handled by `lexMinusOrArrow` so the
+    // standalone `>` arm only fires when `>` is not preceded by `-`),
+    // introduces `ELt Expr Expr` / `EGt Expr Expr` in the AST as
+    // siblings of `EEq`, adds two new arms in `parseCompareTail`
+    // reusing the 7.9f precedence layer, and threads `ELt` / `EGt`
+    // through checkExpr / inferExprType / typeCheck / showExpr /
+    // emitExpr. This test swaps the 20a input for a variant whose
+    // fn bodies use `n < 0` / `n > 0` and asserts codegen reaches
+    // both comparison emissions.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let ltgtPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20e-bootstrap-input-ltgt.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists ltgtPath,  $"missing fixture: {ltgtPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(ltgtPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO error output; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let neg",
+            $"expected emitted F# to contain `let neg`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "let pos",
+            $"expected emitted F# to contain `let pos`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "let main",
+            $"expected emitted F# to contain `let main`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "(n < 0L)",
+            $"expected emitted F# to contain `(n < 0L)`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "(n > 0L)",
+            $"expected emitted F# to contain `(n > 0L)`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
+
+[<Fact>]
 let ``20-bootstrap-compiler.lll parses Maybe[Int] return type and emits main (bracket-form types in fn signatures)`` () =
     // Phase 7.9d: the bootstrap compiler's parseParamGroups /
     // parseReturnType only accepted bare `Upper` type names. A fn with
