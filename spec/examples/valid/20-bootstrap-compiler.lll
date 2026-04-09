@@ -973,6 +973,17 @@ fn parseExpr(toks List[Token]) =
   | TBackslash :: rest -> parseLam rest
   | _ -> parseCompare toks
 
+-- Phase 7.10j: nested-match-in-arm-body extract, same rule as
+-- `skipTEqNewlines`/`skipTRBrack` in 7.10i. Both arms of `parseLetIn`
+-- contained a `let rest3 = match rest2 with TKwIn :: r -> ... | _ ->
+-- rest2 in` chain — the inner match risks desyncing `parseArms` when
+-- `parseLetIn` is itself reached from an arm body (via parseArmBody's
+-- `TKwLet` dispatch), so the canonical fix is to pull it out.
+fn skipTKwInNewlines(toks List[Token]) List[Token] =
+  match toks with
+    | TKwIn :: r -> skipNewlines r
+    | _ -> toks
+
 -- `let name = e1 in e2`. Single-binder let-in. Chains are expressed by
 -- nesting another `let ... in ...` in the `e2` slot (right-recursive).
 -- Both `e1` and `e2` are parsed via the full `parseExpr` so any
@@ -991,10 +1002,7 @@ fn parseLetIn(toks List[Token]) =
   | TLParen :: TLower a :: TLower b :: TRParen :: TEq :: rest ->
     let rest0 = skipNewlines rest in
     let (e1, rest2) = parseExpr rest0 in
-    let rest3 = match rest2 with
-      | TKwIn :: r -> skipNewlines r
-      | _ -> rest2
-    in
+    let rest3 = skipTKwInNewlines rest2 in
     let (e2, rest4) = parseExpr rest3 in
     (ELetInTup2 a b e1 e2, rest4)
   | TLower name :: TEq :: rest ->
@@ -1003,10 +1011,7 @@ fn parseLetIn(toks List[Token]) =
     -- we `skipNewlines` before each `parseExpr` call below.
     let rest0 = skipNewlines rest in
     let (e1, rest2) = parseExpr rest0 in
-    let rest3 = match rest2 with
-      | TKwIn :: r -> skipNewlines r
-      | _ -> rest2
-    in
+    let rest3 = skipTKwInNewlines rest2 in
     let (e2, rest4) = parseExpr rest3 in
     (ELetIn name e1 e2, rest4)
   | _ -> (EInt 0, toks)
@@ -1086,15 +1091,22 @@ fn parseArms(toks List[Token]) =
       ((p :: ps, b :: bs), rest2)
     | _ -> (([], []), toks2)
 
+-- Phase 7.10j: nested-match-in-arm-body extract. `parseArm`'s body
+-- had `let rest3 = match rest2 with TArrow :: r -> r | _ -> rest2 in`
+-- inside its `TBar :: rest` arm. Same rule as `skipTKwInNewlines` /
+-- `skipTEqNewlines` — pull the inner match out so the arm body is a
+-- single call.
+fn skipTArrow(toks List[Token]) List[Token] =
+  match toks with
+    | TArrow :: r -> r
+    | _ -> toks
+
 -- Single arm. Assumes the leading `|` is still on the front. Returns
 -- `((pat, body), leftover)` so the caller can destructure cleanly.
 fn parseArm(toks List[Token]) =
   | TBar :: rest ->
     let (p, rest2) = parsePat rest in
-    let rest3 = match rest2 with
-      | TArrow :: r -> r
-      | _ -> rest2
-    in
+    let rest3 = skipTArrow rest2 in
     let (body, rest4) = parseArmBody rest3 in
     ((p, body), rest4)
   | _ -> ((PWild, EInt 0), toks)
