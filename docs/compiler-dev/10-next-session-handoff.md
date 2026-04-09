@@ -11,7 +11,7 @@ session to pick up without replaying history.
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b + 7.7c + 7.7d + 7.8a + 7.8b + 7.8c + 7.8d + 7.8e + 7.9a done. Phase 7.7 is COMPLETE. Phase 7.8 is COMPLETE. Phase 7.9a ships the first 3-stage bootstrap compiler (parser + elaborator + minimal HM in one program).**
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b + 7.7c + 7.7d + 7.8a + 7.8b + 7.8c + 7.8d + 7.8e + 7.9a + 7.9b done. Phase 7.7 is COMPLETE. Phase 7.8 is COMPLETE. Phase 7.9b ships the first 4-stage bootstrap compiler (parser + elaborator + minimal HM + F# codegen in one program).**
   ll-lang now hosts a real lexer (`09-lexer-real.lll`), a real
   recursive-descent arithmetic parser (`11-parser-real.lll`), a real
   type-declaration parser (`12-typeparser-real.lll`), a real
@@ -313,7 +313,7 @@ session to pick up without replaying history.
   `[<EntryPoint>]` main fn).
 
 - **Phase 7.9a done** — the **first 3-stage bootstrap compiler**
-  lives in [`20-bootstrap-compiler.lll`](../../spec/examples/valid/20-bootstrap-compiler.lll)
+  shipped in [`20-bootstrap-compiler.lll`](../../spec/examples/valid/20-bootstrap-compiler.lll)
   (1598 lines). Starts from `17-pipeline-real.lll` verbatim (parser
   + elaborator in one program) and adds a minimal HM-style type
   checker that walks the parser's `Expr` AST: `TypeExpr = TyName
@@ -321,43 +321,83 @@ session to pick up without replaying history.
   `inferExprType` (Int / Str / arithmetic / if-branch / EVar env
   lookup, everything else falls through to `TyVar "?"`), and
   `typeCheck` that emits `E001 TypeMismatch <l> vs <r>` at each
-  arithmetic or if-branch mismatch. `seedParams` seeds a fresh
-  `TypeEnv` from a fn's declared params, `elaborate` runs the new
-  HM pass after name-resolution and exhaustiveness and concatenates
-  all three error lists. Driver `main` gains a fourth fn
-  `badType(x Int) Int = x + "y"` so the HM pass has something to
-  fire on. Deliberately narrow: no unify / Subst / fresh vars, no
-  let-generalization, no pattern-type checking, no codegen
-  integration (that lands in Phase 7.9b).
+  arithmetic or if-branch mismatch.
+
+- **Phase 7.9b done** — the **4-stage bootstrap compiler** extends
+  `20-bootstrap-compiler.lll` to 2100 lines (+502) by adding an
+  `emit*` codegen pass that walks the parser's `Decl` / `Expr` /
+  `Pat` / `TypeArg` AST and produces a complete F# source file.
+  Helpers ported from `19-codegen-real.lll` and adapted to the
+  parser's richer AST: `emitExpr` covers every expression shape
+  the hardcoded driver source uses (Int / Str / Var / Tagged /
+  Add / Sub / Mul / Div / App / Lam / LetIn / If / Match);
+  `emitPat` covers all five parser pattern shapes (PInt / PVar /
+  PWild / PNil / PCons); `emitTypeArg` / `emitCtorList` /
+  `emitTypeDecl` handle sum-type emission with primitive name
+  mapping (`Int -> int64`, `Str -> string`, `Bool -> bool`);
+  `emitDeclStandalone` / `emitFnPlain` / `emitFnFirst` /
+  `emitFnCont` / `emitMainDecl` handle fn-decl emission with
+  `[<EntryPoint>]` wrapping for zero-param `main` and `let rec
+  ... and ...` grouping for 2+ consecutive non-main fns;
+  `emitGroupedDecls` is the left-to-right grouping walker;
+  `emitPrelude` emits the 5-binding stdlib prelude block;
+  `emitModule` is the top-level entry point that stitches the
+  module header + prelude + decl blocks with `\n\n` separators.
+  The hardcoded driver source is now intentionally clean (no
+  unbound vars, no non-exhaustive matches, no type mismatches),
+  so `elaborate` returns `[]` and `main` proceeds to the codegen
+  pass. The 7.9a error-reporter path stays in as a fallback.
 - `lllc run spec/examples/valid/20-bootstrap-compiler.lll` prints
+  the full F# source for the clean module:
   ```
-  E002 UnboundVar undefinedName
-  E003 NonExhaustiveMatch Shape missing Circle
-  E003 NonExhaustiveMatch Shape missing Rect
-  E001 TypeMismatch Int vs Str
+  module Examples.Clean
+
+  // --- ll-lang stdlib prelude (auto-generated) ---
+  let listMap f xs = List.map f xs
+  let listLen (xs: 'a list) : int64 = int64 (List.length xs)
+  let strLen (s: string) : int64 = int64 s.Length
+  let strConcat (a: string) (b: string) = a + b
+  let print (s: string) = System.Console.Write(s)
+  // --- end prelude ---
+
+  type Maybe<'A> =
+      | Some of 'A
+      | None
+
+  let rec inc x = (x + 1L)
+  and greet = "hello"
+
+  [<EntryPoint>]
+  let main (argv: string[]) =
+      (inc 1L)
+      0
   ```
-  (three stages run back-to-back on the same shared AST inside a
+  (Four stages run back-to-back on the same shared AST inside a
   single ll-lang program: Phase 7.6 proved two-stage stitching;
-  Phase 7.9a proves three-stage stitching.)
+  Phase 7.9a proved three-stage stitching; Phase 7.9b proves
+  four-stage stitching with F# source output.)
 
 ## Immediate next task
 
-**Phase 7.9a is now done.** The ll-lang self-host now has the first
-3-stage bootstrap compiler (parser + elaborator + minimal HM in one
-program). The next natural step is **Phase 7.9b** — fold in codegen
-so the bootstrap compiler can emit F# source end-to-end for the
-hardcoded driver module.
+**Phase 7.9b is now done.** The ll-lang self-host has the first
+4-stage bootstrap compiler (parser + elaborator + minimal HM +
+codegen in one program). The next natural step is **Phase 7.10** —
+the **bootstrap fixpoint**: compile the bootstrap compiler through
+itself and verify the output is byte-stable.
 
-### Option A: **Phase 7.9b — add codegen to the 3-stage pipeline**
+### Option A: **Phase 7.10 — bootstrap fixpoint**
 
-Extend `20-bootstrap-compiler.lll` in place by bringing in the
-TExpr/TDecl walker from `19-codegen-real.lll`. Either (a) inline a
-minimal subset that covers just the shapes the driver module uses,
-or (b) add a small Expr -> TExpr lowering pass so the parser's
-richer AST can be emitted through the existing `showTExpr`
-machinery. Tests: assert `showDecl` produces compilable F# source
-for each fn in the driver, plus a runtime round-trip that parses
-its own output.
+Feed `20-bootstrap-compiler.lll` as input to its own codegen pass
+(running through the F# host: `lllc run` on the file produces F#
+source, that F# source compiles via `dotnet fsi` into a runnable
+binary, that binary takes the same `.lll` file as input and emits
+the same F# source). The fixpoint test asserts that
+`compile(compile(src)) == compile(src)` byte-for-byte. Requires:
+(a) extending the hardcoded driver to read from a real file path
+instead of an inline string (or making the test infrastructure
+feed the file via stdin), (b) widening the codegen pass enough
+to handle every shape `20-bootstrap-compiler.lll` itself uses
+(currently only what the clean test module uses).
 
 ### Option B: **Phase 7.9 — assemble `bootstrap/compiler.lll`**
 

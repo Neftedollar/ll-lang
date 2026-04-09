@@ -2479,3 +2479,125 @@ Either inline `19-codegen-real.lll`'s TExpr/TDecl walker verbatim
 (minimal bridge, matches the Phase 7.9a simplicity) or extend the
 HM pass first so the bootstrap compiler can emit F# source for the
 hardcoded driver module end-to-end.
+
+### 2026-04 — Phase 7.9b: 4-stage bootstrap compiler — + F# codegen (DONE)
+
+Second tick of **Phase 7.9** — turns 20-bootstrap-compiler.lll from a
+3-stage error reporter (parse + elab + HM) into a true **4-stage
+compiler** (parse + elab + HM + **F# emission**). After this slice
+the file takes ll-lang source as input and produces F# source as
+output — not just a list of errors.
+
+Updated file: **`spec/examples/valid/20-bootstrap-compiler.lll`**
+(1598 -> 2100 lines, +502). Adds an `emit*` family of helpers that
+walks the parser's `Decl` / `Expr` / `Pat` / `TypeArg` AST and
+produces an F# source string. Helpers are flat ports of the
+`showTExpr` / `showDecl` family from `19-codegen-real.lll`,
+adapted to the parser's richer AST shape.
+
+**What the codegen pass does**:
+
+  * `emitExpr : Expr -> Str` — covers every shape the hardcoded
+    driver source needs (`EInt` / `EStr` / `EVar` / `ETagged` /
+    `EAdd` / `ESub` / `EMul` / `EDiv` / `EApp` / `ELam` / `ELetIn` /
+    `EIf` / `EMatch`). Arithmetic arms share a single 3-arg
+    `emitBin l r op` helper. Match arms emit on a single line via
+    `emitArms` / `emitArmsCons` (offside-rule-safe in any expression
+    position).
+  * `emitPat : Pat -> Str` — covers all five parser pattern shapes
+    (`PInt` / `PVar` / `PWild` / `PNil` / `PCons`).
+  * `emitTypeArg` / `emitCtorOne` / `emitCtorList` /
+    `emitTypeParamsHeader` — sum-type emission with primitive name
+    mapping (`Int -> int64`, `Str -> string`, `Bool -> bool`),
+    type-param `'A` rendering, and the `T1 * T2` ctor-arg join.
+  * `emitDeclStandalone` / `emitFnPlain` / `emitFnFirst` /
+    `emitFnCont` / `emitMainDecl` — fn-decl emission with
+    `[<EntryPoint>]` wrapping for the zero-param `main` and
+    `let rec ... and ...` grouping for 2+ consecutive non-main fns.
+  * `emitGroupedDecls` — left-to-right walker that partitions a
+    `List[Decl]` into groups (DType / DLet boundaries flush a
+    pending non-main-fn run; main fn flushes too) and emits each
+    group as its own blank-line-joined block. Uses the same
+    "always rec for 2+" simplification as `19-codegen-real.lll`.
+  * `emitPrelude` — minimal 5-binding subset of the F# host's
+    `fsharpPreludeCore` (listMap, listLen, strLen, strConcat,
+    print) wrapped in the canonical comment banner.
+  * `emitModule` — top-level entry point. Stitches the
+    `module <path>` header, prelude block, and decl blocks with
+    `\n\n` separators via `emitJoinBlocks`.
+
+**Driver delta**: the hardcoded source is now **clean** (no
+unbound vars, no non-exhaustive matches, no type mismatches), so
+`elaborate` returns an empty error list and `main` proceeds to the
+codegen pass. The error-reporter path is preserved as a fallback.
+
+New driver source:
+```
+module Examples.Clean
+type Maybe A = Some A | None
+fn inc(x Int) Int = x + 1
+fn greet() Str = "hello"
+fn main() Int = inc 1
+```
+
+Expected stdout (F# source for the clean module):
+```
+module Examples.Clean
+
+// --- ll-lang stdlib prelude (auto-generated) ---
+let listMap f xs = List.map f xs
+let listLen (xs: 'a list) : int64 = int64 (List.length xs)
+let strLen (s: string) : int64 = int64 s.Length
+let strConcat (a: string) (b: string) = a + b
+let print (s: string) = System.Console.Write(s)
+// --- end prelude ---
+
+type Maybe<'A> =
+    | Some of 'A
+    | None
+
+let rec inc x = (x + 1L)
+and greet = "hello"
+
+[<EntryPoint>]
+let main (argv: string[]) =
+    (inc 1L)
+    0
+```
+
+**Deliberately out of scope** (carved out for Phase 7.10+):
+
+  * **Bootstrap fixpoint** — compiling 20-bootstrap-compiler.lll
+    through itself via the emitted F# source and verifying the
+    output is byte-identical. That's Phase 7.10's job.
+  * **`dotnet fsi` invocation** of the emitted F# — the runtime
+    test asserts substrings of the emitted string only.
+  * **Full expression coverage** — only what the hardcoded test
+    module needs is wired through. Records, `DTag` / `DImport`
+    decls, spread patterns, real string escape handling, and
+    parametric `TAApp` ctor-args (`Maybe[Int]`) all work, but
+    other shapes (`TBRecord`, `TBWrapped`, `Float` / `Char` /
+    `Unit` literals) are still un-emitted.
+  * **Recursion-detection walker** — Phase 7.9b uses the "always
+    rec for 2+" simplification (F# accepts `let rec` on
+    non-recursive bindings).
+
+Tests: 401 -> 401 (no new fact; the existing runtime E2E test was
+**rewritten** to assert substrings of the emitted F# source rather
+than the four `E001/E002/E003` lines from the 7.9a hardcoded
+source). Test name updated from `... emits E002 + E003 + E001 for
+the hardcoded source` to `... emits F# source for the clean
+hardcoded module`. Inference round-trip test unchanged.
+
+With this slice in place, four of the five compiler stages (lex +
+parse + elab + minimal HM + codegen) run back-to-back inside a
+single ll-lang program on a real source string. Phase 7.6 proved
+two-stage stitching; Phase 7.9a proved three-stage stitching;
+Phase 7.9b proves four-stage stitching with F# source output.
+
+Next tick: **Phase 7.10** — bootstrap fixpoint. Compile the
+4-stage bootstrap compiler `20-bootstrap-compiler.lll` through
+itself: feed the file to its own codegen pass, run the emitted F#
+through `dotnet fsi`, and verify the resulting program reproduces
+the same F# source for the same input — closing the self-hosting
+loop.
