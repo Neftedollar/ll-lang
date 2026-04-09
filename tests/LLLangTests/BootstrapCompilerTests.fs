@@ -17,25 +17,59 @@ open LLLang.HMInfer
 // main wrapper) — turning the file into a true compiler that emits
 // source rather than just listing errors.
 //
-// The hardcoded driver source is a **clean** ll-lang module — no
-// unbound vars, no non-exhaustive matches, no type mismatches — so
-// the pipeline reaches the codegen pass and the runtime test asserts
-// substrings of the emitted F# (`module`, prelude lines, `type`,
-// `let rec`, `[<EntryPoint>]`).
+// Phase 7.9c: the driver no longer hardcodes its source string —
+// `main` now reads `spec/examples/valid/20a-bootstrap-input.lll`
+// via the `readFile` stdlib fn. The input file content is identical
+// to the 7.9b hardcoded source, so the emitted F# output is
+// byte-identical to the 7.9b baseline. The tests below assert both
+// (a) the codegen output shape and (b) that the file-reading path
+// is actually taken, by renaming the input file and asserting the
+// compiler fails with a clean error message.
 //
-// Two layers of coverage (same shape as 17 / 19):
+// The driver source is a **clean** ll-lang module — no unbound vars,
+// no non-exhaustive matches, no type mismatches — so the pipeline
+// reaches the codegen pass and the runtime test asserts substrings
+// of the emitted F# (`module`, prelude lines, `type`, `let rec`,
+// `[<EntryPoint>]`).
+//
+// Three layers of coverage:
 //   1. inference round-trip — parses, elaborates, and HM-infers the
 //      whole file without errors (smoke test). The `valid corpus
 //      infers ok` theory in `HMInferTests.fs` gets a new
 //      `20-bootstrap-compiler.lll` row in addition to this fact so
 //      the corpus theory still owns the canonical list.
 //   2. runtime E2E — `lllc run` on the file emits the F# source for
-//      the clean hardcoded module. Substring contains, not exact
-//      match, so any trailing whitespace / codegen warnings don't
-//      matter.
+//      the clean module loaded from `20a-bootstrap-input.lll`.
+//      Substring contains, not exact match, so any trailing
+//      whitespace / codegen warnings don't matter.
+//   3. file-reading path — temporarily rename the input file, run
+//      the bootstrap compiler, assert it fails (proving the source
+//      actually flows through `readFile`), then restore.
+
+let private repoRoot =
+    Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, "../.."))
 
 let private readValid name =
-    File.ReadAllText(Path.Combine(__SOURCE_DIRECTORY__, "../../spec/examples/valid", name))
+    File.ReadAllText(Path.Combine(repoRoot, "spec/examples/valid", name))
+
+/// Phase 7.9c: runs `lllc run <bootstrap>` with the working directory
+/// pinned to the repo root (since the bootstrap compiler now loads
+/// its source via a repo-root-relative `readFile` call).
+let private runBootstrap () =
+    let lllPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20-bootstrap-compiler.lll")
+    let llcDll =
+        Path.Combine(repoRoot, "src/LLLangTool/bin/Debug/net10.0/lllc.dll")
+    let psi = System.Diagnostics.ProcessStartInfo("dotnet", $"\"{llcDll}\" run \"{lllPath}\"")
+    psi.RedirectStandardOutput <- true
+    psi.RedirectStandardError  <- true
+    psi.UseShellExecute        <- false
+    psi.WorkingDirectory       <- repoRoot
+    use proc = System.Diagnostics.Process.Start(psi)
+    let stdout = proc.StandardOutput.ReadToEnd()
+    let stderr = proc.StandardError.ReadToEnd()
+    proc.WaitForExit()
+    (proc.ExitCode, stdout, stderr)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll parses, elaborates, and infers without errors`` () =
@@ -51,27 +85,14 @@ let ``20-bootstrap-compiler.lll parses, elaborates, and infers without errors`` 
             | Ok tm -> Assert.NotNull(tm.Env)
 
 [<Fact>]
-let ``20-bootstrap-compiler.lll runs and emits F# source for the clean hardcoded module`` () =
-    let lllPath =
-        Path.Combine(
-            __SOURCE_DIRECTORY__,
-            "../../spec/examples/valid/20-bootstrap-compiler.lll")
-    let llcDll =
-        Path.Combine(
-            __SOURCE_DIRECTORY__,
-            "../../src/LLLangTool/bin/Debug/net10.0/lllc.dll")
-    let psi = System.Diagnostics.ProcessStartInfo("dotnet", $"\"{llcDll}\" run \"{lllPath}\"")
-    psi.RedirectStandardOutput <- true
-    psi.RedirectStandardError  <- true
-    psi.UseShellExecute        <- false
-    use proc = System.Diagnostics.Process.Start(psi)
-    let stdout = proc.StandardOutput.ReadToEnd()
-    let stderr = proc.StandardError.ReadToEnd()
-    proc.WaitForExit()
-    // Phase 7.9b: the hardcoded source in `main` is now intentionally
-    // clean (no unbound vars, no non-exhaustive matches, no type
-    // mismatches), so `elaborate` returns an empty error list and the
-    // pipeline proceeds to the F# codegen pass:
+let ``20-bootstrap-compiler.lll runs and emits F# source for the clean module loaded from 20a-bootstrap-input.lll`` () =
+    let (_, stdout, stderr) = runBootstrap ()
+    // Phase 7.9c: `main` reads the source from
+    // `spec/examples/valid/20a-bootstrap-input.lll` via `readFile`.
+    // The input is a clean ll-lang module (no unbound vars, no
+    // non-exhaustive matches, no type mismatches), so `elaborate`
+    // returns an empty error list and the pipeline proceeds to the
+    // F# codegen pass:
     //   module Examples.Clean
     //   type Maybe A = Some A | None
     //   fn inc(x Int) Int = x + 1
@@ -99,3 +120,37 @@ let ``20-bootstrap-compiler.lll runs and emits F# source for the clean hardcoded
         Assert.True(
             stdout.Contains(line),
             $"missing line: {line}\nstdout: {stdout}\nstderr: {stderr}")
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll actually reads its source from 20a-bootstrap-input.lll (file-reading path)`` () =
+    // Phase 7.9c: prove that the source flows through `readFile` and
+    // not a stale hardcoded string. We temporarily rename the input
+    // file out of the way, run the bootstrap compiler, and assert
+    // that it fails (because `readFile` on a missing path throws and
+    // lllc reports the exception). Then we restore the file so the
+    // rest of the suite is unaffected.
+    //
+    // Use a try/finally to make sure the rename is always undone,
+    // even if the assertion fails.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    File.Move(inputPath, backupPath)
+    try
+        let (exitCode, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        // The host compiler catches the IO exception in `cmdRun`
+        // (`Program.fs`) and prints `lllc: <message>` to stderr with
+        // exit code 1. Accept either a non-zero exit code or the
+        // absence of the codegen output markers as proof that
+        // readFile was actually called.
+        Assert.True(
+            exitCode <> 0 || not (stdout.Contains "module Examples.Clean"),
+            $"expected bootstrap run to fail when input is missing; exit={exitCode}\nstdout: {stdout}\nstderr: {stderr}")
+        Assert.False(
+            stdout.Contains "let rec inc x = (x + 1L)",
+            $"expected no codegen output when input is missing; stdout:\n{combined}")
+    finally
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
