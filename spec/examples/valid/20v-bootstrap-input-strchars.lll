@@ -1,0 +1,7 @@
+module Examples.Clean
+fn chars(s Str) List[Char] = strChars s
+fn rebuilt(s Str) Str = strFromChars (strChars s)
+fn rev(xs List[Char]) List[Char] = listReverse xs
+fn showInt(n Int) Str = intToStr n
+fn isWs(c Char) Bool = charIsSpace c
+fn main() Str = rebuilt "hi"

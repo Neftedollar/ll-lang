@@ -1268,3 +1268,75 @@ let ``20-bootstrap-compiler.lll supports string literal patterns (Phase 7.10d)``
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll resolves strChars/strFromChars/intToStr/charIsSpace/listReverse via stdlibNames (Phase 7.10e)`` () =
+    // Phase 7.10e: a small stdlib audit. The bootstrap's `stdlibNames`
+    // mirror list was missing five host builtins that the bootstrap
+    // itself calls from its lexer and emitter — `strChars` (tokenize,
+    // emitStrBody), `strFromChars` (lexId / lexStr / lexCharLit /
+    // emitChar / emitStrBody), `intToStr` (emitPat / emitExpr /
+    // emitInt), `charIsSpace` (lexChars whitespace skip), and
+    // `listReverse` (emitFlushPendingNonEmpty). Running the bootstrap
+    // on any user program that calls them surfaced the first one as
+    // `E002 UnboundVar`. Same shape as the 7.9p/7.9r/7.10c slices: add
+    // the bare names to the flat name list so the minimal HM pass
+    // accepts them.
+    //
+    // Fixture `20v-bootstrap-input-strchars.lll` exercises all five
+    // builtins from user fn bodies. Pre-fix, the elaborator emits
+    // `E002 UnboundVar strChars` (and stops on the first one reached);
+    // post-fix, all five resolve and codegen emits the user fns plus
+    // the `[<EntryPoint>]` main wrapper.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let strCharsPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20v-bootstrap-input-strchars.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists strCharsPath, $"missing fixture: {strCharsPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(strCharsPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002 UnboundVar strChars",
+            $"expected NO E002 UnboundVar strChars; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E002 UnboundVar strFromChars",
+            $"expected NO E002 UnboundVar strFromChars; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E002 UnboundVar intToStr",
+            $"expected NO E002 UnboundVar intToStr; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E002 UnboundVar charIsSpace",
+            $"expected NO E002 UnboundVar charIsSpace; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E002 UnboundVar listReverse",
+            $"expected NO E002 UnboundVar listReverse; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "rebuilt s =",
+            $"expected emitted F# to contain `rebuilt s =`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "strChars",
+            $"expected emitted F# to reference `strChars`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "strFromChars",
+            $"expected emitted F# to reference `strFromChars`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "listReverse",
+            $"expected emitted F# to reference `listReverse`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "intToStr",
+            $"expected emitted F# to reference `intToStr`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "charIsSpace",
+            $"expected emitted F# to reference `charIsSpace`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)

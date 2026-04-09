@@ -4593,3 +4593,74 @@ name(s) so the minimal HM pass accepts them as
 builtins. The `s` unbound is a likely cascade
 from the failed `let cs = strChars s in` binding.
 
+## Phase 7.10e — small stdlib audit (strChars et al.)
+
+**Slice:** audit the bootstrap's `stdlibNames`
+mirror list against the host elaborator's
+`builtinEnv` for names the bootstrap itself
+calls. Found five missing: `strChars`,
+`strFromChars`, `intToStr`, `charIsSpace`,
+`listReverse`. All five are referenced from
+bootstrap fn bodies (lexer whitespace skip,
+string construction, int formatting, pending
+decl reversal) but were not in the flat name
+list, so the bootstrap's minimal HM pass flagged
+them as `E002 UnboundVar` when elaborating its
+own source.
+
+**Change site (1):**
+
+`fn stdlibNames(_ignored Int) List[Str] =` at
+line 1889 — extend the flat literal list with
+the five missing names, grouped logically
+(str* / list* / char*).
+
+**Fixture + test:**
+`20v-bootstrap-input-strchars.lll`:
+
+```
+module Examples.Clean
+fn chars(s Str) List[Char] = strChars s
+fn rebuilt(s Str) Str = strFromChars (strChars s)
+fn rev(xs List[Char]) List[Char] = listReverse xs
+fn showInt(n Int) Str = intToStr n
+fn isWs(c Char) Bool = charIsSpace c
+fn main() Str = rebuilt "hi"
+```
+
+Regression test `20-bootstrap-compiler.lll
+resolves strChars/strFromChars/intToStr/
+charIsSpace/listReverse via stdlibNames
+(Phase 7.10e)` asserts NO `E002 UnboundVar`
+for any of the five names and the emitted F#
+contains `rebuilt s =` plus references to all
+five builtins plus `[<EntryPoint>]`.
+
+**Fixpoint-probe confirmation:**
+
+| Metric | Before 7.10e | After 7.10e |
+|---|---|---|
+| stdout+stderr bytes | 1609 | 146 |
+| stdout+stderr lines | 11 | 5 |
+| errors reported | 2 (`strChars`, `s`) | 1 (`s` only) |
+| halt point | elaborator flags `strChars` unbound in `classifyIdent` wildcard body | elaborator flags `s` — a single-letter local/param name leaked by parser desync downstream of the now-resolved `strChars`/`strFromChars` sites |
+| main branch taken | `printfn (showErrs errs)` | `printfn (showErrs errs)` |
+
+The byte count shrank 10.8x (1609 → 146) because
+the elaborator now flags only one `E002` instead
+of two, and the second error's message is short.
+The remaining `s` is **not** a stdlib — it's a
+downstream cascade from parser desync somewhere
+past the resolved builtins; probe-driven
+investigation in the next phase will pinpoint it.
+
+**Next blocker:** investigate the lone
+`E002 UnboundVar s`. Likely a parser-layer
+issue in a body expression that references `s`
+before its binder is visible — common suspects
+are `let ... in` visibility inside lambdas or
+a missing case in `patBinders` / environment
+extension. Start with a printf-debug at
+`checkDecls` to find which fn's body owns the
+stray `s` reference.
+
