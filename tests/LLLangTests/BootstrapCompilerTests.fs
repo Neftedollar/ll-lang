@@ -406,3 +406,62 @@ let ``20-bootstrap-compiler.lll accepts true and false literals in fn body (Phas
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll accepts char literals in fn body (Phase 7.9i)`` () =
+    // Phase 7.9i: before the fix, the bootstrap compiler's lexer
+    // silently dropped `'` as an unknown char (falling through to the
+    // catch-all `else lexChars rest` in `lexChars`), mangling any
+    // source that used char literals like `'='` / `'"'` / `'('`.
+    // Without char literal support, the bootstrap compiler can't
+    // parse a single real lexer written in ll-lang — every non-trivial
+    // lexer uses char literals.
+    //
+    // The fix adds a `TChar Char` lexer token, a `lexCharLit` helper
+    // (consumes 1 char, expects closing `'`, emits `TChar ch`), an
+    // `EChar Char` AST variant, a `TChar c :: rest -> (EChar c, rest)`
+    // arm in `parseAtom`, and `EChar _ -> []` / `EChar _ -> TyName
+    // "Char"` arms threaded through `checkExpr` / `inferExprType` /
+    // `typeCheck` / `showExpr` / `emitExpr`. No escape handling in
+    // this slice — `'\n'` / `'\\'` / `'\''` stay in 7.9j.
+    //
+    // Fixture `20g-bootstrap-input-char-lit.lll` exercises `'='` in
+    // an `if ... == ... then n else 0` expression via
+    // `fn sym(n Int) Int = if '=' == '=' then n else 0`.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let charPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20g-bootstrap-input-char-lit.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists charPath,  $"missing fixture: {charPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(charPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001 TypeMismatch error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO error output; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec sym" || stdout.Contains "let sym",
+            $"expected emitted F# to contain `let sym` or `let rec sym`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "let main",
+            $"expected emitted F# to contain `let main`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "'='",
+            $"expected emitted F# to contain `'='` char literal; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
