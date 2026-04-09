@@ -1,0 +1,3 @@
+module Examples.Clean
+fn greet() Str = "say \"hi\"\n"
+fn main() Int = 0

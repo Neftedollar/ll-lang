@@ -531,6 +531,68 @@ let ``20-bootstrap-compiler.lll accepts char escape sequences in fn body (Phase 
             File.Move(backupPath, inputPath)
 
 [<Fact>]
+let ``20-bootstrap-compiler.lll accepts string literal escape sequences (Phase 7.9m)`` () =
+    // Phase 7.9m: before the fix, the bootstrap compiler's `lexStr`
+    // via `takeStrBody` treated `\` as a regular char and terminated
+    // on the first `"`, so `"hello\nworld"` either mangled the body
+    // or — more importantly — its `emitStr` injected the decoded
+    // newline raw into the emitted F# source, breaking round-trip.
+    // Without string escape handling the bootstrap can't round-trip
+    // its own source, which composes output via `strConcat` calls
+    // containing literal `"\n"` fragments.
+    //
+    // The fix extends `takeStrBody` to detect `\` in the body and
+    // consume+decode the following char via `decodeEscape` (reused
+    // from 7.9j), and adds an `emitStrBody` walker + `encodeEscape`
+    // helper so `emitStr` re-encodes `\n` / `\t` / `\\` / `\"` back
+    // to their escaped form in the emitted F# source. Only 4 escapes
+    // supported; `\r` / `\0` / `\u...` deferred.
+    //
+    // Fixture `20k-bootstrap-input-str-esc.lll` exercises all three
+    // critical string escapes in a single literal — `\"` (escaped
+    // quote, which must NOT terminate the string) and `\n` (decoded
+    // newline, which must NOT be injected raw into the emitted F#) —
+    // via `fn greet() Str = "say \"hi\"\n"`.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let strPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20k-bootstrap-input-str-esc.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists strPath,   $"missing fixture: {strPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(strPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001 TypeMismatch error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO error output; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec greet" || stdout.Contains "let greet",
+            $"expected emitted F# to contain `let greet` or `let rec greet`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+        // Escaped quote `\"` must round-trip — without the fix,
+        // the lexer terminates the string at the first unescaped `"`
+        // so the rest of the body is mis-lexed and the greet fn
+        // fails to parse / elaborate.
+        Assert.True(
+            stdout.Contains "\"say \\\"hi\\\"\\n\"",
+            $"expected emitted F# to contain `\"say \\\"hi\\\"\\n\"` string literal; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
+
+[<Fact>]
 let ``20-bootstrap-compiler.lll accepts constructor patterns in match arms (Phase 7.9l)`` () =
     // Phase 7.9l: before the fix, the bootstrap compiler's
     // `parsePrimaryPat` had no `TUpper`-headed arm, so constructor
