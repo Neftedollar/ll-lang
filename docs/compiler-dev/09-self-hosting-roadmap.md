@@ -3256,6 +3256,127 @@ just the lexer extension; the emitter has to symmetric-
 ally re-escape whenever it crosses back into source
 form.
 
+Next tick: **Phase 7.9l** — constructor patterns in
+match arms. Without `PCon` the bootstrap compiler
+silently turns every `| Some n ->` / `| None ->` arm
+into a wildcard, blocking any program that match-
+destructures a tagged union. Direct blocker for self-
+compiling any lexer / parser / elaborator written in
+ll-lang itself, every one of which pattern-matches over
+sum types.
+
+### 2026-04 — Phase 7.9l: constructor patterns in match arms (DONE)
+
+Eleventh tick of **Phase 7.9**. Before this slice, the
+bootstrap compiler's `parsePrimaryPat` had no
+`TUpper`-headed arm, so constructor patterns like
+`| Some n -> ...` / `| None -> ...` / `| Cons h t -> ...`
+silently fell through to the `PWild` catch-all, losing
+the constructor name entirely. The emitted F# turned
+every ctor arm into a wildcard — visible in the fixture
+as `let unwrap m = 0L` (the match collapsed to its
+implicit default branch). This blocks compilation of
+any program that match-destructures a tagged union and
+is therefore a direct blocker for self-compiling any
+lexer / parser / elaborator written in ll-lang itself.
+
+**Changes:**
+
+* New AST variant `PCon Str List[Pat]` in `type Pat`,
+  holding the constructor name plus a list of argument
+  sub-patterns.
+* New parser arm `| TUpper name :: rest -> parseCtorArgs
+  name rest` in `parsePrimaryPat`, before the catch-all.
+* New helper `fn parseCtorArgs(name Str)(toks) =
+  let (args, rest) = parsePatArgs toks in (PCon name
+  args, rest)`.
+* New helper `fn parsePatArgs(toks)` — eagerly consumes
+  a sequence of atomic sub-patterns (`TLower _` /
+  `TUnder` / `TInt _` / `TLBrack TRBrack`) until the
+  next token doesn't start a pattern (like `TArrow` /
+  `TBar` / `TColonColon` / `TRParen`). Deliberately
+  does NOT recurse into nested `TUpper` ctors without
+  parentheses — nested `Cons (Some 1) None` requires
+  parens around `Some 1`.
+* `showPat` / `emitPat` extended with a `PCon name args`
+  arm rendering `(Name arg1 arg2)` (F# DU pattern shape,
+  parens unconditional, space before each arg). New
+  helper `showPatArgs` / `emitPatArgs` walks the arg
+  list.
+* `patBinders` extended with `PCon _ args` recursing
+  via new `patBindersList` helper.
+* `patIsCatchAll` extended with `PCon _ _ -> false`
+  (a ctor pattern matches only its own tag).
+* `coveredCtors` — previously hardwired to `[]` with a
+  comment noting `Pat` had no `PCon` — now walks the
+  arm pattern list and collects the name from every
+  `PCon`, enabling real exhaustiveness feedback.
+* New fixture `20i-bootstrap-input-ctor-pat.lll`
+  exercises both `Some n` (ctor with one arg binder)
+  and `None` (nullary ctor) in
+  `fn unwrap(m Maybe[Int]) Int = match m with | Some n
+  -> n | None -> 0` plus a `fn main() Int = unwrap
+  (Some 5)`. Single-line match (all arms on one line)
+  because the bootstrap's `parseArms` doesn't yet skip
+  `TNewline` between arms — multi-line match is a
+  separate concern tracked below.
+* New regression test in `BootstrapCompilerTests.fs`
+  swaps 20a → 20i, runs the bootstrap, asserts no
+  `E002` / `E001` / `error`, and checks the emitted F#
+  contains `let unwrap` (or `let rec unwrap`),
+  `[<EntryPoint>]`, `| (Some n) ->`, and `| (None) ->`.
+
+**Deliberately out of scope:**
+
+* **Nested ctor patterns without parens** — the greedy
+  `parsePatArgs` stops on `TUpper`, so `Cons (Some 1)
+  None` needs parens around `Some 1`. The bootstrap
+  doesn't need unparenthesised nested ctors today.
+* **Multi-line match arms** — `parseArms` still peeks
+  for `TBar :: _` without skipping intervening
+  `TNewline`, so the fixture uses a single-line match
+  body. Extending `parseArms` to skip newlines would be
+  a clean follow-up but is not required for this slice.
+* **Full exhaustiveness feedback for nested ctors** —
+  `coveredCtors` only collects the head ctor name, not
+  the sub-patterns. Good enough for flat sum types.
+* **Constructor type unification in HM** — the minimal
+  HM in the bootstrap doesn't know that `PCon "Some" n`
+  binds `n` at the `Maybe`'s type-arg instantiation.
+  `n` just becomes a fresh var and the body type
+  carries it, so round-trip emission works without the
+  type-system machinery.
+
+Tests: 409 → 410 (+1 for the constructor-pattern
+regression test).
+
+**Surprises:**
+
+1. The first RED run came out to exactly the shape the
+   test expected — `| Some n ->` fell through to
+   `PWild`, the arm body became bogus, and `main`
+   silently dropped because the `| _ ->` in the match
+   body had a TNewline right before the next `| None`
+   arm, which `parseArms` rejected (no `TBar :: _`
+   match once the newline got there from the preceding
+   arm body's parse). Net effect: `let unwrap m = 0L`
+   with no match at all and no `main`. Clean proof
+   that the parser loses everything when PCon is
+   missing.
+2. GREEN uncovered a second change site: `coveredCtors`
+   was hard-wired to `[]` with an explicit comment
+   saying "no PCon, so no covered ctors". Adding `PCon`
+   required replacing that stub with a real walker,
+   otherwise the match-exhaustiveness check fires
+   `E003 NonExhaustiveMatch Maybe missing Some` /
+   `missing None` for a fully-exhaustive match.
+3. Multi-line match arms don't parse in the bootstrap.
+   `parseArms` has `| TBar :: _` without skipping
+   intervening `TNewline`, so the fixture had to use a
+   single-line match. Host compiler accepts both
+   shapes. Follow-up: extend `parseArms` with a leading
+   `skipNewlines`.
+
 Next tick: **Phase 7.9k** — Bool type promotion in HM /
 `typeCheck`. Deferred from the original 7.9i slot and
 still pending. Promotes `Bool` from an inference-only
