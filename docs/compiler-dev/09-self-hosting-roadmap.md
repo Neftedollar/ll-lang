@@ -2394,3 +2394,88 @@ stitching the five self-host slices (`15-lexer-real.lll`,
 `16-parser-real.lll`, `17-elab-real.lll`, `18-hminfer-real.lll`,
 `19-codegen-real.lll`) into a single end-to-end program that
 takes ll-lang source on stdin and emits F# source on stdout.
+
+### 2026-04 — Phase 7.9a: 3-stage bootstrap compiler — parser + elab + HM (DONE)
+
+First tick of **Phase 7.9** — the **bootstrap assembly** umbrella.
+Where Phase 7.8 finished the codegen back end as a standalone slice,
+Phase 7.9a takes the first step toward stitching the five self-host
+slices into one program: it combines parser + elaborator + a minimal
+HM-style type checker into a **single file**, running all three
+stages back-to-back on the same shared AST.
+
+New file: **`spec/examples/valid/20-bootstrap-compiler.lll`** (1598
+lines). Starts from `17-pipeline-real.lll` verbatim (the existing
+parser + elaborator integration, 1320 lines) and adds ~280 lines of
+HM pass code at the end, plus an updated driver.
+
+**What the HM pass does**:
+
+  * Adds a minimal `TypeExpr` ADT:
+    ```
+    type TypeExpr =
+      | TyName Str
+      | TyVar Str
+    ```
+  * Adds a structural `typeEq : TypeExpr -> TypeExpr -> Bool` that
+    treats `TyVar "?"` as a wildcard matching anything — mirrors the
+    host elaborator's `tyEqual`.
+  * Adds `inferExprType : TypeEnv -> Expr -> TypeExpr` that assigns:
+      - `EInt _` -> `TyName "Int"`
+      - `EStr _` -> `TyName "Str"`
+      - `EVar name` -> lookup in `TypeEnv`, falling back to `TyVar "?"`
+      - arithmetic (`EAdd/ESub/EMul/EDiv`) -> `TyName "Int"`
+      - `EIf _ thn _` -> inferred type of the `then` branch
+      - everything else -> `TyVar "?"` (punted shape)
+  * Adds `typeCheck : TypeEnv -> Expr -> List[Str]` that walks the
+    expression and emits `E001 TypeMismatch <l> vs <r>` at each
+    arithmetic or if-branch mismatch.
+  * Adds a `TypeEnv` seeded from a fn's declared params:
+    `MkParam name (TR tyName)` -> `name -> TyName tyName`.
+  * Extends `elaborate` to run the HM pass after name-resolution and
+    exhaustiveness, concatenating all three error lists in order:
+    E002 first, then E003, then E001.
+
+**Driver delta**: `main`'s hardcoded source gains a fourth fn
+`badType(x Int) Int = x + "y"` so the HM pass has something to fire
+on. Expected stdout is four lines:
+
+```
+E002 UnboundVar undefinedName
+E003 NonExhaustiveMatch Shape missing Circle
+E003 NonExhaustiveMatch Shape missing Rect
+E001 TypeMismatch Int vs Str
+```
+
+**Deliberately out of scope** (carved out for Phase 7.9b+):
+
+  * Full HM with `unify` / `Subst` / fresh vars — 18-hminfer-real.lll
+    has the reference implementation, but it works on a minimal
+    local AST, not the parser's richer one. Phase 7.9b (or later)
+    bridges the two.
+  * Pattern-type checking inside `EMatch` arms.
+  * Let-generalization for `ELetIn` bindings.
+  * Constructor-arity checking for `ECon` applications.
+  * Codegen integration — Phase 7.9b folds in `19-codegen-real.lll`
+    so the bootstrap compiler can emit F# source.
+
+Tests: 398 -> 401 (one new corpus theory row in `HMInferTests.fs`
+plus two new facts in `BootstrapCompilerTests.fs`):
+
+  * `20-bootstrap-compiler.lll parses, elaborates, and infers
+    without errors` — inference round-trip smoke test.
+  * `20-bootstrap-compiler.lll runs and emits E002 + E003 + E001
+    for the hardcoded source` — runtime E2E via `lllc run`,
+    substring-contains assertions on all four expected error
+    lines.
+
+With this slice in place, three of the five compiler stages (lex +
+parse + elab + minimal HM) run back-to-back inside a single
+ll-lang program on a real source string. The Phase 7.6 integration
+proved two-stage stitching; Phase 7.9a proves three-stage stitching.
+
+Next tick: **Phase 7.9b** — add codegen to the stitched pipeline.
+Either inline `19-codegen-real.lll`'s TExpr/TDecl walker verbatim
+(minimal bridge, matches the Phase 7.9a simplicity) or extend the
+HM pass first so the bootstrap compiler can emit F# source for the
+hardcoded driver module end-to-end.

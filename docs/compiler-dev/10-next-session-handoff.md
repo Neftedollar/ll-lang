@@ -7,11 +7,11 @@ session to pick up without replaying history.
 
 - **main** is at a clean commit, everything pushed to
   `github.com/Neftedollar/ll-lang`.
-- **398 xUnit tests** pass (`dotnet test` from repo root).
+- **401 xUnit tests** pass (`dotnet test` from repo root).
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b + 7.7c + 7.7d + 7.8a + 7.8b + 7.8c + 7.8d + 7.8e done. Phase 7.7 is COMPLETE. Phase 7.8 is COMPLETE.**
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b + 7.7c + 7.7d + 7.8a + 7.8b + 7.8c + 7.8d + 7.8e + 7.9a done. Phase 7.7 is COMPLETE. Phase 7.8 is COMPLETE. Phase 7.9a ships the first 3-stage bootstrap compiler (parser + elaborator + minimal HM in one program).**
   ll-lang now hosts a real lexer (`09-lexer-real.lll`), a real
   recursive-descent arithmetic parser (`11-parser-real.lll`), a real
   type-declaration parser (`12-typeparser-real.lll`), a real
@@ -312,21 +312,54 @@ session to pick up without replaying history.
   7.8e collapses the fns into one rec group and adds the
   `[<EntryPoint>]` main fn).
 
+- **Phase 7.9a done** — the **first 3-stage bootstrap compiler**
+  lives in [`20-bootstrap-compiler.lll`](../../spec/examples/valid/20-bootstrap-compiler.lll)
+  (1598 lines). Starts from `17-pipeline-real.lll` verbatim (parser
+  + elaborator in one program) and adds a minimal HM-style type
+  checker that walks the parser's `Expr` AST: `TypeExpr = TyName
+  Str | TyVar Str`, structural `typeEq` with `TyVar "?"` wildcard,
+  `inferExprType` (Int / Str / arithmetic / if-branch / EVar env
+  lookup, everything else falls through to `TyVar "?"`), and
+  `typeCheck` that emits `E001 TypeMismatch <l> vs <r>` at each
+  arithmetic or if-branch mismatch. `seedParams` seeds a fresh
+  `TypeEnv` from a fn's declared params, `elaborate` runs the new
+  HM pass after name-resolution and exhaustiveness and concatenates
+  all three error lists. Driver `main` gains a fourth fn
+  `badType(x Int) Int = x + "y"` so the HM pass has something to
+  fire on. Deliberately narrow: no unify / Subst / fresh vars, no
+  let-generalization, no pattern-type checking, no codegen
+  integration (that lands in Phase 7.9b).
+- `lllc run spec/examples/valid/20-bootstrap-compiler.lll` prints
+  ```
+  E002 UnboundVar undefinedName
+  E003 NonExhaustiveMatch Shape missing Circle
+  E003 NonExhaustiveMatch Shape missing Rect
+  E001 TypeMismatch Int vs Str
+  ```
+  (three stages run back-to-back on the same shared AST inside a
+  single ll-lang program: Phase 7.6 proved two-stage stitching;
+  Phase 7.9a proves three-stage stitching.)
+
 ## Immediate next task
 
-**Phase 7.8 is now complete.** The ll-lang self-host codegen covers
-every shape the bootstrap compiler will need: basic expressions
-(TEInt / TEStr / TEVar / TEAdd / TEApp / TELet / TELam / TEIf /
-TEMatch), sum-type declarations with parametric headers, a complete
-F# module shell (header + stdlib prelude block), mutually-recursive
-`let rec ... and ...` grouping for 2+ consecutive non-main fns, and
-`[<EntryPoint>]` emission on the zero-param `main` fn. All four
-compiler stages (lex → parse → elaborate → HM-infer → codegen) now
-have ll-lang representations. The next natural step is **Phase
-7.9** — assemble `bootstrap/compiler.lll` by stitching the five
-self-host slices into a single end-to-end program.
+**Phase 7.9a is now done.** The ll-lang self-host now has the first
+3-stage bootstrap compiler (parser + elaborator + minimal HM in one
+program). The next natural step is **Phase 7.9b** — fold in codegen
+so the bootstrap compiler can emit F# source end-to-end for the
+hardcoded driver module.
 
-### Option A: **Phase 7.9 — assemble `bootstrap/compiler.lll`**
+### Option A: **Phase 7.9b — add codegen to the 3-stage pipeline**
+
+Extend `20-bootstrap-compiler.lll` in place by bringing in the
+TExpr/TDecl walker from `19-codegen-real.lll`. Either (a) inline a
+minimal subset that covers just the shapes the driver module uses,
+or (b) add a small Expr -> TExpr lowering pass so the parser's
+richer AST can be emitted through the existing `showTExpr`
+machinery. Tests: assert `showDecl` produces compilable F# source
+for each fn in the driver, plus a runtime round-trip that parses
+its own output.
+
+### Option B: **Phase 7.9 — assemble `bootstrap/compiler.lll`**
 
 Stitch the five existing self-hosted slices into a single end-to-end
 program that reads source text, runs it through every stage, and
