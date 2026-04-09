@@ -1,0 +1,3 @@
+module Examples.Clean
+fn demo(c Char) Int = charToInt c
+fn main() Int = demo 'A'

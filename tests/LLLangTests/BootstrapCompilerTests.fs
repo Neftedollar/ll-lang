@@ -878,3 +878,67 @@ let ``20-bootstrap-compiler.lll parses multi-line type decl with leading bar (Ph
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll resolves charToInt via stdlibNames (Phase 7.9p)`` () =
+    // Phase 7.9p: the bootstrap compiler's `stdlibNames` list in
+    // `elaborate`/`checkDecls` seeds the initial name environment
+    // with every stdlib builtin a user program can call without
+    // importing. Before 7.9p, the list held only 12 names
+    // (`strConcat`, `strLen`, `print`, `printfn`, `listMap`,
+    // `listLen`, `listAppend`, `listIsEmpty`, `listFold`, `readFile`,
+    // `true`, `false`). The bootstrap compiler's OWN source uses
+    // `charToInt` inside `lexChars` / `isUpperChar` — a name the
+    // host elaborator knows as a builtin but which the bootstrap's
+    // mirror list did not. Running the bootstrap on its own source
+    // (the fixpoint probe) produced a 26-byte stdout containing
+    // exactly `E002 UnboundVar charToInt`, blocking every
+    // downstream codegen line.
+    //
+    // Discovered via the fixpoint probe after Phase 7.9o (commit
+    // 1d1fca0) unblocked the parser by adding newline tolerance
+    // around `type` decl layout. With the parser clean, the
+    // elaborator's name-resolution pass became the next blocker
+    // and the probe started surfacing UnboundVar errors for
+    // stdlib names the bootstrap itself references.
+    //
+    // Fix: extend the bootstrap's `stdlibNames` list with
+    // `charToInt`. Since the bootstrap's minimal HM pass is
+    // lenient and `checkExpr` only verifies the name is bound,
+    // adding the bare name (no type) is enough to clear the
+    // cascade and let the pipeline reach the codegen pass.
+    //
+    // Fixture `20n-bootstrap-input-stdlib-full.lll` calls
+    // `charToInt` from a user fn body. Before the fix, running
+    // the bootstrap on this fixture surfaces
+    // `E002 UnboundVar charToInt`; after the fix, the elaborator
+    // accepts the name and the codegen pass emits a `let demo`
+    // plus the `[<EntryPoint>]` main wrapper.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let stdlibPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20n-bootstrap-input-stdlib-full.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
+    Assert.True(File.Exists stdlibPath, $"missing fixture: {stdlibPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(stdlibPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002 UnboundVar charToInt",
+            $"expected NO E002 UnboundVar charToInt; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E002 UnboundVar",
+            $"expected NO E002 UnboundVar at all; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec demo" || stdout.Contains "let demo",
+            $"expected emitted F# to contain `let demo` or `let rec demo`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
