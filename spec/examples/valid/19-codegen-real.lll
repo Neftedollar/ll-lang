@@ -1,12 +1,12 @@
 module Examples.CodegenReal
 
--- Phase 7.8a: the first slice of **F# codegen written in ll-lang
--- itself**. After Phase 7.7 closed out the HM middle of self-hosting
--- (18-hminfer-real.lll: TypeExpr / Subst / unify / Env / inferExpr
--- over EInt / EStr / EBool / EVar / EAdd / EApp / ELam / ELet / EIf),
--- this file starts the **back end**: a tiny `TExpr` / `TDecl` AST —
--- a stand-in for the host's TypedAST — plus a `showTExpr` family of
--- walkers that emit F# source strings, mirroring the F# host's
+-- Phase 7.8a+b: F# codegen written in ll-lang itself. After Phase 7.7
+-- closed out the HM middle of self-hosting (18-hminfer-real.lll:
+-- TypeExpr / Subst / unify / Env / inferExpr over EInt / EStr / EBool
+-- / EVar / EAdd / EApp / ELam / ELet / EIf / EMatch), this file
+-- starts the **back end**: a tiny `TExpr` / `TDecl` AST — a stand-in
+-- for the host's TypedAST — plus a `showTExpr` family of walkers
+-- that emit F# source strings, mirroring the F# host's
 -- `src/LLLangCompiler/Codegen.fs` `emitExpr` / `emitDecl`.
 --
 -- After this slice lands, all four compiler stages have ll-lang
@@ -14,16 +14,10 @@ module Examples.CodegenReal
 -- the next umbrella (`bootstrap/compiler.lll`) can stitch them into a
 -- single end-to-end program.
 --
--- Scope ("slice A" — keep tight):
+-- Phase 7.8a scope ("slice A"):
 --   * `TExpr` = TEInt / TEStr / TEVar / TEAdd / TEApp / TELet.
---     No TELam, no TEIf, no TEMatch, no TETagged, no TEList — those
---     land in slice B. This is just enough to render the four hard-
---     coded test fns below.
---   * `TDecl` = TDFn Str List[Str] TExpr (name + params + body). No
---     TDType, no TDImpl, no TDLet, no `main` entry-point handling.
---     The host's `Codegen.fs` grows a `[<EntryPoint>]` preamble for
---     `fn main()` decls; this slice doesn't model that either.
---   * Emission mirrors the host's offside-safe inline forms:
+--   * `TDecl` = TDFn Str List[Str] TExpr.
+--   * Expression emission:
 --       TEInt n        -> "<n>L"         (F# int64 literal)
 --       TEStr s        -> "\"<s>\""      (no escaping — test strings
 --                                         are simple ASCII)
@@ -34,24 +28,50 @@ module Examples.CodegenReal
 --     `TDFn` empty-params -> `let <name> = <body>`;
 --     non-empty         -> `let <name> p1 p2 ... = <body>`.
 --
+-- Phase 7.8b scope ("slice B" — control-flow expression shapes):
+--   * `TExpr` gains `TELam Str TExpr`, `TEIf TExpr TExpr TExpr`, and
+--     `TEMatch TExpr List[Pat] List[TExpr]` — parallel pat/body lists
+--     mirroring 18-hminfer-real.lll's `EMatch` encoding so the
+--     pipeline's ll-lang side uses the same shape top to bottom.
+--   * New `Pat` ADT: `PInt Int | PVar Str | PWild` — the same three
+--     pattern shapes 18-hminfer-real.lll's HM inference supports.
+--   * New emission arms:
+--       TELam x body       -> "(fun <x> -> <body>)"
+--       TEIf c t e         -> "(if <c> then <t> else <e>)"
+--       TEMatch scr ps bs  -> "(match <scr> with | <p1> -> <b1> | <p2> -> <b2>)"
+--     The match form joins all arms on a single line — same trick as
+--     the host's `TEMatchOf` arm in `Codegen.fs` line 201 area — to
+--     dodge F# offside-rule trouble when the match sits inside a
+--     parent expression.
+--   * Pattern emission:
+--       PInt n -> "<n>L"
+--       PVar x -> "<x>"
+--       PWild  -> "_"
+--
 -- Out of scope (later slices in the Phase 7.8 umbrella):
 --   * F# prelude block (the stdlib shim in `Codegen.fs` `fsharpPrelude*`)
---   * Multi-line match emission, mutual-recursion grouping (`let rec`
---     ... `and`), tagged types, `[<EntryPoint>]` on main
+--     — Phase 7.8d.
+--   * Multi-line match emission and constructor-application / tagged-
+--     type (`TECon`) emission — a later slice.
+--   * Mutual-recursion grouping (`let rec ... and ...`) and
+--     `[<EntryPoint>]` on `main` — Phase 7.8e.
+--   * TDType emission — Phase 7.8c.
 --   * Real `TypeScheme`-carrying TypedAST — this slice just walks a
---     plain `TExpr`/`TDecl` without touching type info
+--     plain `TExpr`/`TDecl` without touching type info.
 --   * Consuming the output of `18-hminfer-real.lll` — integration is
---     a separate tick after both sides stabilise
+--     a separate tick after both sides stabilise.
 --   * Keyword-safe ident rewriting (`safeIdent` in Codegen.fs) —
---     every hardcoded test name is already a non-keyword
+--     every hardcoded test name is already a non-keyword.
 --
--- Hardcoded test plan in `main`: four `TDFn`s, one per supported TExpr
--- shape except `TEVar` which appears as sub-expressions inside the
--- others:
---   TDFn "inc"     ["x"] (TEAdd (TEVar "x") (TEInt 1))
---   TDFn "greet"   []    (TEStr "hello")
---   TDFn "addOne"  ["x"] (TELet "y" (TEAdd (TEVar "x") (TEInt 1)) (TEVar "y"))
---   TDFn "callInc" ["x"] (TEApp (TEVar "inc") (TEVar "x"))
+-- Hardcoded test plan in `main`: seven `TDFn`s, one per supported
+-- TExpr shape (TEVar appears as a sub-expression inside the others):
+--   TDFn "inc"      ["x"] (TEAdd (TEVar "x") (TEInt 1))          -- 7.8a
+--   TDFn "greet"    []    (TEStr "hello")                         -- 7.8a
+--   TDFn "addOne"   ["x"] (TELet "y" (TEAdd (TEVar "x") (TEInt 1)) (TEVar "y"))  -- 7.8a
+--   TDFn "callInc"  ["x"] (TEApp (TEVar "inc") (TEVar "x"))       -- 7.8a
+--   TDFn "choose"   ["b"] (TEIf (TEVar "b") (TEInt 1) (TEInt 2))  -- 7.8b
+--   TDFn "double"   []    (TELam "x" (TEAdd (TEVar "x") (TEVar "x")))  -- 7.8b
+--   TDFn "classify" ["x"] (TEMatch (TEVar "x") [PInt 0, PWild] [TEStr "zero", TEStr "other"])  -- 7.8b
 --
 -- Expected stdout (one F# source line per `TDFn`, joined with "\n"
 -- via `joinLines` so `fn main` has a single-expression body):
@@ -59,6 +79,9 @@ module Examples.CodegenReal
 --   let greet = "hello"
 --   let addOne x = (let y = (x + 1L) in y)
 --   let callInc x = (inc x)
+--   let choose b = (if b then 1L else 2L)
+--   let double = (fun x -> (x + x))
+--   let classify x = (match x with | 0L -> "zero" | _ -> "other")
 
 -- ---------- Maybe -------------------------------------------------------
 
@@ -67,14 +90,34 @@ module Examples.CodegenReal
 -- Nothing in this file actually uses `Some` / `None` at runtime.
 type Maybe A = Some A | None
 
+-- ---------- Pat ---------------------------------------------------------
+
+-- Minimal pattern AST for `TEMatch`. Same three-shape restriction as
+-- `18-hminfer-real.lll`'s `Pat` type so the HM-infer side and this
+-- codegen side can eventually share one definition once the pipeline
+-- stitches them together. Constructor / nested patterns land in a
+-- later slice only if the self-host compiler needs them.
+type Pat =
+  | PInt Int
+  | PVar Str
+  | PWild
+
 -- ---------- TExpr -------------------------------------------------------
 
--- Minimal typed-expression AST. Mirrors a tiny slice of the F# host's
--- `LLLang.TypedAST.TypedExpr` minus every variant this slice doesn't
+-- Typed-expression AST. Mirrors a slice of the F# host's
+-- `LLLang.TypedAST.TypedExpr` minus every variant this phase doesn't
 -- emit. Each constructor is the `TE`-prefixed cousin of a surface
 -- `Expr` variant — the "T" in the name is a nod to the host's typed
--- AST but carries no actual type info. Slice B grows the `TypeScheme`
--- payload once the pipeline starts consuming real inferred output.
+-- AST but carries no actual type info. A later slice grows the
+-- `TypeScheme` payload once the pipeline starts consuming real
+-- inferred output.
+--
+-- Phase 7.8a shapes: TEInt / TEStr / TEVar / TEAdd / TEApp / TELet.
+-- Phase 7.8b shapes: TELam / TEIf / TEMatch — the three control-flow
+-- expression forms `18-hminfer-real.lll`'s HM inference already
+-- handles on the front-end side. `TEMatch` uses parallel pat/body
+-- lists (`List[Pat]` and `List[TExpr]`) so it matches the encoding
+-- 18-hminfer-real.lll picked for `EMatch Expr List[Pat] List[Expr]`.
 type TExpr =
   | TEInt Int
   | TEStr Str
@@ -82,6 +125,9 @@ type TExpr =
   | TEAdd TExpr TExpr
   | TEApp TExpr TExpr
   | TELet Str TExpr TExpr
+  | TELam Str TExpr
+  | TEIf TExpr TExpr TExpr
+  | TEMatch TExpr List[Pat] List[TExpr]
 
 -- ---------- TDecl -------------------------------------------------------
 
@@ -106,6 +152,9 @@ fn showTExpr(e TExpr) Str =
     | TEAdd a b -> showAdd a b
     | TEApp f a -> showApp f a
     | TELet n e1 e2 -> showLet n e1 e2
+    | TELam x body -> showLam x body
+    | TEIf c t e -> showIf c t e
+    | TEMatch scr ps bs -> showMatch scr ps bs
 
 -- `TEInt n` -> `"<n>L"` (F# `int64` literal). Uses the stdlib's
 -- `intToStr` builtin and suffixes `L` because ll-lang's `Int` maps to
@@ -140,6 +189,67 @@ fn showApp(f TExpr)(a TExpr) Str =
 -- expression position.
 fn showLet(n Str)(e1 TExpr)(e2 TExpr) Str =
   strConcat "(let " (strConcat n (strConcat " = " (strConcat (showTExpr e1) (strConcat " in " (strConcat (showTExpr e2) ")")))))
+
+-- `TELam x body` -> `"(fun <x> -> <body>)"`. Single-param lambda
+-- only — `18-hminfer-real.lll`'s `ELam Str Expr` also takes a single
+-- param and curries via nested lambdas, so this matches. The host's
+-- `TELam` arm in `Codegen.fs` line 158 area joins a param list with
+-- spaces; this slice's single-param form is a strict subset.
+fn showLam(x Str)(body TExpr) Str =
+  strConcat "(fun " (strConcat x (strConcat " -> " (strConcat (showTExpr body) ")")))
+
+-- `TEIf c t e` -> `"(if <c> then <t> else <e>)"`. Unconditionally
+-- parenthesised, same as the host's `emitExpr` `TEIf` arm in
+-- `Codegen.fs` line 180 area, so the if-expression embeds cleanly in
+-- any parent expression position without offside-rule surprises.
+fn showIf(c TExpr)(t TExpr)(e TExpr) Str =
+  strConcat "(if " (strConcat (showTExpr c) (strConcat " then " (strConcat (showTExpr t) (strConcat " else " (strConcat (showTExpr e) ")")))))
+
+-- `TEMatch scr ps bs` -> `"(match <scr> with <arms>)"`. Arms are
+-- emitted on a **single line** joined by spaces — mirrors the host's
+-- `TEMatchOf` arm in `Codegen.fs` line 201 area. Multi-line match
+-- emission would need indentation tracking this slice doesn't bother
+-- with; single-line form works in any expression position at the
+-- cost of long lines. The parallel `ps`/`bs` lists are walked in
+-- lockstep by `showArms`, same trick as `18-hminfer-real.lll`'s
+-- `inferMatchBranches`.
+fn showMatch(scr TExpr)(ps List[Pat])(bs List[TExpr]) Str =
+  strConcat "(match " (strConcat (showTExpr scr) (strConcat " with " (strConcat (showArms ps bs) ")")))
+
+-- ---------- Pattern + arm emission --------------------------------------
+
+-- Render a `Pat` as its F# source form. Mirrors the host's
+-- `emitPattern` in `Codegen.fs` line 105 area for the three shapes
+-- this slice handles:
+--   PInt n -> "<n>L" (F# int64 literal — reuses `showInt`)
+--   PVar x -> "<x>"
+--   PWild  -> "_"
+fn showPat(p Pat) Str =
+  match p with
+    | PInt n -> showInt n
+    | PVar x -> x
+    | PWild -> "_"
+
+-- Fold parallel `ps`/`bs` lists into a single-line arms string like
+-- `"| <p1> -> <b1> | <p2> -> <b2>"`. Walks both lists in lockstep —
+-- same pattern as `18-hminfer-real.lll`'s `inferMatchBranches`. When
+-- either list runs out, emit nothing more (robust against stray tail
+-- mismatches; inference already rules those out at the front-end).
+fn showArms(ps List[Pat])(bs List[TExpr]) Str =
+  match ps with
+    | p :: prest -> showArmsCons p prest bs
+    | _ -> ""
+
+-- Tail-helper: consumed one head from `ps`, now peel a matching head
+-- from `bs` and glue in `"| <p> -> <b>"` plus the recursive rest.
+-- Split out of `showArms` so each `match` stays one level deep.
+fn showArmsCons(p Pat)(prest List[Pat])(bs List[TExpr]) Str =
+  match bs with
+    | b :: brest ->
+      let head = strConcat "| " (strConcat (showPat p) (strConcat " -> " (showTExpr b))) in
+      let rest = showArms prest brest in
+      if strLen rest == 0 then head else strConcat head (strConcat " " rest)
+    | _ -> ""
 
 -- ---------- Parameter-list emission -------------------------------------
 
@@ -199,14 +309,33 @@ fn joinLines(xs List[Str]) Str =
 -- ---------- main --------------------------------------------------------
 
 fn main() =
-  -- Four hardcoded `TDecl`s, each exercising one supported TExpr
-  -- shape. `inc` covers TEAdd + TEVar + TEInt; `greet` covers TEStr
-  -- and the empty-params branch; `addOne` covers TELet; `callInc`
-  -- covers TEApp. See the header block for the expected emission.
+  -- Seven hardcoded `TDecl`s, each exercising one supported TExpr
+  -- shape. Phase 7.8a: `inc` covers TEAdd + TEVar + TEInt; `greet`
+  -- covers TEStr and the empty-params branch; `addOne` covers TELet;
+  -- `callInc` covers TEApp. Phase 7.8b: `choose` covers TEIf;
+  -- `double` covers TELam (bound as a top-level value, not as a
+  -- function param); `classify` covers TEMatch with PInt / PWild
+  -- branches. See the header block for the expected emission.
   let d1 = TDFn "inc"     ["x"] (TEAdd (TEVar "x") (TEInt 1)) in
   let d2 = TDFn "greet"   []    (TEStr "hello") in
   let d3 = TDFn "addOne"  ["x"] (TELet "y" (TEAdd (TEVar "x") (TEInt 1)) (TEVar "y")) in
   let d4 = TDFn "callInc" ["x"] (TEApp (TEVar "inc") (TEVar "x")) in
-  let decls = [d1 d2 d3 d4] in
+  -- Phase 7.8b: TEIf / TELam / TEMatch.
+  let d5 = TDFn "choose"  ["b"] (TEIf (TEVar "b") (TEInt 1) (TEInt 2)) in
+  let d6 = TDFn "double"  []    (TELam "x" (TEAdd (TEVar "x") (TEVar "x"))) in
+  -- TEMatch parallel-list construction: list-literal elements that
+  -- start with a TypeId ctor app have to be let-bound individually
+  -- so the parser doesn't treat `[PInt 0 PWild]` as a single curried
+  -- ctor application. Same workaround `18-hminfer-real.lll`'s t18
+  -- match case (line 955 area) uses.
+  let classifyPat1 = PInt 0 in
+  let classifyPat2 = PWild in
+  let classifyPats = [classifyPat1 classifyPat2] in
+  let classifyBody1 = TEStr "zero" in
+  let classifyBody2 = TEStr "other" in
+  let classifyBodies = [classifyBody1 classifyBody2] in
+  let classifyExpr = TEMatch (TEVar "x") classifyPats classifyBodies in
+  let d7 = TDFn "classify" ["x"] classifyExpr in
+  let decls = [d1 d2 d3 d4 d5 d6 d7] in
   let lines = listMap showDecl decls in
   printfn (joinLines lines)
