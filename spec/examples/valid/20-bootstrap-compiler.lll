@@ -677,19 +677,55 @@ fn parseFnDecl(toks List[Token]) =
     (MkFn name prms retTy body, rest5)
   | _ -> (MkFn "?" [] None (EInt 0), toks)
 
--- Zero or more param groups. `()` produces no params; `(name Type)` adds
--- a MkParam to the running list.
+-- Phase 7.9d: after a head `TUpper` has been read in param / return
+-- type position, consume any trailing `[ ... ]` bracket groups (e.g.
+-- the `[Int]` in `Maybe[Int]`, or the `[A][E]` in `Result[A][E]`) and
+-- return just the leftover token list. We don't carry the bracket
+-- payload through the AST in this slice — `TypeRef = TR Str` only
+-- holds the head name today, and neither the elaborator nor the F#
+-- codegen inspect type args. The sole goal is to keep `parseFnDecl`
+-- from desynchronising when a fn signature uses a parametric type.
+-- Nested brackets like `Foo[Bar[Baz]]` are handled by recursing into
+-- `parseSkipBrackType` on each inner `TUpper`.
+fn parseSkipBrackType(toks List[Token]) =
+  | TLBrack :: TUpper _ :: rest ->
+    let rest2 = parseSkipBrackType rest in
+    let rest3 = match rest2 with
+      | TRBrack :: r -> r
+      | _ -> rest2
+    in
+    parseSkipBrackType rest3
+  | _ -> toks
+
+-- Zero or more param groups. `()` produces no params; `(name Type)`
+-- adds a `MkParam` to the running list. Phase 7.9d: the type after the
+-- param name may now be a bracket-form parametric application, e.g.
+-- `(xs List[Int])`. We still store only the head name in the AST
+-- (via `TR tname`) and skip the bracket payload with
+-- `parseSkipBrackType` so the outer decl loop resumes cleanly at the
+-- closing `)`.
 fn parseParamGroups(toks List[Token]) =
   | TLParen :: TRParen :: rest -> ([], rest)
-  | TLParen :: TLower pname :: TUpper tname :: TRParen :: rest ->
-    let (ps, rest2) = parseParamGroups rest in
-    (MkParam pname (TR tname) :: ps, rest2)
+  | TLParen :: TLower pname :: TUpper tname :: rest ->
+    let rest2 = parseSkipBrackType rest in
+    let rest3 = match rest2 with
+      | TRParen :: r -> r
+      | _ -> rest2
+    in
+    let (ps, rest4) = parseParamGroups rest3 in
+    (MkParam pname (TR tname) :: ps, rest4)
   | _ -> ([], toks)
 
--- Optional return type: a TUpper immediately before `=` becomes
--- Some (TR name), anything else stays None.
+-- Optional return type: a `TUpper` immediately before `=` becomes
+-- `Some (TR name)`, anything else stays `None`. Phase 7.9d: the head
+-- `TUpper` may be followed by one or more `[ type ]` bracket groups
+-- (e.g. `Maybe[Int]`, `Result[A][E]`). The brackets are consumed and
+-- discarded — only the head name survives into `TR` — so the caller
+-- can still find the trailing `=` and proceed into the body.
 fn parseReturnType(toks List[Token]) =
-  | TUpper tname :: rest -> (Some (TR tname), rest)
+  | TUpper tname :: rest ->
+    let rest2 = parseSkipBrackType rest in
+    (Some (TR tname), rest2)
   | _ -> (None, toks)
 
 -- ---------- Expression parser (subset of 14-exprparser-real.lll) -------
