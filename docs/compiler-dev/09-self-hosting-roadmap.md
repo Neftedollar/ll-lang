@@ -4234,3 +4234,111 @@ kind-checker doesn't recognize. The probe report
 will say which is which and whether 7.9r collapses
 into one slice or needs two.
 
+## Phase 7.10a — List literal expressions
+
+**Slice:** add list literal expression support
+(`[]`, `[x]`, `[x y z]`) to the bootstrap compiler,
+mirroring how `PNil` / `PCons` work on the pattern
+side. Two new `Expr` variants (`ENil`, `ECons`)
+plus parser + elaborator + HM + codegen plumbing.
+
+Pre-fix, `parseAtom` in the bootstrap had no arm
+for `TLBrack` in expression position — every list
+literal silently fell through to the wildcard
+`(EInt 0, toks)` fallback *without consuming the
+`[` token*, desyncing the token stream. The
+bootstrap's own source uses list literals in ~30
+places (`listAppend [c] ...`, `listAppend [TKwFoo]
+...`, `[]` as the empty-case return in lex/parse
+helpers), so this was a hard blocker for
+self-hosting.
+
+**Change sites (7):**
+1. `type Expr` — two new variants `ENil` / `ECons
+   Expr Expr`.
+2. `parseAtom` — two new arms before the wildcard:
+   `TLBrack :: TRBrack :: rest -> (ENil, rest)`,
+   `TLBrack :: rest -> parseListLit rest`. New
+   `parseListLit` helper reads atoms until
+   `TRBrack`, folding right-associatively into
+   `ECons`. Elements parsed via `parseAtom` (not
+   `parseExpr`) — sufficient for every list literal
+   in the bootstrap source.
+3. `isAtomStart` — new `TLBrack -> true` arm so
+   the application layer picks up `head [1 2 3]`
+   as `EApp head [1 2 3]`.
+4. `checkExpr` — noop arms threading child errors
+   (`ENil -> []`, `ECons h t -> listAppend
+   (checkExpr env h) (checkExpr env t)`).
+5. `inferExprType` — `ENil` / `ECons _ _` both
+   return `TyName "List"`. Minimal — no element
+   type checking in this slice.
+6. `typeCheck` (exhaustive walker) — noop arms
+   (`ENil -> []`, `ECons h t -> listAppend
+   (typeCheck env h) (typeCheck env t)`).
+7. `showExpr` — `ENil -> "[]"`, `ECons h t ->
+   "(h :: t)"`.
+8. `emitExpr` — `ENil -> "[]"`, `ECons h t -> "(h
+   :: t)"`. F# uses the same cons syntax as
+   ll-lang, so the emit side is literally the
+   same as `showExpr`.
+
+**Fixture + test:** `20r-bootstrap-input-lists.lll`
+exercises `fn main() Int = head [1 2 3]` over a
+`head(xs List[Int])` match helper. The regression
+test asserts the emitted F# contains `(1L :: (2L
+:: (3L :: [])))`. Pre-fix: the list literal was
+silently dropped, `head` emitted as a bare ref +
+stray `0L`. Post-fix: full cons chain emitted,
+compiles + runs.
+
+**Fixpoint-probe confirmation:**
+
+| Metric | Before 7.10a | After 7.10a |
+|---|---|---|
+| stdout bytes | 2726 | 2764 |
+| stdout lines | 124 | 126 |
+| errors (E00) | 0 | 0 |
+| halt point | `takeIdCont` body | `takeIdCont` body |
+| new content | — | `type Expr` gets `\| ENil` + `\| ECons of Expr * Expr` rows |
+
+The probe output grew by exactly 2 lines / 38
+bytes — the new `ENil` / `ECons` rows inside the
+emitted `type Expr` sum-type decl. This is
+ground-truth proof that the bootstrap is now
+parsing + elaborating + emitting the two new
+variants end-to-end without errors. The bootstrap
+compiles its own modified source cleanly.
+
+**Surprise finding:** the probe still halts at
+`takeIdCont`'s body with `(match cs with | (c ::
+rest) -> 0L)` — the *same* halt point as before
+7.10a. Diagnosing the halt in isolation revealed
+the blocker has nothing to do with list literals:
+minimal fixture
+```
+fn takeIdCont(cs List[Int]) Int =
+  match cs with | c :: rest -> if c then 1 else 0
+                | _ -> 0
+```
+reproduces the identical `-> 0L` halt. Root cause:
+`parseArmBody` in the bootstrap uses `parseCompare`
+(for documented "safe" reasons — "15's match
+bodies never contain bare let/match/lambdas"), but
+`if-then-else` is ALSO a `parseExpr`-level special
+form that `parseCompare` doesn't dispatch to. An
+`if` token inside a match arm body falls through
+`parseCompare → parseAddSub → ... → parseAtom`
+wildcard, producing `(EInt 0, toks)` and corrupting
+the arm body. Pre-existing bug, unrelated to the
+7.10a scope. Verified by git-stashing 7.10a and
+re-running the minimal fixture — identical output.
+
+**Next tick:** **Phase 7.10b** — lift
+`parseArmBody` from `parseCompare` to `parseExpr`
+(or add explicit `TKwIf :: _` dispatch). Once the
+arm body can be an `if-then-else`, `takeIdCont` /
+`dropIdCont` / `takeDigit` / `dropDigit` should
+all emit real bodies and the probe should jump
+significantly past the 126-line wall.
+
