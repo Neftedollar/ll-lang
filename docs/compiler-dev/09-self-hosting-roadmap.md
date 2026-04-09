@@ -2928,3 +2928,118 @@ gets checked against anything. Adding real `Bool` support
 unlocks `checkIfBranches` narrowing on comparison guards,
 enables `&&` / `||` connectives in Phase 7.9i+, and lets
 fns declare explicit `Bool` parameters and return types.
+
+### 2026-04 — Phase 7.9h: true/false literals (DONE)
+
+Eighth tick of **Phase 7.9**. Probing with
+`fn flag() Int = if true == false then 1 else 0` surfaced
+the next gap: the bootstrap compiler's lexer already
+produces `TLower "true"` / `TLower "false"`, `parseAtom`
+already wraps them in `EVar "true"` / `EVar "false"`,
+`emitExpr`'s `EVar x -> x` arm already emits them as valid
+F# boolean literals, and `inferExprType`'s fall-through
+returns `TyVar "?"` for unknown names (which `typeEq`
+short-circuits on) — so the ENTIRE pipeline was already
+wired to handle `true` / `false`. The only gap was the
+elaborator's name-scope check: `"true"` / `"false"` were
+not in `stdlibNames` (the seed env introduced in 7.9e), so
+`checkExpr`'s `EVar name` arm fired `E002 UnboundVar true`
+/ `E002 UnboundVar false` before the expression could
+reach codegen. Blocks any input program that uses bare
+`true` / `false`, including the bootstrap compiler's own
+source (`isUpperChar`, `isLowerChar`, `isIdStart` all
+return `true` / `false` internally).
+
+**Changes:**
+
+* Two new strings appended to `stdlibNames` in
+  `20-bootstrap-compiler.lll`: `"true"` and `"false"`.
+  One-line edit, zero lexer / parser / AST / HM / codegen
+  changes needed — the other layers were already cleared
+  for boolean literal names by the existing `EVar`
+  pipeline. `EVar "true"` emits `true` (a valid F#
+  boolean literal) via the `EVar x -> x` arm.
+* New fixture `20f-bootstrap-input-bool-lits.lll`
+  exercises both literals via
+  `fn flag() Int = if true == false then 1 else 0`
+  alongside a `choose` fn that smoke-tests the 7.9g `>`
+  operator under the expanded stdlib env.
+* New regression test in `BootstrapCompilerTests.fs` swaps
+  the 20a input for 20f, runs the bootstrap compiler, and
+  asserts (a) no `E002` / no `E001` / no `error` in
+  combined output, (b) emitted F# contains `let rec
+  choose` + `and flag` + `let main` + `[<EntryPoint>]` +
+  `true` + `false`. The mutual-recursion spine is the
+  same incidental shape as 7.9g — any run of two or more
+  consecutive non-`main` fn decls gets wrapped in a
+  single `let rec ... and ...` block by the 7.8e grouping
+  pass.
+
+**Deliberately out of scope:**
+
+* **Proper `Bool` type promotion in HM** — this is a
+  NAME-SCOPE-ONLY fix. `true` and `false` are treated as
+  ordinary stdlib names; neither has a `TyBinding` in the
+  `TypeEnv`, so `inferExprType` still returns `TyVar "?"`
+  for `EVar "true"` / `EVar "false"` and `typeEq`
+  silently accepts any comparison against them. A program
+  like `if 1 then 0 else 1` (int guard where a Bool is
+  expected) still parses and emits without complaint.
+  Promoting `Bool` to a proper type in HM/typeCheck stays
+  in Phase 7.9i — the groundwork is already in
+  `inferExprType` (comparisons `EEq` / `ELt` / `EGt`
+  already return `TyName "Bool"`), but nothing consumes
+  that result yet.
+* **Dedicated `EBool` Expr variant** — no new AST variant
+  in this slice. `true` / `false` stay as `EVar "true"` /
+  `EVar "false"`. A proper `EBool Bool` variant (plus
+  `TKwTrue` / `TKwFalse` keyword tokens) is cleaner but
+  requires touching the AST, parser, elaborator, HM, and
+  codegen — deferred to 7.9i as part of the Bool-type
+  promotion work.
+* **Boolean connectives** — `&&` / `||` / `not` stay in
+  Phase 7.9i+.
+* **`!=` / `<=` / `>=`** — these still need their own
+  lexer helpers (same shape as `lexEqOrEqEq` from 7.9f)
+  plus new `Expr` variants; trivial extensions, not in
+  scope here.
+
+Tests: 406 → 407 (+1 for the `true` / `false` regression
+test).
+
+**Observation worth noting** — smallest slice in Phase
+7.9 so far: a single two-element addition to one list
+literal (`stdlibNames`), no other source changes. The
+rest of the pipeline was already cleared for boolean
+literal names as a side-effect of the `EVar x -> x`
+pass-through shape of `emitExpr` and the `TyVar "?"`
+fall-through in `inferExprType`. A testament to how the
+bootstrap compiler's narrow scope and "punt on unknowns"
+shape composes — most of the pipeline simply doesn't
+care what the name resolves to.
+
+Separate parser bug discovered in diagnosis: the
+bootstrap `parseLetIn` doesn't tolerate a `TNewline`
+between `in` and the body expression, so multi-line
+let-in chains like
+```
+let cond = expr in
+  body
+```
+silently mis-parse (the body becomes `EInt 0` and the
+real body tokens flow back to `parseDecls`, producing
+spurious `E002` errors on fn parameters). All existing
+fixtures are single-line, which is why it hadn't surfaced
+before. Not in scope for 7.9h — fixture was adapted to
+single-line form instead. Logged as a separate Phase
+7.10+ cleanup candidate.
+
+Next tick: **Phase 7.9i** — proper `Bool` type in
+HM/typeCheck. Currently `inferExprType` returns `TyName
+"Bool"` from `EEq` / `ELt` / `EGt` but nothing consumes
+it; promoting `Bool` means `typeCheck` can reject `if 1
+then 0 else 1` (non-Bool guard) and comparisons must
+refuse non-`Int` args. Unblocks `EBool` as a dedicated
+AST variant, `TKwTrue` / `TKwFalse` keyword tokens, and
+the `&&` / `||` / `not` connectives that need Bool
+operands.
