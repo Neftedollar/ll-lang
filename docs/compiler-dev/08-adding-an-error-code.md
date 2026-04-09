@@ -119,8 +119,9 @@ error codes; keep it in sync with the spec.
 dotnet test
 ```
 
-All 191 (now 192) tests should pass. If a previously-valid corpus file
-now triggers your new error, decide:
+The whole suite (currently 415 tests) should pass, plus whatever
+positive test you added. If a previously-valid corpus file now
+triggers your new error, decide:
 
 - The new error is correct and the corpus example was always wrong →
   fix the corpus.
@@ -150,7 +151,9 @@ now triggers your new error, decide:
 - **Errors collect, don't throw.** Push to `st.Errors` (HM) or return
   in the error list (Elaborator). The pipeline never throws on a
   user-program error.
-- **Position info is best-effort.** Many existing errors emit `0:0`
-  because position threading isn't complete. New errors should
-  include positions when easy, `0` placeholders otherwise — improving
-  positions is a separate concern.
+- **Position info is threaded via `PosMap`.** The parser records a
+  `Pos` on every source-bearing node and both the elaborator and
+  HMInfer look positions up via `posOf pm node`. New errors should
+  carry positions the same way; fall back to `0:0` only for nodes
+  the compiler itself synthesised (and therefore never had a source
+  location).
