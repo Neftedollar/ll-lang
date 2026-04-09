@@ -1,11 +1,6 @@
-/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangTool/Program.fs(19,13): warning FS3261: Nullness warning: The types 'string' and 'string | null' do not have compatible nullability. [/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangTool/LLLangTool.fsproj]
-/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangTool/Program.fs(57,13): warning FS3261: Nullness warning: The types 'Process' and 'Process | null' do not have compatible nullability. [/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangTool/LLLangTool.fsproj]
-/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangTool/Program.fs(57,13): warning FS3261: Nullness warning: The types 'Process' and 'Process | null' do not have compatible nullability. [/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangTool/LLLangTool.fsproj]
-/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangTool/Program.fs(59,13): warning FS3261: Nullness warning: The types 'Process' and 'Process | null' do not have compatible nullability. [/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangTool/LLLangTool.fsproj]
-/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangTool/Program.fs(59,13): warning FS3261: Nullness warning: The types 'Process' and 'Process | null' do not have compatible nullability. [/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangTool/LLLangTool.fsproj]
 
 
-/var/folders/_3/c83rr8ys2qq_tb9cgbthkhjm0000gn/T/tmp6Y6ehl.tmp.fsx(830,197): warning FS0026: This rule will never be matched
+/var/folders/_3/c83rr8ys2qq_tb9cgbthkhjm0000gn/T/tmpqjV8KU.tmp.fsx(839,71): warning FS0026: This rule will never be matched
 
 module Examples.Bootstrap
 
@@ -245,4 +240,65 @@ and patBindersList ps = (match ps with | [] -> [] | (p :: rest) -> ((listAppend 
 and paramName p = (match p with | (MkParam n _) -> n)
 and paramNames ps = (((listFold (fun acc -> (fun p -> ((listAppend acc) ((paramName p) :: []))))) []) ps)
 and checkExpr env e = (match e with | (EInt _) -> [] | (EStr _) -> [] | (EChar _) -> [] | (EVar name) -> (if ((envHas env) name) then [] else (let msg = ((strConcat "E002 UnboundVar ") name) in (msg :: []))) | (ETagged inner _) -> ((checkExpr env) inner) | (EAdd l r) -> ((listAppend ((checkExpr env) l)) ((checkExpr env) r)) | (ESub l r) -> ((listAppend ((checkExpr env) l)) ((checkExpr env) r)) | (EMul l r) -> ((listAppend ((checkExpr env) l)) ((checkExpr env) r)) | (EDiv l r) -> ((listAppend ((checkExpr env) l)) ((checkExpr env) r)) | (EEq l r) -> ((listAppend ((checkExpr env) l)) ((checkExpr env) r)) | (ELt l r) -> ((listAppend ((checkExpr env) l)) ((checkExpr env) r)) | (EGt l r) -> ((listAppend ((checkExpr env) l)) ((checkExpr env) r)) | (EApp f x) -> ((listAppend ((checkExpr env) f)) ((checkExpr env) x)) | (ELam param body) -> (let env2 = ((envAdd env) param) in ((checkExpr env2) body)) | (ELetIn name rhs body) -> (let rhsErrs = ((checkExpr env) rhs) in (let env2 = ((envAdd env) name) in (let bodyErrs = ((checkExpr env2) body) in ((listAppend rhsErrs) bodyErrs)))) | (ELetInTup2 a b rhs body) -> (let rhsErrs = ((checkExpr env) rhs) in (let env2 = ((envAdd env) a) in (let env3 = ((envAdd env2) b) in (let bodyErrs = ((checkExpr env3) body) in ((listAppend rhsErrs) bodyErrs))))) | (EIf cnd thn els) -> (let ce = ((checkExpr env) cnd) in (let te = ((checkExpr env) thn) in (let ee = ((checkExpr env) els) in ((listAppend ((listAppend ce) te)) ee)))) | (EMatch scrut pats bodies) -> (let scrutErrs = ((checkExpr env) scrut) in (let armErrs = (((checkArms env) pats) bodies) in ((listAppend scrutErrs) armErrs))) | (ENil) -> [] | (ECons h t) -> ((listAppend ((checkExpr env) h)) ((checkExpr env) t)))
-and checkArms env pats bodies = (match pats with | (p :: ps) -> 0L)
+and checkArmsCons env p ps bodies = (match bodies with | (b :: bs) -> (let armEnv = ((envAddAll env) (patBinders p)) in (let armErrs = ((checkExpr armEnv) b) in (let restErrs = (((checkArms env) ps) bs) in ((listAppend armErrs) restErrs)))) | _ -> [])
+and checkArms env pats bodies = (match pats with | (p :: ps) -> ((((checkArmsCons env) p) ps) bodies) | _ -> [])
+and checkFnBody env fd = (match fd with | (MkFn _ params _ body) -> (let bodyEnv = ((envAddAll env) (paramNames params)) in ((checkExpr bodyEnv) body)))
+and checkLetBody env ld = (match ld with | (MkLet _ body) -> ((checkExpr env) body))
+and checkDecl env d = (match d with | (DFn fd) -> ((checkFnBody env) fd) | (DLet ld) -> ((checkLetBody env) ld) | (DType _) -> [] | (DTag _) -> [] | (DImport _) -> [] | (DExport inner) -> ((checkDecl env) inner))
+and checkDecls env decls = (match decls with | (d :: rest) -> ((listAppend ((checkDecl env) d)) ((checkDecls env) rest)) | _ -> [])
+and ctorName c = (match c with | (MkCtor n _) -> n)
+and ctorNames cs = (((listFold (fun acc -> (fun c -> ((listAppend acc) ((ctorName c) :: []))))) []) cs)
+and fnName fd = (match fd with | (MkFn n _ _ _) -> n)
+and letName ld = (match ld with | (MkLet n _) -> n)
+and typeDeclCtors td = (match td with | (MkTypeDecl _ _ ctors) -> (ctorNames ctors))
+and collectDecl env d = (match d with | (DFn fd) -> ((envAdd env) (fnName fd)) | (DLet ld) -> ((envAdd env) (letName ld)) | (DType td) -> ((envAddAll env) (typeDeclCtors td)) | (DTag name) -> ((envAdd env) name) | (DImport _) -> env | (DExport inner) -> ((collectDecl env) inner))
+and collectDecls env decls = (match decls with | (d :: rest) -> ((collectDecls ((collectDecl env) d)) rest) | _ -> env)
+
+type TypeCtors =
+    | MkTypeCtors of string * List<string>
+
+let rec typeDeclName td = (match td with | (MkTypeDecl n _ _) -> n)
+and collectTypesDecl d = (match d with | (DType td) -> (((MkTypeCtors (typeDeclName td)) (typeDeclCtors td)) :: []) | (DExport inner) -> (collectTypesDecl inner) | _ -> [])
+and collectTypes decls = (match decls with | (d :: rest) -> ((listAppend (collectTypesDecl d)) (collectTypes rest)) | _ -> [])
+and lookupCtors types name = (match types with | ((MkTypeCtors n cs) :: rest) -> (if (n = name) then cs else ((lookupCtors rest) name)) | _ -> [])
+and patIsCatchAll p = (match p with | (PWild) -> true | (PVar _) -> true | (PCons _ _) -> true | (PCon _ _) -> false | (PStr _) -> false | _ -> false)
+and armsHaveCatchAll pats = (((listFold (fun acc -> (fun p -> (if acc then true else (patIsCatchAll p))))) false) pats)
+and coveredCtorsCons p tail = (match p with | (PCon name _) -> ((listAppend (name :: [])) tail) | _ -> tail)
+and coveredCtors pats = (match pats with | (p :: rest) -> (let tail = (coveredCtors rest) in ((coveredCtorsCons p) tail)) | _ -> [])
+and missingCtorErrs ty required covered = (match required with | (c :: rest) -> (let tail = (((missingCtorErrs ty) rest) covered) in (let isCovered = (((listFold (fun acc -> (fun x -> (if acc then true else (if (x = c) then true else false))))) false) covered) in (if isCovered then tail else (let msg = ((strConcat ((strConcat ((strConcat "E003 NonExhaustiveMatch ") ty)) " missing ")) c) in ((listAppend (msg :: [])) tail))))) | _ -> [])
+and typeRefName tr = (match tr with | (TR s) -> s)
+and paramTypeName p = (match p with | (MkParam _ tr) -> (typeRefName tr))
+and lastParamTypeName ps = (((listFold (fun acc -> (fun p -> (paramTypeName p)))) "") ps)
+and exhaustivenessFn types fd = (match fd with | (MkFn _ params _ body) -> (let lastTy = (lastParamTypeName params) in (if ((strLen lastTy) = 0L) then [] else (let required = ((lookupCtors types) lastTy) in (if (listIsEmpty required) then [] else (match body with | (EMatch _ pats _) -> (if (armsHaveCatchAll pats) then [] else (let covered = (coveredCtors pats) in (((missingCtorErrs lastTy) required) covered))) | _ -> []))))))
+and exhaustivenessDecl types d = (match d with | (DFn fd) -> ((exhaustivenessFn types) fd) | (DExport inner) -> ((exhaustivenessDecl types) inner) | _ -> [])
+and exhaustivenessCheck types decls = (match decls with | (d :: rest) -> ((listAppend ((exhaustivenessDecl types) d)) ((exhaustivenessCheck types) rest)) | _ -> [])
+
+type TypeExpr =
+    | TyName of string
+    | TyVar of string
+
+type TyBinding =
+    | MkTyBinding of string * TypeExpr
+
+type TypeEnv =
+    | MkTypeEnv of List<TyBinding>
+
+let rec typeEnvAdd name ty env = (match env with | (MkTypeEnv bs) -> (MkTypeEnv ((listAppend bs) (((MkTyBinding name) ty) :: []))))
+and typeEnvLookup env name = (match env with | (MkTypeEnv bs) -> ((typeEnvLookupList bs) name))
+and typeEnvLookupList bs name = (match bs with | ((MkTyBinding n t) :: rest) -> (if (n = name) then t else ((typeEnvLookupList rest) name)) | _ -> (TyVar "?"))
+and showType t = (match t with | (TyName n) -> n | (TyVar v) -> v)
+and typeEqTyVar va b = (if (va = "?") then true else (match b with | (TyVar vb) -> (va = vb) | _ -> false))
+and typeEqTyName na b = (match b with | (TyName nb) -> (na = nb) | (TyVar vb) -> (vb = "?") | _ -> false)
+and typeEq a b = (match a with | (TyVar va) -> ((typeEqTyVar va) b) | (TyName na) -> ((typeEqTyName na) b))
+and inferExprType env e = (match e with | (EInt _) -> (TyName "Int") | (EStr _) -> (TyName "Str") | (EChar _) -> (TyName "Char") | (EVar name) -> ((typeEnvLookup env) name) | (ETagged inner _) -> ((inferExprType env) inner) | (EAdd _ _) -> (TyName "Int") | (ESub _ _) -> (TyName "Int") | (EMul _ _) -> (TyName "Int") | (EDiv _ _) -> (TyName "Int") | (EEq _ _) -> (TyName "Bool") | (ELt _ _) -> (TyName "Bool") | (EGt _ _) -> (TyName "Bool") | (EIf _ thn _) -> ((inferExprType env) thn) | (ENil) -> (TyName "List") | (ECons _ _) -> (TyName "List") | _ -> (TyVar "?"))
+and mkTypeMismatch tl tr = (let head = ((strConcat "E001 TypeMismatch ") (showType tl)) in ((strConcat ((strConcat head) " vs ")) (showType tr)))
+and checkArith env l r = (let tl = ((inferExprType env) l) in (let tr = ((inferExprType env) r) in (let tyInt = (TyName "Int") in (let lErr = (if ((typeEq tl) tyInt) then [] else (((mkTypeMismatch tyInt) tl) :: [])) in (let rErr = (if ((typeEq tr) tyInt) then [] else (((mkTypeMismatch tyInt) tr) :: [])) in ((listAppend lErr) rErr))))))
+and checkIfBranches env thn els = (let tt = ((inferExprType env) thn) in (let te = ((inferExprType env) els) in (if ((typeEq tt) te) then [] else (((mkTypeMismatch tt) te) :: []))))
+and typeCheck env e = (match e with | (EInt _) -> [] | (EStr _) -> [] | (EChar _) -> [] | (EVar _) -> [] | (ETagged inner _) -> ((typeCheck env) inner) | (EAdd l r) -> (let here = (((checkArith env) l) r) in (let lErrs = ((typeCheck env) l) in (let rErrs = ((typeCheck env) r) in ((listAppend here) ((listAppend lErrs) rErrs))))) | (ESub l r) -> (let here = (((checkArith env) l) r) in (let lErrs = ((typeCheck env) l) in (let rErrs = ((typeCheck env) r) in ((listAppend here) ((listAppend lErrs) rErrs))))) | (EMul l r) -> (let here = (((checkArith env) l) r) in (let lErrs = ((typeCheck env) l) in (let rErrs = ((typeCheck env) r) in ((listAppend here) ((listAppend lErrs) rErrs))))) | (EDiv l r) -> (let here = (((checkArith env) l) r) in (let lErrs = ((typeCheck env) l) in (let rErrs = ((typeCheck env) r) in ((listAppend here) ((listAppend lErrs) rErrs))))) | (EEq l r) -> (let lErrs = ((typeCheck env) l) in (let rErrs = ((typeCheck env) r) in ((listAppend lErrs) rErrs))) | (ELt l r) -> (let lErrs = ((typeCheck env) l) in (let rErrs = ((typeCheck env) r) in ((listAppend lErrs) rErrs))) | (EGt l r) -> (let lErrs = ((typeCheck env) l) in (let rErrs = ((typeCheck env) r) in ((listAppend lErrs) rErrs))) | (EApp f x) -> ((listAppend ((typeCheck env) f)) ((typeCheck env) x)) | (ELam _ body) -> ((typeCheck env) body) | (ELetIn _ rhs body) -> ((listAppend ((typeCheck env) rhs)) ((typeCheck env) body)) | (ELetInTup2 _ _ rhs body) -> ((listAppend ((typeCheck env) rhs)) ((typeCheck env) body)) | (EIf c t el) -> (let ce = ((typeCheck env) c) in (let te = ((typeCheck env) t) in (let ee = ((typeCheck env) el) in (let branchErrs = (((checkIfBranches env) t) el) in ((listAppend ((listAppend ((listAppend ce) te)) ee)) branchErrs))))) | (EMatch scrut _ bodies) -> (let sErrs = ((typeCheck env) scrut) in (let bodiesErrs = ((typeCheckBodies env) bodies) in ((listAppend sErrs) bodiesErrs))) | (ENil) -> [] | (ECons h t) -> ((listAppend ((typeCheck env) h)) ((typeCheck env) t)))
+and typeCheckBodies env bodies = (match bodies with | (b :: rest) -> ((listAppend ((typeCheck env) b)) ((typeCheckBodies env) rest)) | _ -> [])
+and seedParamOne env p = (match p with | (MkParam n tr) -> (((typeEnvAdd n) (TyName (typeRefName tr))) env))
+and seedParams env ps = (((listFold (fun acc -> (fun p -> ((seedParamOne acc) p)))) env) ps)
+and hmFn fd = (match fd with | (MkFn _ params _ body) -> (let env0 = (MkTypeEnv []) in (let env = ((seedParams env0) params) in ((typeCheck env) body))))
+and hmDecl d = (match d with | (DFn fd) -> (hmFn fd) | (DExport inner) -> (hmDecl inner) | _ -> [])
+and hmCheck decls = (match decls with | (d :: rest) -> ((listAppend (hmDecl d)) (hmCheck rest)) | _ -> [])
+and stdlibNames = 0L

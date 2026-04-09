@@ -1862,7 +1862,7 @@ type TyBinding = MkTyBinding Str TypeExpr
 
 type TypeEnv = MkTypeEnv List[TyBinding]
 
-fn typeEnvAdd(env TypeEnv)(name Str)(ty TypeExpr) TypeEnv =
+fn typeEnvAdd(name Str)(ty TypeExpr)(env TypeEnv) TypeEnv =
   match env with
     | MkTypeEnv bs -> MkTypeEnv (listAppend bs [(MkTyBinding name ty)])
 
@@ -2043,7 +2043,7 @@ fn typeCheckBodies(env TypeEnv)(bodies List[Expr]) List[Str] =
 -- inside a `\acc p. ...` body — keeping the match at fn-body scope
 -- sidesteps that dispatcher ambiguity.
 fn seedParamOne(env TypeEnv)(p Param) TypeEnv =
-  | MkParam n tr -> typeEnvAdd env n (TyName (typeRefName tr))
+  | MkParam n tr -> typeEnvAdd n (TyName (typeRefName tr)) env
 
 -- Seed a `TypeEnv` with one binding per fn param. `MkParam name (TR
 -- tyName)` becomes `name -> TyName tyName`. This is all the HM env
