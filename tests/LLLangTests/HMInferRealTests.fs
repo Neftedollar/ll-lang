@@ -66,7 +66,12 @@ let ``18-hminfer-real.lll runs and emits unify + inferExpr result lines`` () =
     // literal / addition / var-in-env / application-in-env / app-mismatch
     // expression shapes. Phase 7.7c adds t11-t15: ELam (identity +
     // lambda-with-Add), ELet (mono-bind), and EIf (then/else same type +
-    // then/else mismatch).
+    // then/else mismatch). Phase 7.7d adds t16-t20: higher-order lambda
+    // (exercises composeSubst chains), occurs check (E008 InfiniteType),
+    // and EMatch inference (success + branch mismatch + PVar binding).
+    // Error lines now carry the real E001 / E002 / E008 message from the
+    // new `Outcome A = OkR A | ErrR Str` carrier (replaces the 7.7b
+    // `TyName "ERROR"` sentinel).
     //   t1:  unify Int Int                         -> ok
     //   t2:  unify Int Str                         -> mismatch
     //   t3:  unify a Int                           -> ok bound a
@@ -76,12 +81,17 @@ let ``18-hminfer-real.lll runs and emits unify + inferExpr result lines`` () =
     //   t7:  infer (EAdd 1 2)                      -> Int
     //   t8:  infer (EVar "x") {x: Int}             -> Int
     //   t9:  infer (EApp double (EInt 5))          -> Int
-    //   t10: infer (EApp double (EStr "x"))        -> ERROR (unify fail)
+    //   t10: infer (EApp double (EStr "x"))        -> ERROR E001 TypeMismatch
     //   t11: infer (ELam "x" (EVar "x"))           -> ($0 -> $0) identity
     //   t12: infer (ELam "x" (EAdd (EVar "x") 1))  -> (Int -> Int)
     //   t13: infer (ELet "x" 5 (EAdd (EVar "x") 1))-> Int
     //   t14: infer (EIf true 1 2)                  -> Int
-    //   t15: infer (EIf true 1 "x")                -> ERROR (branch mismatch)
+    //   t15: infer (EIf true 1 "x")                -> ERROR E001 TypeMismatch
+    //   t16: infer (\f. \x. f x)                   -> higher-order function
+    //   t17: unify a (a -> Int)                    -> infinite (E008 occurs)
+    //   t18: infer (match 1 | 0 -> "zero" | _ -> "other") -> Str
+    //   t19: infer (match 1 | 0 -> "zero" | 1 -> 42)      -> ERROR E001
+    //   t20: infer (match 1 | x -> x + 1)          -> Int (PVar binds `x`)
     let expected =
         [ "t1 unify Int Int ok"
           "t2 unify Int Str mismatch"
@@ -92,12 +102,17 @@ let ``18-hminfer-real.lll runs and emits unify + inferExpr result lines`` () =
           "t7 infer (1 + 2) : Int"
           "t8 infer x in env : Int"
           "t9 infer (double 5) in env : Int"
-          "t10 infer (double \"x\") in env : ERROR"
+          "t10 infer (double \"x\") in env : ERROR E001 TypeMismatch Int vs Str"
           "t11 infer (\\x. x) : ($0 -> $0)"
           "t12 infer (\\x. x + 1) : (Int -> Int)"
           "t13 infer (let x = 5 in x + 1) : Int"
           "t14 infer (if true then 1 else 2) : Int"
-          "t15 infer (if true then 1 else \"x\") : ERROR" ]
+          "t15 infer (if true then 1 else \"x\") : ERROR E001 TypeMismatch Int vs Str"
+          "t16 infer (\\f. \\x. f x) : (($1 -> $2) -> ($1 -> $2))"
+          "t17 unify a (a -> Int) infinite"
+          "t18 infer (match 1 | 0 -> \"zero\" | _ -> \"other\") : Str"
+          "t19 infer (match 1 | 0 -> \"zero\" | 1 -> 42) : ERROR E001 TypeMismatch Str vs Int"
+          "t20 infer (match 1 | x -> x + 1) : Int" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),
