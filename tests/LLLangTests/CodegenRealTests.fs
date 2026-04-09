@@ -73,8 +73,22 @@ let ``19-codegen-real.lll runs and emits F# source lines for each TDFn`` () =
     //   Maybe — parametric `<'A>`, arg-bearing + nullary ctors
     //   Shape — no type params, mixed nullary and multi-arg TAName ctors
     //   Pair  — two-arg TAVar ctor ensuring the `*` join shape
+    // Plus Phase 7.8d: module header + minimal F# stdlib prelude block.
+    //   module header — "module Examples.Generated" above everything else
+    //   prelude start — "// --- ll-lang stdlib prelude (auto-generated) ---"
+    //   prelude body  — 5-line subset of host `fsharpPreludeCore`
+    //                   (listMap, listLen, strLen, strConcat, print)
+    //   prelude end   — "// --- end prelude ---"
     let expected =
-        [ "let inc x = (x + 1L)"
+        [ "module Examples.Generated"
+          "// --- ll-lang stdlib prelude (auto-generated) ---"
+          "let listMap f xs = List.map f xs"
+          "let listLen (xs: 'a list) : int64 = int64 (List.length xs)"
+          "let strLen (s: string) : int64 = int64 s.Length"
+          "let strConcat (a: string) (b: string) = a + b"
+          "let print (s: string) = System.Console.Write(s)"
+          "// --- end prelude ---"
+          "let inc x = (x + 1L)"
           "let greet = \"hello\""
           "let addOne x = (let y = (x + 1L) in y)"
           "let callInc x = (inc x)"
