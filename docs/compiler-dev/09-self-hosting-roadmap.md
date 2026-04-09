@@ -3986,3 +3986,108 @@ the bootstrap's complexity, more unbound-var errors
 are likely hiding just behind `charToInt`. The
 fixpoint probe after 7.9p should reveal the next
 layer.
+
+### 2026-04 — Phase 7.9p: stdlib audit (DONE)
+
+**Problem:** After 7.9o unblocked the parser, the
+elaborator's name-resolution pass became the next
+blocker. Running the bootstrap on its own source
+(the fixpoint probe) produced a 26-byte stdout
+containing exactly `E002 UnboundVar charToInt`.
+The bootstrap's `stdlibNames` list — the seed
+environment the elaborator uses to satisfy calls
+to built-ins that aren't declared via `fn` — was
+missing names the bootstrap source itself uses.
+
+**Audit method:** The probe already enumerates the
+full `E002 UnboundVar` set in one shot (the
+bootstrap's `checkDecls` walks all decls and
+collects every error; `showErrs` joins them with
+`\n`). So the probe output is the ground truth —
+no regex grep heuristic needed. The entire
+`UnboundVar` cascade turned out to be a *single*
+name: `charToInt`. Every other stdlib call the
+bootstrap uses (`strConcat`, `strLen`, `printfn`,
+`listMap`, `listLen`, `listAppend`, `listIsEmpty`,
+`listFold`, `readFile`, `true`, `false`, `print`)
+was already in the list; every other name the
+bootstrap references resolves via its own
+top-level `fn` declarations (which `collectDecls`
+adds to the env alongside the stdlib seed).
+
+**Fix:** Extend `stdlibNames` with a single name
+— `charToInt`. New list has 13 entries:
+
+```
+["strConcat" "strLen" "print" "printfn" "listMap"
+ "listLen" "listAppend" "listIsEmpty" "listFold"
+ "readFile" "true" "false" "charToInt"]
+```
+
+**Fixture:** New `20n-bootstrap-input-stdlib-full.lll`
+— a minimal module with `fn demo(c Char) Int =
+charToInt c` + a zero-arg `main`. Before the fix,
+running the bootstrap on this fixture surfaces
+`E002 UnboundVar charToInt`; after the fix, the
+elaborator accepts the name and the codegen pass
+emits `let demo` + the `[<EntryPoint>]` main wrapper.
+
+**Test:** New `Phase 7.9p` regression in
+`BootstrapCompilerTests.fs` follows the same
+20a-backup / copy-fixture / restore pattern as
+7.9h–7.9o. Asserts (a) no `E002 UnboundVar
+charToInt`, (b) no `E002 UnboundVar` at all,
+(c) `let demo` or `let rec demo` in emitted F#,
+(d) `[<EntryPoint>]` present.
+
+Tests: 414 → 415 (+1 for the stdlib-audit
+regression test).
+
+**Fixpoint-probe confirmation:**
+
+| Metric | Before 7.9p | After 7.9p |
+|---|---|---|
+| stdout bytes | 26 | 2253 |
+| content | `E002 UnboundVar charToInt` | ~100 lines of emitted F# |
+| pipeline stage reached | elaborator (name check) | codegen (partial) |
+
+Post-fix, the bootstrap's codegen pass emits the
+module header, stdlib prelude, *all thirteen*
+top-level `type` decls (Maybe, Token, TypeArg,
+Ctor, TypeDecl, TypeRef, Param, Pat, Expr,
+LetDecl, FnDecl, Decl, Module), and then the
+first `fn` — `isUpperChar` — as a single malformed
+`let` line:
+
+```
+let isUpperChar c = (let n = (charToInt c) in
+  (if (n < 65L) then false else 0L))
+```
+
+The emitted body mixes `Bool` (`false`) and `Int`
+(`0L`) in the `if` branches — the bootstrap's
+codegen pass for `EIf` doesn't unify the two arms
+into a common type, and the entire pass halts
+after this one fn (exit 0, no stack trace). That
+means the remaining fns never get emitted, and
+there's no `let rec`, no `[<EntryPoint>]` main
+wrapper.
+
+**Deliberately out of scope:** this codegen
+halting is *not* a name-resolution issue, so it's
+not 7.9p's slice. The E002 cascade is clear.
+
+**Next tick:** **Phase 7.9q** — **codegen
+continuation / if-branch typing**. The bootstrap's
+`emitExpr` pass for `EIf` needs to either (a)
+unify the two arm types via the minimal HM and
+coerce the mismatched branch, or (b) emit a type
+annotation on the if expr so F# accepts it. More
+importantly, whatever is halting the emission
+walker after the first fn needs investigation:
+exit 0 + no error + truncated stdout means the
+walker is quietly running out of something
+(recursive depth? an exception swallowed by a
+catch-all?). Either way, the next probe slice is
+a **codegen** issue, not elaboration. The E002
+UnboundVar cascade is fully clear.
