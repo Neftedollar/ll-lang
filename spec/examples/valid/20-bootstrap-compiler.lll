@@ -1064,17 +1064,17 @@ fn parseLamParams(acc List[Str])(toks List[Token]) =
     | TLower name :: rest -> parseLamParams (listAppend acc [name]) rest
     | _ -> (acc, toks)
 
-fn wrapLamParams(params List[Str])(body Expr) Expr =
-  match params with
+fn wrapLamParams(__ll_params List[Str])(body Expr) Expr =
+  match __ll_params with
     | p :: rest -> ELam p (wrapLamParams rest body)
     | _ -> body
 
 fn parseLam(toks List[Token]) =
-  let (params, rest) = parseLamParams [] toks in
+  let (__ll_params, rest) = parseLamParams [] toks in
   match rest with
     | TDot :: rest2 ->
       let (body, rest3) = parseExpr rest2 in
-      (wrapLamParams params body, rest3)
+      (wrapLamParams __ll_params body, rest3)
     | _ -> (EInt 0, toks)
 
 -- `if c then a else b`. Each of the three sub-expressions is parsed via
@@ -1694,8 +1694,8 @@ fn checkArms(env Env)(pats List[Pat])(bodies List[Expr]) List[Str] =
 -- `DExport inner` recurses into the inner decl so an exported fn's
 -- body still gets name-resolved.
 fn checkFnBody(env Env)(fd FnDecl) List[Str] =
-  | MkFn _ params _ body ->
-    let bodyEnv = envAddAll env (paramNames params) in
+  | MkFn _ __ll_params _ body ->
+    let bodyEnv = envAddAll env (paramNames __ll_params) in
     checkExpr bodyEnv body
 
 fn checkLetBody(env Env)(ld LetDecl) List[Str] =
@@ -1840,8 +1840,8 @@ fn lastParamTypeName(ps List[Param]) Str =
 -- Run the exhaustiveness check on a single `FnDecl` body. Shared
 -- between the plain `DFn fd` arm and the `DExport (DFn fd)` unwrap.
 fn exhaustivenessFn(types List[TypeCtors])(fd FnDecl) List[Str] =
-  | MkFn _ params _ body ->
-    let lastTy = lastParamTypeName params in
+  | MkFn _ __ll_params _ body ->
+    let lastTy = lastParamTypeName __ll_params in
     if strLen lastTy == 0 then []
     else
       let required = lookupCtors types lastTy in
@@ -2107,9 +2107,9 @@ fn seedParams(env TypeEnv)(ps List[Param]) TypeEnv =
 -- Run the HM pass on a single `FnDecl` body. Seeds a fresh `TypeEnv`
 -- from the fn's params, then walks the body with `typeCheck`.
 fn hmFn(fd FnDecl) List[Str] =
-  | MkFn _ params _ body ->
+  | MkFn _ __ll_params _ body ->
     let env0 = MkTypeEnv [] in
-    let env = seedParams env0 params in
+    let env = seedParams env0 __ll_params in
     typeCheck env body
 
 -- Run the HM pass on a single decl. Only `DFn` contributes (fn bodies
@@ -2479,8 +2479,8 @@ fn emitFnParamsTail(first Str)(rest List[Str]) Str =
 -- decl walker to single out the entry-point fn so it gets the
 -- `[<EntryPoint>]` wrapper instead of the plain `let` form. Mirrors
 -- `19-codegen-real.lll`'s `isMainFn`.
-fn emitIsMainFn(name Str)(params List[Param]) Bool =
-  match params with
+fn emitIsMainFn(name Str)(__ll_params List[Param]) Bool =
+  match __ll_params with
     | _ :: _ -> false
     | _ -> if name == "main" then true else false
 
@@ -2547,9 +2547,9 @@ fn emitDeclStandalone(d Decl) Str =
   | DExport inner -> emitDeclStandalone inner
 
 fn emitDeclStandaloneFn(fd FnDecl) Str =
-  | MkFn name params _ body ->
-    let pnames = emitParamNames params in
-    if emitIsMainFn name params then emitMainDecl body
+  | MkFn name __ll_params _ body ->
+    let pnames = emitParamNames __ll_params in
+    if emitIsMainFn name __ll_params then emitMainDecl body
     else emitFnPlain name pnames body
 
 -- Dispatch a single `DFn` to `emitFnFirst`. Used by `emitFnGroup`'s
@@ -2559,8 +2559,8 @@ fn emitDeclFnFirst(d Decl) Str =
   | _ -> ""
 
 fn emitDeclFnFirstUnwrap(fd FnDecl) Str =
-  | MkFn name params _ body ->
-    let pnames = emitParamNames params in
+  | MkFn name __ll_params _ body ->
+    let pnames = emitParamNames __ll_params in
     emitFnFirst name pnames body
 
 -- Dispatch a single `DFn` to `emitFnCont`. Same split shape as
@@ -2570,8 +2570,8 @@ fn emitDeclFnCont(d Decl) Str =
   | _ -> ""
 
 fn emitDeclFnContUnwrap(fd FnDecl) Str =
-  | MkFn name params _ body ->
-    let pnames = emitParamNames params in
+  | MkFn name __ll_params _ body ->
+    let pnames = emitParamNames __ll_params in
     emitFnCont name pnames body
 
 -- Emit a 2+ run of consecutive non-main `DFn` decls as a single
@@ -2651,8 +2651,8 @@ fn emitStepMain(d Decl)(rest List[Decl])(pending List[Decl])(acc Str) Str =
   emitGroupLoop rest [] acc3
 
 -- DFn branch dispatch: main → boundary; non-main → push onto pending.
-fn emitStepFn(d Decl)(name Str)(params List[Param])(rest List[Decl])(pending List[Decl])(acc Str) Str =
-  if emitIsMainFn name params then emitStepMain d rest pending acc
+fn emitStepFn(d Decl)(name Str)(__ll_params List[Param])(rest List[Decl])(pending List[Decl])(acc Str) Str =
+  if emitIsMainFn name __ll_params then emitStepMain d rest pending acc
   else emitGroupLoop rest (d :: pending) acc
 
 -- Per-step dispatch: look at the head decl and decide whether to
@@ -2670,7 +2670,7 @@ fn emitStep(d Decl)(rest List[Decl])(pending List[Decl])(acc Str) Str =
 -- decision in `emitStepFn`.
 fn emitStepFnUnwrap(d Decl)(fd FnDecl)(rest List[Decl])(pending List[Decl])(acc Str) Str =
   match fd with
-    | MkFn name params _ _ -> emitStepFn d name params rest pending acc
+    | MkFn name __ll_params _ _ -> emitStepFn d name __ll_params rest pending acc
 
 -- Generic boundary step: flush pending, emit `d` as a standalone
 -- block, keep walking. Shared by `DType` / `DLet` / `DTag` / `DImport`.
@@ -2762,9 +2762,9 @@ fn main() =
   -- harness) must set its working directory to the repo root.
   let src = readFile "spec/examples/valid/20a-bootstrap-input.lll" in
   let toks = tokenize src in
-  let mod = parseModule toks in
-  match mod with
+  let __ll_mod = parseModule toks in
+  match __ll_mod with
     | MkModule _ decls ->
       let errs = elaborate decls in
-      if listIsEmpty errs then printfn (emitModule mod)
+      if listIsEmpty errs then printfn (emitModule __ll_mod)
       else printfn (showErrs errs)
