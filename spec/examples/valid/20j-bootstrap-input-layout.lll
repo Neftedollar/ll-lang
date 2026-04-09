@@ -1,0 +1,8 @@
+module Examples.Clean
+type Maybe A = Some A | None
+fn describe(m Maybe[Int]) Int =
+  let fallback = 0 in
+  match m with
+    | Some n -> n
+    | None -> fallback
+fn main() Int = describe (Some 5)

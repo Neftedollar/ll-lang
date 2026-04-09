@@ -588,3 +588,77 @@ let ``20-bootstrap-compiler.lll accepts constructor patterns in match arms (Phas
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll accepts multi-line let-in and match arm layout (Phase 7.9.newlines)`` () =
+    // Phase 7.9.newlines: before the fix, the bootstrap compiler's
+    // `parseLetIn` and `parseArms` peeked at the next token without
+    // first calling `skipNewlines`, so any intervening `TNewline`
+    // caused silent mis-parse.
+    //
+    // Bundles two sibling bugs — Neftedollar/ll-lang#8 (parseLetIn)
+    // and #12 (parseArms) — because the root cause is identical and
+    // one surgery closes both.
+    //
+    // Bug 1 (#8): `let x = 0 in` followed by a newline before the
+    // body caused `parseExpr` to be called on `TNewline :: ...`,
+    // garbling the body and cascading into `E002 UnboundVar`.
+    //
+    // Bug 2 (#12): a multi-line match
+    //   match m with
+    //     | Some n -> n
+    //     | None -> 0
+    // silently dropped the `| None` arm because after the first arm
+    // body, a `TNewline` intervened before the next `TBar`, so
+    // `parseArms` terminated at the `TNewline :: TBar :: _` peek.
+    //
+    // The fix threads `skipNewlines` through `parseLetIn` (after
+    // `TEq` and after `TKwIn`) and `parseArms` (at entry, so the
+    // `TBar :: _` peek sees through leading newlines).
+    //
+    // Fixture `20j-bootstrap-input-layout.lll` exercises BOTH paths:
+    //   * `let fallback = 0 in` + newline + `match m with` (bug #8)
+    //   * multi-line arms `| Some n -> n` / `| None -> fallback` (#12)
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let layoutPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20j-bootstrap-input-layout.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
+    Assert.True(File.Exists layoutPath, $"missing fixture: {layoutPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(layoutPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001 TypeMismatch error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO error output; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec describe" || stdout.Contains "let describe",
+            $"expected emitted F# to contain `let describe` or `let rec describe`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "let main" || stdout.Contains "and main",
+            $"expected emitted F# to contain `let main` or `and main`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "| (Some n) ->",
+            $"expected emitted F# to contain `| (Some n) ->` (Some arm survived); stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "| (None) ->",
+            $"expected emitted F# to contain `| (None) ->` (None arm survived); stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "fallback",
+            $"expected emitted F# to contain `fallback` (let-in body survived); stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
