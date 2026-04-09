@@ -154,3 +154,42 @@ let ``20-bootstrap-compiler.lll actually reads its source from 20a-bootstrap-inp
     finally
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll parses Maybe[Int] return type and emits main (bracket-form types in fn signatures)`` () =
+    // Phase 7.9d: the bootstrap compiler's parseParamGroups /
+    // parseReturnType only accepted bare `Upper` type names. A fn with
+    // a bracket-form return type like `Maybe[Int]` caused the parser to
+    // consume only the head `Maybe`, leaving `[Int] = Some v` in the
+    // token stream, which then desynchronised the outer decl loop and
+    // silently dropped the subsequent `main` decl entirely.
+    //
+    // This test swaps the 20a input for a variant that exercises the
+    // bracket-form return type and asserts that the emitted F# source
+    // contains `wrap`, `let main`, and `[<EntryPoint>]` — proving
+    // `main` is no longer dropped.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let maybePath =
+        Path.Combine(repoRoot, "spec/examples/valid/20b-bootstrap-input-maybe.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
+    Assert.True(File.Exists maybePath,  $"missing fixture: {maybePath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(maybePath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.True(
+            stdout.Contains "wrap",
+            $"expected emitted F# to contain `wrap`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "let main",
+            $"expected emitted F# to contain `let main`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
