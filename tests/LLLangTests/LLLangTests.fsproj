@@ -34,5 +34,6 @@
     <Compile Include="PipelineRealTests.fs" />
     <Compile Include="HMInferRealTests.fs" />
     <Compile Include="CodegenRealTests.fs" />
+    <Compile Include="BootstrapCompilerTests.fs" />
   </ItemGroup>
 </Project>
