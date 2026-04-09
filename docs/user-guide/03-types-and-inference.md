@@ -6,15 +6,17 @@ inference would be ambiguous or where you want to lock down a signature.
 
 ## Base types
 
-| ll-lang  | Codegen (F#) |
-|----------|--------------|
-| `Int`    | `int64`      |
-| `Float`  | `float`      |
-| `Str`    | `string`     |
-| `Bool`   | `bool`       |
-| `Unit`   | `unit`       |
+| ll-lang  | Codegen (F#) | Literal form         |
+|----------|--------------|----------------------|
+| `Int`    | `int64`      | `42`                 |
+| `Float`  | `float`      | `3.14`               |
+| `Str`    | `string`     | `"hello"`            |
+| `Bool`   | `bool`       | `true`, `false`      |
+| `Char`   | `char`       | `'c'`, `'\n'`, `'\\'`|
+| `Unit`   | `unit`       | (no literal)         |
 
 Integer literals always produce `Int`, decimal literals always produce `Float`.
+String and character literals share the escape set `\n \t \\ \" \'`.
 
 ## Inferred signatures
 

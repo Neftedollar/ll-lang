@@ -47,8 +47,8 @@ impl Functor Maybe = ...
 impl Monad Maybe = ...
 ```
 
-Internally the compiler mangles impl method names as `method_TypeName` (so
-`map` in `impl Functor Maybe` becomes `map_Maybe` in the codegen output).
+Internally the compiler mangles impl method names as `TypeName_method` (so
+`map` in `impl Functor Maybe` becomes `Maybe_map` in the codegen output).
 
 ## Using a constrained generic
 
@@ -99,7 +99,7 @@ correctly, and emits mangled impl method names in codegen. However:
 
 - There is no automatic instance resolution at call sites yet. If you write
   `map (\x. x * 2) (Some 5)` the compiler does not automatically pick
-  `map_Maybe` — you must call `map_Maybe` by its mangled name, or use a
+  `Maybe_map` — you must call `Maybe_map` by its mangled name, or use a
   constrained generic like `transform`.
 - `E006 MissingImpl` fires when a constrained generic is instantiated at a
   type that has no matching `impl`, but the constraint check is conservative.

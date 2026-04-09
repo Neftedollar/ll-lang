@@ -4,8 +4,9 @@ Every ll-lang file begins with `module`, followed by optional `import`
 declarations, then top-level `let`, `fn`, `type`, `tag`, `trait`, and `impl`
 declarations.
 
-Indentation is significant. Comments start with `--` and run to end of line.
-ASCII only. No semicolons, no braces.
+Indentation is significant. Comments start with `--` and run to end of line;
+both full-line (`-- header`) and trailing (`x + 1 -- increment`) forms are
+accepted. ASCII only. No semicolons, no braces.
 
 ## Module header
 
@@ -21,10 +22,23 @@ Must be the first non-comment token in the file.
 ```lll
 let pi = 3.14159
 let greeting = "hello"
+let ready = true
+let bang = '!'
 ```
 
 Type is inferred from the literal. Integer literals default to `Int` (emitted
-as `int64`), decimal literals to `Float`, quoted text to `Str`.
+as `int64`), decimal literals to `Float`, quoted text to `Str`, `true`/`false`
+to `Bool`, and single-quoted characters to `Char`.
+
+### Literals in detail
+
+| Form        | Type   | Notes                                       |
+|-------------|--------|---------------------------------------------|
+| `42`        | `Int`  | 64-bit signed                               |
+| `3.14`      | `Float`| requires a decimal point                    |
+| `"hi"`      | `Str`  | supports escapes `\n`, `\t`, `\\`, `\"`     |
+| `true` / `false` | `Bool` | keywords, not constructors             |
+| `'c'`       | `Char` | supports escapes `\n`, `\t`, `\\`, `\'`     |
 
 ## `fn`: functions
 
@@ -109,6 +123,15 @@ type Shape = Circle Float | Rect Float Float | Empty
 Constructors are uppercase identifiers followed by zero or more type arguments.
 Branches are separated by `|`.
 
+A multi-line form with an optional leading `|` is also accepted for readability:
+
+```lll
+type Color =
+  | Red
+  | Green
+  | Blue
+```
+
 ### Product types (records)
 
 ```lll
@@ -139,8 +162,11 @@ See [04-tags-and-units](04-tags-and-units.md) for the phantom state pattern.
 
 ## `match`: pattern matching
 
-Inside a function body, a pattern match is a series of `| pattern -> expr`
-branches. The compiler enforces exhaustiveness (error `E003`):
+There are two surface forms. The compiler enforces exhaustiveness (error
+`E003`) in both.
+
+**Shortcut form** — when a function body is a single match over its last
+parameter, omit the `match ... with` header and list branches directly:
 
 ```lll
 fn area(s Shape) Float =
@@ -149,11 +175,27 @@ fn area(s Shape) Float =
   | Empty -> 0.0
 ```
 
+**Explicit form** — `match <scrutinee> with` followed by branches. Useful
+inside a larger expression or after a `let ... in`:
+
+```lll
+fn describe(m Maybe[Int]) Int =
+  let fallback = 0 in
+  match m with
+    | Some n -> n
+    | None -> fallback
+```
+
+Newlines are tolerated between `=` and `match`, between `in` and `match`,
+and before the first `|` — both `match m with | Some n -> n ...` on one
+line and the indented variant above parse identically.
+
 Supported patterns:
 
 - `ConstructorName arg1 arg2` — constructor pattern, binds args by position
+  (e.g. `Some n`, `None`, `Rect w h`)
 - `name` — variable binding (catches anything, binds to `name`)
-- `42`, `"hi"`, `true` — literal match
+- `42`, `"hi"`, `true`, `'c'` — literal match (Int, Str, Bool, Char)
 - `_` — wildcard
 
 ## `tag`: semantic labels
