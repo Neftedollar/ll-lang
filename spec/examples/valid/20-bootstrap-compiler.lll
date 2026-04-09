@@ -1012,11 +1012,22 @@ fn parseArm(toks List[Token]) =
 -- `TBackslash` are deliberately NOT dispatched here: a nested `match`
 -- inside an arm body is still the ambiguous case the original
 -- constraint existed to guard against, and the bootstrap never puts a
--- bare lambda in arm-body position.
+-- bare lambda in arm-body position. Phase 7.10f: the multi-line arm
+-- form `| _ ->\n  let x = ... in ...` tokenises with a `TNewline`
+-- between the `TArrow` and the `TKwLet` / `TKwIf`, so skip leading
+-- newlines BEFORE the special-form dispatch — otherwise the arm body
+-- falls through to `parseCompare` on `TNewline :: TKwLet :: ...`,
+-- bottoms out at `(EInt 0, toks)`, and the `let ... in ...` gets
+-- ejected to top-level decl position, silently losing the outer fn
+-- param scope and producing a phantom `E002 UnboundVar` on any name
+-- from that scope used inside the let body. Mirrors the
+-- `skipNewlines` pattern in `parseArms`.
 fn parseArmBody(toks List[Token]) =
-  | TKwIf :: rest -> parseIf rest
-  | TKwLet :: rest -> parseLetIn rest
-  | _ -> parseCompare toks
+  let toks2 = skipNewlines toks in
+  match toks2 with
+    | TKwIf :: rest -> parseIf rest
+    | TKwLet :: rest -> parseLetIn rest
+    | _ -> parseCompare toks2
 
 -- Phase 7.9l: eagerly consume a sequence of atomic sub-patterns (var
 -- binder, wildcard, int literal, or empty-list `[]`) until the next
