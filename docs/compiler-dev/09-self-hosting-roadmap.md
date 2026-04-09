@@ -4091,3 +4091,146 @@ walker is quietly running out of something
 catch-all?). Either way, the next probe slice is
 a **codegen** issue, not elaboration. The E002
 UnboundVar cascade is fully clear.
+
+### 2026-04 — Phase 7.9q: parseIf newline tolerance (DONE)
+
+**Problem:** 7.9p's probe surfaced what looked like
+a codegen walker halt: stdout ended cleanly after a
+single malformed `let isUpperChar c = (... if ...
+then false else 0L)` line, with no `let rec`, no
+further fns, no `[<EntryPoint>]`. Exit 0. No stack
+trace. The visible symptom pointed at `emitExpr` /
+`emitGroupLoop` quietly failing on the first fn.
+
+**Diagnosis:** Before writing any fix, I reproduced
+the halt with a 6-fn fixture (all trivial bodies)
+— the bootstrap emitted all 6 fns correctly. That
+ruled out the walker-short-circuit hypotheses. I
+then wrote a second fixture with one `if a then x\n
+else if b then y\n else z` body followed by four
+more trivial fns. That fixture reproduced the halt:
+only the first fn emitted, with a truncated if body
+`(if (c < 65L) then 0L else 0L)`, exactly matching
+the symptom on the bootstrap's own `isUpperChar`.
+Root cause was not in codegen at all — it was in
+the bootstrap's `parseIf`:
+
+```
+fn parseIf(toks List[Token]) =
+  let (c, rest) = parseExpr toks in
+  let rest2 = match rest with
+    | TKwThen :: r -> r
+    | _ -> rest
+  in
+  ...
+  let rest4 = match rest3 with
+    | TKwElse :: r -> r
+    | _ -> rest3
+  in
+  ...
+```
+
+The two `TKwThen :: r` / `TKwElse :: r` match arms
+have no newline tolerance. On a multi-line if
+like `if c < 65 then false\n  else if c > 90 then
+false\n  else true`, the token stream between arms
+is `... TKwThen (false) TNewline TKwElse ...`.
+After parsing the `then` branch body, `parseIf`
+checks for `TKwElse` but the head is `TNewline` —
+the wildcard fires, leaving `rest4 = rest3`, and
+`parseExpr` is called on `TNewline :: TKwElse :: ...`.
+That bottoms out in `parseAtom`'s `| _ -> (EInt 0,
+toks)` wildcard which returns `EInt 0` **without
+consuming anything**. So `parseIf` returns
+`EIf cond thenE (EInt 0)` with the stray `TKwElse`
+(and everything after it — the rest of the
+bootstrap's 2000+ lines) still sitting on the
+token stream.
+
+Back up in `parseDecls` after `parseFnDecl`
+returns, `skipNewlines` eats the newline but the
+head is now `TKwElse`, which matches none of the
+`TKwType`/`TKwLet`/`TKwFn`/`TKwTag`/`TKwImport`/
+`TKwExport` arms. The wildcard `| _ -> []` fires
+and **every remaining decl is silently dropped**.
+The pipeline sees a truncated decl list with one
+non-main fn and emits it via `emitFnPlain`
+(singleton `let`, not `let rec`) — which is
+exactly what the probe showed.
+
+The codegen concern about heterogeneous `EIf`
+arms (`false` vs `0L`) is real but a downstream
+symptom: with the `else` arm dropped, the parser
+synthesised an `EInt 0` defensively and that's
+why the emitted body has `0L` where the source
+has `true`. Once `parseIf` consumes the newline,
+the body parses cleanly and the heterogeneous-if
+concern vanishes for this particular fn. (A more
+robust Bool-vs-Int unification in codegen stays
+on the backlog.)
+
+**Fix:** Call `skipNewlines` four times inside
+`parseIf`: before and after the `TKwThen` match,
+and before and after the `TKwElse` match. Mirrors
+the host parser's `skipNewlines c` calls at
+exactly the same sites (`Parser.fs` lines ~383 and
+~391 in the `KwIf` arm). Single-site change,
+~15 lines of `parseIf` touched, no ripple into
+`emitExpr` / `emitGroupLoop` / anywhere else.
+
+**Fixture:** `20o-bootstrap-input-multifn.lll` — a
+minimal repro with one multi-line `if-then-else-if-
+then-else` body followed by four trivial fns and
+a zero-arg `main`. Before the fix, only the first
+fn emits (as a singleton `let`, truncated body);
+after the fix, all five non-main fns collapse into
+a `let rec one ... and two ... and five ...` block
+plus the `[<EntryPoint>]` main wrapper.
+
+**Test:** New `Phase 7.9q` regression in
+`BootstrapCompilerTests.fs` follows the same
+20a-backup / copy-fixture / restore pattern as
+7.9h–7.9p. Asserts `let one` / `let rec one`,
+`let five` / `and five`, `let main` / `and main`,
+and `[<EntryPoint>]` in the emitted F#.
+
+Tests: 415 → 416 (+1 for the parseIf-layout
+regression test).
+
+**Fixpoint-probe confirmation:**
+
+| Metric | Before 7.9q | After 7.9q |
+|---|---|---|
+| stdout bytes | 2253 | 86 |
+| pipeline stage reached | codegen (partial, 1 fn) | elaborator (error) |
+| decls parsed | ~14 (13 types + 1 fn) | all ~75 |
+| content | truncated F# | 4 E002 UnboundVar lines |
+
+The byte count *drops* because the fix exposes
+the next blocker: with the parser now consuming
+the full source, the elaborator sees four
+previously-hidden unbound names — `charIsDigit`,
+`p`, `cs`, `List` — in fns that were silently
+dropped before. The error path short-circuits
+before codegen, hence the smaller output. This is
+correct: all decls are now parsed, and the probe
+faithfully reports the first un-resolved names
+reachable from a well-formed decl list. The 2253-
+byte partial codegen from 7.9p was a *lie* — most
+of the bootstrap's decls weren't being parsed at
+all.
+
+**Next tick:** **Phase 7.9r** — unbound-name
+cleanup. The four surfaced names split into two
+kinds: (a) `charIsDigit` is a stdlib builtin the
+host elaborator knows about; the fix is the same
+one-line extension to `stdlibNames` that 7.9p did
+for `charToInt`. (b) `p`, `cs`, `List` are more
+interesting — `p`/`cs` are lambda/fn params that
+the bootstrap's minimal name-scoping pass isn't
+threading through correctly, and `List` is a type
+constructor used in a position the elaborator's
+kind-checker doesn't recognize. The probe report
+will say which is which and whether 7.9r collapses
+into one slice or needs two.
+
