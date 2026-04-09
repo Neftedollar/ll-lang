@@ -1,6 +1,6 @@
 # Code generation
 
-File: `src/LLLangCompiler/Codegen.fs` (~210 lines).
+File: `src/LLLangCompiler/Codegen.fs` (~490 lines).
 
 Walks a `TypedModule` and produces a single F# source string. No
 intermediate representation — direct AST-to-string emission.
@@ -11,15 +11,18 @@ intermediate representation — direct AST-to-string emission.
 let emit (tm: TypedModule) : string = emitModule tm
 ```
 
-`emitModule` produces:
+`emitModule` splits declarations into two buckets so the auto-generated
+F# prelude can reference user-declared `Maybe` / `Result` types when
+present:
 
 ```
 module <dotted.path>
 
-<decl1>
+<type decls>           -- emitted first so the prelude can see them
 
-<decl2>
-...
+<prelude block>        -- core stdlib bindings (+ Maybe/Result when used)
+
+<non-type decls>       -- fns, lets, impls (grouped for mutual recursion)
 ```
 
 Declarations are joined with double newlines. Empty strings (returned
@@ -35,6 +38,8 @@ let rec private emitType (t: TypeExpr) : string =
     | TyName "Str"   -> "string"
     | TyName "Bool"  -> "bool"
     | TyName "Unit"  -> "unit"
+    | TyName "Char"  -> "char"
+    | TyName x when isTypeParamName x -> "'" + x  // single-uppercase A/B/C
     | TyName x       -> x
     | TyVar v        -> "'" + v
     | TyApp(TyName "List", a) -> emitType a + " list"
@@ -47,8 +52,10 @@ Key points:
 
 - ll-lang `Int` becomes F# `int64`. Integer literals are suffixed with
   `L`. A deliberate choice — ll-lang integers are 64-bit everywhere.
-- Type variables `TyVar v` become `'v` (F# syntax for generic type
-  parameters).
+- ll-lang `Char` becomes F# `char`.
+- Type variables `TyVar v` become `'v`. A bare single-uppercase
+  `TyName A` (treated as a type parameter by the parser / normalizer)
+  also emits as `'A` via `isTypeParamName`.
 - `TyApp(TyName "List", a)` is special-cased to `a list`. Other type
   applications use F# postfix syntax `arg Outer`.
 - `TyTagged` strips the tag entirely — units and newtype labels are
@@ -65,11 +72,13 @@ let private emitLit (l: Literal) : string =
         if s.Contains('.') || s.Contains('e') || s.Contains('E') then s else s + ".0"
     | LStr s   -> // escape \\, ", \n, \r, \t then quote
     | LBool b  -> if b then "true" else "false"
+    | LChar c  -> // escape \\, ', \n, \r, \t, \0 then quote
 ```
 
 The float handling appends `.0` to integer-valued floats so F# doesn't
-treat them as `int`. Strings are quoted and escape sequences are
-re-applied.
+treat them as `int`. Strings and chars are quoted and escape sequences
+are re-applied. `LChar` uses the F# single-quoted form (`'a'`,
+`'\n'`).
 
 ## Binary operator mapping
 
@@ -106,25 +115,37 @@ function call.
 
 Each `TypedExprKind` maps to a textual form:
 
-| Node                    | Output                                              |
-|-------------------------|-----------------------------------------------------|
-| `TELit l`               | `emitLit l`                                         |
-| `TEVar x`               | `safeIdent x`                                       |
-| `TECon c`               | `safeIdent c`                                       |
-| `TEApp(f, a)` (binop)   | `(a op b)`                                          |
-| `TEApp(f, a)`           | `(f a)`                                             |
-| `TELam(ps, body)`       | `(fun p1 p2 -> body)`                               |
-| `TELet(x, _, e, Some b)`| `(let x = e in\n  b)`                               |
-| `TELet(x, _, e, None)`  | `(let x = e)`                                       |
-| `TEIf(c, t, e)`         | `(if c then t else e)`                              |
-| `TETagged(e, _)`        | `emitExpr e` (tag dropped)                          |
-| `TEList es`             | `[e1; e2; e3]`                                      |
-| `TETuple es`            | `(e1, e2, e3)`                                      |
-| `TEPipe(a, b)`          | `(b a)` — pipe becomes forward application         |
-| `TEMatch(scrut, brs)`   | `(match scrut with\| p -> body\| ...)`              |
+| Node                       | Output                                              |
+|----------------------------|-----------------------------------------------------|
+| `TELit l`                  | `emitLit l`                                         |
+| `TEVar x`                  | `safeIdent x`                                       |
+| `TECon c`                  | `safeIdent c`                                       |
+| `TEApp(f, a)` (binop)      | `(a op b)`                                          |
+| `TEApp(f, a)` (multi-arg ctor) | `(C (a1, a2, ..., aN))`                         |
+| `TEApp(f, a)` (plain)      | `(f a)`                                             |
+| `TELam(ps, body)`          | `(fun p1 p2 -> body)`                               |
+| `TELet(x, _, e, Some b)`   | `(let x = e in b)` (single-line form)               |
+| `TELet(x, _, e, None)`     | `(let x = e)`                                       |
+| `TELetPat(tp, e, Some b)`  | `(let <pat> = e in b)` (single-line)                |
+| `TELetPat(tp, e, None)`    | `(let <pat> = e)`                                   |
+| `TEIf(c, t, e)`            | `(if c then t else e)`                              |
+| `TETagged(e, _)`           | `emitExpr e` (tag dropped)                          |
+| `TEList es`                | `[e1; e2; e3]`                                      |
+| `TETuple es`               | `(e1, e2, e3)`                                      |
+| `TECons(h, t)`             | `(h :: t)`                                          |
+| `TEPipe(a, b)`             | `(b a)` — pipe becomes forward application          |
+| `TEMatch(scrut, brs)`      | multi-line `(match scrut with\n  \| p -> body\n  \| ...)` |
+| `TEMatchOf(scrut, brs)`    | single-line `(match scrut with \| p -> body \| ...)` |
 
 All emitted expressions are wrapped in parens to sidestep precedence
-surprises in the target F#.
+surprises in the target F#. The single-line `let` / `let-pat` / match
+forms sidestep F# offside-rule issues when the construct is nested inside
+another expression at an arbitrary indentation column.
+
+Multi-arg ADT constructors are a special case of `TEApp`: ll-lang
+treats them as curried (`MkPair x y`) but F# requires a tuple argument
+(`MkPair(x, y)`), so codegen walks through nested `TEApp`s to gather
+arguments and emits a single tuple call when the head is a `TECon`.
 
 ## Pattern emission
 
@@ -134,14 +155,19 @@ let rec private emitPattern (p: Pattern) : string =
     | PVar x   -> safeIdent x
     | PWild    -> "_"
     | PLit l   -> emitLit l
+    | PCon("[]", []) -> "[]"  // parser's empty-list sentinel
     | PCon(c, [])  -> safeIdent c
     | PCon(c, [p]) -> safeIdent c + " " + emitPattern p
     | PCon(c, ps)  -> safeIdent c + "(" + (ps |> List.map emitPattern |> String.concat ", ") + ")"
+    | PTuple ps    -> "(" + (ps |> List.map emitPattern |> String.concat ", ") + ")"
+    | PCons(h, t)  -> "(" + emitPattern h + " :: " + emitPattern t + ")"
 ```
 
 Single-arg constructors go space-separated (`Some x`); multi-arg use
 parenthesized tuple form (`Rect(w, h)`), which matches F# DU pattern
-syntax for multi-field cases.
+syntax for multi-field cases. `PCon("[]", [])` is a sentinel emitted by
+the parser for empty-list patterns and must render as F#'s `[]`
+literal, not as an ordinary ctor reference.
 
 ## Declaration emission — `emitDecl`
 
@@ -170,14 +196,12 @@ only for the elaborator/inference to distinguish types.
 
 ```fsharp
 | TDFn(sig_, _, body) ->
-    let isMain = sig_.Name = "main" && List.isEmpty sig_.Params
-    let isRec = containsVar sig_.Name body
-    let recKw = if isRec then "rec " else ""
-    ...
-    if isMain then
+    if isMainFn sig_ then
         "[<EntryPoint>]\nlet main (argv: string[]) =\n    " + bodyStr + "\n    0"
     else
-        "let " + recKw + safeIdent sig_.Name + paramPart + " =\n    " + bodyStr
+        let isRec = containsVar sig_.Name body
+        let recKw = if isRec then "rec " else ""
+        "let " + recKw + emitFnClause sig_ body
 ```
 
 Three decisions:
@@ -188,8 +212,29 @@ Three decisions:
    name. If found, emit `let rec`.
 3. Otherwise: normal `let` with space-joined parameter names.
 
-`containsVar` is a simple structural recursion over `TypedExpr` that
-looks for `TEVar name` matching the function's own name.
+`containsVar` is a structural recursion over `TypedExpr` that looks
+for `TEVar name` matching a given name.
+
+### Mutual recursion grouping
+
+Runs of consecutive non-`main` top-level function decls are passed
+through `groupDecls`, which partitions them into mutually-recursive
+groups. A group of two or more functions is emitted as a single F#
+`let rec <first> ... and <rest>` block **iff** at least one function
+in the run references another function from the same run. Runs where
+no cross-reference exists are split back into singletons so existing
+output stays as plain `let` definitions (no unnecessary `rec`).
+
+This is necessary because HMInfer's top-level pass already infers
+mutually-recursive sibling fns together — without the codegen
+grouping, the emitted F# would fail to resolve forward references.
+
+### Top-level lets
+
+```fsharp
+| TDLet(x, _, e)        -> "let " + safeIdent x + " = " + emitExpr 0 e
+| TDLetPat(tp, e)       -> "let " + emitPattern tp.Pat + " = " + emitExpr 0 e
+```
 
 ### Tag and trait decls
 
@@ -218,18 +263,44 @@ parallels the one in `HMInfer.fs` for environment lookups.
 
 ## F# keyword safety
 
-`safeIdent` wraps reserved F# keywords in double backticks to prevent
-collisions:
+`safeIdent` rewrites ll-lang identifiers that collide with F# keywords
+OR with F#'s "reserved for future use" word list (FS0046 —
+`params`, `object`, `functor`, ...) to a prefixed safe form:
 
 ```fsharp
-let private fsKeywords = Set.ofList [ "abstract"; "and"; "as"; ... ]
+let private fsKeywords = Set.ofList [ "abstract"; "and"; "as"; ...;
+                                      "params"; "object"; "functor"; ... ]
 
 let private safeIdent (s: string) =
-    if Set.contains s fsKeywords then "``" + s + "``" else s
+    if Set.contains s fsKeywords then "__ll_" + s else s
 ```
 
-So a ll-lang function called `function` would emit as `` ``function`` ``
-in the output — the F# compiler accepts it.
+So a ll-lang parameter called `params` emits as `__ll_params` in the
+output. The `__ll_` prefix is used instead of backtick-quoting because
+backticks do **not** suppress the FS0046 "reserved for future use"
+warning on words like `object` and `params`.
+
+## F# prelude block
+
+`assemblePrelude` prepends an auto-generated F# prelude to every
+emitted module. It has three parts:
+
+- `fsharpPreludeCore` — always emitted. Contains the runtime
+  definitions for every stdlib function exposed via `builtinEnv`
+  that has no dependency on user-declared types (math, list-without-
+  Maybe, str, char, file IO, process, print).
+- `fsharpPreludeMaybe` — emitted only when the user module declares
+  `type Maybe`. Defines `listHead`, `listTail`, `maybeMap`,
+  `maybeBind`, `maybeWithDefault`, `strToInt`, `listAt` — all of
+  which return `Maybe`-shaped values and therefore need the user's
+  `Some`/`None` constructors in scope.
+- `fsharpPreludeResult` — emitted only when the user module declares
+  `type Result`. Defines `resultMap`, `resultBind`, `resultMapErr`.
+
+The prelude is emitted AFTER the user's type declarations so that
+`Maybe`/`Result`-dependent helpers resolve to the user's own types
+rather than F#'s built-in `Option` / `Result`. The core prelude is
+also exposed as `Codegen.preludeBlock` for tests.
 
 ## `lllc run` and `dotnet fsi` quirks
 
