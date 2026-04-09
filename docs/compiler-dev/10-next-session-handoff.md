@@ -7,11 +7,11 @@ session to pick up without replaying history.
 
 - **main** is at a clean commit, everything pushed to
   `github.com/Neftedollar/ll-lang`.
-- **395 xUnit tests** pass (`dotnet test` from repo root).
+- **398 xUnit tests** pass (`dotnet test` from repo root).
 - **Error positions are real** — E001..E008 report actual `line:col`
   instead of the historical `0:0`, threaded via a `PosMap` side-table
   keyed by reference equality on AST nodes.
-- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b + 7.7c done.**
+- **Phases 1–6 + 7.1 + 7.2 + 7.3a + 7.3b + 7.3c + 7.4 + 7.5a + 7.5b + 7.5c + 7.5d + 7.5e + 7.6a + 7.6b + 7.6 integration + 7.7a + 7.7b + 7.7c + 7.8a done.**
   ll-lang now hosts a real lexer (`09-lexer-real.lll`), a real
   recursive-descent arithmetic parser (`11-parser-real.lll`), a real
   type-declaration parser (`12-typeparser-real.lll`), a real
@@ -197,45 +197,91 @@ session to pick up without replaying history.
   literal, addition, var lookup, application success, application
   mismatch, identity lambda, lambda-with-body, mono let-in, if-int-
   int, and if-int-str mismatch).
+- **Phase 7.8a done** — first slice of **F# codegen written in
+  ll-lang itself** lives in
+  [`19-codegen-real.lll`](../../spec/examples/valid/19-codegen-real.lll)
+  (212 lines). Defines a tiny `TExpr` / `TDecl` AST (TEInt / TEStr /
+  TEVar / TEAdd / TEApp / TELet; `TDFn Str List[Str] TExpr`) and a
+  `showTExpr` / `showDecl` family that walks it and emits F# source
+  strings, mirroring the F# host's
+  [`Codegen.fs`](../../src/LLLangCompiler/Codegen.fs) `emitExpr` /
+  `emitDecl` for the supported shapes. Each arm is split into its
+  own helper to keep `match` nesting one level deep — same trick as
+  `18-hminfer-real.lll`'s `unify` / `inferExpr` spines. **Milestone**:
+  all four compiler stages (lex → parse → elaborate → HM-infer →
+  codegen) now have ll-lang representations, unblocking the future
+  `bootstrap/compiler.lll` integration. Deliberately still out of
+  scope after 7.8a: TELam / TEIf / TEMatch emission, F# prelude
+  block, mutual-recursion grouping, `[<EntryPoint>]` main special
+  case, keyword-safe ident rewriting, `TypeScheme`-carrying TypedAST,
+  and consuming the output of `18-hminfer-real.lll`.
+- `lllc run spec/examples/valid/19-codegen-real.lll` prints
+  ```
+  let inc x = (x + 1L)
+  let greet = "hello"
+  let addOne x = (let y = (x + 1L) in y)
+  let callInc x = (inc x)
+  ```
+  (four hardcoded `TDFn`s — one per supported TExpr shape — emitted
+  as F# source strings: `inc` covers TEAdd + TEVar + TEInt; `greet`
+  covers TEStr and the empty-params branch; `addOne` covers TELet
+  with nested TEAdd; `callInc` covers TEApp).
 
 ## Immediate next task
 
-**Phase 7.7d — add let-generalization + polymorphism + occurs check
-+ `Result`-based error reporting to the HM-inference-in-ll-lang
-slice**. Phase 7.7c shipped mono-typed `ELam` / `ELet` / `EIf`
-inference; the next tick makes the spine feature-complete enough
-to host polymorphic stdlib functions like `listMap` and real
-error reporting.
+Pick one of two paths — both unblocked now that Phase 7.8a landed
+and all four compiler stages have ll-lang representations:
 
-Shape (Phase 7.7d):
-1. Extend `18-hminfer-real.lll` in place with a `TypeScheme`
-   (`MkScheme List[Str] TypeExpr` — list of bound vars + body type)
-   and wire it into `Env` so `envLookup` returns a scheme not a raw
-   type. `applyEnv` must skip quantified vars.
-2. Add `generalize : Env -> TypeExpr -> TypeScheme` and
-   `instantiate : Int -> TypeScheme -> (TypeExpr, Int)` using the
-   existing `freshVar` counter. Rewire `ELet` to generalize at the
-   binding site.
-3. Replace `inferExpr`'s `ERROR` sentinel with a proper
-   `Result[InferResult, LLError]` return, where `LLError` is a small
-   ADT (at minimum `E002UnboundVar Str` and `E001TypeMismatch Str
-   Str`). Thread the `Result` through every arm — the helper-split
-   pattern 7.7a/7.7b/7.7c established should extend cleanly.
-4. Add `occurs : Str -> TypeExpr -> Bool` and wire it into `unify`'s
-   `TyVar` arm — return an `Err (E008 OccursCheck)` if the var
-   occurs in the candidate type. Mirrors the F# host's `e008
-   OccursCheck` in `HMInfer.fs` line 52 area.
-5. Upgrade `composeSubst` from the current dumb list-concat to a
-   real compose that applies `s1` to `s2`'s vals before concatenating
-   (needed for chained bindings, which let-generalization can
-   produce).
-6. Add two new test cases to `main`: a `let id = \x. x in (id 5)`
-   style test proving polymorphism works, and an occurs-check test
-   proving `unify a (TyFn a b)` returns `Err E008`.
+### Option A: **Phase 7.8b — extend codegen with TELam + TEIf + TEMatch**
 
-Keep scope tight for 7.7d: no `EMatch` inference yet, no trait
-dispatch, no source positions, no `TyApp` / `TyTagged`. Those
-land in 7.7e and beyond.
+Extend `19-codegen-real.lll` in place with the remaining TExpr
+shapes. The host's `emitExpr` already shows the inline-form recipes
+for each (line 158 for `TELam`, line 180 for `TEIf`, line 194 for
+`TEMatch`). Keep the same helper-split pattern so `match` nesting
+stays one level deep.
+
+Shape (Phase 7.8b):
+1. Add `TELam Str TExpr`, `TEIf TExpr TExpr TExpr`, and
+   `TEMatch TExpr List[TArm]` constructors to `TExpr`. `TArm` is a
+   parallel-list pair `MkArm Str TExpr` for now (pattern is a bare
+   ctor name, same shortcut as `16-elaborator-real.lll`).
+2. Add `showLam` / `showIf` / `showMatch` helpers, one per new
+   ctor, emitting the host's inline forms:
+   ```
+   (fun x -> <body>)
+   (if <c> then <t> else <e>)
+   (match <scrut> with | p1 -> e1 | p2 -> e2)
+   ```
+3. Add three new hardcoded TDFn test cases to `main` covering each
+   new shape. Update the runtime E2E expectation.
+4. Optionally add `TDType Str List[TCtor]` — ADT emission via
+   `type X = | C1 | C2 of arg * arg` — mirroring `Codegen.fs`
+   `TDType` arm. Out of scope if the slice gets long.
+
+### Option B: **Phase 7.9 — assemble `bootstrap/compiler.lll`**
+
+Stitch the five existing self-hosted slices into a single end-to-end
+program that reads source text, runs it through every stage, and
+emits F# source:
+  * `09-lexer-real.lll` — `tokenize`
+  * `15-moduleparser-real.lll` — `parseModule`
+  * `17-pipeline-real.lll` — `elaborate` (already wraps 15 + 16)
+  * `18-hminfer-real.lll` — `inferExpr` (needs Phase 7.7d for
+    polymorphism + error reporting, so Option B is currently blocked
+    on 7.7d completing first)
+  * `19-codegen-real.lll` — `showDecl`
+
+A new `bootstrap/compiler.lll` imports the five modules and defines
+`fn compile(src Str) Str = src |> tokenize |> parseModule |>
+elaborate |> infer |> showModule`. First integration test: feeding
+the compiler a minimal `module Hello\nfn main() = printfn "hi"`
+source and asserting the emitted F# source compiles under the F#
+host.
+
+Recommended order: **Option A first** (7.8b) to harden the codegen
+spine, **then Phase 7.7d** (polymorphism + error reporting to unblock
+integration), **then Option B** (7.9) once all three prerequisites
+are in.
 
 ### Backlog: heavier module-parser extensions in ll-lang
 

@@ -1772,3 +1772,106 @@ Next tick: **Phase 7.7d** — add let-generalization, `Result`-based
 error reporting, and the occurs check (`e008`). After 7.7d the HM
 spine is feature-complete enough to host polymorphic stdlib
 functions like `listMap` / `maybeMap` in later slices.
+
+### 2026-04 — Phase 7.8a: codegen slice A — TExpr + showTExpr + showDecl (DONE)
+
+First tick of **Phase 7.8** — the **back end** of the compiler,
+written in ll-lang itself. After Phase 7.7 closed out the HM middle
+(18-hminfer-real.lll: unify + inferExpr over every basic Expr shape),
+this slice starts `Codegen.lll`: a tiny `TExpr` / `TDecl` AST —
+a stand-in for the host's TypedAST — plus a `showTExpr` family of
+walkers that emit F# source strings, mirroring the F# host's
+[`Codegen.fs`](../../src/LLLangCompiler/Codegen.fs) `emitExpr` /
+`emitDecl`.
+
+**Milestone**: After this slice lands, **all four compiler stages
+have ll-lang representations** (lex → parse → elaborate → HM-infer →
+codegen), so the next umbrella (`bootstrap/compiler.lll`) can stitch
+them into a single end-to-end program.
+
+New file:
+[`19-codegen-real.lll`](../../spec/examples/valid/19-codegen-real.lll)
+(212 lines).
+
+**Shape**:
+
+```lll
+type TExpr =
+  | TEInt Int | TEStr Str | TEVar Str
+  | TEAdd TExpr TExpr
+  | TEApp TExpr TExpr
+  | TELet Str TExpr TExpr
+
+type TDecl = TDFn Str List[Str] TExpr
+
+fn showTExpr(e TExpr) Str          -- dispatcher, one arm per TExpr ctor
+fn showInt(n Int) Str              -- "<n>L" (F# int64 literal)
+fn showStr(s Str) Str              -- "\"<s>\"" (no escaping)
+fn showAdd(a TExpr)(b TExpr) Str   -- "(<a> + <b>)"
+fn showApp(f TExpr)(a TExpr) Str   -- "(<f> <a>)"
+fn showLet(n Str)(e1 TExpr)(e2 TExpr) Str  -- "(let n = e1 in e2)"
+fn showParams(ps List[Str]) Str    -- space-separated idents
+fn showDecl(d TDecl) Str           -- dispatch to showFnDecl
+fn showFnDecl(name Str)(ps List[Str])(body TExpr) Str
+  -- empty ps  -> "let name = body"
+  -- non-empty -> "let name p1 p2 ... = body"
+```
+
+Every recursive arm is split into its own helper so `match` nesting
+stays one level deep — same trick as `18-hminfer-real.lll`'s `unify`
+and `inferExpr` spines, for the same indentation-ambiguity reason.
+
+`main` hardcodes four `TDFn`s, one per supported TExpr shape:
+
+```
+let inc x = (x + 1L)
+let greet = "hello"
+let addOne x = (let y = (x + 1L) in y)
+let callInc x = (inc x)
+```
+
+`inc` exercises TEAdd + TEVar + TEInt; `greet` exercises TEStr and
+the empty-params `TDFn` branch; `addOne` exercises TELet (with a
+nested TEAdd inside the binding); `callInc` exercises TEApp. Output
+is joined via the same `joinLines` helper as
+`18-hminfer-real.lll` — `fn main` has a single-expression body so all
+four emitted lines have to funnel through a single `printfn` call.
+
+Emission mirrors the host's offside-safe inline forms from
+`Codegen.fs` line 162 area:
+* `TELet` renders as single-line `(let n = e1 in e2)` to dodge F#'s
+  offside-rule in nested contexts — same as the host's `emitExpr`
+  `TELet(_, _, _, Some body)` arm.
+* `TEApp` and `TEAdd` always parenthesise, same as the host.
+* `TDFn` zero-params drops the param segment entirely (`let greet =
+  "hello"`), matching the host's `emitFnClause` behaviour.
+
+**Deliberately out of scope** (carved out for Phase 7.8b+):
+
+1. **TELam / TEIf / TEMatch** — multi-line match emission needs
+   indentation tracking that this slice dodges.
+2. **F# prelude block** — the stdlib shim in `Codegen.fs`
+   `fsharpPrelude*` constants is a separate concern.
+3. **`[<EntryPoint>]` on `main`** — the host's special-case branch
+   for zero-arg `fn main`.
+4. **Mutual-recursion grouping** (`let rec ... and ...`) — the host's
+   `groupDecls` logic is a separate slice.
+5. **Keyword-safe ident rewriting** — the host's `safeIdent` table;
+   every hardcoded test name in this slice is already a non-keyword.
+6. **Real `TypeScheme`-carrying TypedAST** — this slice walks a plain
+   `TExpr`/`TDecl` without touching type info. Slice B adds the
+   `TypeScheme` payload once integration with 18-hminfer-real starts.
+7. **Consuming the output of `18-hminfer-real.lll`** — integration is
+   a separate tick after both sides stabilise.
+
+Tests: 395 → 398 (+3: 1 new corpus theory row in `HMInferTests.fs` +
+2 new facts in `CodegenRealTests.fs` — a dedicated inference round-
+trip fact and a runtime E2E fact). The runtime E2E asserts each of
+the four emitted F# source lines appears in stdout.
+
+Next tick: **Phase 7.8b** — extend `19-codegen-real.lll` in place
+with the remaining TExpr shapes (TELam, TEIf, TEMatch) and optional
+`TDType` emission, OR **Phase 7.9** — assemble `bootstrap/compiler.lll`
+by stitching 09 / 15 / 17 / 18 / 19 into a single end-to-end program
+that consumes source text and emits F# source. Pick one; slice B
+keeps the codegen spine evolving, 7.9 proves the pipeline composes.
