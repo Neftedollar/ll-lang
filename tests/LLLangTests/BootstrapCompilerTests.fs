@@ -793,3 +793,88 @@ let ``20-bootstrap-compiler.lll skips `--` line comments (Phase 7.9n)`` () =
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll parses multi-line type decl with leading bar (Phase 7.9o)`` () =
+    // Phase 7.9o: before the fix, the bootstrap compiler's
+    // `parseTypeDecl` / `parseCtors` / `parseCtorsTail` trio had
+    // no newline tolerance around the constructor list. The
+    // multi-line form
+    //     type Color =
+    //       | Red
+    //       | Green
+    //       | Blue
+    // has a `TNewline` immediately after `TEq` and a leading `TBar`
+    // before the FIRST ctor. The pre-fix code passed those tokens
+    // straight to `parseCtor`, which saw `TNewline :: TBar :: ...`
+    // (not `TUpper _`) and fell through to `MkCtor "?" []`, emitting
+    // `| ?` and terminating the ctor list after one bogus entry.
+    //
+    // Discovered via the fixpoint probe after Phase 7.9n shipped
+    // line-comment support — the first "real" thing the bootstrap
+    // compiler's own source defines is `type Token = | TKwModule
+    // | TKwType ...`, which is exactly this multi-line form. The
+    // probe output showed `type Token =\n    | ?` and stopped,
+    // confirming the blocker.
+    //
+    // The fix has three sites, all in the type-decl parser:
+    //   1. `parseTypeDecl` — skipNewlines after `TEq`
+    //   2. `parseCtors` — strip optional leading `TBar` (+ newlines)
+    //      so the first ctor in a multi-line list parses cleanly
+    //   3. `parseCtorsTail` — skipNewlines before the `TBar :: _`
+    //      peek so inter-ctor newlines don't terminate the list
+    //      early; also skipNewlines after `TBar` before each
+    //      `parseCtor` call
+    //
+    // The single-line form `type Maybe A = Some A | None` must
+    // keep working (tests in 7.9l rely on it) — the fixes are
+    // strictly additive (skipNewlines over zero newlines is a
+    // no-op, optional leading bar doesn't break ctors that lack one).
+    //
+    // Fixture `20m-bootstrap-input-type-layout.lll` exercises
+    // `type Color =\n  | Red\n  | Green\n  | Blue` and a `label`
+    // fn that pattern-matches over it — the multi-line match body
+    // already works as of Phase 7.9.newlines.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let layoutPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20m-bootstrap-input-type-layout.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
+    Assert.True(File.Exists layoutPath, $"missing fixture: {layoutPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(layoutPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001 TypeMismatch error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO error output; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "| ?",
+            $"expected NO `| ?` placeholder (signals broken ctor parsing); combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "| Red" || stdout.Contains "Red of",
+            $"expected emitted F# to contain `| Red` or `Red of`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "| Green" || stdout.Contains "Green of",
+            $"expected emitted F# to contain `| Green` or `Green of`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "| Blue" || stdout.Contains "Blue of",
+            $"expected emitted F# to contain `| Blue` or `Blue of`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec label" || stdout.Contains "let label",
+            $"expected emitted F# to contain `let label` or `let rec label`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)

@@ -1,0 +1,11 @@
+module Examples.Clean
+type Color =
+  | Red
+  | Green
+  | Blue
+fn label(c Color) Int =
+  match c with
+    | Red -> 1
+    | Green -> 2
+    | Blue -> 3
+fn main() Int = label Red
