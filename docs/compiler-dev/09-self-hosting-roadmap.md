@@ -2828,3 +2828,103 @@ Next tick: **Phase 7.9g** — `<` / `>` comparison operators,
 so `if n < 0 then 0 - n else n` can parse. Reuses the
 `parseCompare` layer shipped in 7.9f — only new lexer
 tokens, new `Expr` variants, and new emit arms needed.
+
+### 2026-04 — Phase 7.9g: < and > operators (DONE)
+
+Seventh tick of **Phase 7.9**. Probing with
+`fn abs(n Int) Int = if n < 0 then 0 - n else n` surfaced
+the next gap: the bootstrap lexer silently dropped `<` and
+`>` via the `lexChars` fall-through (`else lexChars rest`),
+so `n < 0` tokenised as `n 0` and parsed as juxtaposition
+application `(n 0L)` — a silent mis-parse that reached
+codegen and emitted invalid F#. Blocks any input program
+that uses ordered integer comparison — which includes every
+`abs` / `max` / `min` / bounds-check shape.
+
+**Changes:**
+
+* New lexer tokens `TLt` and `TGt` in
+  `20-bootstrap-compiler.lll`'s `Token` sum, alongside the
+  existing `TEq` / `TEqEq`.
+* Two new single-char arms in `lexChars` — `else if c == '<'
+  then listAppend [TLt] (lexChars rest)` and the `>` mirror.
+  No `lexLtOrX` helper needed: this slice has no two-char
+  forms like `<=` / `>=` / `<<` / `>>`. The standalone `>`
+  arm does NOT collide with `lexMinusOrArrow`'s `->` handling
+  because `lexMinusOrArrow` is only called from the `c ==
+  '-'` arm, so a bare `>` (not preceded by `-`) falls through
+  to the new arm as intended.
+* New `ELt Expr Expr` / `EGt Expr Expr` variants in `Expr`,
+  siblings of `EEq`.
+* Two new arms in `parseCompareTail` — `| TLt :: r -> let
+  (rhs, rest2) = parseAddSub r in parseCompareTail (ELt lhs
+  rhs) rest2` and the `TGt` / `EGt` mirror. Reuses the 7.9f
+  `parseCompare` precedence layer unchanged; no new tier
+  needed.
+* `checkExpr` / `inferExprType` / `typeCheck` / `showExpr` /
+  `emitExpr` each get two new arms (`ELt` / `EGt`) mirroring
+  the existing `EEq` arms. `inferExprType` returns `TyName
+  "Bool"` for both, same as `EEq`.
+* `emitExpr` uses `emitBin l r " < "` / `emitBin l r " > "`
+  — F# uses `<` / `>` verbatim for integer comparison, so
+  `ELt (EVar "n") (EInt 0)` emits `(n < 0L)` (the `L` suffix
+  comes from `emitInt`).
+* New fixture `20e-bootstrap-input-ltgt.lll` exercises both
+  operators together via `fn neg(n Int) Int = if n < 0 then
+  0 - n else n` and `fn pos(n Int) Int = if n > 0 then n
+  else 0 - n`.
+* New regression test in `BootstrapCompilerTests.fs` swaps
+  the 20a input for 20e, runs the bootstrap compiler, and
+  asserts (a) no `E002` / no `error` in combined output,
+  (b) emitted F# contains `let rec neg` + `and pos` +
+  `let main` + `[<EntryPoint>]` + `(n < 0L)` + `(n > 0L)`.
+  The `let rec` / `and` spine is an incidental consequence
+  of the 7.8e mutual-recursion grouping — any run of two or
+  more consecutive non-`main` fn decls gets wrapped in a
+  single `let rec ... and ...` block.
+
+**Deliberately out of scope:**
+
+* **`<=` / `>=` / `!=`** — only `<` and `>` in this slice.
+  The two-char forms each need their own `lexLtOrLte` /
+  `lexGtOrGte` / `lexBangOrNeq` helpers (same shape as
+  `lexEqOrEqEq` from 7.9f) plus new `Expr` variants. Trivial
+  extensions, just not in scope here.
+* **`Bool` type machinery** — `TyName "Bool"` is still just
+  a string tag. Comparison results infer to `TyName "Bool"`
+  but nothing consumes them; an `if` guard on a comparison
+  short-circuits via `inferExprType`'s `EIf _ thn _ ->
+  inferExprType env thn` arm (returns the `then` branch's
+  type), never actually checking that the guard is `Bool`.
+  An input program that binds a comparison result to a
+  variable and then tries to use it as an `Int` will still
+  parse and emit — HM rubber-stamps the `TyVar "?"`
+  mismatch.
+* **Boolean connectives** — `&&` / `||` / `not` stay in
+  Phase 7.9h+.
+* **`true` / `false` literals** — Bool literals still
+  unavailable; comparisons are the only way to produce a
+  "truthy" value.
+
+Tests: 405 → 406 (+1 for the `< / >` regression test).
+
+**Observation worth noting** — the pre-fix behaviour was a
+silent mis-parse, not a crash: `n < 0` tokenised as `n` `0`
+(unknown chars dropped by the lexer fall-through) and
+parsed as `EApp (EVar "n") (EInt 0)`, which then reached
+codegen and emitted `(n 0L)` as juxtaposition application.
+The fsharpc check in the test pipeline caught it as `FS0026
+This rule will never be matched` (the spurious app made a
+subsequent `if` arm unreachable), but from the bootstrap
+compiler's own perspective everything looked fine. This is
+exactly the class of bug that future `unknown char` lexer
+diagnostics (Phase 7.10+) should surface loudly.
+
+Next tick: **Phase 7.9h** — `Bool` as a proper type +
+`true` / `false` literals. The HM layer currently treats
+`Bool` as just a string tag (`TyName "Bool"`) and nothing
+consumes it — comparisons return `TyName "Bool"` that never
+gets checked against anything. Adding real `Bool` support
+unlocks `checkIfBranches` narrowing on comparison guards,
+enables `&&` / `||` connectives in Phase 7.9i+, and lets
+fns declare explicit `Bool` parameters and return types.
