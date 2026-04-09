@@ -66,12 +66,13 @@ let ``18-hminfer-real.lll runs and emits unify + inferExpr result lines`` () =
     // literal / addition / var-in-env / application-in-env / app-mismatch
     // expression shapes. Phase 7.7c adds t11-t15: ELam (identity +
     // lambda-with-Add), ELet (mono-bind), and EIf (then/else same type +
-    // then/else mismatch). Phase 7.7d adds t16-t20: higher-order lambda
+    // then/else mismatch). Phase 7.7d adds t16-t22: higher-order lambda
     // (exercises composeSubst chains), occurs check (E008 InfiniteType),
-    // and EMatch inference (success + branch mismatch + PVar binding).
-    // Error lines now carry the real E001 / E002 / E008 message from the
-    // new `Outcome A = OkR A | ErrR Str` carrier (replaces the 7.7b
-    // `TyName "ERROR"` sentinel).
+    // EMatch inference (success + branch mismatch + PVar binding), and
+    // let-generalization (t21 mono `id 5`, t22 polymorphic double-use of
+    // `id`). Error lines now carry the real E001 / E002 / E008 message
+    // from the new `Outcome A = OkR A | ErrR Str` carrier (replaces the
+    // 7.7b `TyName "ERROR"` sentinel).
     //   t1:  unify Int Int                         -> ok
     //   t2:  unify Int Str                         -> mismatch
     //   t3:  unify a Int                           -> ok bound a
@@ -92,6 +93,9 @@ let ``18-hminfer-real.lll runs and emits unify + inferExpr result lines`` () =
     //   t18: infer (match 1 | 0 -> "zero" | _ -> "other") -> Str
     //   t19: infer (match 1 | 0 -> "zero" | 1 -> 42)      -> ERROR E001
     //   t20: infer (match 1 | x -> x + 1)          -> Int (PVar binds `x`)
+    //   t21: infer (let id = \x. x in id 5)        -> Int (basic let-bind)
+    //   t22: infer (let id = \x. x in let i = id 5 in id "hi") -> Str
+    //        (polymorphic double use — requires let-generalization)
     let expected =
         [ "t1 unify Int Int ok"
           "t2 unify Int Str mismatch"
@@ -112,7 +116,9 @@ let ``18-hminfer-real.lll runs and emits unify + inferExpr result lines`` () =
           "t17 unify a (a -> Int) infinite"
           "t18 infer (match 1 | 0 -> \"zero\" | _ -> \"other\") : Str"
           "t19 infer (match 1 | 0 -> \"zero\" | 1 -> 42) : ERROR E001 TypeMismatch Str vs Int"
-          "t20 infer (match 1 | x -> x + 1) : Int" ]
+          "t20 infer (match 1 | x -> x + 1) : Int"
+          "t21 infer (let id = \\x. x in id 5) : Int"
+          "t22 infer (let id = \\x. x in let i = id 5 in id \"hi\") : Str" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),
