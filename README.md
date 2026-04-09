@@ -94,7 +94,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 454 tests
+dotnet test    # 521 tests
 ```
 
 ### Run your first program
@@ -121,10 +121,14 @@ This runs a 979-line ll-lang program that tokenizes, parses, and pretty-prints a
 ### CLI
 
 ```
-lllc build <file.lll>   # compile single file → <file>.fs
-lllc build [dir]        # compile project (reads ll.toml) → bin/<name>.fs
-lllc run   <file.lll>   # compile and run via dotnet fsi
-lllc new   <name>       # scaffold new project
+lllc build <file.lll>               # compile → <file>.fs  (F# default)
+lllc build --target ts <file.lll>   # compile → <file>.ts  (TypeScript)
+lllc build --target py <file.lll>   # compile → <file>.py  (Python)
+lllc build --target java <file.lll> # compile → <file>.java (Java 21)
+lllc build [dir]                    # compile project (reads ll.toml)
+lllc run   <file.lll>               # compile and run via dotnet fsi
+lllc new   <name>                   # scaffold new project
+lllc mcp                            # run MCP server (stdio, for Claude/Cursor)
 ```
 
 ### Create a multi-file project
@@ -136,6 +140,26 @@ cd myapp
 lllc build              # → bin/myapp.fs + bin/myapp.fsproj
 dotnet run --project bin/myapp.fsproj
 ```
+
+## For LLM Agents: MCP Integration
+
+ll-lang ships a built-in MCP server. Wire it to Claude Code, Cursor, or Zed — your LLM client gains structured tools to compile, check, and run ll-lang code without parsing shell output:
+
+```json
+// claude_desktop_config.json / .cursor/mcp.json
+{
+  "mcpServers": {
+    "lllc": {
+      "command": "dotnet",
+      "args": ["run", "--project", "/path/to/ll-lang/src/LLLangTool", "--", "mcp"]
+    }
+  }
+}
+```
+
+Available MCP tools: `compile_file`, `check_file`, `run_file`, `list_errors`, `lookup_error`, `stdlib_search`, `grammar_lookup`, `project_info`.
+
+The agent can ask "does this compile?" and get a structured JSON response with error codes, line numbers, and fix hints — no scraping required.
 
 ## Problem
 
@@ -151,6 +175,19 @@ ll-lang is built around four properties:
 - **Static types with inference** — Hindley-Milner type inference. Declare types where they matter, elide them everywhere else.
 - **Compiled = works** — tag violations, unbound variables, non-exhaustive matches, and unit mismatches are caught at compile time, not runtime.
 - **LLM-readable errors** — all errors follow a compact machine-readable format (`E001 12:5 TypeMismatch ...`) designed for direct consumption by an LLM agent.
+
+## Multi-Platform Output
+
+Write once in ll-lang, compile to any target:
+
+```bash
+lllc build --target fs   adts.lll   # → F# discriminated unions
+lllc build --target ts   adts.lll   # → TypeScript sealed interfaces
+lllc build --target py   adts.lll   # → Python @dataclass + Union
+lllc build --target java adts.lll   # → Java 21 sealed interfaces
+```
+
+Same source, same semantics, four targets. Useful when an LLM agent needs to prototype logic in ll-lang and then ship it to a specific platform.
 
 ## Syntax
 
@@ -283,19 +320,30 @@ src/LLLangCompiler/        — compiler library (F#)
   Elaborator.fs            — name resolution, declared-type checking (E001-E005)
   Types.fs                 — TypeScheme, Subst, generalize/instantiate
   TypedAST.fs              — typed AST after H-M inference
-  HMInfer.fs               — Algorithm W, unification (E008), trait dispatch (E006)
+  HMInfer.fs               — Algorithm W, unification (E008), trait dispatch
   Codegen.fs               — F# source emitter
-  Compiler.fs              — end-to-end pipeline entry point
-src/LLLangTool/            — `lllc` CLI (build / run)
-tests/LLLangTests/         — xUnit test suite (401 tests)
+  CodegenTS.fs             — TypeScript source emitter
+  CodegenPy.fs             — Python source emitter
+  CodegenJava.fs           — Java 21 source emitter
+  Compiler.fs              — end-to-end pipeline + Target dispatch
+src/LLLangTool/            — `lllc` CLI (build / run / mcp)
+  Mcp.fs                   — MCP server (8 tools for LLM clients)
+  Program.fs               — entry point
+tests/LLLangTests/         — xUnit test suite (521 tests)
+docs/user-guide/           — user documentation
+docs/compiler-dev/         — compiler developer documentation
 ```
 
 ## Roadmap
 
-- **Phase 7.6** — elaborator in ll-lang (name resolution shipped in 7.6a; constructor-coverage exhaustiveness shipped in 7.6b; E001 type checking, E004 / E005 tag checks remain), plus heavier front-end slices (multi-line fn bodies, `trait` / `impl` module-level decls).
-- **Phase 7.7** — H-M inference rewritten in ll-lang.
-- **Phase 7.8** — codegen in ll-lang, then bootstrap fixpoint (compiler₁ == compiler₂).
-- **Multi-target backends** — TypeScript / Python / JVM / LLVM after self-hosting lands.
+All 10 phases complete. Upcoming work:
+
+- **Language quality** — structured `LLError` fields (issue #21), lexer error recovery (issue #24), parser module split (issue #22)
+- **Stdlib expansion** — more string/list/IO builtins, async IO primitives
+- **Platform interop** — import .NET / npm / PyPI packages by path
+- **LLVM / WASM target** — native executables
+- **Language server** — LSP hover, go-to-definition, inline errors
+- **Self-hosting codegen** — rewrite CodegenFS.fs in ll-lang itself (the next frontier)
 
 ## Design Philosophy
 
