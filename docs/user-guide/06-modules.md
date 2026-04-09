@@ -1,7 +1,6 @@
-# Modules
+# Modules and Projects
 
-Every `.lll` file starts with a module header. Modules give types, functions,
-and impls a namespace and will eventually be the unit of separate compilation.
+ll-lang supports both single-file programs and multi-file projects. Every `.lll` file starts with a module header.
 
 ## Module header
 
@@ -9,17 +8,14 @@ and impls a namespace and will eventually be the unit of separate compilation.
 module Examples.Basics
 ```
 
-The header must be the first non-comment line. The path is one or more
-uppercase-starting segments joined by dots.
+The header must be the first non-comment line. The path is one or more uppercase-starting segments joined by dots.
 
-Conventionally the path mirrors the directory layout, e.g. a file at
-`spec/examples/valid/03-tags.lll` declares `module Examples.Tags`.
+In project mode the path must match the file location: a file at `src/Foo/Bar.lll` in project `myapp` must declare `module Myapp.Foo.Bar`.
 
 ## Imports
 
 ```lll
 module Examples.Modules
-
 import Std.List
 import Std.Maybe
 
@@ -27,67 +23,131 @@ fn firstDoubled(xs List[Int]) Maybe[Int] =
   xs -> head -> map (\x. x * 2)
 ```
 
-Each `import` declares a dependency on another module. Imports appear
-immediately after the module header, before any declarations.
+Each `import` declares a dependency on another module. Imports appear immediately after the module header, before any declarations.
+
+The **implicit prelude** (~50 stdlib functions) is always in scope without any `import`. Writing `import Std.List` currently parses correctly but is a no-op — all prelude names are already visible.
 
 ## Exports
 
 ```lll
-export fn greet(name Str) Str = "hello " + name
+export fn greet(name Str) Str = "hello " ++ name
 ```
 
-Prefixing a declaration with `export` marks it as visible to other modules.
-Without `export`, a declaration is module-private.
+Prefixing a declaration with `export` marks it as public to other modules. Without `export`, a declaration is private to the file.
 
-The current compiler parses `export` and stores the flag in the AST
-(`LLModule.Decls : (Decl * bool) list`), but since cross-module linking is
-not yet wired, every declaration is effectively visible within its own file.
+---
 
-## Codegen
+## Project mode (`ll.toml`)
 
-A `module Examples.Basics` header emits an F# module header:
+For multi-file programs, create a project manifest `ll.toml` at the project root:
 
-```fsharp
-module Examples.Basics
+```toml
+[project]
+name    = "myapp"
+version = "0.1.0"       # optional
+entry   = "src/Main.lll"  # optional, default src/Main.lll
+
+[deps]
+# Future: external ll-lang packages (Go-style module paths)
+# "github.com/alice/json" = "v1.2.0"
+
+[platform]
+# Opt-in to platform-specific modules (Phase 8 PR4)
+# use = ["Platform.IO", "Platform.Math"]
 ```
 
-All top-level decls in the ll-lang file end up as top-level F# `let`
-bindings and `type` declarations inside that module.
+### Directory layout
+
+```
+myapp/
+├── ll.toml          ← project manifest
+├── src/
+│   ├── Main.lll     ← module Myapp.Main
+│   └── Lib.lll      ← module Myapp.Lib
+└── bin/             ← generated: myapp.fs + myapp.fsproj
+```
+
+### Module path convention
+
+The compiler derives the expected module path from the file location:
+
+| File | Expected header |
+|------|----------------|
+| `src/Main.lll` | `module Myapp.Main` |
+| `src/Foo/Bar.lll` | `module Myapp.Foo.Bar` |
+
+If the declared path doesn't match the expected path you get `E020 ModulePathMismatch`.
+
+### Import ordering
+
+Files are compiled in topological order (dependencies first). Import cycles produce `E024 ModuleCycle`.
+
+### Build commands
+
+```bash
+# Scaffold a new project
+lllc new myapp
+
+# Build the project (reads ll.toml in current directory or any parent)
+cd myapp && lllc build
+
+# Build a project in a specific directory
+lllc build ./myapp
+
+# Single-file (no ll.toml needed — unchanged from before)
+lllc build hello.lll
+```
+
+Output: `bin/myapp.fs` + `bin/myapp.fsproj` (ready for `dotnet build`).
+
+### Two-file example
+
+`src/Greet.lll`:
+```lll
+module Hello.Greet
+
+export fn greet(name Str) Str = "Hello, " ++ name ++ "!"
+```
+
+`src/Main.lll`:
+```lll
+module Hello.Main
+import Hello.Greet
+
+fn main() Str = greet "World"
+```
+
+`ll.toml`:
+```toml
+[project]
+name = "hello"
+```
+
+```bash
+lllc build   # → bin/hello.fs (both modules concatenated)
+```
+
+---
+
+## Error codes
+
+| Code | Name | Meaning |
+|------|------|---------|
+| E020 | ModulePathMismatch | `module` header does not match the file's location in `src/` |
+| E024 | ModuleCycle | Import graph contains a cycle |
+| E025 | NoProjectForImport | Non-`Std.*` import used in single-file mode (no `ll.toml`) |
+
+---
 
 ## Known limitations
 
-The module system is parsed and tracked through the typed AST, but several
-pieces are not yet implemented:
-
-- **Implicit prelude instead of `import`**. A built-in prelude is injected
-  into every module via the elaborator's `builtinEnv`. It exposes ~50
-  stdlib functions (`listMap`, `listFold`, `strLen`, `strChars`,
-  `charIsDigit`, `readFile`, `exit`, ...) and the F# runtime bindings are
-  emitted as a header block in every generated `.fs` file. Writing
-  `import Std.List` still parses without error but is a no-op — the
-  names are already in scope.
-- **No multi-file compilation**. Each invocation of `lllc build` or `lllc run`
-  operates on a single `.lll` file. Cross-file symbol resolution is a
-  planned future feature.
-- **No `Platform.*` modules**. The design spec reserves `Platform.IO`,
-  `Platform.DotNet.ASP`, etc. None are implemented; `E007 PlatformMismatch`
-  is reserved in the error table but never emitted.
-- **No `export` visibility enforcement**. The flag is tracked but every
-  in-file declaration is accessible.
+- **No dep resolution yet.** The `[deps]` section is parsed and schema-frozen but packages are not fetched. Writing a dep that isn't vendored locally produces `E022 UnresolvedDep` (only when actually imported).
+- **No `Platform.*` stubs yet.** The `[platform]` section is parsed; actual stubs (Phase 8 PR4) are pending.
+- **Cross-module type checking is partial.** Each file is elaborated and type-checked independently; F# handles cross-module type resolution in the concatenated output. This means `E002 UnboundVar` may not fire for missing imported names at compile time — but `dotnet build` will catch them.
+- **No `export` visibility enforcement yet.** The `export` flag is tracked in the AST but not enforced — every declaration is accessible.
 
 ## Practical advice
 
-Until multi-file modules land:
-
-- Put everything you need in a single `.lll` file.
-- The implicit prelude (`listMap`, `strLen`, `printfn`, `readFile`, ...) is
-  available without any `import` statement. See
-  [07-error-codes.md](07-error-codes.md) and the corpus examples for the
-  full set.
-- Types like `Maybe` and `Result` are NOT built-in — you must declare them
-  locally in any file that uses `listHead`, `strToInt`, or `resultMap`:
-  `type Maybe A = Some A | None`, `type Result A E = Ok A | Err E`. The
-  codegen prelude emits the Maybe/Result-dependent runtime helpers only
-  when your file declares these types.
-
-A self-contained file is the safest shape to ship today.
+- For learning/scripts: use a single `.lll` file with no `ll.toml`. The implicit prelude (`listMap`, `strLen`, `printfn`, `readFile`, …) is always available.
+- For `Maybe` / `Result` in single-file mode: declare them locally — `type Maybe A = Some A | None`.
+- For multi-file projects: use `lllc new <name>` to get the right directory structure, then add `.lll` files to `src/`.

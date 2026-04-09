@@ -1,5 +1,9 @@
 # Self-hosting roadmap
 
+> **Status (2026-04-09): COMPLETE.** Phase 7.10 bootstrap fixpoint achieved.
+> `compiler₁.fs == compiler₂.fs` (401 lines, 264 bindings, byte-identical).
+> See `docs/compiler-dev/fixpoint-snapshots/compiler1-latest.fs`.
+
 Phase 7 of the project goal: rewrite the ll-lang compiler in ll-lang
 itself. The current F# compiler ("compiler₀") becomes a bootstrap
 artifact, and after one fixpoint cycle the language is self-sufficient

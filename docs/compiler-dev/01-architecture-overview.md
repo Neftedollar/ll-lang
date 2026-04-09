@@ -6,6 +6,8 @@ returns `Result<_, LLError list>`.
 
 ## Pipeline
 
+### Single-file mode
+
 ```
 .lll source (string)
         │
@@ -29,8 +31,32 @@ returns `Result<_, LLError list>`.
            →  dotnet build (lllc build)
 ```
 
-The entry point `Compiler.compile : string -> Result<string, LLError list>`
-chains the five stages together. Any stage can short-circuit with `Error`.
+Entry point: `Compiler.compile : string -> Result<string, LLError list>`
+
+### Project mode (Phase 8)
+
+```
+ll.toml
+        │
+        ▼
+   Manifest.parseManifest         LLManifest (name, version, deps, platform)
+        │
+        ▼
+   ProjectLoader.loadProject      LLProject (topo-sorted LoadedFile list)
+        │   ▼ glob src/*.lll
+        │   ▼ parse each file header (module path + imports)
+        │   ▼ validate module paths (E020)
+        │   ▼ Kahn's topological sort (E024 on cycle)
+        ▼
+   Compiler.compileProject        for each file: compile → TypedModule
+        │
+        ▼
+   Codegen.emitProjectModules     prelude once + all modules concatenated
+        │
+        ▼
+  bin/<name>.fs + bin/<name>.fsproj
+```
+
 A `PosMap` side-table (see `AST.fs`) is populated by the parser and
 threaded through the elaborator and inference passes so that every
 error carries a real `line:col` from the source (instead of the historic
@@ -142,21 +168,42 @@ with no params becomes `[<EntryPoint>] let main (argv: string[]) = ... 0`.
 
 See [06-codegen](06-codegen.md).
 
+### `Manifest.fs` — TOML subset parser (Phase 8)
+
+Hand-written parser for `ll.toml` project manifests. Supports `[table]` headers,
+`key = "value"` strings, and `key = ["a","b"]` string arrays. No NuGet
+dependencies. Entry point: `parseManifest : string -> Result<LLManifest, string>`.
+
+### `ProjectLoader.fs` — multi-file project driver (Phase 8)
+
+1. Calls `Manifest.parseManifest`.
+2. Globs `src/**/*.lll` using `Directory.GetFiles`.
+3. Parses each file to extract its `module` header and `import` list.
+4. Validates module paths against file locations (E020).
+5. Topological sort via Kahn's algorithm (E024 on cycle).
+6. Returns `LLProject { Manifest; RootDir; Files: LoadedFile list }`.
+
+Entry point: `loadProject : string -> Result<LLProject, LLError list>`.
+
 ### `Compiler.fs` — pipeline glue
 
-~30 lines. Tokenize → `parseModuleWithPos` → `elaborate pm m` →
-`infer pm m' env` → `emit`. Any failure short-circuits with `Error`.
-The `PosMap` `pm` from the parser is threaded through the elaborator
-and inference so emitted errors carry source positions.
+Two entry points:
+
+- `compile : string -> Result<string, LLError list>` — single-file pipeline.
+- `compileProject : LLProject -> Result<string, LLError list>` — multi-file
+  pipeline: runs `compile` on each topo-sorted file, concatenates via
+  `Codegen.emitProjectModules`.
 
 ### `src/LLLangTool/Program.fs` — CLI
 
-The `lllc` driver. Two commands:
+The `lllc` driver. Four commands:
 
-- `build <file.lll>` — writes `<file>.fs` next to input.
+- `build <file.lll>` — single-file mode.
+- `build [dir]` — project mode (reads `ll.toml`, writes `bin/<name>.fs`).
 - `run <file.lll>` — writes a temp `.fsx` (stripping `module` and
   `[<EntryPoint>]`, appending `main [||] |> exit`) and shells out to
   `dotnet fsi`.
+- `new <name>` — scaffold project directory structure.
 
 ## F# compile order
 
@@ -173,6 +220,8 @@ in the `.fsproj`. The current order is significant:
 <Compile Include="TypedAST.fs" />
 <Compile Include="HMInfer.fs" />
 <Compile Include="Codegen.fs" />
+<Compile Include="Manifest.fs" />
+<Compile Include="ProjectLoader.fs" />
 <Compile Include="Compiler.fs" />
 ```
 
@@ -181,11 +230,12 @@ Dependency chain:
 - `Token.fs` → `Lexer.fs`
 - `AST.fs` is independent; `Parser.fs` depends on `Token.fs` + `AST.fs`
 - `Elaborator.fs` depends on `AST.fs` only
-- `Types.fs` depends on `AST.fs` and (for `fromElaboratorEnv`) on
-  `Elaborator.fs`
+- `Types.fs` depends on `AST.fs` and (for `fromElaboratorEnv`) on `Elaborator.fs`
 - `TypedAST.fs` depends on `AST.fs` + `Types.fs`
 - `HMInfer.fs` depends on all of the above
 - `Codegen.fs` depends on `AST.fs` + `Types.fs` + `TypedAST.fs`
+- `Manifest.fs` depends only on `System` (no compiler module deps)
+- `ProjectLoader.fs` depends on `Manifest.fs` + `Elaborator.fs` + `Lexer.fs` + `Parser.fs`
 - `Compiler.fs` glues everything together
 
 If you add a new file, slot it in where its dependencies are satisfied.

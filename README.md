@@ -19,7 +19,9 @@ Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting 
 
 ## Status
 
-Working end-to-end compiler with a **422-test** suite, written in F# / .NET 10. All 7 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins).
+Working end-to-end compiler with a **437-test** suite, written in F# / .NET 10. All 8 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins) → module system.
+
+**Bootstrap: COMPLETE (Phase 7.10).** `compiler₁.fs == compiler₂.fs` — ll-lang compiles itself.
 
 **Bootstrap progress (Phase 7 — ll-lang hosting itself):**
 
@@ -40,7 +42,7 @@ Working end-to-end compiler with a **422-test** suite, written in F# / .NET 10. 
 
 The module parser (979 lines of ll-lang) consumes `module M \n import ... \n tag ... \n type ... \n let ... \n fn ... = ...` and pretty-prints a `List[Decl]` AST — **real proof that ll-lang can express its own front-end**. The elaborator slice (512 lines) walks a hardcoded `List[Decl]` AST with a two-pass `collectDecls` → `checkDecls` pipeline plus an exhaustiveness pass, and emits `E002 UnboundVar <name>` for every free variable and `E003 NonExhaustiveMatch <type> missing <ctor>` for every clause-sugar match that doesn't cover its sum type — mirroring the F# host elaborator's name-resolution + constructor-coverage semantics. The pipeline slice (~1500 lines) stitches the two halves into one program: a source string goes in, `tokenize` + `parseModule` + `elaborate` runs back-to-back, and the resulting error list is printed. **Showcase milestone** — first time two compiler layers authored in ll-lang share a single AST and run back-to-back on a real source string.
 
-Still to come: elaborator, HM-inference, and codegen rewrites in ll-lang, then bootstrap fixpoint (compiler₀ compiles compiler.lll → compiler₁; compiler₁ compiles compiler.lll → compiler₂ == compiler₁).
+**Phase 7 complete** — bootstrap fixpoint achieved (2026-04-09). **Phase 8 complete** — module system with `ll.toml`, multi-file builds, `lllc new`.
 
 | Phase | Description | Status |
 |---|---|---|
@@ -50,6 +52,8 @@ Still to come: elaborator, HM-inference, and codegen rewrites in ll-lang, then b
 | 4 | Hindley-Milner + TypedAST + trait dispatch | ✅ |
 | 5 | F# codegen + `lllc` CLI | ✅ |
 | 6 | Stdlib (~50 builtins) | ✅ |
+| **7** | **Bootstrap fixpoint** — ll-lang compiles itself (`compiler₁.fs == compiler₂.fs`) | ✅ |
+| **8** | **Module system** — `ll.toml`, multi-file builds, `lllc new`, topo-sort, E020/E024 | ✅ |
 | **7.1 – 7.5** | **ll-lang front-end in ll-lang** (lexer + 4 parser slices + full module parser, 979 lines) | ✅ |
 | **7.6a + 7.6b** | **Elaborator slices A + B in ll-lang** (name resolution + E002 unbound-var; constructor-coverage exhaustiveness + E003 non-exhaustive match, 512 lines) | ✅ |
 | **7.6 integration** | **Parser + elaborator pipeline in one ll-lang program** (`17-pipeline-real.lll`, ~1500 lines) | ✅ |
@@ -78,7 +82,7 @@ Still to come: elaborator, HM-inference, and codegen rewrites in ll-lang, then b
 | **7.10d** | **`PStr Str` string-literal patterns in bootstrap compiler** — new `PStr Str` variant in `type Pat`, plus the six-site cascade through `parsePrimaryPat` (`TStr s :: rest -> (PStr s, rest)` between `TInt` and `TUnder`), `showPat` / `patBinders` / `patIsCatchAll` / `emitPat`. Pre-fix, `parsePrimaryPat` had no `TStr _` arm and every string-literal pattern fell through to the catch-all `| _ -> (PWild, toks)` — silently collapsing arms like `\| "module" -> TKwModule \| "type" -> TKwType ...` into a single `PWild` arm. The 7.10c probe exposed this: `classifyIdent` emitted a one-arm `match s with \| _ -> "module"` instead of the full 14-keyword dispatch. Post-fix, the bootstrap parses all 14 `classifyIdent` arms correctly and the elaborator reaches the previously-unreached wildcard arm body (`let cs = strChars s in ...`), surfacing a new real blocker: `E002 UnboundVar strChars`. Fixpoint probe: 3338 → 1609 bytes (131 → 11 lines); the byte count shrinks because the bootstrap now fails fast at elaboration rather than silently emitting truncated F#. This is forward progress — the 3338-byte "success" was a false positive hiding 13 dropped arms. Next tick 7.10e — add `strChars` to the bootstrap's `stdlibNames` list. New fixture `20u-bootstrap-input-str-pat.lll` + regression test exercise `match s with \| "one" -> 1 \| "two" -> 2 \| _ -> 0` | ✅ |
 | **7.10e** | **Small stdlib audit: `strChars` / `strFromChars` / `intToStr` / `charIsSpace` / `listReverse` in bootstrap's `stdlibNames`** — append five missing host builtins to the bootstrap's flat `stdlibNames` list, all referenced from bootstrap fn bodies but never declared as callable names. Same shape as 7.9p (`charToInt`) / 7.9r (`charIsDigit`) / 7.10c (`strToInt`) — the host elaborator's `builtinEnv` already knows all five, but the bootstrap's mirror list was stale. Audit done by probing the bootstrap against itself (5 names surfaced as cascaded `E002 UnboundVar` errors) and cross-referencing Elaborator.fs's builtin table. Fixpoint probe: 1609 → 146 bytes (11 → 5 lines, 2 → 1 errors). The remaining single `E002 UnboundVar s` is a downstream parser desync on a short local name, not a missing stdlib — next phase will trace it. New fixture `20v-bootstrap-input-strchars.lll` + regression test exercise one fn per builtin (`strChars s`, `strFromChars (strChars s)`, `listReverse xs`, `intToStr n`, `charIsSpace c`) and assert the emitted F# contains all five plus `[<EntryPoint>]` | ✅ |
 | **7.10f** | **`skipNewlines` in `parseArmBody` before `TKwIf` / `TKwLet` dispatch** — the 7.10e-residual `E002 UnboundVar s` was not a scoping bug. Root cause was parser desync: a multi-line match arm body of the form `\| _ ->\n  let cs = ... in <body>` tokenises as `TBar TUnder TArrow TNewline TKwLet ...`. `parseArmBody` pattern-matched on `TKwLet` / `TKwIf` directly, so the leading `TNewline` fell through to `parseCompare`, which bottomed out at `(EInt 0, toks)` with zero tokens consumed. The arm body became `EInt 0`, the enclosing match returned, and the orphaned `let cs = ... in <body>` was re-parsed by the top-level `parseDecls` loop as a standalone `DLet` — losing the outer fn param scope entirely. In `classifyIdent`, the ejected `<body>` referenced `s` (the outer fn's `(s Str)` param) and produced the phantom `E002 UnboundVar s`. Fix: 15-line diff converting `parseArmBody`'s clause-sugar form into `let toks2 = skipNewlines toks in match toks2 with ...`, mirroring the `skipNewlines` pattern already used by `parseArms`. Fixpoint probe: 146 → 178 bytes, 5 → 6 lines, 1 → 2 errors (`E002 UnboundVar s` gone, replaced by `E002 UnboundVar lexChars` x2 — the next real blocker surfaced by the unblocked parser). No new fixture — existing 23 bootstrap tests stay green. The `s` phantom was masking a separate clause-sugar fn body parser gap, which becomes Phase 7.10g | ✅ |
-| 7.10 | Bootstrap fixpoint | ⏳ |
+| **7.10** | **Bootstrap fixpoint** — `compiler₁.fs == compiler₂.fs` (401 lines, 264 bindings, byte-identical) | ✅ |
 
 ## Getting Started
 
@@ -88,7 +92,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 422 tests
+dotnet test    # 437 tests
 ```
 
 ### Run your first program
@@ -115,8 +119,20 @@ This runs a 979-line ll-lang program that tokenizes, parses, and pretty-prints a
 ### CLI
 
 ```
-lllc build <file.lll>   # elaborate + infer + emit <file>.fs
-lllc run <file.lll>     # build + execute via dotnet fsi
+lllc build <file.lll>   # compile single file → <file>.fs
+lllc build [dir]        # compile project (reads ll.toml) → bin/<name>.fs
+lllc run   <file.lll>   # compile and run via dotnet fsi
+lllc new   <name>       # scaffold new project
+```
+
+### Create a multi-file project
+
+```bash
+lllc new myapp          # creates myapp/ll.toml + myapp/src/Main.lll
+cd myapp
+# edit src/Main.lll, add more .lll files to src/
+lllc build              # → bin/myapp.fs + bin/myapp.fsproj
+dotnet run --project bin/myapp.fsproj
 ```
 
 ## Problem
