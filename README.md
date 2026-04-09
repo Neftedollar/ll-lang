@@ -19,7 +19,7 @@ Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting 
 
 ## Status
 
-Working end-to-end compiler with a **402-test** suite, written in F# / .NET 10. All 7 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins).
+Working end-to-end compiler with a **404-test** suite, written in F# / .NET 10. All 7 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins).
 
 **Bootstrap progress (Phase 7 — ll-lang hosting itself):**
 
@@ -58,6 +58,8 @@ Still to come: elaborator, HM-inference, and codegen rewrites in ll-lang, then b
 | **7.9a** | **First 3-stage bootstrap compiler** — parser + elaborator + minimal HM type checker in one ll-lang file (`20-bootstrap-compiler.lll`, 1598 lines). Adds `TypeExpr` / `typeEq` / `inferExprType` / `typeCheck` on top of `17-pipeline-real.lll` and emits `E001 TypeMismatch` for arithmetic / if-branch mismatches alongside the existing `E002` / `E003` output. First time three compiler stages run back-to-back on a shared AST inside a single ll-lang program. Deliberately narrow — no `unify` / `Subst` / fresh vars (punted to 7.9b), no `ELam` / `ELetIn` / `EMatch` type checking | ✅ |
 | **7.9b** | **4-stage bootstrap compiler** — adds an `emit*` codegen pass to `20-bootstrap-compiler.lll` (1598 → 2100 lines). Walks the parser's `Decl` / `Expr` / `Pat` / `TypeArg` AST and produces a complete F# source file (`module` header + auto-generated stdlib prelude block + sum-type decls + `let rec ... and ...` non-main fn group + `[<EntryPoint>]`-wrapped `main` fn). The hardcoded driver source is now intentionally clean (no errors), so the pipeline reaches the codegen pass and prints F# instead of an error list. The 7.9a error-reporter path stays in as a fallback. First time four compiler stages run back-to-back on a shared AST inside a single ll-lang program | ✅ |
 | **7.9c** | **Bootstrap compiler reads source from file** — driver now calls `readFile "spec/examples/valid/20a-bootstrap-input.lll"` instead of a hardcoded string literal. New 5-line corpus file holds the clean input module. First concrete step toward `compiler₁ = compile(compiler.lll)` — any .lll file on disk can be the input, which unblocks progressive feature-gap discovery. New file-reading-path regression test (renames input → asserts failure → restores) proves the source flows through `readFile` | ✅ |
+| **7.9d** | **Bracket-form types in fn signatures** — `parseParamGroups` / `parseReturnType` now consume `Upper[type][type]...` chains (`Maybe[Int]`, `List[Str]`, `Result[A][E]`) via a new `parseSkipBrackType` helper. Previously, a fn with `Maybe[Int]` return type made the parser desync and silently drop the subsequent `main` decl entirely. New fixture `20b-bootstrap-input-maybe.lll` + regression test prove `wrap(v Int) Maybe[Int] = Some v` now emits both `wrap` and `main` | ✅ |
+| **7.9e** | **Stdlib builtins in elaborator env** — `elaborate` now seeds `env0` with `strConcat` / `strLen` / `print` / `printfn` / `listMap` / `listLen` / `listAppend` / `listIsEmpty` / `listFold` / `readFile` via a new `stdlibNames` helper, so fn bodies that call stdlib builtins no longer fire `E002 UnboundVar`. New fixture `20c-bootstrap-input-stdlib.lll` + regression test exercise `strConcat "hi " n` in a fn body | ✅ |
 | 7.10 | Bootstrap fixpoint | ⏳ |
 
 ## Getting Started

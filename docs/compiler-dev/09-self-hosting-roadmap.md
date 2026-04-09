@@ -2671,3 +2671,95 @@ can change behaviour by editing `20a-bootstrap-input.lll` alone.
 Next tick: **Phase 7.9d** — expand the input file toward
 `20-bootstrap-compiler.lll`'s own shape and fix the first class
 of gaps that surface.
+
+### 2026-04 — Phase 7.9d: bracket-form types in fn signatures (DONE)
+
+Fourth tick of **Phase 7.9**. Probing the bootstrap compiler with
+a fn that uses a parametric return type (`fn wrap(v Int) Maybe[Int]
+= Some v`) surfaced a cascading parser bug: `parseParamGroups`
+and `parseReturnType` only accepted bare `Upper` type names, so
+the head `Maybe` was consumed but `[Int] = Some v` was left in
+the token stream. The expression parser fell through to `(EInt
+0, toks)` on `TLBrack` in `parseAtom`, the outer decl loop
+desynched on the stray tokens, and the subsequent `main` decl
+was **silently dropped** from the emitted F# source.
+
+**Changes:**
+
+* New helper `parseSkipBrackType` in `20-bootstrap-compiler.lll`
+  consumes any trailing `[...]` bracket groups after a head
+  `TUpper` has been read. Handles nested (`Foo[Bar[Baz]]`) and
+  chained (`Result[A][E]`) forms.
+* `parseParamGroups` + `parseReturnType` both call the helper.
+  The bracket payload is discarded at parse time (kept out of
+  `TypeRef = TR Str`) — enough to unblock parsing without
+  extending the AST.
+* New fixture `20b-bootstrap-input-maybe.lll` exercises
+  `fn wrap(v Int) Maybe[Int] = Some v` + main.
+* New regression test in `BootstrapCompilerTests.fs` swaps the
+  20a input for 20b, runs the bootstrap compiler, and asserts
+  the emitted F# contains `wrap`, `[<EntryPoint>]`, and `let main`
+  — proving main is no longer dropped.
+
+**Deliberately out of scope:**
+
+* **Bracket-form type payload in `TypeRef`** — the brackets are
+  consumed and discarded. A future slice can extend `TypeRef`
+  to carry the full type application and feed it to
+  `typeCheck` / HM for real bracket-aware inference.
+* **`(Upper Upper)` juxtaposition form** — the host parser
+  accepts both `Maybe[Int]` and `(Maybe Int)`; the bootstrap
+  parser only accepts the bracket form for now.
+
+Tests: 402 → 403 (+1 for the bracket-form regression test).
+
+Next tick: **Phase 7.9e** — seed the elaborator env with stdlib
+builtin names, so fn bodies that call `strConcat` / `listMap`
+don't fire `E002 UnboundVar`.
+
+### 2026-04 — Phase 7.9e: stdlib builtins in elaborator env (DONE)
+
+Fifth tick of **Phase 7.9**. Probing with `fn greet(n Str) Str =
+strConcat "hi " n` surfaced the next gap: `elaborate` started
+with an empty `env0 = MkEnv []`, so any fn body that called a
+stdlib builtin fired `E002 UnboundVar <name>`. Blocks any input
+program that uses `strConcat` / `listMap` / `printfn` / `readFile`
+— which is **most** of the ll-lang corpus files.
+
+**Changes:**
+
+* New helper `stdlibNames(_ignored Int) List[Str]` in
+  `20-bootstrap-compiler.lll` returns the list of stdlib builtin
+  names the bootstrap compiler itself relies on:
+  `["strConcat" "strLen" "print" "printfn" "listMap" "listLen"
+  "listAppend" "listIsEmpty" "listFold" "readFile"]`. Uses the
+  `_ignored Int` dummy-arg convention already used by
+  `emitPrelude` to dodge ll-lang's lack of zero-param fn-call
+  surface syntax at expression position.
+* `elaborate` now calls `MkEnv (stdlibNames 0)` instead of
+  `MkEnv []`, so every input program starts with the 10 builtin
+  names already in scope.
+* New fixture `20c-bootstrap-input-stdlib.lll` exercises
+  `strConcat "hi " n` in a fn body.
+* New regression test in `BootstrapCompilerTests.fs` swaps the
+  20a input for 20c, runs the bootstrap compiler, and asserts
+  (a) no `E002` in the combined output, (b) emitted F# contains
+  `let greet n` + `strConcat` + `[<EntryPoint>]`.
+
+**Deliberately out of scope:**
+
+* **Full stdlib coverage** — 10 names only (the ones the
+  bootstrap compiler itself uses). Other host builtins like
+  `charToStr` / `strFromChar` / `intToStr` can be added in a
+  later slice once an input program needs them.
+* **Stdlib types** — the env is still a flat `List[Str]`. HM
+  still skips unknowns on stdlib calls. Real stdlib type
+  plumbing is a much bigger slice.
+
+Tests: 403 → 404 (+1 for the stdlib-env regression test).
+
+Next tick: **Phase 7.9f** — comparison ops (`<` / `>` / `==`)
+and `Bool` type support, so `if n < 0 then 0 - n else n` can
+parse. Requires new lexer tokens, new `Expr` variants, new
+codegen arms, and a Bool type in the minimal HM layer — a
+meaningfully larger slice than 7.9c/d/e.
