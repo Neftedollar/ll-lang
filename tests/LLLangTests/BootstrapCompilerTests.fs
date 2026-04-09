@@ -1116,3 +1116,65 @@ let ``20-bootstrap-compiler.lll emits list literal expressions (Phase 7.10a)`` (
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll emits if expression in match arm body (Phase 7.10b)`` () =
+    // Phase 7.10b: before this slice, `parseArmBody` in the bootstrap
+    // fell straight through to `parseCompare`, which SKIPS the special-
+    // form dispatch (`parseIf` / `parseLetIn` / `parseMatch` / `parseLam`)
+    // that lives in `parseExpr`. So a match arm whose body starts with
+    // `if ...` hit `parseCompare` → `parseAddSub` → ... → `parseAtom`,
+    // which has no `TKwIf` arm, fell into the wildcard `(EInt 0, toks)`,
+    // and the rest of the tokens desynced — the body became literal
+    // `0` and every subsequent decl silently dropped out.
+    //
+    // The surgical fix dispatches `TKwIf` / `TKwLet` at the top of
+    // `parseArmBody` (the two cases needed by the bootstrap's own
+    // source) while preserving `parseCompare`-level parsing for all
+    // other forms so a nested `match` inside an arm body can still not
+    // accidentally grab a sibling `| ...` arm.
+    //
+    // Fixture `20s-bootstrap-input-arm-if.lll` has a match whose first
+    // arm body is `if 1 == 1 then 10 else 20`. Pre-fix, `describe` got
+    // an `EInt 0` body. Post-fix, the emitted F# contains the proper
+    // `if ... then 10L else 20L` form.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let armIfPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20s-bootstrap-input-arm-if.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists armIfPath, $"missing fixture: {armIfPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(armIfPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO `error`; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "describe",
+            $"expected emitted F# to contain `describe`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "if ",
+            $"expected emitted F# to contain `if `; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "10L",
+            $"expected emitted F# to contain `10L`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "20L",
+            $"expected emitted F# to contain `20L`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
