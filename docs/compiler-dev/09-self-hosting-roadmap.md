@@ -2290,3 +2290,107 @@ a complete F# file shape (module header + prelude + types + fns),
 so a trimmed `module M\ntype T = ...\nfn main() = ...` example can
 round-trip through the ll-lang codegen and compile standalone
 without any host-side assembly.
+
+### 2026-04 — Phase 7.8e: codegen slice E — let-rec grouping + `[<EntryPoint>]` (DONE)
+
+Fifth and final tick of Phase 7.8. Extends `19-codegen-real.lll` in
+place with mutually-recursive `let rec ... and ...` grouping for 2+
+consecutive non-main TDFns and `[<EntryPoint>]` emission on the zero-
+param `main` fn. Both mirror the host `Codegen.fs` behavior, using a
+simplified "always rec for 2+" rule instead of the host's
+`containsVar` dependency walker.
+
+Extended file:
+[`19-codegen-real.lll`](../../spec/examples/valid/19-codegen-real.lll)
+(683 → 926 lines, +243).
+
+**New shapes**:
+
+```lll
+fn isMainFn(name Str)(ps List[Str]) Bool
+fn showMainDecl(body TExpr) Str                    -- [<EntryPoint>] form
+fn showFnDeclPlain(name Str)(ps List[Str])(body TExpr) Str   -- singleton `let`
+fn showFnDeclFirst(name Str)(ps List[Str])(body TExpr) Str   -- `let rec` head
+fn showFnDeclCont (name Str)(ps List[Str])(body TExpr) Str   -- `and` tail
+fn showFnGroup(fns List[TDecl]) Str                -- 2+ run → let rec block
+fn splitAndShowDecls(decls List[TDecl]) Str        -- accumulator walker
+```
+
+**Design notes**:
+
+* **"Always rec for 2+" rule** — the host `Codegen.fs` runs a
+  `containsVar` walker to decide whether a 2+ fn run is actually
+  recursive and only emits `let rec` when it is. This slice skips
+  that walker entirely: any consecutive run of 2+ non-main TDFns
+  becomes a single `let rec ... and ... and ...` block unconditionally.
+  F# accepts `let rec` on non-recursive bindings — it's stricter,
+  not wrong — so the output stays valid in every test case at a
+  fraction of the implementation cost.
+* **`isMainFn` predicate** matches zero-param fns named `"main"`
+  exactly, mirroring `isMainFn` in `Codegen.fs` line 268 area minus
+  the `TypedFnSig` wrapping. Non-zero-param `main` fns fall through
+  to the normal `showFnDeclPlain` path.
+* **`showMainDecl` wraps the body** with a fixed header/trailer:
+  `[<EntryPoint>]\nlet main (argv: string[]) =\n    <body>\n    0`.
+  F# requires the entry point to have signature `string[] -> int`,
+  so the dummy `argv` parameter and `0` exit code are mandatory.
+* **Four `showFnDecl*` variants** — `Plain` for singleton runs,
+  `First`/`Cont` for grouped runs, and `Dispatch` to route TDFn
+  through either `Plain` or `Main`. Each one keeps its own
+  `match ps with` so the "one-level-deep match" discipline holds
+  across the whole file.
+* **`splitAndShowDecls` walker** carries two accumulators through
+  a left-to-right traversal: `pending` (reversed list of non-main
+  TDFns currently being collected into a potential rec group) and
+  `acc` (output string built so far). On every TDType or main
+  boundary it flushes `pending` via `flushPendingFns` — which
+  reverses the list back to source order and dispatches on length
+  (singleton → `showDecl` plain `let`, 2+ → `showFnGroup` rec
+  block) — then emits the boundary decl as its own block.
+* **Flushing on end-of-list** — the loop's base case hits
+  `flushPendingFns` too, so any trailing non-main fn run gets its
+  own block even when no TDType or main follows it.
+* **`if ... then EXPR` must stay on one line** — the parser rejects
+  `if cond\n  then EXPR` layouts, so `splitAndShowStepFn` extracts
+  its main-boundary branch into a separate `splitAndShowStepMain`
+  helper. Same one-line-branch rule as `showTypeArgName`.
+
+`main` now grows from 10 to 11 decls, adding `TDFn "main" [] (TEApp
+(TEVar "print") (TEStr "hello"))` at the end. The seven existing
+non-main fns now collapse into a single `let rec inc ... and greet
+... and addOne ... and callInc ... and choose ... and double ... and
+classify ...` block, and the new `main` decl prints with the
+`[<EntryPoint>]` header, dummy `argv` parameter, and `0` exit-code
+trailer.
+
+**Still deliberately out of scope** (carved out for Phase 7.9+):
+
+1. **Proper recursion-detection walker** (host's `containsVar`) —
+   this slice uses "always rec for 2+" to keep the impl tiny.
+2. **Mutual-recursion dependency splitting** within groups — every
+   contiguous non-main fn run stays as one group, even if the fns
+   don't actually reference each other.
+3. **Full ~30-binding `fsharpPreludeCore`** — still 5-line subset
+   from Phase 7.8d.
+4. **Integration with the 18-hminfer-real.lll HM side** — still a
+   standalone demo; bootstrap stitching lands in Phase 7.9.
+5. **Keyword-safe ident rewriting** (`safeIdent` in `Codegen.fs`) —
+   every hardcoded test name is already a non-keyword.
+
+Tests: 398 → 398 (no new facts — the existing `runs and emits F#
+source lines for each TDFn` fact in `CodegenRealTests.fs` grows its
+expected-substring list from 24 to 29 to cover the `let rec inc`
+head, six `and <name>` continuation lines, `[<EntryPoint>]`,
+`let main (argv: string[]) =`, `(print "hello")`, and `    0`).
+
+With this slice in place, **Phase 7.8 is complete**: all four
+compiler stages (lex / parse / elaborate / HM-infer / codegen) now
+have ll-lang self-host representations for every shape the
+bootstrap compiler will need, and the codegen side emits a complete,
+compilable F# source file for every supported input.
+
+Next tick: **Phase 7.9** — assemble `bootstrap/compiler.lll` by
+stitching the five self-host slices (`15-lexer-real.lll`,
+`16-parser-real.lll`, `17-elab-real.lll`, `18-hminfer-real.lll`,
+`19-codegen-real.lll`) into a single end-to-end program that
+takes ll-lang source on stdin and emits F# source on stdout.
