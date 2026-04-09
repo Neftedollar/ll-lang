@@ -1,0 +1,1598 @@
+module Examples.Bootstrap
+
+-- Phase 7.9a integration: the first **3-stage bootstrap compiler**
+-- written entirely in ll-lang itself. Stitches a real parser, a real
+-- elaborator, and a minimal HM-style type checker into ONE program:
+-- source Str -> lexer -> module parser -> `List[Decl]` -> elaborator
+-- (name resolution + exhaustiveness) -> minimal type-check pass
+-- (arithmetic + if) -> list of `E001` / `E002` / `E003` error strings
+-- -> printed to stdout. Showcase milestone: the first time THREE
+-- compiler layers authored in ll-lang share a single AST and run
+-- back-to-back on a real source string.
+--
+-- Phase 7.9a delta vs 17-pipeline-real.lll:
+--   * Add a minimal `TypeExpr` ADT (`TyName Str | TyVar Str`).
+--   * Add a simple `typeEq` structural equality over `TypeExpr`.
+--   * Add `inferExprType : Expr -> TypeExpr` that assigns the obvious
+--     type to `EInt` / `EStr` / arithmetic / `EIf` branches and falls
+--     through to `TyVar "?"` everywhere else (no lambdas, no let-gen,
+--     no unify, no Subst — that's Phase 7.9b).
+--   * Add `typeCheck : Expr -> List[Str]` which walks the expression
+--     and emits `E001 TypeMismatch <l> vs <r>` strings for each
+--     `+ - * /` or `if` branch whose operand types don't match.
+--   * Extend `elaborate` to also run the HM pass over every fn body
+--     and concatenate the resulting error list.
+--   * Add a new `fn badType(x Int) Int = x + "y"` to the hardcoded
+--     driver source so the HM pass has something to fire on. The
+--     expected stdout now has four lines:
+--       E002 UnboundVar undefinedName
+--       E003 NonExhaustiveMatch Shape missing Circle
+--       E003 NonExhaustiveMatch Shape missing Rect
+--       E001 TypeMismatch Int vs Str
+--
+-- Deliberately SKIPPED in this slice (punted to Phase 7.9b):
+--   * Full HM with unify / Subst / fresh vars.
+--   * `ELam` / `ELetIn` / `EMatch` / `ECon` type checking — the HM
+--     pass just skips these shapes (treats them as `TyVar "?"`).
+--   * Codegen integration — 7.9b will fold in `19-codegen-real.lll`.
+--
+-- Inherited header from 17-pipeline-real.lll follows (parser + elab
+-- halves are unchanged from that file):
+--
+-- Phase 7.6 integration: the first end-to-end compiler pipeline written
+-- entirely in ll-lang itself. Stitches `15-moduleparser-real.lll` and
+-- `16-elaborator-real.lll` into a single program: source Str -> lexer
+-- -> module parser -> `List[Decl]` -> elaborator (name resolution +
+-- exhaustiveness) -> list of `E002` / `E003` error strings -> printed
+-- to stdout. Showcase milestone — the first time two compiler layers
+-- authored in ll-lang share a single AST and run back-to-back on a real
+-- source string.
+--
+-- The file is big (parser + elaborator in one) but mechanically
+-- assembled: the parser half is copied verbatim from
+-- `15-moduleparser-real.lll`; the elaborator half is adapted from
+-- `16-elaborator-real.lll` to walk 15's richer `Decl` / `Expr` / `Pat`
+-- AST instead of 16's minimal local AST.
+--
+-- Adaptation deltas vs 16:
+--   * `checkExpr` handles every 15 `Expr` variant: `EInt` / `EStr` /
+--     `EVar` (the only leaf that actually resolves names) / `ETagged`
+--     / all four arithmetic arms / `EApp` / `ELam` / `ELetIn` / `EIf`
+--     / `EMatch`.
+--   * `collectDecl` / `checkDecl` / `exhaustivenessDecl` unwrap 15's
+--     `DType TypeDecl` / `DFn FnDecl` / `DLet LetDecl` / `DTag Str` /
+--     `DImport Str` / `DExport Decl` variants. `DExport inner`
+--     recurses into the inner decl so an exported fn still registers
+--     its top-level name and gets its body walked.
+--   * `exhaustivenessDecl` reads the last curried param's type name
+--     via `MkParam name (TR typeName)` on 15's `Param`. 15's `Pat`
+--     set has no `PCon` (named constructor patterns are a later
+--     slice), so `coveredCtors` is always empty — a match over a
+--     declared sum type with no catch-all arm emits one `E003` per
+--     constructor. This is the deliberately narrow cut that keeps the
+--     integration tight.
+--   * `DImport` contributes nothing to the env (real module resolution
+--     is a much later phase); `DLet`'s RHS is walked now (16 skipped
+--     it).
+--
+-- The inherited parser half still carries the Phase 7.1..7.5e doc
+-- strings — kept as-is so diffing against `15-moduleparser-real.lll`
+-- remains trivial.
+--
+-- Original 15 header follows:
+--
+-- Phase 7.4 / 7.5a / 7.5b / 7.5c / 7.5d: a real recursive-descent **full
+-- module** parser written in ll-lang itself. Showcase milestone — the
+-- first single file that can consume a whole `module M\n type ...\n
+-- let ... \n fn ... = ...` source end-to-end and emit a `List[Decl]`
+-- AST. Stitches together the earlier self-hosting slices:
+--   * 09-lexer-real.lll       — single-pass char tokenizer
+--   * 12-typeparser-real.lll  — single-line sum-type decls
+--   * 13-fnparser-real.lll    — curried typed fn decls + arithmetic body
+--   * 14-exprparser-real.lll  — `if-then-else`, `match`, var refs,
+--                               `let-in` chains, lambdas
+--
+-- Phase 7.5a added `let name = expr` decls at module level and a
+-- `match scrut with | pat -> body | ...` special form inside fn bodies
+-- (lifting the match machinery from 14-exprparser-real.lll).
+--
+-- Phase 7.5b added two more expression forms inside fn bodies:
+-- `\x. body` lambdas and `let name = e1 in e2` let-in chains. Both
+-- dispatch from `parseExpr`, so either can nest inside any other
+-- expression form the grammar already accepts. Note: `TKwLet` is now
+-- ambiguous at dispatch time — `parseDecls` consumes it as a module-
+-- level decl, `parseExpr` (invoked from inside an fn body) consumes it
+-- as an expression let-in. Context disambiguates cleanly because the
+-- two entry points are independent.
+--
+-- Phase 7.5c added two more items from the Phase 7.5 backlog: **string
+-- literals** in fn-body expressions (`EStr s`, lexed as `TStr` via the
+-- `takeStrBody` helper lifted from 14-exprparser-real.lll) and **cons
+-- / nil patterns** in match arms (`PNil` for `[]`, `PCons h t` for
+-- `h :: t`, right-associative via recursive `parsePat`). The lexer
+-- gained `TLBrack` / `TRBrack` / `TColonColon` tokens; `parseAtom` got
+-- a `TStr` arm; `parsePat` was split into `parsePrimaryPat` (which
+-- handles `[]` as a primary) plus a recursive wrapper that folds a
+-- trailing `:: pat` into `PCons`.
+--
+-- Phase 7.5d added two more items: **tagged literals** in expression
+-- position (`ETagged e tag`, surface `"x"[UserId]` / `5[m]`, restricted
+-- to `EInt` / `EStr` atoms to mirror the host compiler's Phase 7.2.2
+-- literal-only rule) and **parametric ctor args** in type decls
+-- (`TAApp head args`, bracket-form surface `Maybe[Int]` / `Result[A][E]`
+-- — picked over the `(Maybe Int)` juxtaposition form because brackets
+-- need no lookahead). The lexer already has `TLBrack` / `TRBrack` from
+-- Phase 7.5c; `parseAtom` got a `maybeTagged` post-pass after `EInt`
+-- and `EStr`; `parseTypeArgs` was split into `parseOneTypeArg` +
+-- `parseBrackArgs` so bracket groups can chain and nest.
+--
+-- Phase 7.5e adds three more module-level decl forms — closing out the
+-- last item on the Phase 7.5 umbrella: bare **`tag Name`** decls
+-- (`DTag`, no body, no params), dotted **`import Foo.Bar.Baz`** decls
+-- (`DImport`, path built via the same `parseModuleNameTail` helper the
+-- module header uses), and an **`export`** modifier prefix that wraps
+-- any existing decl in a new `DExport` variant. The lexer gains three
+-- keywords `tag` / `import` / `export`; `parseDecls` grows three new
+-- dispatch arms (the `export` arm reads the next decl via a new
+-- `parseOneDecl` helper and wraps the result in `DExport`); the
+-- pretty-printer gains three trivial arms (`tag <name>`, `import
+-- <path>`, `export <show inner>`). `trait` / `impl` decls are
+-- deliberately NOT in this slice — they're much more complex
+-- (multi-line signatures + indented fn bodies) and live in a separate
+-- Phase 7.6 slice.
+--
+-- Still constrained: no multi-line fn bodies, no `trait`/`impl`
+-- module-level decls, no multi-line type decls, no list-literal
+-- expression atoms (`[a b c]` in expression position), no tuple
+-- patterns.
+--
+-- What IS covered is enough to prove the front-end can be a single
+-- ll-lang program:
+--   * module header with dot-separated TypeId segments
+--   * multiple single-line sum-type decls with multi-ctor `|` chains
+--   * multiple module-level `let name = expr` decls
+--   * multiple single-line fn decls with curried typed params, optional
+--     return type, int-literal / var-ref / arithmetic / if-then-else /
+--     match-with-scrutinee / let-in / lambda / application bodies
+--
+-- Grammar (each decl on its own line; `\n` between decls):
+--   module   = 'module' Upper ('.' Upper)* '\n' decls
+--   decls    = decl*
+--   decl     = typeDecl | letDecl | fnDecl | tagDecl | importDecl
+--            | 'export' decl
+--   tagDecl  = 'tag' Upper
+--   importDecl = 'import' Upper ('.' Upper)*
+--   typeDecl = 'type' Upper param* '=' ctor ('|' ctor)*
+--   param    = single-uppercase-letter (A, B, ...)
+--   ctor     = Upper typeArg*
+--   typeArg  = Upper brackGroup*       -- Phase 7.5d: `Maybe[Int]` chain
+--   brackGroup = '[' typeArg ']'       -- recursive, flattened into TAApp
+--   letDecl  = 'let' lower '=' expr
+--   fnDecl   = 'fn' lower paramGroup* typeName? '=' expr
+--   paramGroup = '(' lower typeName ')'  |  '(' ')'
+--   expr     = ifExpr | matchExpr | letInExpr | lamExpr | addSub
+--   ifExpr   = 'if' expr 'then' expr 'else' expr
+--   matchExpr = 'match' expr 'with' ('|' pat '->' addSub)+
+--   letInExpr = 'let' lower '=' expr 'in' expr
+--   lamExpr  = '\' lower '.' expr
+--   pat      = primaryPat ('::' pat)?
+--   primaryPat = int | lower | '_' | '[' ']'
+--   addSub   = mulDiv (('+' | '-') mulDiv)*
+--   mulDiv   = app (('*' | '/') app)*
+--   app      = atom atom*
+--   atom     = int tag? | str tag? | lower | Upper | '(' expr ')'
+--   tag      = '[' Upper ']'           -- Phase 7.5d: ETagged wrapper
+--
+-- The pretty printer produces a deterministic, unambiguous string so the
+-- runtime test can substring-match each line of the expected output.
+
+type Maybe A = Some A | None
+
+type Token =
+  | TKwModule
+  | TKwType
+  | TKwFn
+  | TKwIf
+  | TKwThen
+  | TKwElse
+  | TKwLet
+  | TKwIn
+  | TKwMatch
+  | TKwWith
+  | TKwTag
+  | TKwImport
+  | TKwExport
+  | TLower Str
+  | TUpper Str
+  | TInt Int
+  | TStr Str
+  | TLParen
+  | TRParen
+  | TLBrack
+  | TRBrack
+  | TEq
+  | TBar
+  | TDot
+  | TBackslash
+  | TArrow
+  | TUnder
+  | TColonColon
+  | TPlus
+  | TMinus
+  | TStar
+  | TSlash
+  | TNewline
+  | TEnd
+
+-- Type-decl AST ------------------------------------------------------------
+
+-- Phase 7.5d: `TAApp head args` is the bracket-form parametric type
+-- application `Maybe[Int]` / `Result[A][E]`. Multiple bracket groups on
+-- the same head flatten into one `TAApp` with a multi-element arg list.
+-- Plain single-segment names still parse as `TAVar` (single letter) or
+-- `TACon` (multi-char) exactly like earlier slices.
+type TypeArg =
+  | TAVar Str
+  | TACon Str
+  | TAApp Str List[TypeArg]
+
+type Ctor = MkCtor Str List[TypeArg]
+
+type TypeDecl = MkTypeDecl Str List[Str] List[Ctor]
+
+-- Fn-decl + expression AST -------------------------------------------------
+
+type TypeRef = TR Str
+
+type Param = MkParam Str TypeRef
+
+-- Match patterns for this slice: int literal, lowercase var binder,
+-- wildcard `_`, nil `[]`, and cons `h :: t`. Phase 7.5c added `PNil` /
+-- `PCons`; constructor patterns, string-literal patterns, list
+-- literals, and tuple patterns still live in Phase 7.5+'s backlog.
+type Pat =
+  | PInt Int
+  | PVar Str
+  | PWild
+  | PNil
+  | PCons Pat Pat
+
+-- Expression grammar for this slice: int literal, var ref (covers both
+-- lowercase identifiers and uppercase constructor references — the
+-- elaborator would distinguish, but for pretty-printing they're the
+-- same leaf), parenthesised grouping, `+ - * /`, `if-then-else`, curried
+-- juxtaposition application, AND `match scrut with | pat -> body | ...`.
+-- Match arms are stored as two parallel lists inside EMatch (pats, bodies)
+-- the same way 14-exprparser-real.lll does it — the current codegen
+-- can't emit mutually-recursive `type MatchArm = MkArm Pat Expr`, so
+-- splitting the arm into two lockstep lists dodges the issue and keeps
+-- the invariant `length pats == length bodies` by construction.
+type Expr =
+  | EInt Int
+  | EStr Str
+  | EVar Str
+  | ETagged Expr Str
+  | EAdd Expr Expr
+  | ESub Expr Expr
+  | EMul Expr Expr
+  | EDiv Expr Expr
+  | EApp Expr Expr
+  | ELam Str Expr
+  | ELetIn Str Expr Expr
+  | EIf Expr Expr Expr
+  | EMatch Expr List[Pat] List[Expr]
+
+-- Phase 7.5a: `let name = expr` at module level. Lives alongside type and
+-- fn decls inside the top-level `Decl` sum.
+type LetDecl = MkLet Str Expr
+
+type FnDecl = MkFn Str List[Param] Maybe[TypeRef] Expr
+
+-- Module AST ---------------------------------------------------------------
+
+-- Phase 7.5e adds three more decl variants:
+--   * `DTag name` for bare `tag UserId` decls (semantic tag
+--     declaration, no body, no params);
+--   * `DImport path` for `import Std.List` decls, where `path` is the
+--     dot-joined qualified module name (built by walking the sequence
+--     of `TUpper` / `TDot` tokens exactly like `parseModuleHeader`);
+--   * `DExport inner` — a wrapper marking the inner decl as publicly
+--     visible. The `export` keyword is a modifier prefix on top of any
+--     existing decl (`export fn ...`, `export type ...`, `export let
+--     ...`), so `DExport` just holds a nested `Decl`. Picked over an
+--     `exported: Bool` field on each variant because wrapping doesn't
+--     touch any existing variant shape.
+type Decl =
+  | DType TypeDecl
+  | DLet LetDecl
+  | DFn FnDecl
+  | DTag Str
+  | DImport Str
+  | DExport Decl
+
+type Module = MkModule Str List[Decl]
+
+-- ---------- Char predicates ---------------------------------------------
+
+-- ASCII uppercase / lowercase tests, same shape as 12/13/14. ll-lang lacks
+-- `&&` so each predicate is two nested `if`s.
+fn isUpperChar(c Char) Bool =
+  let n = charToInt c in
+  if n < 65 then false
+  else if n > 90 then false
+  else true
+
+fn isLowerChar(c Char) Bool =
+  let n = charToInt c in
+  if n < 97 then false
+  else if n > 122 then false
+  else true
+
+fn isIdStart(c Char) Bool =
+  if isUpperChar c then true else isLowerChar c
+
+fn isIdCont(c Char) Bool =
+  if isIdStart c then true else charIsDigit c
+
+-- ---------- Lexer --------------------------------------------------------
+
+-- Greedy take/drop while predicate, shared shape with every earlier slice.
+fn takeWhilePred(p)(cs List[Char]) List[Char] =
+  | c :: rest -> if p c then listAppend [c] (takeWhilePred p rest) else []
+  | _ -> []
+
+fn dropWhilePred(p)(cs List[Char]) List[Char] =
+  | c :: rest -> if p c then dropWhilePred p rest else cs
+  | _ -> []
+
+-- Unwrap `strToInt` into a raw Int; the lexer only calls this on strings
+-- that are already all-digits, so the `None` branch is defensive.
+fn parseIntStr(s Str) Int =
+  match strToInt s with
+    | Some n -> n
+    | None -> 0
+
+-- Classify an identifier: keywords map to TKw*; uppercase-start becomes
+-- TUpper (type / ctor names); lowercase-start becomes TLower (fn names,
+-- params, value vars). Phase 7.5a adds `let` (module-level decls) and
+-- `match` / `with` (match-as-expression inside fn bodies). Phase 7.5b
+-- adds `in` (let-in chains inside fn bodies, dispatched from parseExpr).
+-- Phase 7.5e adds `tag` / `import` / `export` — three new module-level
+-- decl forms (a bare `tag Name` decl, a dotted `import Foo.Bar` decl,
+-- and an `export` modifier prefix that wraps any existing decl in a
+-- `DExport` variant).
+fn classifyIdent(s Str) Token =
+  match s with
+    | "module" -> TKwModule
+    | "type" -> TKwType
+    | "fn" -> TKwFn
+    | "if" -> TKwIf
+    | "then" -> TKwThen
+    | "else" -> TKwElse
+    | "let" -> TKwLet
+    | "in" -> TKwIn
+    | "match" -> TKwMatch
+    | "with" -> TKwWith
+    | "tag" -> TKwTag
+    | "import" -> TKwImport
+    | "export" -> TKwExport
+    | _ ->
+      let cs = strChars s in
+      match cs with
+        | c :: _ -> if isUpperChar c then TUpper s else TLower s
+        | _ -> TLower s
+
+fn lexId(cs List[Char]) List[Token] =
+  let idChars = takeWhilePred isIdCont cs in
+  let leftover = dropWhilePred isIdCont cs in
+  let tok = classifyIdent (strFromChars idChars) in
+  listAppend [tok] (lexChars leftover)
+
+fn lexNum(cs List[Char]) List[Token] =
+  let digits = takeWhilePred charIsDigit cs in
+  let leftover = dropWhilePred charIsDigit cs in
+  listAppend [TInt (parseIntStr (strFromChars digits))] (lexChars leftover)
+
+-- Collect a string literal body: the opening `"` has already been
+-- consumed, now greedily take chars until the closing `"`. Returns
+-- (body-chars, leftover). Lifted from 14-exprparser-real.lll.
+fn takeStrBody(cs List[Char]) =
+  | c :: rest ->
+    if c == '"' then ([], rest)
+    else
+      let (body, leftover) = takeStrBody rest in
+      (c :: body, leftover)
+  | _ -> ([], [])
+
+fn lexStr(cs List[Char]) List[Token] =
+  let (body, leftover) = takeStrBody cs in
+  listAppend [TStr (strFromChars body)] (lexChars leftover)
+
+-- Handle `:` vs `::`: peek the next char to decide. Only `::` is a
+-- valid token in this grammar (cons pattern separator); a bare `:` is
+-- not used anywhere, so it falls through silently.
+fn lexColonOrCons(cs List[Char]) List[Token] =
+  | c :: rest ->
+    if c == ':' then listAppend [TColonColon] (lexChars rest)
+    else lexChars cs
+  | _ -> [TEnd]
+
+-- Handle `-` vs `->`: peek the next char to decide between TMinus and
+-- TArrow. `->` is used by match arms (`| pat -> body`); 15 only had
+-- TMinus before Phase 7.5a. Lifted from 14-exprparser-real.lll.
+fn lexMinusOrArrow(cs List[Char]) List[Token] =
+  | c :: rest ->
+    if c == '>' then listAppend [TArrow] (lexChars rest)
+    else listAppend [TMinus] (lexChars cs)
+  | _ -> [TMinus]
+
+-- Main loop. Newlines are significant (they separate decls); spaces and
+-- tabs are skipped. Every other single-char symbol maps directly to its
+-- token constructor. Phase 7.5a adds `_` → TUnder (wildcard pattern) and
+-- the two-char `->` arrow via the `lexMinusOrArrow` helper. Phase 7.5b
+-- adds `\` → TBackslash (lambda-intro) — `.` → TDot was already here.
+fn lexChars(cs List[Char]) List[Token] =
+  | c :: rest ->
+    if c == '\n' then listAppend [TNewline] (lexChars rest)
+    else if charIsSpace c then lexChars rest
+    else if isIdStart c then lexId cs
+    else if charIsDigit c then lexNum cs
+    else if c == '"' then lexStr rest
+    else if c == '(' then listAppend [TLParen] (lexChars rest)
+    else if c == ')' then listAppend [TRParen] (lexChars rest)
+    else if c == '[' then listAppend [TLBrack] (lexChars rest)
+    else if c == ']' then listAppend [TRBrack] (lexChars rest)
+    else if c == '=' then listAppend [TEq] (lexChars rest)
+    else if c == '|' then listAppend [TBar] (lexChars rest)
+    else if c == '.' then listAppend [TDot] (lexChars rest)
+    else if c == '\\' then listAppend [TBackslash] (lexChars rest)
+    else if c == '_' then listAppend [TUnder] (lexChars rest)
+    else if c == ':' then lexColonOrCons rest
+    else if c == '+' then listAppend [TPlus] (lexChars rest)
+    else if c == '-' then lexMinusOrArrow rest
+    else if c == '*' then listAppend [TStar] (lexChars rest)
+    else if c == '/' then listAppend [TSlash] (lexChars rest)
+    else lexChars rest
+  | _ -> [TEnd]
+
+fn tokenize(src Str) List[Token] = lexChars (strChars src)
+
+-- ---------- Recursive-descent parser ------------------------------------
+
+-- Skip leading newlines between decls. Blank lines are invisible.
+fn skipNewlines(toks List[Token]) List[Token] =
+  | TNewline :: rest -> skipNewlines rest
+  | _ -> toks
+
+-- Module name tail: `.Upper` segments. Each recursive call prepends the
+-- dot + next segment to the accumulator string, then keeps walking. On
+-- the first non-dot token it stops.
+fn parseModuleNameTail(acc Str)(toks List[Token]) =
+  | TDot :: TUpper seg :: rest ->
+    let acc2 = strConcat (strConcat acc ".") seg in
+    parseModuleNameTail acc2 rest
+  | _ -> (acc, toks)
+
+-- `module Upper (. Upper)*`. Returns (qualified-name, remaining-tokens).
+fn parseModuleHeader(toks List[Token]) =
+  | TKwModule :: TUpper head :: rest ->
+    parseModuleNameTail head rest
+  | _ -> ("?", toks)
+
+-- Top-level driver. Reads the module header, then drives a decl loop.
+fn parseModule(toks List[Token]) Module =
+  let (name, rest) = parseModuleHeader toks in
+  let decls = parseDecls (skipNewlines rest) in
+  MkModule name decls
+
+-- Main decl loop. Cons-pattern fast paths dispatch on the first token.
+-- Anything that isn't `type`, `let`, `fn`, `tag`, `import`, or `export`
+-- terminates the loop — TEnd, TNewline (already skipped), unexpected
+-- tokens all fall through to the wildcard. Phase 7.5a added the `let`
+-- arm; Phase 7.5e adds three more: `tag Name`, `import Foo.Bar`, and
+-- the `export` modifier prefix. The `export` arm parses the remainder
+-- of the token stream as any regular decl via `parseOneDecl` and wraps
+-- the result in `DExport` — this keeps the modifier composable with
+-- every existing decl form without duplicating the dispatch ladder.
+fn parseDecls(toks List[Token]) List[Decl] =
+  | TKwType :: _ -> consTypeDecl (parseTypeDecl toks)
+  | TKwLet :: _ -> consLetDecl (parseLetDecl toks)
+  | TKwFn :: _ -> consFnDecl (parseFnDecl toks)
+  | TKwTag :: _ -> consDecl (parseTagDecl toks)
+  | TKwImport :: _ -> consDecl (parseImportDecl toks)
+  | TKwExport :: rest ->
+    let (inner, rest2) = parseOneDecl rest in
+    DExport inner :: parseDecls (skipNewlines rest2)
+  | _ -> []
+
+-- Helper: turn a (TypeDecl, leftover) pair into the recursive list.
+fn consTypeDecl(pair) List[Decl] =
+  let (td, rest) = pair in
+  DType td :: parseDecls (skipNewlines rest)
+
+-- Same shape for let decls (Phase 7.5a).
+fn consLetDecl(pair) List[Decl] =
+  let (ld, rest) = pair in
+  DLet ld :: parseDecls (skipNewlines rest)
+
+fn consFnDecl(pair) List[Decl] =
+  let (fd, rest) = pair in
+  DFn fd :: parseDecls (skipNewlines rest)
+
+-- Phase 7.5e: generic `(Decl, leftover) -> List[Decl]` cons helper for
+-- parsers that already return a fully-constructed `Decl` (tag and
+-- import decls build `DTag` / `DImport` directly, unlike the type /
+-- let / fn paths whose helpers return the inner decl body).
+fn consDecl(pair) List[Decl] =
+  let (d, rest) = pair in
+  d :: parseDecls (skipNewlines rest)
+
+-- Phase 7.5e: parse exactly one decl, returning `(Decl, leftover)`.
+-- Used by the `TKwExport :: rest` arm in `parseDecls` to consume the
+-- decl that follows an `export` keyword without recursing into the
+-- full decl-list loop. Dispatches on the same keyword ladder as
+-- `parseDecls` and returns the single parsed decl + whatever tokens
+-- are left. `export export ...` falls through to a defensive `DTag
+-- "?"` arm — the grammar forbids stacking, and an error there would
+-- immediately surface at the next parseDecls call.
+fn parseOneDecl(toks List[Token]) =
+  | TKwType :: _ ->
+    let (td, rest) = parseTypeDecl toks in
+    (DType td, rest)
+  | TKwLet :: _ ->
+    let (ld, rest) = parseLetDecl toks in
+    (DLet ld, rest)
+  | TKwFn :: _ ->
+    let (fd, rest) = parseFnDecl toks in
+    (DFn fd, rest)
+  | TKwTag :: _ -> parseTagDecl toks
+  | TKwImport :: _ -> parseImportDecl toks
+  | _ -> (DTag "?", toks)
+
+-- ---------- Tag-decl parser (Phase 7.5e) --------------------------------
+
+-- Single `tag Name` decl. No body, no params — just the keyword and a
+-- single TUpper. Mirrors the host compiler's KwTag arm in parseDecl.
+fn parseTagDecl(toks List[Token]) =
+  | TKwTag :: TUpper name :: rest -> (DTag name, rest)
+  | _ -> (DTag "?", toks)
+
+-- ---------- Import-decl parser (Phase 7.5e) -----------------------------
+
+-- Single `import Foo.Bar.Baz` decl. The dotted tail is collected by
+-- `parseModuleNameTail` — the same helper `parseModuleHeader` uses, so
+-- the qualified path string is built exactly the same way on both
+-- sides. Stores the path as one dot-joined string, matching how the
+-- pretty printer later renders it.
+fn parseImportDecl(toks List[Token]) =
+  | TKwImport :: TUpper head :: rest ->
+    let (path, rest2) = parseModuleNameTail head rest in
+    (DImport path, rest2)
+  | _ -> (DImport "?", toks)
+
+-- ---------- Let-decl parser (Phase 7.5a) --------------------------------
+
+-- Single module-level let decl: 'let' lower '=' expr. The RHS reuses the
+-- full `parseExpr` pipeline so it can be any expression the fn-body
+-- grammar accepts (int lit, arithmetic, if-then-else, match, ...).
+fn parseLetDecl(toks List[Token]) =
+  | TKwLet :: TLower name :: TEq :: rest ->
+    let (body, rest2) = parseExpr rest in
+    (MkLet name body, rest2)
+  | _ -> (MkLet "?" (EInt 0), toks)
+
+-- ---------- Type-decl parser (adapted from 12-typeparser-real.lll) ------
+
+-- Single decl: 'type' Upper param* '=' ctor ('|' ctor)*
+fn parseTypeDecl(toks List[Token]) =
+  | TKwType :: TUpper name :: rest ->
+    let (prms, rest2) = parseTypeParams rest in
+    let rest3 = match rest2 with
+      | TEq :: r -> r
+      | _ -> rest2
+    in
+    let (ctors, rest4) = parseCtors rest3 in
+    (MkTypeDecl name prms ctors, rest4)
+  | _ -> (MkTypeDecl "?" [] [], toks)
+
+-- Collect zero or more single-letter uppercase type params, stopping at
+-- TEq (or anything else non-Upper).
+fn parseTypeParams(toks List[Token]) =
+  | TUpper s :: rest ->
+    if strLen s == 1 then
+      let (ps, rest2) = parseTypeParams rest in
+      (s :: ps, rest2)
+    else ([], toks)
+  | _ -> ([], toks)
+
+-- First ctor is mandatory; each subsequent ctor is preceded by `|`.
+fn parseCtors(toks List[Token]) =
+  let (c, rest) = parseCtor toks in
+  parseCtorsTail [c] rest
+
+fn parseCtorsTail(acc List[Ctor])(toks List[Token]) =
+  | TBar :: rest ->
+    let (c, rest2) = parseCtor rest in
+    parseCtorsTail (listAppend acc [c]) rest2
+  | _ -> (acc, toks)
+
+fn parseCtor(toks List[Token]) =
+  | TUpper name :: rest ->
+    let (args, rest2) = parseTypeArgs rest in
+    (MkCtor name args, rest2)
+  | _ -> (MkCtor "?" [], toks)
+
+-- Collect zero or more type args. Stops on TBar / TNewline / TEnd / any
+-- non-Upper token. Each arg is parsed via `parseOneTypeArg`, which
+-- handles both the bare form (`Int`, `A`) and the Phase 7.5d bracket-
+-- form parametric application (`Maybe[Int]`, `Result[A][E]`).
+fn parseTypeArgs(toks List[Token]) =
+  | TUpper _ :: _ ->
+    let (arg, rest) = parseOneTypeArg toks in
+    let (args, rest2) = parseTypeArgs rest in
+    (arg :: args, rest2)
+  | _ -> ([], toks)
+
+-- Phase 7.5d: parse a single type arg. Bare TUpper becomes `TAVar` (len
+-- 1) or `TACon` (longer). If the head is immediately followed by one or
+-- more bracket groups `[ typeArg ]`, those groups flatten into a single
+-- `TAApp head args` ctor. Recurses through `parseBrackArgs` so a
+-- bracket group's inner arg can itself be another bracket-form
+-- application (`Foo[Bar[Baz]]`).
+fn parseOneTypeArg(toks List[Token]) =
+  | TUpper s :: rest ->
+    let (brackArgs, rest2) = parseBrackArgs [] rest in
+    if listIsEmpty brackArgs then
+      let arg = if strLen s == 1 then TAVar s else TACon s in
+      (arg, rest2)
+    else (TAApp s brackArgs, rest2)
+  | _ -> (TACon "?", toks)
+
+-- Collect successive `[ typeArg ]` bracket groups, appending each
+-- parsed inner arg to the running `acc` list. Stops on the first
+-- non-TLBrack token. The caller is responsible for deciding whether the
+-- resulting arg list should become a `TAApp` or a plain bare form.
+fn parseBrackArgs(acc List[TypeArg])(toks List[Token]) =
+  | TLBrack :: rest ->
+    let (inner, rest2) = parseOneTypeArg rest in
+    let rest3 = match rest2 with
+      | TRBrack :: r -> r
+      | _ -> rest2
+    in
+    parseBrackArgs (listAppend acc [inner]) rest3
+  | _ -> (acc, toks)
+
+-- ---------- Fn-decl parser (adapted from 13-fnparser-real.lll) ----------
+
+-- Single fn decl: 'fn' lower paramGroup* typeName? '=' expr
+fn parseFnDecl(toks List[Token]) =
+  | TKwFn :: TLower name :: rest ->
+    let (prms, rest2) = parseParamGroups rest in
+    let (retTy, rest3) = parseReturnType rest2 in
+    let rest4 = match rest3 with
+      | TEq :: r -> r
+      | _ -> rest3
+    in
+    let (body, rest5) = parseExpr rest4 in
+    (MkFn name prms retTy body, rest5)
+  | _ -> (MkFn "?" [] None (EInt 0), toks)
+
+-- Zero or more param groups. `()` produces no params; `(name Type)` adds
+-- a MkParam to the running list.
+fn parseParamGroups(toks List[Token]) =
+  | TLParen :: TRParen :: rest -> ([], rest)
+  | TLParen :: TLower pname :: TUpper tname :: TRParen :: rest ->
+    let (ps, rest2) = parseParamGroups rest in
+    (MkParam pname (TR tname) :: ps, rest2)
+  | _ -> ([], toks)
+
+-- Optional return type: a TUpper immediately before `=` becomes
+-- Some (TR name), anything else stays None.
+fn parseReturnType(toks List[Token]) =
+  | TUpper tname :: rest -> (Some (TR tname), rest)
+  | _ -> (None, toks)
+
+-- ---------- Expression parser (subset of 14-exprparser-real.lll) -------
+
+-- Decide whether a token can start an atom. Used by parseApp to know
+-- when to stop collecting arguments in a juxtaposition chain. Only
+-- atom-starters here: TInt, TLower, TUpper, TLParen. Newlines and
+-- keywords fall through to `false` so the application layer stops
+-- cleanly at decl boundaries and before `then`/`else` tokens.
+fn isAtomStart(t Token) Bool =
+  | TInt _ -> true
+  | TStr _ -> true
+  | TLower _ -> true
+  | TUpper _ -> true
+  | TLParen -> true
+  | _ -> false
+
+-- Top-level expression dispatcher. Phase 7.5a added `match` as a second
+-- special form alongside `if`. Phase 7.5b adds `let-in` (`TKwLet`) and
+-- lambda (`TBackslash`) as two more special forms — both dispatched
+-- here so they can nest freely inside any other expression. Note: the
+-- top-level `parseDecls` has its own `TKwLet :: _` arm for module-level
+-- `let name = expr` decls (no `in` required). At expression position,
+-- the same token starts a let-in chain via `parseLetIn`. The two entry
+-- points are independent so the context naturally disambiguates.
+fn parseExpr(toks List[Token]) =
+  | TKwIf :: rest -> parseIf rest
+  | TKwMatch :: rest -> parseMatch rest
+  | TKwLet :: rest -> parseLetIn rest
+  | TBackslash :: rest -> parseLam rest
+  | _ -> parseAddSub toks
+
+-- `let name = e1 in e2`. Single-binder let-in. Chains are expressed by
+-- nesting another `let ... in ...` in the `e2` slot (right-recursive).
+-- Both `e1` and `e2` are parsed via the full `parseExpr` so any
+-- expression form the fn-body grammar accepts (including nested lambdas
+-- and further let-in chains) works on either side.
+fn parseLetIn(toks List[Token]) =
+  | TLower name :: TEq :: rest ->
+    let (e1, rest2) = parseExpr rest in
+    let rest3 = match rest2 with
+      | TKwIn :: r -> r
+      | _ -> rest2
+    in
+    let (e2, rest4) = parseExpr rest3 in
+    (ELetIn name e1 e2, rest4)
+  | _ -> (EInt 0, toks)
+
+-- `\x. body`. Single-param lambda; multi-param is expressed by nesting
+-- (`\x. \y. body`). The body is parsed at full `parseExpr` level so it
+-- can contain any expression form the grammar accepts.
+fn parseLam(toks List[Token]) =
+  | TLower name :: TDot :: rest ->
+    let (body, rest2) = parseExpr rest in
+    (ELam name body, rest2)
+  | _ -> (EInt 0, toks)
+
+-- `if c then a else b`. Each of the three sub-expressions is parsed via
+-- the full parseExpr so nested `if`s work naturally.
+fn parseIf(toks List[Token]) =
+  let (c, rest) = parseExpr toks in
+  let rest2 = match rest with
+    | TKwThen :: r -> r
+    | _ -> rest
+  in
+  let (a, rest3) = parseExpr rest2 in
+  let rest4 = match rest3 with
+    | TKwElse :: r -> r
+    | _ -> rest3
+  in
+  let (b, rest5) = parseExpr rest4 in
+  (EIf c a b, rest5)
+
+-- `match scrut with | pat -> body | pat -> body ...`. Same shape as the
+-- helper in 14-exprparser-real.lll: scrutinee is parsed via `parseExpr`
+-- (it stops cleanly at `TKwWith` because `with` is not an atom-starter
+-- nor an arithmetic operator), then `parseArms` pulls the two parallel
+-- arm lists out of the rest of the token stream.
+fn parseMatch(toks List[Token]) =
+  let (scrut, rest) = parseExpr toks in
+  let rest2 = match rest with
+    | TKwWith :: r -> r
+    | _ -> rest
+  in
+  let (armLists, rest3) = parseArms rest2 in
+  let (pats, bodies) = armLists in
+  (EMatch scrut pats bodies, rest3)
+
+-- Collect arms while the next token is `|`. Returns `((pats, bodies),
+-- rest)` — the two arm lists stay in lockstep because each recursive
+-- step cons'es onto both at once. The outer result is still a 2-tuple
+-- `(result, leftover)` like every other parseX helper.
+fn parseArms(toks List[Token]) =
+  | TBar :: _ ->
+    let (armPair, rest) = parseArm toks in
+    let (p, b) = armPair in
+    let (moreLists, rest2) = parseArms rest in
+    let (ps, bs) = moreLists in
+    ((p :: ps, b :: bs), rest2)
+  | _ -> (([], []), toks)
+
+-- Single arm. Assumes the leading `|` is still on the front. Returns
+-- `((pat, body), leftover)` so the caller can destructure cleanly.
+fn parseArm(toks List[Token]) =
+  | TBar :: rest ->
+    let (p, rest2) = parsePat rest in
+    let rest3 = match rest2 with
+      | TArrow :: r -> r
+      | _ -> rest2
+    in
+    let (body, rest4) = parseArmBody rest3 in
+    ((p, body), rest4)
+  | _ -> ((PWild, EInt 0), toks)
+
+-- Arm bodies stop at the next `|` (start of sibling arm) or at TNewline
+-- / TEnd (decl boundary). Parsing at the `parseAddSub` level rather than
+-- full `parseExpr` prevents an arm body from accidentally grabbing a
+-- trailing `| ...` as part of a nested match — safe because 15's match
+-- bodies never themselves contain bare `let`/`match`/lambdas (those are
+-- Phase 7.5+).
+fn parseArmBody(toks List[Token]) = parseAddSub toks
+
+-- Primary pattern: int literal, lowercase var binder, wildcard `_`,
+-- or empty-list `[]`. The recursive `parsePat` calls this once, then
+-- peeks for `TColonColon` to optionally fold the result into a
+-- right-associative `PCons`. Ctor / list-literal / tuple / string
+-- patterns all stay in Phase 7.5+.
+fn parsePrimaryPat(toks List[Token]) =
+  | TInt n :: rest -> (PInt n, rest)
+  | TUnder :: rest -> (PWild, rest)
+  | TLBrack :: TRBrack :: rest -> (PNil, rest)
+  | TLower s :: rest -> (PVar s, rest)
+  | _ -> (PWild, toks)
+
+-- Pattern: a primary pattern optionally followed by `:: pat`. The
+-- right side is parsed via `parsePat` itself so chains like
+-- `a :: b :: rest` fold right-associatively into `PCons a (PCons b
+-- (PVar "rest"))`. Phase 7.5c added `PNil` and `PCons`.
+fn parsePat(toks List[Token]) =
+  let (p, rest) = parsePrimaryPat toks in
+  match rest with
+    | TColonColon :: rest2 ->
+      let (tail, rest3) = parsePat rest2 in
+      (PCons p tail, rest3)
+    | _ -> (p, rest)
+
+-- Arithmetic precedence cascade, same shape as 13/14.
+fn parseAddSub(toks List[Token]) =
+  let (e, rest) = parseMulDiv toks in
+  parseAddSubTail e rest
+
+fn parseAddSubTail(lhs Expr)(toks List[Token]) =
+  | TPlus :: rest ->
+    let (r, rest2) = parseMulDiv rest in
+    parseAddSubTail (EAdd lhs r) rest2
+  | TMinus :: rest ->
+    let (r, rest2) = parseMulDiv rest in
+    parseAddSubTail (ESub lhs r) rest2
+  | _ -> (lhs, toks)
+
+fn parseMulDiv(toks List[Token]) =
+  let (e, rest) = parseApp toks in
+  parseMulDivTail e rest
+
+fn parseMulDivTail(lhs Expr)(toks List[Token]) =
+  | TStar :: rest ->
+    let (r, rest2) = parseApp rest in
+    parseMulDivTail (EMul lhs r) rest2
+  | TSlash :: rest ->
+    let (r, rest2) = parseApp rest in
+    parseMulDivTail (EDiv lhs r) rest2
+  | _ -> (lhs, toks)
+
+-- Application layer: left-associative juxtaposition. Collects atom args
+-- while the head token is an atom-starter.
+fn parseApp(toks List[Token]) =
+  let (e, rest) = parseAtom toks in
+  parseAppTail e rest
+
+fn parseAppTail(lhs Expr)(toks List[Token]) =
+  match toks with
+    | t :: _ ->
+      if isAtomStart t then
+        let (arg, rest) = parseAtom toks in
+        parseAppTail (EApp lhs arg) rest
+      else (lhs, toks)
+    | _ -> (lhs, toks)
+
+-- Atom: int, string literal, lower / upper variable reference,
+-- parenthesised expr. Anything unexpected falls through to a defensive
+-- `EInt 0`. Phase 7.5c added the `TStr s :: rest -> (EStr s, rest)`
+-- arm; the lexer already produces `TStr` for `"..."` literals. Phase
+-- 7.5d folds a trailing `[Tag]` into `ETagged` by dispatching on the
+-- wider 4-token prefix `TInt/TStr :: TLBrack :: TUpper ty :: TRBrack
+-- :: rest` BEFORE falling through to the plain 1-token `TInt n :: rest`
+-- / `TStr s :: rest` arms. Mirrors the host compiler's Phase 7.2.2
+-- rule: only int / str literal atoms can take a tag — other atom
+-- shapes (`TLower`, `TUpper`, `TLParen`) never try to match a `[Tag]`
+-- suffix here, so a stray `[` in those positions stays on the token
+-- stream and would later error out.
+fn parseAtom(toks List[Token]) =
+  | TInt n :: TLBrack :: TUpper ty :: TRBrack :: rest -> (ETagged (EInt n) ty, rest)
+  | TStr s :: TLBrack :: TUpper ty :: TRBrack :: rest -> (ETagged (EStr s) ty, rest)
+  | TInt n :: rest -> (EInt n, rest)
+  | TStr s :: rest -> (EStr s, rest)
+  | TLower s :: rest -> (EVar s, rest)
+  | TUpper s :: rest -> (EVar s, rest)
+  | TLParen :: rest ->
+    let (e, rest2) = parseExpr rest in
+    match rest2 with
+      | TRParen :: rest3 -> (e, rest3)
+      | _ -> (e, rest2)
+  | _ -> (EInt 0, toks)
+
+-- ---------- Pretty printer ----------------------------------------------
+
+-- Render a TypeArg as its bare name; type vars and type cons are
+-- disambiguated by the wrapping context. Phase 7.5d: `TAApp head args`
+-- renders as `head[arg1][arg2]...` — each bracket group is emitted
+-- via the `showBrackArgs` helper, which recursively calls `showTypeArg`
+-- on every inner arg so nested applications `Foo[Bar[Baz]]` print
+-- uniformly.
+fn showTypeArg(a TypeArg) Str =
+  | TAVar s -> s
+  | TACon s -> s
+  | TAApp head args -> strConcat head (showBrackArgs args)
+
+-- Render a list of bracket-form args as `[a1][a2]...`. One bracket
+-- group per arg, matching the surface input shape `Result[A][E]`. Lives
+-- separately from `showArgs` (which renders comma-joined parens for
+-- ctor-arg lists).
+fn showBrackArgs(args List[TypeArg]) Str =
+  listFold (\acc a. strConcat (strConcat acc "[") (strConcat (showTypeArg a) "]")) "" args
+
+-- Render a list of args as `(a1, a2)` or empty string for no args.
+fn showArgs(args List[TypeArg]) Str =
+  if listIsEmpty args then ""
+  else
+    let inner = listFold (\acc a. if strLen acc == 0 then showTypeArg a else strConcat (strConcat acc ", ") (showTypeArg a)) "" args in
+    strConcat (strConcat "(" inner) ")"
+
+fn showCtor(c Ctor) Str =
+  | MkCtor name args -> strConcat name (showArgs args)
+
+fn showCtors(cs List[Ctor]) Str =
+  listFold (\acc c. if strLen acc == 0 then showCtor c else strConcat (strConcat acc " | ") (showCtor c)) "" cs
+
+-- Render the type-param list as ` (A) (B)` with a leading space, or empty.
+fn showTypeParams(ps List[Str]) Str =
+  listFold (\acc p. strConcat (strConcat acc " (") (strConcat p ")")) "" ps
+
+fn showTypeDecl(d TypeDecl) Str =
+  | MkTypeDecl name prms ctors ->
+    let head = strConcat (strConcat "type " name) (showTypeParams prms) in
+    strConcat (strConcat head " = ") (showCtors ctors)
+
+-- Fn-decl pretty printer, matching the shape used by 13-fnparser-real.lll.
+fn showTypeRef(t TypeRef) Str =
+  | TR s -> s
+
+fn showParam(p Param) Str =
+  | MkParam n t -> strConcat (strConcat (strConcat "(" n) ": ") (strConcat (showTypeRef t) ")")
+
+fn showFnParams(ps List[Param]) Str =
+  if listIsEmpty ps then " ()"
+  else listFold (\acc p. strConcat (strConcat acc " ") (showParam p)) "" ps
+
+fn showReturn(r Maybe[TypeRef]) Str =
+  match r with
+    | Some t -> showTypeRef t
+    | None -> "?"
+
+-- Pattern pretty-printer for match arms (Phase 7.5a + 7.5c). Phase
+-- 7.5c added `PNil` (rendered as `[]`) and `PCons h t` (rendered as
+-- `(h :: t)`, recursively, so chains nest as `(a :: (b :: rest))`).
+fn showPat(p Pat) Str =
+  | PInt n -> intToStr n
+  | PVar s -> s
+  | PWild -> "_"
+  | PNil -> "[]"
+  | PCons h t -> strConcat (strConcat (strConcat (strConcat "(" (showPat h)) " :: ") (showPat t)) ")"
+
+-- Render a single `| pat -> body` arm; helper for `showArms`.
+fn showArm(p Pat)(body Expr) Str =
+  strConcat (strConcat (strConcat "| " (showPat p)) " -> ") (showExpr body)
+
+-- Walk the two parallel lists in lockstep to produce `| pat -> body`
+-- chunks joined by single spaces. The invariant `length pats == length
+-- bodies` is maintained by `parseArms`.
+fn showArms(pats List[Pat])(bodies List[Expr]) Str =
+  match pats with
+    | p :: ps ->
+      match bodies with
+        | b :: bs ->
+          let head = showArm p b in
+          let tail = showArms ps bs in
+          if strLen tail == 0 then head
+          else strConcat (strConcat head " ") tail
+        | _ -> ""
+    | _ -> ""
+
+-- Fully-parenthesised expression pretty-printer, matching 13/14's shape
+-- so the runtime test can substring-match each body.
+fn showExpr(e Expr) Str =
+  | EInt n -> intToStr n
+  | EStr s -> strConcat (strConcat "\"" s) "\""
+  | EVar s -> s
+  | ETagged inner t -> strConcat (strConcat (strConcat (strConcat "(" (showExpr inner)) "[") t) "])"
+  | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " + ") (showExpr r)) ")"
+  | ESub l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " - ") (showExpr r)) ")"
+  | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " * ") (showExpr r)) ")"
+  | EDiv l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " / ") (showExpr r)) ")"
+  | EApp f x -> strConcat (strConcat (strConcat (strConcat "(" (showExpr f)) " ") (showExpr x)) ")"
+  | ELam n body -> strConcat (strConcat (strConcat (strConcat "(fun " n) " -> ") (showExpr body)) ")"
+  | ELetIn n e1 e2 ->
+    let p1 = strConcat (strConcat "(let " n) " = " in
+    let p2 = strConcat (strConcat p1 (showExpr e1)) " in " in
+    strConcat (strConcat p2 (showExpr e2)) ")"
+  | EIf c a b ->
+    let p1 = strConcat "(if " (showExpr c) in
+    let p2 = strConcat (strConcat p1 " then ") (showExpr a) in
+    strConcat (strConcat (strConcat p2 " else ") (showExpr b)) ")"
+  | EMatch scrut pats bodies ->
+    let head = strConcat (strConcat "(match " (showExpr scrut)) " with " in
+    strConcat (strConcat head (showArms pats bodies)) ")"
+
+fn showFnDecl(d FnDecl) Str =
+  | MkFn name prms ret body ->
+    let headPart = strConcat (strConcat "fn " name) (showFnParams prms) in
+    let arrowPart = strConcat (strConcat headPart " -> ") (showReturn ret) in
+    strConcat (strConcat arrowPart " = ") (showExpr body)
+
+-- Let-decl pretty printer (Phase 7.5a): `let <name> = <show expr>`.
+fn showLetDecl(d LetDecl) Str =
+  | MkLet name body ->
+    strConcat (strConcat (strConcat "let " name) " = ") (showExpr body)
+
+-- Phase 7.5e: `DTag` / `DImport` / `DExport` pretty-printer arms. The
+-- `DExport inner` wrapper recurses back into `showDecl` so the inner
+-- decl's canonical pretty form stays untouched and the `export `
+-- modifier stacks in front of any shape — `export fn ...`, `export
+-- type ...`, `export let ...`, even `export tag ...` / `export import
+-- ...` if the grammar ever wants it.
+fn showDecl(d Decl) Str =
+  | DType td -> showTypeDecl td
+  | DLet ld -> showLetDecl ld
+  | DFn fd -> showFnDecl fd
+  | DTag name -> strConcat "tag " name
+  | DImport path -> strConcat "import " path
+  | DExport inner -> strConcat "export " (showDecl inner)
+
+-- Render a list of decls joined by `\n`, matching the input layout.
+fn showDecls(ds List[Decl]) Str =
+  listFold (\acc d. if strLen acc == 0 then showDecl d else strConcat (strConcat acc "\n") (showDecl d)) "" ds
+
+fn showModule(m Module) Str =
+  | MkModule name decls ->
+    let header = strConcat "module " name in
+    if listIsEmpty decls then header
+    else strConcat (strConcat header "\n") (showDecls decls)
+
+-- ---------- Elaborator (Phase 7.6 integration) --------------------------
+--
+-- Name-resolution env: just a `List[Str]` of declared names. No types,
+-- no source positions — this slice cares only about "is this name
+-- defined?". Wrapped in `MkEnv` so future slices can carry richer data
+-- (per-name types, scope depth, etc.) without changing the surface.
+type Env = MkEnv List[Str]
+
+fn envHas(env Env)(name Str) Bool =
+  match env with
+    | MkEnv xs ->
+      listFold (\acc x. if acc then true else if x == name then true else false) false xs
+
+fn envAdd(env Env)(name Str) Env =
+  match env with
+    | MkEnv xs -> MkEnv (listAppend xs [name])
+
+-- Fold a list of names into an env, extending one binder at a time.
+fn envAddAll(env Env)(names List[Str]) Env =
+  listFold (\acc n. envAdd acc n) env names
+
+-- Collect every `PVar` binder introduced by a pattern. Wildcards, nil,
+-- int-literal patterns don't bind anything. `PCons h t` binds whatever
+-- the head and tail patterns bind, left-to-right. 15's `Pat` has no
+-- `PCon` (named constructor patterns), so this walker only needs the
+-- five variants `PInt` / `PVar` / `PWild` / `PNil` / `PCons`.
+fn patBinders(p Pat) List[Str] =
+  | PInt _ -> []
+  | PWild -> []
+  | PNil -> []
+  | PVar name -> [name]
+  | PCons h t -> listAppend (patBinders h) (patBinders t)
+
+-- Extract the param name from a `MkParam name (TR ty)`. Used when a
+-- `DFn` extends the local env for its body walk.
+fn paramName(p Param) Str =
+  | MkParam n _ -> n
+
+fn paramNames(ps List[Param]) List[Str] =
+  listFold (\acc p. listAppend acc [(paramName p)]) [] ps
+
+-- Walk `e` under `env`, returning the list of `E002 UnboundVar <name>`
+-- error strings produced by every `EVar name` not in `env` plus any
+-- errors produced by sub-expressions. The only arms that actually
+-- flag are `EVar`; every compound arm recurses and concatenates its
+-- children's error lists. `ELetIn` / `ELam` / `EMatch` extend the
+-- local env for their body sub-expression(s) before recursing.
+fn checkExpr(env Env)(e Expr) List[Str] =
+  | EInt _ -> []
+  | EStr _ -> []
+  | EVar name ->
+    if envHas env name then []
+    else
+      let msg = strConcat "E002 UnboundVar " name in
+      [msg]
+  | ETagged inner _ -> checkExpr env inner
+  | EAdd l r -> listAppend (checkExpr env l) (checkExpr env r)
+  | ESub l r -> listAppend (checkExpr env l) (checkExpr env r)
+  | EMul l r -> listAppend (checkExpr env l) (checkExpr env r)
+  | EDiv l r -> listAppend (checkExpr env l) (checkExpr env r)
+  | EApp f x -> listAppend (checkExpr env f) (checkExpr env x)
+  | ELam param body ->
+    let env2 = envAdd env param in
+    checkExpr env2 body
+  | ELetIn name rhs body ->
+    let rhsErrs = checkExpr env rhs in
+    let env2 = envAdd env name in
+    let bodyErrs = checkExpr env2 body in
+    listAppend rhsErrs bodyErrs
+  | EIf cnd thn els ->
+    let ce = checkExpr env cnd in
+    let te = checkExpr env thn in
+    let ee = checkExpr env els in
+    listAppend (listAppend ce te) ee
+  | EMatch scrut pats bodies ->
+    let scrutErrs = checkExpr env scrut in
+    let armErrs = checkArms env pats bodies in
+    listAppend scrutErrs armErrs
+
+-- Walk the two parallel arm lists in lockstep. For each arm, extend
+-- the scrutinee env with every binder the pattern introduces, then
+-- walk the body expression under the extended env. Pattern binders
+-- are only visible inside their own arm body, not across arms.
+fn checkArms(env Env)(pats List[Pat])(bodies List[Expr]) List[Str] =
+  match pats with
+    | p :: ps ->
+      match bodies with
+        | b :: bs ->
+          let armEnv = envAddAll env (patBinders p) in
+          let armErrs = checkExpr armEnv b in
+          let restErrs = checkArms env ps bs in
+          listAppend armErrs restErrs
+        | _ -> []
+    | _ -> []
+
+-- Walk a single decl under the top-level `env`. `DFn` extends `env`
+-- with its own params (fn params are locals, not top-level names)
+-- then walks `body`. `DLet`'s RHS is also walked — unlike 16 which
+-- skipped it. `DType` / `DTag` / `DImport` have no sub-expressions.
+-- `DExport inner` recurses into the inner decl so an exported fn's
+-- body still gets name-resolved.
+fn checkFnBody(env Env)(fd FnDecl) List[Str] =
+  | MkFn _ params _ body ->
+    let bodyEnv = envAddAll env (paramNames params) in
+    checkExpr bodyEnv body
+
+fn checkLetBody(env Env)(ld LetDecl) List[Str] =
+  | MkLet _ body -> checkExpr env body
+
+fn checkDecl(env Env)(d Decl) List[Str] =
+  | DFn fd -> checkFnBody env fd
+  | DLet ld -> checkLetBody env ld
+  | DType _ -> []
+  | DTag _ -> []
+  | DImport _ -> []
+  | DExport inner -> checkDecl env inner
+
+fn checkDecls(env Env)(decls List[Decl]) List[Str] =
+  | d :: rest -> listAppend (checkDecl env d) (checkDecls env rest)
+  | _ -> []
+
+-- Collect the single top-level name each decl introduces into the env.
+-- `DFn` / `DLet` / `DTag` each contribute one name; `DType` contributes
+-- every ctor name (the type name itself isn't a value, matching the F#
+-- host elaborator). `DImport` contributes nothing in this slice (real
+-- module resolution is a later phase). `DExport inner` recurses into
+-- the inner decl so `export fn foo` still registers `foo`.
+fn ctorName(c Ctor) Str =
+  | MkCtor n _ -> n
+
+fn ctorNames(cs List[Ctor]) List[Str] =
+  listFold (\acc c. listAppend acc [(ctorName c)]) [] cs
+
+fn fnName(fd FnDecl) Str =
+  | MkFn n _ _ _ -> n
+
+fn letName(ld LetDecl) Str =
+  | MkLet n _ -> n
+
+fn typeDeclCtors(td TypeDecl) List[Str] =
+  | MkTypeDecl _ _ ctors -> ctorNames ctors
+
+fn collectDecl(env Env)(d Decl) Env =
+  | DFn fd -> envAdd env (fnName fd)
+  | DLet ld -> envAdd env (letName ld)
+  | DType td -> envAddAll env (typeDeclCtors td)
+  | DTag name -> envAdd env name
+  | DImport _ -> env
+  | DExport inner -> collectDecl env inner
+
+fn collectDecls(env Env)(decls List[Decl]) Env =
+  | d :: rest -> collectDecls (collectDecl env d) rest
+  | _ -> env
+
+-- Type -> ctor index. Build a `List[TypeCtors]` indexed by type name
+-- so the exhaustiveness check can answer "what ctors does type T
+-- have?". Only `DType` decls contribute; `DExport (DType td)` is
+-- unwrapped one level so exported types still register their ctors.
+type TypeCtors = MkTypeCtors Str List[Str]
+
+fn typeDeclName(td TypeDecl) Str =
+  | MkTypeDecl n _ _ -> n
+
+fn collectTypesDecl(d Decl) List[TypeCtors] =
+  | DType td -> [(MkTypeCtors (typeDeclName td) (typeDeclCtors td))]
+  | DExport inner -> collectTypesDecl inner
+  | _ -> []
+
+fn collectTypes(decls List[Decl]) List[TypeCtors] =
+  | d :: rest -> listAppend (collectTypesDecl d) (collectTypes rest)
+  | _ -> []
+
+-- Linear lookup: returns the ctor list for the given type name, or
+-- the empty list if the name isn't a declared sum type.
+fn lookupCtors(types List[TypeCtors])(name Str) List[Str] =
+  match types with
+    | MkTypeCtors n cs :: rest ->
+      if n == name then cs else lookupCtors rest name
+    | _ -> []
+
+-- A pattern counts as "catch-all relative to a sum type" if it's
+-- `PWild`, `PVar`, or `PCons` — mirrors the F# host elaborator's
+-- catch-all list. `PInt` / `PNil` are NOT catch-alls — they match
+-- specific literals.
+fn patIsCatchAll(p Pat) Bool =
+  | PWild -> true
+  | PVar _ -> true
+  | PCons _ _ -> true
+  | _ -> false
+
+fn armsHaveCatchAll(pats List[Pat]) Bool =
+  listFold (\acc p. if acc then true else patIsCatchAll p) false pats
+
+-- 15's `Pat` has no `PCon` (named constructor patterns), so no arm
+-- pattern can ever identify a sum-type ctor. This means `coveredCtors`
+-- is always the empty list — a match over a declared sum type with no
+-- catch-all arm reports every constructor as missing. Deliberately
+-- narrow: the integration's goal is proving the pipeline plumbing, not
+-- full coverage analysis.
+fn coveredCtors(pats List[Pat]) List[Str] = []
+
+-- For a given `required` ctor list and `covered` ctor list, return
+-- one `E003 NonExhaustiveMatch <type> missing <ctor>` message per
+-- required ctor that isn't in `covered`.
+fn missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) List[Str] =
+  match required with
+    | c :: rest ->
+      let tail = missingCtorErrs ty rest covered in
+      let isCovered = listFold (\acc x. if acc then true else if x == c then true else false) false covered in
+      if isCovered then tail
+      else
+        let msg = strConcat (strConcat (strConcat "E003 NonExhaustiveMatch " ty) " missing ") c in
+        listAppend [msg] tail
+    | _ -> []
+
+-- Extract the type name out of a param (via `MkParam _ (TR t)`).
+-- `paramTypeName` returns just the string.
+fn typeRefName(tr TypeRef) Str =
+  | TR s -> s
+
+fn paramTypeName(p Param) Str =
+  | MkParam _ tr -> typeRefName tr
+
+-- Extract the last param's type name from a param list. Returns "" if
+-- the list is empty. Folds left so the final non-"" name wins —
+-- mirrors the F# host elaborator's "clause sugar scrutinizes the
+-- LAST curried param" rule.
+fn lastParamTypeName(ps List[Param]) Str =
+  listFold (\acc p. paramTypeName p) "" ps
+
+-- Run the exhaustiveness check on a single `FnDecl` body. Shared
+-- between the plain `DFn fd` arm and the `DExport (DFn fd)` unwrap.
+fn exhaustivenessFn(types List[TypeCtors])(fd FnDecl) List[Str] =
+  | MkFn _ params _ body ->
+    let lastTy = lastParamTypeName params in
+    if strLen lastTy == 0 then []
+    else
+      let required = lookupCtors types lastTy in
+      if listIsEmpty required then []
+      else
+        match body with
+          | EMatch _ pats _ ->
+            if armsHaveCatchAll pats then []
+            else
+              let covered = coveredCtors pats in
+              missingCtorErrs lastTy required covered
+          | _ -> []
+
+-- Run the exhaustiveness check over a single decl. Non-`DFn` decls
+-- contribute nothing. `DExport (DFn ...)` is unwrapped one level.
+fn exhaustivenessDecl(types List[TypeCtors])(d Decl) List[Str] =
+  | DFn fd -> exhaustivenessFn types fd
+  | DExport inner -> exhaustivenessDecl types inner
+  | _ -> []
+
+fn exhaustivenessCheck(types List[TypeCtors])(decls List[Decl]) List[Str] =
+  | d :: rest ->
+    listAppend (exhaustivenessDecl types d) (exhaustivenessCheck types rest)
+  | _ -> []
+
+-- ---------- Minimal HM pass (Phase 7.9a) ---------------------------------
+--
+-- Tight, deliberately-simple type checker for the parser's `Expr` AST.
+-- The goal is to exercise the three-stage (parser + elaborator + HM)
+-- integration on a single shared AST — NOT to reproduce
+-- 18-hminfer-real.lll's full unify / Subst / fresh-var machinery.
+--
+-- Scope of the pass:
+--   * `EInt _`           -> TyName "Int"
+--   * `EStr _`           -> TyName "Str"
+--   * `EVar name`        -> lookup in TypeEnv; missing names fall through
+--                           to `TyVar "?"` (the elaborator already
+--                           reported E002 for them)
+--   * `EAdd/ESub/EMul/EDiv l r` -> TyName "Int"; emits E001 if either
+--                           operand is a concrete non-Int type
+--   * `EIf c t e`        -> inferred type of the `then` branch;
+--                           emits E001 if `then` and `else` branches
+--                           have concrete non-matching types
+--   * everything else (`ELam`, `ELetIn`, `EMatch`, `ETagged`, `EApp`)
+--     -> walked recursively so sub-expression errors still surface,
+--        but the outer shape infers to `TyVar "?"` (wildcard).
+--
+-- `typeEq` treats `TyVar "?"` as a wildcard that matches anything,
+-- mirroring the host elaborator's `tyEqual`. This keeps the pass
+-- silent on unknown sub-expressions (no false positives) while still
+-- firing on the concrete `Int` vs `Str` mismatches the test needs.
+--
+-- NOT in this slice (punted to Phase 7.9b integration):
+--   * unify / Subst / fresh vars (see 18-hminfer-real.lll)
+--   * let-generalization
+--   * pattern-type checking
+--   * constructor-arity checking
+
+type TypeExpr =
+  | TyName Str
+  | TyVar Str
+
+-- Per-name type binding for the HM pass. Only fn params get bindings
+-- in this slice — the HM env is built fresh per fn body, seeded from
+-- `MkParam name (TR tyName)`.
+type TyBinding = MkTyBinding Str TypeExpr
+
+type TypeEnv = MkTypeEnv List[TyBinding]
+
+fn typeEnvAdd(env TypeEnv)(name Str)(ty TypeExpr) TypeEnv =
+  match env with
+    | MkTypeEnv bs -> MkTypeEnv (listAppend bs [(MkTyBinding name ty)])
+
+-- Linear lookup. Returns `TyVar "?"` (the sentinel wildcard) when the
+-- name isn't bound — every `typeEq` comparison against `TyVar "?"`
+-- short-circuits to `true`, so unbound names never trigger E001.
+fn typeEnvLookup(env TypeEnv)(name Str) TypeExpr =
+  match env with
+    | MkTypeEnv bs -> typeEnvLookupList bs name
+
+fn typeEnvLookupList(bs List[TyBinding])(name Str) TypeExpr =
+  match bs with
+    | MkTyBinding n t :: rest ->
+      if n == name then t else typeEnvLookupList rest name
+    | _ -> TyVar "?"
+
+-- Render a TypeExpr in a human-readable surface form. `TyName n` just
+-- prints the name, `TyVar v` prints the raw var name (the `"?"`
+-- wildcard would never actually hit an E001 message because `typeEq`
+-- short-circuits on it, but the fallthrough is kept for defensive
+-- debugging).
+fn showType(t TypeExpr) Str =
+  | TyName n -> n
+  | TyVar v -> v
+
+-- Structural equality on the two-variant `TypeExpr`. `TyVar "?"` on
+-- either side is a wildcard that matches anything — this is the only
+-- way unknown types (EApp / ELam results) get to silently slip past
+-- the arithmetic / if checks. `TyVar` with any other name compares by
+-- variable name (treated as a rigid var in this slice, unused so far).
+fn typeEq(a TypeExpr)(b TypeExpr) Bool =
+  match a with
+    | TyVar va ->
+      if va == "?" then true
+      else
+        match b with
+          | TyVar vb -> va == vb
+          | _ -> false
+    | TyName na ->
+      match b with
+        | TyName nb -> na == nb
+        | TyVar vb -> vb == "?"
+        | _ -> false
+
+-- Infer the type of a single expression under `env`. No unification
+-- and no substitution — each arm just returns the obvious "surface"
+-- type. Unknown / punted shapes return `TyVar "?"` so downstream
+-- `typeEq` checks silently accept them.
+fn inferExprType(env TypeEnv)(e Expr) TypeExpr =
+  | EInt _ -> TyName "Int"
+  | EStr _ -> TyName "Str"
+  | EVar name -> typeEnvLookup env name
+  | ETagged inner _ -> inferExprType env inner
+  | EAdd _ _ -> TyName "Int"
+  | ESub _ _ -> TyName "Int"
+  | EMul _ _ -> TyName "Int"
+  | EDiv _ _ -> TyName "Int"
+  | EIf _ thn _ -> inferExprType env thn
+  | _ -> TyVar "?"
+
+-- Emit a single `E001 TypeMismatch <l> vs <r>` string built from the
+-- two `TypeExpr` operands' `showType` renderings. Shared helper so the
+-- arithmetic arms and the `if` arm produce identically-shaped messages.
+fn mkTypeMismatch(tl TypeExpr)(tr TypeExpr) Str =
+  let head = strConcat "E001 TypeMismatch " (showType tl) in
+  strConcat (strConcat head " vs ") (showType tr)
+
+-- Check that both operands of a `+ - * /` expression infer to `Int`.
+-- Any operand whose inferred type is NOT `typeEq` to `TyName "Int"`
+-- contributes one E001 message. Inferred `TyVar "?"` short-circuits
+-- (via typeEq) to silent — so `EVar` references to unbound names and
+-- `EApp` results never produce false positives.
+fn checkArith(env TypeEnv)(l Expr)(r Expr) List[Str] =
+  let tl = inferExprType env l in
+  let tr = inferExprType env r in
+  let tyInt = TyName "Int" in
+  let lErr = if typeEq tl tyInt then [] else [(mkTypeMismatch tyInt tl)] in
+  let rErr = if typeEq tr tyInt then [] else [(mkTypeMismatch tyInt tr)] in
+  listAppend lErr rErr
+
+-- Check that the `then` / `else` branches of an `if` expression agree
+-- on type. One E001 per mismatched pair; silent when either branch
+-- infers to `TyVar "?"`.
+fn checkIfBranches(env TypeEnv)(thn Expr)(els Expr) List[Str] =
+  let tt = inferExprType env thn in
+  let te = inferExprType env els in
+  if typeEq tt te then []
+  else [(mkTypeMismatch tt te)]
+
+-- Walk an expression under `env`, returning the list of E001 type
+-- mismatch errors produced at every arithmetic or if-branch node. The
+-- recursive walker short-circuits punted shapes (`ELam`, `ELetIn`,
+-- `EMatch`) by simply recursing into their sub-expressions — the
+-- punted shapes don't themselves emit errors, only their children
+-- might. `EMatch` walks the scrutinee and every arm body.
+fn typeCheck(env TypeEnv)(e Expr) List[Str] =
+  | EInt _ -> []
+  | EStr _ -> []
+  | EVar _ -> []
+  | ETagged inner _ -> typeCheck env inner
+  | EAdd l r ->
+    let here = checkArith env l r in
+    let lErrs = typeCheck env l in
+    let rErrs = typeCheck env r in
+    listAppend here (listAppend lErrs rErrs)
+  | ESub l r ->
+    let here = checkArith env l r in
+    let lErrs = typeCheck env l in
+    let rErrs = typeCheck env r in
+    listAppend here (listAppend lErrs rErrs)
+  | EMul l r ->
+    let here = checkArith env l r in
+    let lErrs = typeCheck env l in
+    let rErrs = typeCheck env r in
+    listAppend here (listAppend lErrs rErrs)
+  | EDiv l r ->
+    let here = checkArith env l r in
+    let lErrs = typeCheck env l in
+    let rErrs = typeCheck env r in
+    listAppend here (listAppend lErrs rErrs)
+  | EApp f x ->
+    listAppend (typeCheck env f) (typeCheck env x)
+  | ELam _ body -> typeCheck env body
+  | ELetIn _ rhs body ->
+    listAppend (typeCheck env rhs) (typeCheck env body)
+  | EIf c t el ->
+    let ce = typeCheck env c in
+    let te = typeCheck env t in
+    let ee = typeCheck env el in
+    let branchErrs = checkIfBranches env t el in
+    listAppend (listAppend (listAppend ce te) ee) branchErrs
+  | EMatch scrut _ bodies ->
+    let sErrs = typeCheck env scrut in
+    let bodiesErrs = typeCheckBodies env bodies in
+    listAppend sErrs bodiesErrs
+
+-- Walk every arm body in a match expression under the same outer env
+-- (pattern binders are NOT re-introduced in this slice — the HM pass
+-- is only interested in arithmetic / if mismatches, and those never
+-- rely on pattern-bound names in the test corpus). Concatenates each
+-- body's errors.
+fn typeCheckBodies(env TypeEnv)(bodies List[Expr]) List[Str] =
+  | b :: rest -> listAppend (typeCheck env b) (typeCheckBodies env rest)
+  | _ -> []
+
+-- Add one `Param` binding to a `TypeEnv`. Pulled out of a lambda into
+-- its own top-level fn because 15's parser doesn't fold a `match`
+-- inside a `\acc p. ...` body — keeping the match at fn-body scope
+-- sidesteps that dispatcher ambiguity.
+fn seedParamOne(env TypeEnv)(p Param) TypeEnv =
+  | MkParam n tr -> typeEnvAdd env n (TyName (typeRefName tr))
+
+-- Seed a `TypeEnv` with one binding per fn param. `MkParam name (TR
+-- tyName)` becomes `name -> TyName tyName`. This is all the HM env
+-- ever gets in this slice — no top-level let / fn bindings, no
+-- cross-decl resolution, because the pass only cares whether fn
+-- params (typed at declaration) are misused inside their own body.
+fn seedParams(env TypeEnv)(ps List[Param]) TypeEnv =
+  listFold (\acc p. seedParamOne acc p) env ps
+
+-- Run the HM pass on a single `FnDecl` body. Seeds a fresh `TypeEnv`
+-- from the fn's params, then walks the body with `typeCheck`.
+fn hmFn(fd FnDecl) List[Str] =
+  | MkFn _ params _ body ->
+    let env0 = MkTypeEnv [] in
+    let env = seedParams env0 params in
+    typeCheck env body
+
+-- Run the HM pass on a single decl. Only `DFn` contributes (fn bodies
+-- are the only place 7.9a's tight HM pass has anything to say).
+-- `DExport inner` unwraps one level so `export fn ...` still gets
+-- checked. Every other decl shape contributes nothing.
+fn hmDecl(d Decl) List[Str] =
+  | DFn fd -> hmFn fd
+  | DExport inner -> hmDecl inner
+  | _ -> []
+
+fn hmCheck(decls List[Decl]) List[Str] =
+  | d :: rest -> listAppend (hmDecl d) (hmCheck rest)
+  | _ -> []
+
+-- Top-level elaborator entry. First collects top-level names into a
+-- fresh env AND a type-to-ctors index, then runs the name-resolution
+-- pass, the exhaustiveness pass, and the Phase 7.9a minimal HM pass
+-- under those indices and concatenates all three error lists. Errors
+-- are emitted in a stable order: E002 (name resolution) first, then
+-- E003 (exhaustiveness), then E001 (HM type mismatches) — matching
+-- the expected stdout of the runtime test.
+fn elaborate(decls List[Decl]) List[Str] =
+  let env0 = MkEnv [] in
+  let env = collectDecls env0 decls in
+  let types = collectTypes decls in
+  let nameErrs = checkDecls env decls in
+  let exhErrs = exhaustivenessCheck types decls in
+  let hmErrs = hmCheck decls in
+  listAppend (listAppend nameErrs exhErrs) hmErrs
+
+-- Render the error list as one message per line. Empty list prints a
+-- single `no errors` sentinel so the runtime can tell a clean
+-- elaborate apart from an elaborate that printed nothing at all.
+fn showErrs(errs List[Str]) Str =
+  if listIsEmpty errs then "no errors"
+  else listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n") s) "" errs
+
+-- ---------- Driver -------------------------------------------------------
+--
+-- Hardcoded ll-lang source with intentional name-resolution,
+-- exhaustiveness, AND type-mismatch issues. The pipeline lexes,
+-- parses, elaborates, and type-checks it in-memory; the expected
+-- error output is four lines (E002 first, then E003 in declaration
+-- order, then E001):
+--   E002 UnboundVar undefinedName
+--   E003 NonExhaustiveMatch Shape missing Circle
+--   E003 NonExhaustiveMatch Shape missing Rect
+--   E001 TypeMismatch Int vs Str
+--
+-- Walk-through:
+--   * `type Shape = Circle | Rect` registers `Circle`, `Rect` in the
+--     top-level env and in the type index.
+--   * `fn good(x Int) Int = x + 1` resolves `x` locally — clean.
+--   * `fn bad(x Int) Int = undefinedName` references a name that was
+--     never declared — emits one `E002 UnboundVar undefinedName`.
+--   * `fn shapeBad(s Shape) Int = match s with | 0 -> 1` has its last
+--     param typed as `Shape`. The arm pattern is `PInt 0`, which is
+--     neither a catch-all nor a named-ctor cover, so the exhaustiveness
+--     pass emits one `E003` per Shape ctor (Circle, Rect).
+--   * `fn badType(x Int) Int = x + "y"` is the Phase 7.9a addition:
+--     the fn's only param `x` is declared `Int`, so `seedParams`
+--     binds `x -> TyName "Int"`. Inside the body `EAdd (EVar "x")
+--     (EStr "y")`, the right operand infers to `TyName "Str"`, which
+--     is not `typeEq` to `TyName "Int"`, so `checkArith` emits one
+--     `E001 TypeMismatch Int vs Str`.
+fn main() =
+  let src = "module M\ntype Shape = Circle | Rect\nfn good(x Int) Int = x + 1\nfn bad(x Int) Int = undefinedName\nfn shapeBad(s Shape) Int = match s with | 0 -> 1\nfn badType(x Int) Int = x + \"y\"" in
+  let toks = tokenize src in
+  let mod = parseModule toks in
+  match mod with
+    | MkModule _ decls ->
+      let errs = elaborate decls in
+      printfn (showErrs errs)
