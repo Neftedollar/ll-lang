@@ -2601,3 +2601,73 @@ itself: feed the file to its own codegen pass, run the emitted F#
 through `dotnet fsi`, and verify the resulting program reproduces
 the same F# source for the same input — closing the self-hosting
 loop.
+
+### 2026-04 — Phase 7.9c: bootstrap compiler reads source from file (DONE)
+
+Third tick of **Phase 7.9** — flips the driver from a hardcoded
+string literal to a real `readFile` call. First concrete step
+toward `compiler₁ = compile(compiler.lll)`: the bootstrap
+compiler is now a file-reading tool rather than a fixed-input
+demo.
+
+**Changes:**
+
+* New corpus file `spec/examples/valid/20a-bootstrap-input.lll`
+  (5 lines) — the exact same "clean" ll-lang module that was
+  previously a hardcoded string literal inside `main`:
+  ```
+  module Examples.Clean
+  type Maybe A = Some A | None
+  fn inc(x Int) Int = x + 1
+  fn greet() Str = "hello"
+  fn main() Int = inc 1
+  ```
+* `main` in `20-bootstrap-compiler.lll` (+17 / -11) now reads
+  the source via `readFile "spec/examples/valid/20a-bootstrap-input.lll"`
+  and pipes it through the existing `tokenize → parseModule →
+  elaborate → emitModule` chain.
+* `tests/LLLangTests/BootstrapCompilerTests.fs` (+86 / -31):
+  pinned the child process `WorkingDirectory` to the repo root
+  (derived from `__SOURCE_DIRECTORY__`), extracted a `runBootstrap`
+  helper, and added a **new file-reading-path test** that
+  temporarily renames `20a-bootstrap-input.lll` to `.bak`, asserts
+  the bootstrap run fails with no codegen markers, and restores
+  the file in a `finally` block — proving the source genuinely
+  flows through `readFile` rather than a stale hardcoded fallback.
+
+**Why it matters:**
+
+Before 7.9c, the 4-stage bootstrap compiler only ever compiled
+one hardcoded input. "Point it at a different .lll file" meant
+editing and rebuilding the source. Now any .lll file on disk
+can be the input — the minimum shape of a real CLI compiler
+tool. The next tick can progressively expand
+`20a-bootstrap-input.lll` (or point at other corpus files) to
+probe what the bootstrap compiler can handle and where the
+parser / elaborator / HM / codegen gaps live. That feature-gap
+list is the raw material for Phase 7.10.
+
+`readFile : Str -> Str` was already wired end-to-end
+(`Elaborator.fs:127` + `Codegen.fs:410` prelude), so no host
+compiler changes were needed.
+
+**Deliberately out of scope** (carved out for Phase 7.9d+):
+
+* **argv / stdin** — the input path is still hardcoded in the
+  ll-lang source. A true CLI with `argv` needs ll-lang support
+  for command-line args, which doesn't exist yet.
+* **Feature-gap expansion** — `20a-bootstrap-input.lll` is still
+  the minimal 5-line clean module. Pointing the bootstrap
+  compiler at larger corpus files (e.g. `17-pipeline-real.lll`,
+  `18-hminfer-real.lll`) will surface parser / elab / HM / codegen
+  gaps that Phase 7.9d / 7.10 will have to close.
+
+Tests: 401 → 402 (+1 for the file-reading-path regression test).
+
+With 7.9c in place, the bootstrap compiler is now a real file
+consumer rather than a fixed-input demo. Every subsequent slice
+can change behaviour by editing `20a-bootstrap-input.lll` alone.
+
+Next tick: **Phase 7.9d** — expand the input file toward
+`20-bootstrap-compiler.lll`'s own shape and fix the first class
+of gaps that surface.
