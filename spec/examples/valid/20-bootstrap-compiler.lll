@@ -2059,14 +2059,17 @@ fn emitModule(m Module) Str =
 
 -- ---------- Driver -------------------------------------------------------
 --
--- Phase 7.9b: the hardcoded ll-lang source is now intentionally
--- **clean** — no unbound vars, no non-exhaustive matches, no
--- arithmetic / if type mismatches — so the elaborator's combined
--- error list is empty and `main` proceeds to the codegen pass and
--- prints the emitted F# source instead. The 7.9a error-reporter
--- path is preserved as a fallback for non-empty error lists.
+-- Phase 7.9c: the driver now **reads the source from a file** via
+-- `readFile` instead of a hardcoded string literal — the first real
+-- step toward `compiler₁ = compile(compiler.lll)`. The content of
+-- `20a-bootstrap-input.lll` is a deliberately **clean** ll-lang
+-- module (no unbound vars, no non-exhaustive matches, no type
+-- mismatches) so the elaborator's combined error list is empty and
+-- `main` proceeds to the codegen pass and prints the emitted F#
+-- source. The 7.9a error-reporter path is preserved as a fallback
+-- for non-empty error lists.
 --
--- Source:
+-- Source (read from `spec/examples/valid/20a-bootstrap-input.lll`):
 --   module Examples.Clean
 --   type Maybe A = Some A | None
 --   fn inc(x Int) Int = x + 1
@@ -2086,11 +2089,14 @@ fn emitModule(m Module) Str =
 --     string[]) =\n    (inc 1L)\n    0`.
 --
 -- Pipeline shape:
---   tokenize -> parseModule -> elaborate -> if errors then printfn
---   errs else printfn (emitModule mod). The error-reporter path
---   stays in for the day a regression reintroduces a stale source.
+--   readFile -> tokenize -> parseModule -> elaborate -> if errors
+--   then printfn errs else printfn (emitModule mod). The error-
+--   reporter path stays in for the day a regression reintroduces a
+--   stale source.
 fn main() =
-  let src = "module Examples.Clean\ntype Maybe A = Some A | None\nfn inc(x Int) Int = x + 1\nfn greet() Str = \"hello\"\nfn main() Int = inc 1" in
+  -- Path is relative to the repo root; `lllc run` (and the test
+  -- harness) must set its working directory to the repo root.
+  let src = readFile "spec/examples/valid/20a-bootstrap-input.lll" in
   let toks = tokenize src in
   let mod = parseModule toks in
   match mod with
