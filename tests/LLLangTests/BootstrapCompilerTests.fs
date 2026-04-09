@@ -7,17 +7,21 @@ open LLLang.Parser
 open LLLang.Elaborator
 open LLLang.HMInfer
 
-// Phase 7.9a: tests for `spec/examples/valid/20-bootstrap-compiler.lll`
-// — the first **3-stage bootstrap compiler** written entirely in
-// ll-lang itself. The file starts from `17-pipeline-real.lll` verbatim
-// (parser + elaborator in one program) and adds a minimal HM-style
-// type checker (`TypeExpr` = `TyName Str | TyVar Str`, `typeEq`,
-// `inferExprType`, `typeCheck`) that walks the parser's `Expr` AST and
-// emits `E001 TypeMismatch ...` errors for arithmetic and if-branch
-// type mismatches. `elaborate` is extended to run the new HM pass
-// after the name-resolution and exhaustiveness passes, and the
-// hardcoded driver source gains a fourth fn `badType(x Int) Int = x
-// + "y"` to exercise the HM pass.
+// Phase 7.9b: tests for `spec/examples/valid/20-bootstrap-compiler.lll`
+// — the first **4-stage bootstrap compiler** written entirely in
+// ll-lang itself: parser + elaborator + minimal HM type checker +
+// **F# code emission**. Phase 7.9a shipped the 3-stage error reporter;
+// Phase 7.9b extends it with a codegen pass that walks the parser's
+// `List[Decl]` AST and emits an F# source file (module header,
+// stdlib prelude, type decls, `let rec` fn group, `[<EntryPoint>]`
+// main wrapper) — turning the file into a true compiler that emits
+// source rather than just listing errors.
+//
+// The hardcoded driver source is a **clean** ll-lang module — no
+// unbound vars, no non-exhaustive matches, no type mismatches — so
+// the pipeline reaches the codegen pass and the runtime test asserts
+// substrings of the emitted F# (`module`, prelude lines, `type`,
+// `let rec`, `[<EntryPoint>]`).
 //
 // Two layers of coverage (same shape as 17 / 19):
 //   1. inference round-trip — parses, elaborates, and HM-infers the
@@ -25,14 +29,10 @@ open LLLang.HMInfer
 //      infers ok` theory in `HMInferTests.fs` gets a new
 //      `20-bootstrap-compiler.lll` row in addition to this fact so
 //      the corpus theory still owns the canonical list.
-//   2. runtime E2E — `lllc run` on the file emits all four expected
-//      error lines from the hardcoded source:
-//        E002 UnboundVar undefinedName
-//        E003 NonExhaustiveMatch Shape missing Circle
-//        E003 NonExhaustiveMatch Shape missing Rect
-//        E001 TypeMismatch Int vs Str
-//      Substring contains, not exact match, so any trailing
-//      whitespace / codegen warnings don't matter.
+//   2. runtime E2E — `lllc run` on the file emits the F# source for
+//      the clean hardcoded module. Substring contains, not exact
+//      match, so any trailing whitespace / codegen warnings don't
+//      matter.
 
 let private readValid name =
     File.ReadAllText(Path.Combine(__SOURCE_DIRECTORY__, "../../spec/examples/valid", name))
@@ -51,7 +51,7 @@ let ``20-bootstrap-compiler.lll parses, elaborates, and infers without errors`` 
             | Ok tm -> Assert.NotNull(tm.Env)
 
 [<Fact>]
-let ``20-bootstrap-compiler.lll runs and emits E002 + E003 + E001 for the hardcoded source`` () =
+let ``20-bootstrap-compiler.lll runs and emits F# source for the clean hardcoded module`` () =
     let lllPath =
         Path.Combine(
             __SOURCE_DIRECTORY__,
@@ -68,27 +68,34 @@ let ``20-bootstrap-compiler.lll runs and emits E002 + E003 + E001 for the hardco
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
-    // The hardcoded source in `main`:
-    //   module M
-    //   type Shape = Circle | Rect
-    //   fn good(x Int) Int = x + 1
-    //   fn bad(x Int) Int = undefinedName
-    //   fn shapeBad(s Shape) Int = match s with | 0 -> 1
-    //   fn badType(x Int) Int = x + "y"
+    // Phase 7.9b: the hardcoded source in `main` is now intentionally
+    // clean (no unbound vars, no non-exhaustive matches, no type
+    // mismatches), so `elaborate` returns an empty error list and the
+    // pipeline proceeds to the F# codegen pass:
+    //   module Examples.Clean
+    //   type Maybe A = Some A | None
+    //   fn inc(x Int) Int = x + 1
+    //   fn greet() Str = "hello"
+    //   fn main() Int = inc 1
     //
-    // `bad` references an undeclared name (one E002). `shapeBad`
-    // matches on a `Shape` value with a single `PInt 0` arm (neither
-    // a catch-all nor a named-ctor pattern in 15's AST), so the
-    // exhaustiveness pass emits one E003 per Shape ctor. `badType`'s
-    // body is `x + "y"`; `seedParams` binds `x -> Int`, and
-    // `inferExprType` tags the right operand as `Str`, so `checkArith`
-    // emits one `E001 TypeMismatch Int vs Str`.
+    // The emitted F# source contains the module header, the auto-
+    // generated stdlib prelude block, the `Maybe<'A>` sum-type decl,
+    // a `let rec ... and ...` group of plain fns, and an
+    // `[<EntryPoint>]`-wrapped `main` fn. Substring contains, not
+    // exact match.
     let expected =
-        [ "E002 UnboundVar undefinedName"
-          "E003 NonExhaustiveMatch Shape missing Circle"
-          "E003 NonExhaustiveMatch Shape missing Rect"
-          "E001 TypeMismatch Int vs Str" ]
+        [ "module Examples.Clean"
+          "// --- ll-lang stdlib prelude (auto-generated) ---"
+          "let print (s: string) = System.Console.Write(s)"
+          "// --- end prelude ---"
+          "type Maybe<'A> ="
+          "    | Some of 'A"
+          "    | None"
+          "let rec inc x = (x + 1L)"
+          "and greet = \"hello\""
+          "[<EntryPoint>]"
+          "let main (argv: string[]) =" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),
-            $"missing error line: {line}\nstdout: {stdout}\nstderr: {stderr}")
+            $"missing line: {line}\nstdout: {stdout}\nstderr: {stderr}")
