@@ -1,7 +1,7 @@
 # ll-lang Compiler Developer Guide
 
 For contributors working on the ll-lang compiler itself. Assumes you know
-F# well enough to read it; the compiler is ~1.5k lines across the source
+F# well enough to read it; the compiler is ~3.8k lines across the source
 tree and deliberately avoids external parser/inference libraries.
 
 ## Contents
@@ -44,12 +44,17 @@ ll-lang/
 │       ├── Program.fs
 │       └── LLLangTool.fsproj
 ├── tests/
-│   └── LLLangTests/              xUnit suite (325 tests)
-│       ├── LexerTests.fs
-│       ├── ParserTests.fs
-│       ├── ElaboratorTests.fs
-│       ├── HMInferTests.fs
-│       └── CodegenTests.fs
+│   └── LLLangTests/              xUnit suite (415 tests)
+│       ├── LexerTests.fs           RealLexerTests.fs
+│       ├── ParserTests.fs          ArithmeticParserTests.fs
+│       │                           TypeParserTests.fs   FnParserTests.fs
+│       │                           ExprParserTests.fs   ModuleParserTests.fs
+│       ├── ElaboratorTests.fs      ElaboratorRealTests.fs
+│       ├── HMInferTests.fs         HMInferRealTests.fs
+│       ├── CodegenTests.fs         CodegenRealTests.fs
+│       ├── PipelineRealTests.fs
+│       ├── StdlibTests.fs
+│       └── BootstrapCompilerTests.fs  -- bootstrap compiler corpus
 ├── docs/                         user guide + compiler-dev guide (this tree)
 └── README.md
 ```
@@ -58,12 +63,12 @@ ll-lang/
 
 ```bash
 dotnet build                      # all three projects
-dotnet test                       # run xUnit suite (325 tests)
+dotnet test                       # run xUnit suite (415 tests)
 ```
 
-The compiler library targets `net10.0` with `LangVersion=preview` and has
-no external package dependencies. Tests depend on `xunit 2.6.3` and
-`Microsoft.NET.Test.Sdk 17.8.0`.
+The compiler library targets `net10.0` with `LangVersion=preview` and
+`Nullable=enable`, and has no external package dependencies. Tests
+depend on `xunit 2.6.3` and `Microsoft.NET.Test.Sdk 17.8.0`.
 
 ## Conventions
 
