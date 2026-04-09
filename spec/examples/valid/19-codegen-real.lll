@@ -48,6 +48,26 @@ module Examples.CodegenReal
 --       PVar x -> "<x>"
 --       PWild  -> "_"
 --
+-- Phase 7.8c scope ("slice C" — sum-type declaration emission):
+--   * `TDecl` gains a second variant:
+--       TDType Str List[Str] List[Ctor]
+--     which pairs with the new `Ctor = MkCtor Str List[TypeArg]` ADT
+--     and the single-segment `TypeArg = TAName Str | TAVar Str` ADT.
+--   * New emission helpers:
+--       showTypeParam : Str -> Str       -- "'A"
+--       showTypeArg   : TypeArg -> Str   -- primitive + type-var map
+--       showCtorArgs  : List[TypeArg] -> Str  -- " * "-joined arg body
+--       showCtor      : Ctor -> Str           -- one arm line
+--       showCtors     : List[Ctor] -> Str     -- newline-joined arms
+--       showTypeParams: List[Str] -> Str      -- "<'A, 'B>" header seg
+--       showTypeDecl  : Str -> List[Str] -> List[Ctor] -> Str
+--   * Multi-line emission is safe because type decls sit at module
+--     level — F# accepts left-anchored `| ctor` lines without any
+--     offside-rule fuss.
+--   * Primitive name mapping mirrors `emitType` in `Codegen.fs` line
+--     51 area: Int -> int64 / Str -> string / Bool -> bool; every
+--     other name passes through as-is.
+--
 -- Out of scope (later slices in the Phase 7.8 umbrella):
 --   * F# prelude block (the stdlib shim in `Codegen.fs` `fsharpPrelude*`)
 --     — Phase 7.8d.
@@ -55,7 +75,10 @@ module Examples.CodegenReal
 --     type (`TECon`) emission — a later slice.
 --   * Mutual-recursion grouping (`let rec ... and ...`) and
 --     `[<EntryPoint>]` on `main` — Phase 7.8e.
---   * TDType emission — Phase 7.8c.
+--   * Record (`TBRecord`) and wrapped (`TBWrapped`) type bodies — only
+--     sum bodies are supported in 7.8c.
+--   * Parametric type applications in ctor args (`Some (Maybe A)`) —
+--     only flat TAName / TAVar single-segment args are supported.
 --   * Real `TypeScheme`-carrying TypedAST — this slice just walks a
 --     plain `TExpr`/`TDecl` without touching type info.
 --   * Consuming the output of `18-hminfer-real.lll` — integration is
@@ -63,8 +86,7 @@ module Examples.CodegenReal
 --   * Keyword-safe ident rewriting (`safeIdent` in Codegen.fs) —
 --     every hardcoded test name is already a non-keyword.
 --
--- Hardcoded test plan in `main`: seven `TDFn`s, one per supported
--- TExpr shape (TEVar appears as a sub-expression inside the others):
+-- Hardcoded test plan in `main`: seven `TDFn`s + three `TDType`s.
 --   TDFn "inc"      ["x"] (TEAdd (TEVar "x") (TEInt 1))          -- 7.8a
 --   TDFn "greet"    []    (TEStr "hello")                         -- 7.8a
 --   TDFn "addOne"   ["x"] (TELet "y" (TEAdd (TEVar "x") (TEInt 1)) (TEVar "y"))  -- 7.8a
@@ -72,8 +94,11 @@ module Examples.CodegenReal
 --   TDFn "choose"   ["b"] (TEIf (TEVar "b") (TEInt 1) (TEInt 2))  -- 7.8b
 --   TDFn "double"   []    (TELam "x" (TEAdd (TEVar "x") (TEVar "x")))  -- 7.8b
 --   TDFn "classify" ["x"] (TEMatch (TEVar "x") [PInt 0, PWild] [TEStr "zero", TEStr "other"])  -- 7.8b
+--   TDType "Maybe" ["A"] [MkCtor "Some" [TAVar "A"], MkCtor "None" []]  -- 7.8c
+--   TDType "Shape" []    [MkCtor "Circle" [], MkCtor "Rect" [TAName "Int", TAName "Int"], MkCtor "Empty" []]  -- 7.8c
+--   TDType "Pair"  ["A" "B"] [MkCtor "MkPair" [TAVar "A", TAVar "B"]]  -- 7.8c
 --
--- Expected stdout (one F# source line per `TDFn`, joined with "\n"
+-- Expected stdout (one F# source block per decl, joined with "\n"
 -- via `joinLines` so `fn main` has a single-expression body):
 --   let inc x = (x + 1L)
 --   let greet = "hello"
@@ -82,6 +107,15 @@ module Examples.CodegenReal
 --   let choose b = (if b then 1L else 2L)
 --   let double = (fun x -> (x + x))
 --   let classify x = (match x with | 0L -> "zero" | _ -> "other")
+--   type Maybe<'A> =
+--       | Some of 'A
+--       | None
+--   type Shape =
+--       | Circle
+--       | Rect of int64 * int64
+--       | Empty
+--   type Pair<'A, 'B> =
+--       | MkPair of 'A * 'B
 
 -- ---------- Maybe -------------------------------------------------------
 
@@ -129,13 +163,38 @@ type TExpr =
   | TEIf TExpr TExpr TExpr
   | TEMatch TExpr List[Pat] List[TExpr]
 
+-- ---------- Type-argument + constructor AST (Phase 7.8c) ----------------
+
+-- `TypeArg` is the single-segment type reference this slice emits inside
+-- a ctor's `of` arg-list. `TAName` covers primitive / ADT names (`Int`,
+-- `Str`, `Bool`, `Shape`, ...); `TAVar` covers single-letter type
+-- parameters (`A`, `B`, ...) — matching the host's `TyName` /
+-- `isTypeParamName` split in `Codegen.fs` line 46-60 area. Parametric
+-- applications (`Maybe A`) and function types are deliberately out of
+-- scope for 7.8c — the test cases only need flat ctor arg lists.
+type TypeArg =
+  | TAName Str
+  | TAVar Str
+
+-- A single ADT constructor: name + ordered list of `TypeArg`s. Mirrors
+-- the host's `TBSum` branch pair `(con, args)` in `Codegen.fs` line 252
+-- area. Zero-arg ctors (`None`, `Circle`, `Empty`) pass an empty list.
+type Ctor = MkCtor Str List[TypeArg]
+
 -- ---------- TDecl -------------------------------------------------------
 
--- Minimal typed declaration: a function with name, curried param
--- names (as a `List[Str]` — no type annotations yet), and a single
--- `TExpr` body. The host's `TypedDecl.TDFn` carries a `TypedFnSig`
--- and a `TypeScheme`; this slice drops both. Slice B adds them back.
-type TDecl = TDFn Str List[Str] TExpr
+-- Typed top-level declaration. Two shapes:
+--   * `TDFn name params body` — a function decl, same as Phase 7.8a.
+--   * `TDType name typeParams ctors` — a sum-type decl. `typeParams` is
+--     a `List[Str]` of single-letter type parameter names (empty for
+--     monomorphic types like `Shape`), and `ctors` is a `List[Ctor]`.
+--     Only sum bodies are supported; records and wrapped types stay out
+--     of scope for Phase 7.8c.
+-- The host's `TypedDecl.TDFn` carries a `TypedFnSig` and a `TypeScheme`;
+-- this slice still drops both. A later slice adds them back.
+type TDecl =
+  | TDFn Str List[Str] TExpr
+  | TDType Str List[Str] List[Ctor]
 
 -- ---------- Expression emission -----------------------------------------
 
@@ -271,19 +330,115 @@ fn showParamsTail(first Str)(rest List[Str]) Str =
     | p :: more -> strConcat first (strConcat " " (showParamsTail p more))
     | _ -> first
 
+-- ---------- Type-argument + constructor emission ------------------------
+
+-- Render a type parameter name as its F# form — `A` -> `'A`. Mirrors
+-- the host's `emitTypeParams` in `Codegen.fs` line 67 area (which
+-- produces `'A` for every `TPBare` param). Only single-letter params
+-- are emitted in this slice.
+fn showTypeParam(p Str) Str =
+  strConcat "'" p
+
+-- Render a single `TypeArg` as its F# type string. `TAName` covers the
+-- primitive name mapping (`Int` -> `int64`, `Str` -> `string`, `Bool`
+-- -> `bool`; every other name passes through as-is for user ADTs like
+-- `Shape`). `TAVar` prefixes with `'` so `A` becomes `'A`. Mirrors
+-- `emitType` in `Codegen.fs` line 51 area, minus `Float` / `Unit` /
+-- `Char` / `TyApp` / `TyFn` which this slice doesn't exercise.
+fn showTypeArg(a TypeArg) Str =
+  match a with
+    | TAName n -> showTypeArgName n
+    | TAVar v -> showTypeParam v
+
+-- Primitive-name mapping helper: `Int` -> `int64`, `Str` -> `string`,
+-- `Bool` -> `bool`; anything else passes through verbatim (user-
+-- defined ADTs emit as their bare F# name). Split from `showTypeArg`
+-- so the outer match stays one level deep.
+fn showTypeArgName(n Str) Str =
+  if n == "Int" then "int64"
+  else if n == "Str" then "string"
+  else if n == "Bool" then "bool"
+  else n
+
+-- Join a ctor's `List[TypeArg]` into the `of T1 * T2 * ...` arg-tuple
+-- body (without the leading `of `). Mirrors the host's
+-- `args |> List.map emitType |> String.concat " * "` in `Codegen.fs`
+-- line 256 area. Empty list returns the empty string — callers that
+-- care about the empty vs non-empty distinction (`showCtor`) branch
+-- before calling this helper.
+fn showCtorArgs(args List[TypeArg]) Str =
+  match args with
+    | a :: rest -> showCtorArgsTail (showTypeArg a) rest
+    | _ -> ""
+
+-- Tail-helper: we've already rendered one head, now glue the rest on
+-- with ` * ` separators. Same shape as `showParamsTail`.
+fn showCtorArgsTail(acc Str)(rest List[TypeArg]) Str =
+  match rest with
+    | a :: more -> showCtorArgsTail (strConcat acc (strConcat " * " (showTypeArg a))) more
+    | _ -> acc
+
+-- Render a single `Ctor` as one indented arm line — `"    | Name"` for
+-- zero-arg ctors, `"    | Name of T1 * T2"` otherwise. Mirrors the
+-- host's `TBSum` arm emission in `Codegen.fs` line 252 area.
+fn showCtor(c Ctor) Str =
+  match c with
+    | MkCtor name args -> showCtorBody name args
+
+-- Split helper so `showCtor`'s outer match stays one level deep. Zero-
+-- arg ctors skip the `of ...` segment entirely.
+fn showCtorBody(name Str)(args List[TypeArg]) Str =
+  match args with
+    | _ :: _ ->
+      let argStr = showCtorArgs args in
+      strConcat "    | " (strConcat name (strConcat " of " argStr))
+    | _ ->
+      strConcat "    | " name
+
+-- Fold a `List[Ctor]` into a single newline-joined string. Each arm
+-- occupies its own indented line — `showCtor` supplies the `    | `
+-- prefix, so the joiner only needs `\n`.
+fn showCtors(cs List[Ctor]) Str =
+  match cs with
+    | c :: rest -> showCtorsTail (showCtor c) rest
+    | _ -> ""
+
+-- Tail-helper: one head already rendered, glue the rest on with `\n`
+-- separators. Mirrors `showCtorArgsTail` / `showParamsTail`.
+fn showCtorsTail(acc Str)(rest List[Ctor]) Str =
+  match rest with
+    | c :: more -> showCtorsTail (strConcat acc (strConcat "\n" (showCtor c))) more
+    | _ -> acc
+
+-- Render the `<'A, 'B>` segment of a type header. Empty list returns
+-- the empty string (so `Shape` emits `type Shape = ...` with no `<>`);
+-- non-empty lists get the full `<'A, 'B>` form. Mirrors
+-- `emitTypeParams` in `Codegen.fs` line 67 area.
+fn showTypeParams(ps List[Str]) Str =
+  match ps with
+    | p :: rest -> strConcat "<" (strConcat (showTypeParamsBody p rest) ">")
+    | _ -> ""
+
+-- Tail-helper: consumed one head, glue the rest on with `", "`
+-- separators. Split out of `showTypeParams` so each `match` stays one
+-- level deep.
+fn showTypeParamsBody(first Str)(rest List[Str]) Str =
+  match rest with
+    | p :: more -> strConcat (showTypeParam first) (strConcat ", " (showTypeParamsBody p more))
+    | _ -> showTypeParam first
+
 -- ---------- Declaration emission ----------------------------------------
 
--- Walk a `TDecl` and produce its F# source rendering. Mirrors the F#
--- host's `emitDecl` `TDFn` arm in `src/LLLangCompiler/Codegen.fs` line
--- 268 area, minus the mutual-recursion grouping (`let rec ... and ...`)
--- and the `main` entry-point special case. Zero-param fns get
--- `let name = body`; non-zero-param fns get `let name p1 p2 ... =
--- body`, same as the host — the difference matters because F# rejects
--- `let greet () = "hello"` bindings with a stray `()` param that the
--- host's empty-param-fn form doesn't emit.
+-- Walk a `TDecl` and produce its F# source rendering. Dispatches on
+-- the two variants: `TDFn` hits `showFnDecl` (same behavior as Phase
+-- 7.8a/b); `TDType` hits `showTypeDecl` (new in Phase 7.8c). Mirrors
+-- the F# host's `emitDecl` in `src/LLLangCompiler/Codegen.fs` line 244
+-- area, minus the mutual-recursion grouping, `main` entry-point, and
+-- the `TBRecord` / `TBWrapped` / `TBTrait` / `TDImpl` arms.
 fn showDecl(d TDecl) Str =
   match d with
     | TDFn name ps body -> showFnDecl name ps body
+    | TDType name tps ctors -> showTypeDecl name tps ctors
 
 -- Helper: the zero-params branch drops the param segment entirely.
 -- Non-empty params get a leading space + `showParams`. Split from
@@ -295,6 +450,18 @@ fn showFnDecl(name Str)(ps List[Str])(body TExpr) Str =
       strConcat "let " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
     | _ ->
       strConcat "let " (strConcat name (strConcat " = " (showTExpr body)))
+
+-- Emit a sum-type decl as multi-line F# source. Shape:
+--   `type <name><typeParams> =\n    | <ctor1>\n    | <ctor2> ...`
+-- Mirrors the host's `TDType` + `TBSum` arm in `Codegen.fs` line 247
+-- area. Multi-line form is fine here because type decls live at module
+-- level — F# has no offside-rule trouble between sibling `| ctor`
+-- lines once they're left-anchored. Phase 7.8d+ adds records and
+-- wrapped types; this slice only handles sum bodies.
+fn showTypeDecl(name Str)(tps List[Str])(ctors List[Ctor]) Str =
+  let paramStr = showTypeParams tps in
+  let arms = showCtors ctors in
+  strConcat "type " (strConcat name (strConcat paramStr (strConcat " =\n" arms)))
 
 -- ---------- Line joiner -------------------------------------------------
 
@@ -336,6 +503,44 @@ fn main() =
   let classifyBodies = [classifyBody1 classifyBody2] in
   let classifyExpr = TEMatch (TEVar "x") classifyPats classifyBodies in
   let d7 = TDFn "classify" ["x"] classifyExpr in
-  let decls = [d1 d2 d3 d4 d5 d6 d7] in
+  -- Phase 7.8c: three TDType sum-type decls exercising every
+  -- `showTypeDecl` sub-case.
+  --   `Maybe` — parametric (`<'A>`), mixes an arg-bearing ctor (`Some
+  --     of 'A`) with a nullary ctor (`None`).
+  --   `Shape` — monomorphic (no `<>`), mixes nullary (`Circle`,
+  --     `Empty`) with a multi-arg ctor (`Rect of int64 * int64`) to
+  --     exercise the `" * "` join in `showCtorArgs`.
+  --   `Pair`  — two-type-param header (`<'A, 'B>`) with a single
+  --     multi-arg ctor to exercise the `", "` join in
+  --     `showTypeParamsBody` as well as the `TAVar` arm of
+  --     `showTypeArg`.
+  -- The list-literal construction for `ctors` needs the same let-bind-
+  -- each-element workaround as the `classifyPats` list above: list-
+  -- literal elements that start with a `TypeId` ctor app (e.g.
+  -- `MkCtor ...`) parse as a single curried app when written inline,
+  -- so each `MkCtor` call is let-bound individually before being
+  -- stitched into the outer `[...]` literal. Same workaround applies
+  -- to the inner `TAVar` / `TAName` element lists.
+  let maybeArg1 = TAVar "A" in
+  let maybeSomeArgs = [maybeArg1] in
+  let maybeSome = MkCtor "Some" maybeSomeArgs in
+  let maybeNone = MkCtor "None" [] in
+  let maybeCtors = [maybeSome maybeNone] in
+  let d8 = TDType "Maybe" ["A"] maybeCtors in
+  let rectArg1 = TAName "Int" in
+  let rectArg2 = TAName "Int" in
+  let rectArgs = [rectArg1 rectArg2] in
+  let shapeCircle = MkCtor "Circle" [] in
+  let shapeRect = MkCtor "Rect" rectArgs in
+  let shapeEmpty = MkCtor "Empty" [] in
+  let shapeCtors = [shapeCircle shapeRect shapeEmpty] in
+  let d9 = TDType "Shape" [] shapeCtors in
+  let pairArg1 = TAVar "A" in
+  let pairArg2 = TAVar "B" in
+  let pairArgs = [pairArg1 pairArg2] in
+  let pairMk = MkCtor "MkPair" pairArgs in
+  let pairCtors = [pairMk] in
+  let d10 = TDType "Pair" ["A" "B"] pairCtors in
+  let decls = [d1 d2 d3 d4 d5 d6 d7 d8 d9 d10] in
   let lines = listMap showDecl decls in
   printfn (joinLines lines)
