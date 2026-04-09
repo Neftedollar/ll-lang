@@ -136,7 +136,7 @@ let ``20-bootstrap-compiler.lll actually reads its source from 20a-bootstrap-inp
         Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     try
         let (exitCode, stdout, stderr) = runBootstrap ()
         let combined = stdout + stderr
@@ -153,7 +153,7 @@ let ``20-bootstrap-compiler.lll actually reads its source from 20a-bootstrap-inp
             $"expected no codegen output when input is missing; stdout:\n{combined}")
     finally
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts stdlib builtin strConcat in fn body (Phase 7.9e)`` () =
@@ -171,7 +171,7 @@ let ``20-bootstrap-compiler.lll accepts stdlib builtin strConcat in fn body (Pha
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath,       $"missing fixture: {inputPath}")
     Assert.True(File.Exists stdlibInputPath, $"missing fixture: {stdlibInputPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(stdlibInputPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -191,7 +191,7 @@ let ``20-bootstrap-compiler.lll accepts stdlib builtin strConcat in fn body (Pha
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts == operator in fn body (Phase 7.9f)`` () =
@@ -212,7 +212,7 @@ let ``20-bootstrap-compiler.lll accepts == operator in fn body (Phase 7.9f)`` ()
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists eqeqPath,  $"missing fixture: {eqeqPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(eqeqPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -235,7 +235,7 @@ let ``20-bootstrap-compiler.lll accepts == operator in fn body (Phase 7.9f)`` ()
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts < and > operators in fn body (Phase 7.9g)`` () =
@@ -260,7 +260,7 @@ let ``20-bootstrap-compiler.lll accepts < and > operators in fn body (Phase 7.9g
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists ltgtPath,  $"missing fixture: {ltgtPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(ltgtPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -292,7 +292,7 @@ let ``20-bootstrap-compiler.lll accepts < and > operators in fn body (Phase 7.9g
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll parses Maybe[Int] return type and emits main (bracket-form types in fn signatures)`` () =
@@ -314,7 +314,7 @@ let ``20-bootstrap-compiler.lll parses Maybe[Int] return type and emits main (br
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
     Assert.True(File.Exists maybePath,  $"missing fixture: {maybePath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(maybePath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -331,7 +331,7 @@ let ``20-bootstrap-compiler.lll parses Maybe[Int] return type and emits main (br
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts true and false literals in fn body (Phase 7.9h)`` () =
@@ -370,7 +370,7 @@ let ``20-bootstrap-compiler.lll accepts true and false literals in fn body (Phas
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists boolPath,  $"missing fixture: {boolPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(boolPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -405,7 +405,7 @@ let ``20-bootstrap-compiler.lll accepts true and false literals in fn body (Phas
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts char literals in fn body (Phase 7.9i)`` () =
@@ -435,7 +435,7 @@ let ``20-bootstrap-compiler.lll accepts char literals in fn body (Phase 7.9i)`` 
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists charPath,  $"missing fixture: {charPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(charPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -464,7 +464,7 @@ let ``20-bootstrap-compiler.lll accepts char literals in fn body (Phase 7.9i)`` 
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts char escape sequences in fn body (Phase 7.9j)`` () =
@@ -493,7 +493,7 @@ let ``20-bootstrap-compiler.lll accepts char escape sequences in fn body (Phase 
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists charPath,  $"missing fixture: {charPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(charPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -528,7 +528,7 @@ let ``20-bootstrap-compiler.lll accepts char escape sequences in fn body (Phase 
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts string literal escape sequences (Phase 7.9m)`` () =
@@ -560,7 +560,7 @@ let ``20-bootstrap-compiler.lll accepts string literal escape sequences (Phase 7
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists strPath,   $"missing fixture: {strPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(strPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -590,7 +590,7 @@ let ``20-bootstrap-compiler.lll accepts string literal escape sequences (Phase 7
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts constructor patterns in match arms (Phase 7.9l)`` () =
@@ -620,7 +620,7 @@ let ``20-bootstrap-compiler.lll accepts constructor patterns in match arms (Phas
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists ctorPath,  $"missing fixture: {ctorPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(ctorPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -649,7 +649,7 @@ let ``20-bootstrap-compiler.lll accepts constructor patterns in match arms (Phas
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts multi-line let-in and match arm layout (Phase 7.9.newlines)`` () =
@@ -688,7 +688,7 @@ let ``20-bootstrap-compiler.lll accepts multi-line let-in and match arm layout (
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
     Assert.True(File.Exists layoutPath, $"missing fixture: {layoutPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(layoutPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -723,7 +723,7 @@ let ``20-bootstrap-compiler.lll accepts multi-line let-in and match arm layout (
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll skips `--` line comments (Phase 7.9n)`` () =
@@ -763,7 +763,7 @@ let ``20-bootstrap-compiler.lll skips `--` line comments (Phase 7.9n)`` () =
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath,    $"missing fixture: {inputPath}")
     Assert.True(File.Exists commentsPath, $"missing fixture: {commentsPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(commentsPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -792,7 +792,7 @@ let ``20-bootstrap-compiler.lll skips `--` line comments (Phase 7.9n)`` () =
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll parses multi-line type decl with leading bar (Phase 7.9o)`` () =
@@ -842,7 +842,7 @@ let ``20-bootstrap-compiler.lll parses multi-line type decl with leading bar (Ph
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
     Assert.True(File.Exists layoutPath, $"missing fixture: {layoutPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(layoutPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -877,7 +877,7 @@ let ``20-bootstrap-compiler.lll parses multi-line type decl with leading bar (Ph
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll resolves charToInt via stdlibNames (Phase 7.9p)`` () =
@@ -921,7 +921,7 @@ let ``20-bootstrap-compiler.lll resolves charToInt via stdlibNames (Phase 7.9p)`
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
     Assert.True(File.Exists stdlibPath, $"missing fixture: {stdlibPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(stdlibPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -941,7 +941,7 @@ let ``20-bootstrap-compiler.lll resolves charToInt via stdlibNames (Phase 7.9p)`
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll parses multi-line if-then-else and keeps emitting subsequent fns (Phase 7.9q)`` () =
@@ -991,7 +991,7 @@ let ``20-bootstrap-compiler.lll parses multi-line if-then-else and keeps emittin
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath,   $"missing fixture: {inputPath}")
     Assert.True(File.Exists multifnPath, $"missing fixture: {multifnPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(multifnPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -1011,7 +1011,7 @@ let ``20-bootstrap-compiler.lll parses multi-line if-then-else and keeps emittin
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll resolves charIsDigit via stdlibNames (Phase 7.9r)`` () =
@@ -1044,7 +1044,7 @@ let ``20-bootstrap-compiler.lll resolves charIsDigit via stdlibNames (Phase 7.9r
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists digitPath, $"missing fixture: {digitPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(digitPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -1064,7 +1064,7 @@ let ``20-bootstrap-compiler.lll resolves charIsDigit via stdlibNames (Phase 7.9r
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll emits list literal expressions (Phase 7.10a)`` () =
@@ -1089,7 +1089,7 @@ let ``20-bootstrap-compiler.lll emits list literal expressions (Phase 7.10a)`` (
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists listsPath, $"missing fixture: {listsPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(listsPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -1115,7 +1115,7 @@ let ``20-bootstrap-compiler.lll emits list literal expressions (Phase 7.10a)`` (
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll emits if expression in match arm body (Phase 7.10b)`` () =
@@ -1145,7 +1145,7 @@ let ``20-bootstrap-compiler.lll emits if expression in match arm body (Phase 7.1
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists armIfPath, $"missing fixture: {armIfPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(armIfPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -1177,7 +1177,7 @@ let ``20-bootstrap-compiler.lll emits if expression in match arm body (Phase 7.1
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll resolves strToInt via stdlibNames (Phase 7.10c)`` () =
@@ -1201,7 +1201,7 @@ let ``20-bootstrap-compiler.lll resolves strToInt via stdlibNames (Phase 7.10c)`
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists strToIntPath, $"missing fixture: {strToIntPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(strToIntPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -1218,7 +1218,7 @@ let ``20-bootstrap-compiler.lll resolves strToInt via stdlibNames (Phase 7.10c)`
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll supports string literal patterns (Phase 7.10d)`` () =
@@ -1241,7 +1241,7 @@ let ``20-bootstrap-compiler.lll supports string literal patterns (Phase 7.10d)``
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists strPatPath, $"missing fixture: {strPatPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(strPatPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -1267,7 +1267,7 @@ let ``20-bootstrap-compiler.lll supports string literal patterns (Phase 7.10d)``
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll resolves strChars/strFromChars/intToStr/charIsSpace/listReverse via stdlibNames (Phase 7.10e)`` () =
@@ -1295,7 +1295,7 @@ let ``20-bootstrap-compiler.lll resolves strChars/strFromChars/intToStr/charIsSp
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists strCharsPath, $"missing fixture: {strCharsPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(strCharsPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -1339,7 +1339,7 @@ let ``20-bootstrap-compiler.lll resolves strChars/strFromChars/intToStr/charIsSp
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll desugars clause-sugar fn bodies (Phase 7.10g)`` () =
@@ -1378,7 +1378,7 @@ let ``20-bootstrap-compiler.lll desugars clause-sugar fn bodies (Phase 7.10g)`` 
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
     Assert.True(File.Exists clausePath, $"missing fixture: {clausePath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(clausePath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -1404,7 +1404,7 @@ let ``20-bootstrap-compiler.lll desugars clause-sugar fn bodies (Phase 7.10g)`` 
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll emits tuple literal expressions (Phase 7.10q)`` () =
@@ -1442,7 +1442,7 @@ let ``20-bootstrap-compiler.lll emits tuple literal expressions (Phase 7.10q)`` 
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
     Assert.True(File.Exists tuplePath,  $"missing fixture: {tuplePath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(tuplePath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -1468,7 +1468,7 @@ let ``20-bootstrap-compiler.lll emits tuple literal expressions (Phase 7.10q)`` 
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 // Phase 7.10r blocker tests — skipped until each blocker is resolved.
 // These document the remaining gaps between compiler_1.fs (F# host output)
@@ -1499,7 +1499,7 @@ let ``20y-bootstrap-input-prelude.lll: bootstrap prelude contains listFold and l
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath,   $"missing fixture: {inputPath}")
     Assert.True(File.Exists preludePath, $"missing fixture: {preludePath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(preludePath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -1522,7 +1522,7 @@ let ``20y-bootstrap-input-prelude.lll: bootstrap prelude contains listFold and l
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20y-bootstrap-input-mutrec.lll: mutually recursive fns across type boundary produce correct let-rec grouping (Phase 7.10r blocker 2)`` () =
@@ -1550,7 +1550,7 @@ let ``20y-bootstrap-input-mutrec.lll: mutually recursive fns across type boundar
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
     Assert.True(File.Exists mutrecPath, $"missing fixture: {mutrecPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(mutrecPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -1575,7 +1575,7 @@ let ``20y-bootstrap-input-mutrec.lll: mutually recursive fns across type boundar
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)
 
 [<Fact>]
 let ``20y-bootstrap-input-fmt.lll: each fn in a multi-fn module is emitted on its own separate line (Phase 7.10r blocker 3)`` () =
@@ -1604,7 +1604,7 @@ let ``20y-bootstrap-input-fmt.lll: each fn in a multi-fn module is emitted on it
     let backupPath = inputPath + ".bak"
     Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
     Assert.True(File.Exists fmtPath,   $"missing fixture: {fmtPath}")
-    File.Move(inputPath, backupPath)
+    File.Move(inputPath, backupPath, true)
     File.Copy(fmtPath, inputPath)
     try
         let (_, stdout, stderr) = runBootstrap ()
@@ -1629,4 +1629,4 @@ let ``20y-bootstrap-input-fmt.lll: each fn in a multi-fn module is emitted on it
     finally
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
-            File.Move(backupPath, inputPath)
+            File.Move(backupPath, inputPath, true)

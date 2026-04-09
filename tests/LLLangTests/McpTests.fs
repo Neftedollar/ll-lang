@@ -181,3 +181,37 @@ fn f(x Int) Str = x
         let codes = es |> List.map (fun e -> e.Code)
         Assert.Contains(E001, codes)
     | Ok _ -> Assert.True(false, "Expected E001 error")
+
+// ─── multi-target compile ─────────────────────────────────────────────────────
+
+[<Fact>]
+let ``compileTarget TypeScript produces TS output for valid source`` () =
+    match compileTarget TypeScript validSrc with
+    | Ok ts ->
+        Assert.Contains("const", ts)
+        Assert.DoesNotContain("let rec", ts)
+    | Error es -> Assert.True(false, sprintf "compileTarget TS failed: %A" es)
+
+[<Fact>]
+let ``compileTarget Python produces Python output for valid source`` () =
+    match compileTarget Python validSrc with
+    | Ok py ->
+        Assert.Contains("def ", py)
+        Assert.DoesNotContain("let rec", py)
+    | Error es -> Assert.True(false, sprintf "compileTarget Py failed: %A" es)
+
+[<Fact>]
+let ``compileTarget Java produces Java output for valid source`` () =
+    match compileTarget Java validSrc with
+    | Ok java ->
+        Assert.Contains("public static", java)
+        Assert.DoesNotContain("let rec", java)
+    | Error es -> Assert.True(false, sprintf "compileTarget Java failed: %A" es)
+
+[<Fact>]
+let ``compileTarget FSharp does not produce Python output`` () =
+    match compileTarget FSharp validSrc with
+    | Ok fs ->
+        Assert.DoesNotContain("def ", fs)
+        Assert.DoesNotContain("from __future__", fs)
+    | Error es -> Assert.True(false, sprintf "compileTarget FS failed: %A" es)

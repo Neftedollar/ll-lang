@@ -14,9 +14,11 @@ open LLLang.ProjectLoader
 
 // ─── Arg types ───────────────────────────────────────────────────────────────
 
-type CompileFileArgs = { path: string; include_output: bool option }
-type CheckFileArgs   = { path: string }
-type RunFileArgs     = { path: string }
+type CompileFileArgs   = { path: string; include_output: bool option; target: string option }
+type CompileSourceArgs = { source: string; target: string option }
+type CheckFileArgs     = { path: string }
+type CheckSourceArgs   = { source: string }
+type RunFileArgs       = { path: string }
 type LookupErrorArgs    = { code: string }
 type StdlibSearchArgs   = { query: string }
 type GrammarLookupArgs  = { rule: string }
@@ -36,6 +38,18 @@ let private errorsToJson (es: LLError list) =
                 e.Code e.Line e.Col (js e.Message))
     "[" + String.concat "," items + "]"
 
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+let private parseTargetStr (t: string option) : Target =
+    match t |> Option.map (fun s -> s.ToLower()) with
+    | Some ("ts" | "typescript") -> TypeScript
+    | Some ("py" | "python")     -> Python
+    | Some ("java" | "jvm")      -> Java
+    | _                          -> FSharp
+
+let private targetFieldName = function
+    | FSharp -> "fsharp" | TypeScript -> "typescript" | Python -> "python" | Java -> "java"
+
 // ─── compile_file ────────────────────────────────────────────────────────────
 
 let compileFileTool (args: CompileFileArgs) : Task<Result<Content list, McpError>> =
@@ -45,15 +59,45 @@ let compileFileTool (args: CompileFileArgs) : Task<Result<Content list, McpError
                 return! ok """{"ok":false,"errors":[{"code":"E000","message":"path must end with .lll"}]}"""
             else
                 let src = File.ReadAllText(args.path)
-                match compile src with
-                | Ok fs ->
-                    let fsharpField =
+                let target = parseTargetStr args.target
+                match compileTarget target src with
+                | Ok out ->
+                    let outputField =
                         if args.include_output |> Option.defaultValue false
-                        then sprintf ",\"fsharp\":%s" (js fs)
+                        then sprintf ",\"%s\":%s" (targetFieldName target) (js out)
                         else ""
-                    return! ok (sprintf "{\"ok\":true,\"errors\":[]%s}" fsharpField)
+                    return! ok (sprintf "{\"ok\":true,\"errors\":[],\"target\":%s%s}" (js (string target)) outputField)
                 | Error es ->
                     return! ok (sprintf "{\"ok\":false,\"errors\":%s}" (errorsToJson es))
+        with ex ->
+            return! ok (sprintf "{\"ok\":false,\"errors\":[{\"code\":\"E000\",\"message\":%s}]}" (js ex.Message))
+    }
+
+// ─── compile_source ──────────────────────────────────────────────────────────
+
+let compileSourceTool (args: CompileSourceArgs) : Task<Result<Content list, McpError>> =
+    task {
+        try
+            let target = parseTargetStr args.target
+            match compileTarget target args.source with
+            | Ok out ->
+                return! ok (sprintf "{\"ok\":true,\"errors\":[],\"target\":%s,\"%s\":%s}"
+                                (js (string target)) (targetFieldName target) (js out))
+            | Error es ->
+                return! ok (sprintf "{\"ok\":false,\"errors\":%s}" (errorsToJson es))
+        with ex ->
+            return! ok (sprintf "{\"ok\":false,\"errors\":[{\"code\":\"E000\",\"message\":%s}]}" (js ex.Message))
+    }
+
+// ─── check_source ────────────────────────────────────────────────────────────
+
+let checkSourceTool (args: CheckSourceArgs) : Task<Result<Content list, McpError>> =
+    task {
+        try
+            match check args.source with
+            | Ok ()  -> return! ok """{"ok":true,"errors":[]}"""
+            | Error es ->
+                return! ok (sprintf "{\"ok\":false,\"errors\":%s}" (errorsToJson es))
         with ex ->
             return! ok (sprintf "{\"ok\":false,\"errors\":[{\"code\":\"E000\",\"message\":%s}]}" (js ex.Message))
     }
@@ -349,13 +393,23 @@ let runServer () =
 
         tool (TypedTool.define<CompileFileArgs>
             "compile_file"
-            "Compile a .lll file end-to-end. Returns {ok, errors[], fsharp?}. Set include_output=true to get the generated F# source."
+            "Compile a .lll file. target: 'fs'|'ts'|'py'|'java' (default 'fs'). include_output=true returns generated source. Returns {ok, errors[], target, <target>?}."
             compileFileTool |> unwrapResult)
+
+        tool (TypedTool.define<CompileSourceArgs>
+            "compile_source"
+            "Compile ll-lang source string directly (no file needed). target: 'fs'|'ts'|'py'|'java' (default 'fs'). Returns {ok, errors[], target, <target>}. Fastest way for an LLM to check generated code."
+            compileSourceTool |> unwrapResult)
 
         tool (TypedTool.define<CheckFileArgs>
             "check_file"
             "Type-check a .lll file (lex→parse→elaborate→infer, no codegen). Returns {ok, errors[]}. Faster than compile_file."
             checkFileTool |> unwrapResult)
+
+        tool (TypedTool.define<CheckSourceArgs>
+            "check_source"
+            "Type-check ll-lang source string directly (no file needed). Returns {ok, errors[]}. Fastest way for an LLM to validate syntax and types."
+            checkSourceTool |> unwrapResult)
 
         tool (TypedTool.define<RunFileArgs>
             "run_file"

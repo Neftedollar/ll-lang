@@ -32,11 +32,6 @@ Untagged value passed where tagged value expected.
 
 Compact: `E005 7:8 TagViolation expected:Str[UserId] got:Str`
 
-### E006 MissingImpl
-No `impl TraitName TypeName` found for a constrained type variable.
-
-Compact: `E006 20:1 MissingImpl trait:Functor type:MyType`
-
 ### E007 PlatformMismatch
 A platform-specific module imported but the compile target doesn't support it.
 

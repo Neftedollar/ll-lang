@@ -5,7 +5,7 @@ open LLLang.AST
 /// Symbol table: name → declared type.
 type TypeEnv = Map<string, TypeExpr>
 
-type ErrorCode = E001 | E002 | E003 | E004 | E005 | E006 | E008
+type ErrorCode = E001 | E002 | E003 | E004 | E005 | E008
                 | E020 | E024 | E025
 
 type LLError = {

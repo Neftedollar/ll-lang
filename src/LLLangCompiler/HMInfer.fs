@@ -18,7 +18,6 @@ let private e001 t1 t2 = mkErr E001 0 0 $"TypeMismatch {t1} vs {t2}"
 let private e002 name  = mkErr E002 0 0 $"UnboundVar {name}"
 let private e004 t1 t2 = mkErr E004 0 0 $"UnitMismatch {t1} vs {t2}"
 let private e005 t1 t2 = mkErr E005 0 0 $"TaggedUntaggedMismatch {t1} vs {t2}"
-let private e006 tr ty = mkErr E006 0 0 $"MissingImpl {tr} for {ty}"
 let private e008 v  t  = mkErr E008 0 0 $"OccursCheck {v} in {t}"
 
 /// Look up a node's source position in the PosMap side-table.
@@ -88,14 +87,13 @@ let rec unify (t1: TypeExpr) (t2: TypeExpr) : Result<Subst, LLError> =
 type private InferState = {
     Fresh: FreshState
     mutable Errors: LLError list
-    mutable Dispatch: Map<ExprId, DispatchInfo>
     mutable NextId: int
     /// Source position side-table from the parser.
     Positions: PosMap
 }
 
 let private newState (pm: PosMap) : InferState =
-    { Fresh = newFreshState (); Errors = []; Dispatch = Map.empty; NextId = 0; Positions = pm }
+    { Fresh = newFreshState (); Errors = []; NextId = 0; Positions = pm }
 
 let private newId (st: InferState) : ExprId =
     let n = st.NextId in st.NextId <- n + 1; n
@@ -860,4 +858,4 @@ let infer (pm: PosMap) (m: LLModule) (env0: Elaborator.TypeEnv) : Result<TypedMo
             | _ -> envAcc
         ) initEnv decls
     if st.Errors <> [] then Error st.Errors
-    else Ok { Path = m.Path; Decls = decls; Env = finalEnv; Dispatch = st.Dispatch }
+    else Ok { Path = m.Path; Decls = decls; Env = finalEnv }

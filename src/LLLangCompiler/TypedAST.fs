@@ -3,20 +3,13 @@ module LLLang.TypedAST
 open LLLang.AST
 open LLLang.Types
 
-/// Unique ID per expression node (used for dispatch map keys)
+/// Unique ID per expression node (used for unique name generation in codegen)
 type ExprId = int
 
 /// Typed pattern (carries resolved type)
 type TypedPattern = {
     Pat: Pattern
     Type: TypeExpr
-}
-
-/// Dispatch info for a resolved trait method call
-type DispatchInfo = {
-    TraitName: TypeIdent
-    ImplType: TypeIdent
-    ResolvedName: Ident
 }
 
 /// Typed expression node
@@ -67,5 +60,4 @@ type TypedModule = {
     Path: string list
     Decls: (TypedDecl * bool) list
     Env: Env
-    Dispatch: Map<ExprId, DispatchInfo>
 }
