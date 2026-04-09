@@ -1,7 +1,4 @@
 module Examples.Clean
 type Maybe A = Some A | None
-fn unwrap(m Maybe[Int]) Int =
-  match m with
-    | Some n -> n
-    | None -> 0
+fn unwrap(m Maybe[Int]) Int = match m with | Some n -> n | None -> 0
 fn main() Int = unwrap (Some 5)

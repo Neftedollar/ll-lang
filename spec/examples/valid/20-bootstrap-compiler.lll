@@ -251,15 +251,18 @@ type TypeRef = TR Str
 type Param = MkParam Str TypeRef
 
 -- Match patterns for this slice: int literal, lowercase var binder,
--- wildcard `_`, nil `[]`, and cons `h :: t`. Phase 7.5c added `PNil` /
--- `PCons`; constructor patterns, string-literal patterns, list
--- literals, and tuple patterns still live in Phase 7.5+'s backlog.
+-- wildcard `_`, nil `[]`, cons `h :: t`, and named constructor `PCon
+-- name args`. Phase 7.5c added `PNil` / `PCons`; Phase 7.9l added
+-- `PCon` for arms like `| Some n -> ...` / `| None -> ...`. String-
+-- literal patterns, list literals, and tuple patterns still live in
+-- Phase 7.5+'s backlog.
 type Pat =
   | PInt Int
   | PVar Str
   | PWild
   | PNil
   | PCons Pat Pat
+  | PCon Str List[Pat]
 
 -- Expression grammar for this slice: int literal, var ref (covers both
 -- lowercase identifiers and uppercase constructor references — the
@@ -916,16 +919,46 @@ fn parseArm(toks List[Token]) =
 -- Phase 7.5+).
 fn parseArmBody(toks List[Token]) = parseCompare toks
 
+-- Phase 7.9l: eagerly consume a sequence of atomic sub-patterns (var
+-- binder, wildcard, int literal, or empty-list `[]`) until the next
+-- token doesn't start a pattern (like `TArrow` / `TBar` /
+-- `TColonColon` / `TRParen`). Deliberately does NOT recurse into
+-- nested `TUpper` constructors without parentheses — so a nested
+-- `Cons (Some 1) None` needs parens for the `Some 1`, but the
+-- bootstrap rarely needs nested ctors without parens.
+fn parsePatArgs(toks List[Token]) =
+  match toks with
+    | TLower _ :: _ -> parsePatArgsCons toks
+    | TUnder :: _ -> parsePatArgsCons toks
+    | TInt _ :: _ -> parsePatArgsCons toks
+    | TLBrack :: TRBrack :: _ -> parsePatArgsCons toks
+    | _ -> ([], toks)
+
+fn parsePatArgsCons(toks List[Token]) =
+  let (p, rest) = parsePrimaryPat toks in
+  let (ps, rest2) = parsePatArgs rest in
+  (listAppend [p] ps, rest2)
+
+-- Phase 7.9l: fold a `TUpper name :: rest` constructor pattern into a
+-- `PCon name args` node. Consumes the ctor name plus any trailing
+-- atomic sub-patterns via `parsePatArgs`.
+fn parseCtorArgs(name Str)(toks List[Token]) =
+  let (args, rest) = parsePatArgs toks in
+  (PCon name args, rest)
+
 -- Primary pattern: int literal, lowercase var binder, wildcard `_`,
--- or empty-list `[]`. The recursive `parsePat` calls this once, then
--- peeks for `TColonColon` to optionally fold the result into a
--- right-associative `PCons`. Ctor / list-literal / tuple / string
--- patterns all stay in Phase 7.5+.
+-- empty-list `[]`, or `TUpper`-headed constructor pattern. The
+-- recursive `parsePat` calls this once, then peeks for `TColonColon`
+-- to optionally fold the result into a right-associative `PCons`.
+-- Phase 7.9l added the `TUpper name :: rest` arm for constructor
+-- patterns. List-literal / tuple / string patterns all stay in
+-- Phase 7.5+.
 fn parsePrimaryPat(toks List[Token]) =
   | TInt n :: rest -> (PInt n, rest)
   | TUnder :: rest -> (PWild, rest)
   | TLBrack :: TRBrack :: rest -> (PNil, rest)
   | TLower s :: rest -> (PVar s, rest)
+  | TUpper name :: rest -> parseCtorArgs name rest
   | _ -> (PWild, toks)
 
 -- Pattern: a primary pattern optionally followed by `:: pat`. The
@@ -1089,15 +1122,23 @@ fn showReturn(r Maybe[TypeRef]) Str =
     | Some t -> showTypeRef t
     | None -> "?"
 
--- Pattern pretty-printer for match arms (Phase 7.5a + 7.5c). Phase
--- 7.5c added `PNil` (rendered as `[]`) and `PCons h t` (rendered as
--- `(h :: t)`, recursively, so chains nest as `(a :: (b :: rest))`).
+-- Pattern pretty-printer for match arms (Phase 7.5a + 7.5c + 7.9l).
+-- Phase 7.5c added `PNil` (rendered as `[]`) and `PCons h t`
+-- (rendered as `(h :: t)`, recursively, so chains nest as
+-- `(a :: (b :: rest))`). Phase 7.9l added `PCon name args` (rendered
+-- as `(Name arg1 arg2)`, a space before each arg).
 fn showPat(p Pat) Str =
   | PInt n -> intToStr n
   | PVar s -> s
   | PWild -> "_"
   | PNil -> "[]"
   | PCons h t -> strConcat (strConcat (strConcat (strConcat "(" (showPat h)) " :: ") (showPat t)) ")"
+  | PCon name args -> strConcat "(" (strConcat name (strConcat (showPatArgs args) ")"))
+
+fn showPatArgs(ps List[Pat]) Str =
+  match ps with
+    | [] -> ""
+    | p :: rest -> strConcat " " (strConcat (showPat p) (showPatArgs rest))
 
 -- Render a single `| pat -> body` arm; helper for `showArms`.
 fn showArm(p Pat)(body Expr) Str =
@@ -1205,15 +1246,21 @@ fn envAddAll(env Env)(names List[Str]) Env =
 
 -- Collect every `PVar` binder introduced by a pattern. Wildcards, nil,
 -- int-literal patterns don't bind anything. `PCons h t` binds whatever
--- the head and tail patterns bind, left-to-right. 15's `Pat` has no
--- `PCon` (named constructor patterns), so this walker only needs the
--- five variants `PInt` / `PVar` / `PWild` / `PNil` / `PCons`.
+-- the head and tail patterns bind, left-to-right. Phase 7.9l added
+-- `PCon name args` which binds whatever its arg patterns bind, in
+-- left-to-right order via `patBindersList`.
 fn patBinders(p Pat) List[Str] =
   | PInt _ -> []
   | PWild -> []
   | PNil -> []
   | PVar name -> [name]
   | PCons h t -> listAppend (patBinders h) (patBinders t)
+  | PCon _ args -> patBindersList args
+
+fn patBindersList(ps List[Pat]) List[Str] =
+  match ps with
+    | [] -> []
+    | p :: rest -> listAppend (patBinders p) (patBindersList rest)
 
 -- Extract the param name from a `MkParam name (TR ty)`. Used when a
 -- `DFn` extends the local env for its body walk.
@@ -1368,24 +1415,32 @@ fn lookupCtors(types List[TypeCtors])(name Str) List[Str] =
 
 -- A pattern counts as "catch-all relative to a sum type" if it's
 -- `PWild`, `PVar`, or `PCons` — mirrors the F# host elaborator's
--- catch-all list. `PInt` / `PNil` are NOT catch-alls — they match
--- specific literals.
+-- catch-all list. `PInt` / `PNil` / `PCon` are NOT catch-alls —
+-- `PCon` matches only its own tag.
 fn patIsCatchAll(p Pat) Bool =
   | PWild -> true
   | PVar _ -> true
   | PCons _ _ -> true
+  | PCon _ _ -> false
   | _ -> false
 
 fn armsHaveCatchAll(pats List[Pat]) Bool =
   listFold (\acc p. if acc then true else patIsCatchAll p) false pats
 
--- 15's `Pat` has no `PCon` (named constructor patterns), so no arm
--- pattern can ever identify a sum-type ctor. This means `coveredCtors`
--- is always the empty list — a match over a declared sum type with no
--- catch-all arm reports every constructor as missing. Deliberately
--- narrow: the integration's goal is proving the pipeline plumbing, not
--- full coverage analysis.
-fn coveredCtors(pats List[Pat]) List[Str] = []
+-- Phase 7.9l: now that `Pat` has `PCon name args`, a match arm can
+-- identify a sum-type ctor. Walk the arm pattern list and collect the
+-- name from every `PCon`. Non-ctor patterns (`PWild` / `PVar` /
+-- `PInt` / `PNil` / `PCons`) contribute nothing — the catch-all /
+-- cons / literal cases are handled elsewhere (`armsHaveCatchAll` /
+-- coverage logic is disabled when a catch-all is present).
+fn coveredCtors(pats List[Pat]) List[Str] =
+  match pats with
+    | p :: rest ->
+      let tail = coveredCtors rest in
+      match p with
+        | PCon name _ -> listAppend [name] tail
+        | _ -> tail
+    | _ -> []
 
 -- For a given `required` ctor list and `covered` ctor list, return
 -- one `E003 NonExhaustiveMatch <type> missing <ctor>` message per
@@ -1756,15 +1811,24 @@ fn showErrs(errs List[Str]) Str =
 -- ---- Pattern emission --------------------------------------------------
 
 -- Render a `Pat` as its F# source form. Mirrors `showPat` in
--- 19-codegen-real.lll but extends it to the parser's full 5-variant
--- `Pat` (PInt / PVar / PWild / PNil / PCons). `PNil` -> `[]`, `PCons
--- h t` -> `(h :: t)` (recursive, parens unconditional).
+-- 19-codegen-real.lll but extends it to the parser's full 6-variant
+-- `Pat` (PInt / PVar / PWild / PNil / PCons / PCon). `PNil` -> `[]`,
+-- `PCons h t` -> `(h :: t)` (recursive, parens unconditional).
+-- Phase 7.9l added `PCon name args` -> `(Name arg1 arg2)` — F#
+-- discriminated-union pattern shape, parens unconditional, each arg
+-- prefixed by a single space.
 fn emitPat(p Pat) Str =
   | PInt n -> strConcat (intToStr n) "L"
   | PVar x -> x
   | PWild -> "_"
   | PNil -> "[]"
   | PCons h t -> strConcat "(" (strConcat (emitPat h) (strConcat " :: " (strConcat (emitPat t) ")")))
+  | PCon name args -> strConcat "(" (strConcat name (strConcat (emitPatArgs args) ")"))
+
+fn emitPatArgs(ps List[Pat]) Str =
+  match ps with
+    | [] -> ""
+    | p :: rest -> strConcat " " (strConcat (emitPat p) (emitPatArgs rest))
 
 -- ---- Expression emission -----------------------------------------------
 
