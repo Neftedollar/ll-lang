@@ -416,21 +416,50 @@ fn lexStr(cs List[Char]) List[Token] =
   let (body, leftover) = takeStrBody cs in
   listAppend [TStr (strFromChars body)] (lexChars leftover)
 
+-- Phase 7.9j: decode one escape-sequence content char. Supports the
+-- four escapes needed for self-host: `\n` → newline, `\t` → tab,
+-- `\\` → backslash, `\'` → single-quote. Unknown escapes pass
+-- through raw (lenient — mirrors the catch-all in `lexChars`).
+fn decodeEscape(c Char) Char =
+  if c == 'n' then '\n'
+  else if c == 't' then '\t'
+  else if c == '\\' then '\\'
+  else if c == '\'' then '\''
+  else c
+
+-- Phase 7.9j: lex the tail of an escaped single-char literal
+-- `'\e'`. The opening `'` AND the backslash have already been
+-- consumed; `cs` points at the escape content char. Consume the
+-- content char, decode it, expect the closing `'`, and emit a
+-- `TChar (decodeEscape esc)` token. Missing closing quote → drop.
+fn lexCharEsc(cs List[Char]) List[Token] =
+  match cs with
+    | esc :: rest ->
+      match rest with
+        | c :: r ->
+          if c == '\'' then listAppend [TChar (decodeEscape esc)] (lexChars r)
+          else lexChars cs
+        | _ -> lexChars cs
+    | _ -> []
+
 -- Phase 7.9i: lex a single-char literal `'c'`. The opening `'` has
 -- already been consumed. Consume one content char, expect the
--- closing `'`, and emit a `TChar ch` token. No escape handling in
--- this slice — `'\n'` / `'\\'` / `'\''` stay in Phase 7.9j. If the
--- closing `'` is missing (unterminated), silently fall through and
--- re-lex from the saved position, matching the leniency of the
--- catch-all `else lexChars rest` arm in `lexChars`.
+-- closing `'`, and emit a `TChar ch` token. Phase 7.9j extends this
+-- to detect a leading `\` and dispatch to `lexCharEsc` for the four
+-- supported escapes (`\n` / `\t` / `\\` / `\'`). If the closing `'`
+-- is missing (unterminated), silently fall through and re-lex from
+-- the saved position, matching the leniency of the catch-all
+-- `else lexChars rest` arm in `lexChars`.
 fn lexCharLit(cs List[Char]) List[Token] =
   match cs with
     | ch :: rest ->
-      match rest with
-        | c :: r ->
-          if c == '\'' then listAppend [TChar ch] (lexChars r)
-          else lexChars cs
-        | _ -> lexChars cs
+      if ch == '\\' then lexCharEsc rest
+      else
+        match rest with
+          | c :: r ->
+            if c == '\'' then listAppend [TChar ch] (lexChars r)
+            else lexChars cs
+          | _ -> lexChars cs
     | _ -> []
 
 -- Handle `:` vs `::`: peek the next char to decide. Only `::` is a
@@ -1749,13 +1778,24 @@ fn emitInt(n Int) Str = strConcat (intToStr n) "L"
 -- `showStr`; a real implementation would escape `\"` / `\\` / `\n`.
 fn emitStr(s Str) Str = strConcat "\"" (strConcat s "\"")
 
+-- Phase 7.9j: re-encode a `Char` as an F#-compatible char literal.
+-- The lexer decoded `'\n'` / `'\\'` / `'\''` / `'\t'` into raw
+-- bytes; here we invert the mapping so the emitted F# source is
+-- valid. Any other char is wrapped verbatim in single quotes.
+fn emitChar(c Char) Str =
+  if c == '\n' then "'\\n'"
+  else if c == '\t' then "'\\t'"
+  else if c == '\\' then "'\\\\'"
+  else if c == '\'' then "'\\''"
+  else strConcat (strConcat "'" (strFromChars [c])) "'"
+
 -- Top-level expression dispatcher. Each non-leaf arm delegates to a
 -- dedicated helper to keep the outer `match e` one level deep — same
 -- "shallow spine" trick `19-codegen-real.lll`'s `showTExpr` uses.
 fn emitExpr(e Expr) Str =
   | EInt n -> emitInt n
   | EStr s -> emitStr s
-  | EChar c -> strConcat (strConcat "'" (strFromChars [c])) "'"
+  | EChar c -> emitChar c
   | EVar x -> x
   | ETagged inner _ -> emitExpr inner
   | EAdd l r -> emitBin l r " + "
