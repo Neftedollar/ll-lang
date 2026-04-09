@@ -3034,12 +3034,142 @@ before. Not in scope for 7.9h — fixture was adapted to
 single-line form instead. Logged as a separate Phase
 7.10+ cleanup candidate.
 
-Next tick: **Phase 7.9i** — proper `Bool` type in
-HM/typeCheck. Currently `inferExprType` returns `TyName
-"Bool"` from `EEq` / `ELt` / `EGt` but nothing consumes
-it; promoting `Bool` means `typeCheck` can reject `if 1
-then 0 else 1` (non-Bool guard) and comparisons must
-refuse non-`Int` args. Unblocks `EBool` as a dedicated
-AST variant, `TKwTrue` / `TKwFalse` keyword tokens, and
-the `&&` / `||` / `not` connectives that need Bool
-operands.
+Next tick: **Phase 7.9i** — basic char literal (`'c'`)
+support. Bool type promotion moves to Phase 7.9k; char
+literals are much higher impact because the bootstrap
+compiler's own source uses `'='` / `'"'` / `'('` / `')'`
+/ `'|'` / `'.'` / `':'` / `'_'` and dozens of other single
+chars in `lexChars` — without char literal support, the
+bootstrap compiler can't parse a single real ll-lang
+source file.
+
+### 2026-04 — Phase 7.9i: char literals (DONE)
+
+Ninth tick of **Phase 7.9**. Pivoted from the originally
+planned "Bool type promotion in HM" slot because char
+literals are strictly higher impact: the bootstrap
+compiler's own source uses single-char literals (`'='`,
+`'"'`, `'('`, `')'`, `'['`, `']'`, `'|'`, `'.'`, `'\\'`,
+`'_'`, `':'`, `'+'`, `'-'`, `'*'`, `'/'`, `'>'`, `'<'`,
+`'\n'`) literally dozens of times in `lexChars` and
+friends. Without char literals, the bootstrap compiler
+silently drops `'` as an unknown char (falls through to
+the catch-all `else lexChars rest` in `lexChars`) and
+mangles any source that uses them. Bool type promotion
+just tightens an existing feature; char literals unblock
+a primitive that every non-trivial lexer needs.
+
+**Changes:**
+
+* New lexer token variant `TChar Char` in `type Token`,
+  placed next to `TInt Int` / `TStr Str`.
+* New lexer helper `fn lexCharLit(cs List[Char]) List[Token]`
+  consumes one content char, expects the closing `'`, and
+  emits `TChar ch`. If the closing quote is missing
+  (unterminated literal), silently falls through and
+  re-lexes from the saved position — same leniency as the
+  catch-all `else lexChars rest` arm in `lexChars`.
+* New arm in `lexChars`:
+  `else if c == '\'' then lexCharLit rest` — placed right
+  after the `'"'` / `lexStr` arm to mirror the string
+  literal shape.
+* New AST variant `EChar Char` in `type Expr`, placed next
+  to `EInt Int` / `EStr Str`.
+* New arm `TChar c :: rest -> (EChar c, rest)` in
+  `parseAtom`, as a sibling of the `TInt n :: rest` and
+  `TStr s :: rest` arms.
+* New `TChar _ -> true` arm in `isAtomStart` so char
+  literals can start an atom at juxtaposition position
+  (`f 'x'`).
+* New `EChar _ -> []` noop arms in `checkExpr` (name
+  resolution) and `typeCheck` (exhaustive walker), plus
+  `EChar _ -> TyName "Char"` in `inferExprType`.
+* New `EChar c -> strConcat (strConcat "'" (strFromChars [c])) "'"`
+  arms in `showExpr` and `emitExpr`. F# accepts `'c'`
+  directly for `char`, so the emitted source is valid F#
+  verbatim. Uses `strFromChars [c]` since the bootstrap
+  compiler has no `strFromChar` helper — a single-element
+  char list through `strFromChars` is the equivalent.
+* New fixture `20g-bootstrap-input-char-lit.lll` exercises
+  `'='` in a conditional:
+  `fn sym(n Int) Int = if '=' == '=' then n else 0`
+  alongside a `main` that calls `sym 5`.
+* New regression test in `BootstrapCompilerTests.fs`
+  swaps the 20a input for 20g, runs the bootstrap
+  compiler, and asserts (a) no `E002` / `E001` / `error`
+  in combined output, (b) emitted F# contains `let sym`
+  or `let rec sym`, `let main`, `[<EntryPoint>]`, and the
+  `'='` char literal substring. The test is the same
+  swap/restore pattern as the 7.9h bool literal test.
+
+**Deliberately out of scope:**
+
+* **Escape sequences** (`'\n'`, `'\\'`, `'\''`) deferred
+  to Phase 7.9j. Escape handling adds a lexer state
+  machine (recognise the leading `\`, consume the next
+  char as the escape marker, decode `n` / `\\` / `'`
+  back to the literal char) which doubles the slice size.
+  This 7.9i slice is enough to prove the pipeline works
+  end-to-end for a new primitive literal; escapes are
+  next.
+* **Unicode** (non-ASCII chars) deferred beyond 7.9j. The
+  `Char` type in ll-lang is currently single-byte ASCII
+  and the F# host compiler's char codegen doesn't
+  distinguish ASCII from UTF-8 yet — proper unicode is a
+  much later phase.
+* **Unterminated char lit diagnostic** — currently the
+  lexer silently skips a lone `'` or a malformed `'c`
+  (no closing quote). Matches the leniency of every
+  other `else lexChars rest` arm in the bootstrap lexer.
+  A proper `E010 UnterminatedCharLit` diagnostic is a
+  later phase when the bootstrap lexer grows a proper
+  diagnostic channel.
+* **Multi-char char lits** — `'ab'` stays a silent skip
+  (neither the host nor the bootstrap accepts it).
+* **`Char` type as a proper HM type operand** — `EChar`
+  infers to `TyName "Char"` in `inferExprType`, but no
+  arm in `typeCheck` actually consumes a `Char` type
+  (there are no char-specific arithmetic / comparison
+  ops in the bootstrap grammar — `==` just checks
+  reference equality through the punted `EEq` arm).
+  Char-typed mismatches stay silent for now.
+* **Bool type promotion in HM** — moved from the
+  originally planned 7.9i slot to Phase 7.9k.
+
+Tests: 407 → 408 (+1 for the char literal regression
+test).
+
+**Observation worth noting** — this slice is the first
+time the bootstrap compiler has added a genuinely new
+**primitive literal** (vs 7.9f/g/h which added operators
+or promoted existing identifiers). The pattern is the
+same as 7.9f's `EEq` operator slice — nine change sites
+across lexer, AST, parser, elaborator, HM, and codegen —
+but the lexer change is more interesting: a new multi-
+char token (opening `'`, content, closing `'`) that
+doesn't fit the single-char symbol shape of any earlier
+bootstrap token. `lexCharLit` handles the tiny state
+machine as a plain recursive helper, same shape as
+`takeStrBody` / `lexStr` but simpler (fixed-length: one
+content char, one closing quote).
+
+Next tick: **Phase 7.9j** — char escape sequences
+(`'\n'`, `'\\'`, `'\''`), needed to lex the bootstrap
+compiler's own source which uses `'\n'` on line 452 of
+the `lexChars` newline arm. The shape is a lexer state-
+machine extension to `lexCharLit`: peek the first content
+char, if it's `\` then consume and decode the next char
+(n → `'\n'`, `\\` → `'\\'`, `'` → `'\''`), otherwise use
+the raw char as today. Roughly doubles the size of
+`lexCharLit` and adds a small escape-decoding helper.
+
+### Phase 7.9k (planned): Bool type promotion in HM
+
+Deferred from the original 7.9i slot. Currently
+`inferExprType` returns `TyName "Bool"` from `EEq` /
+`ELt` / `EGt` but nothing consumes it; promoting `Bool`
+means `typeCheck` can reject `if 1 then 0 else 1`
+(non-Bool guard) and comparisons must refuse non-`Int`
+args. Unblocks `EBool` as a dedicated AST variant,
+`TKwTrue` / `TKwFalse` keyword tokens, and the `&&` /
+`||` / `not` connectives that need Bool operands.
