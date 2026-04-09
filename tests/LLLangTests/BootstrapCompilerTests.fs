@@ -1065,3 +1065,54 @@ let ``20-bootstrap-compiler.lll resolves charIsDigit via stdlibNames (Phase 7.9r
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll emits list literal expressions (Phase 7.10a)`` () =
+    // Phase 7.10a: before this slice, the bootstrap's `parseAtom` had
+    // NO arm for `TLBrack` in expression position — every list literal
+    // (`[]`, `[c]`, `[1 2 3]`) silently fell through to the `(EInt 0,
+    // toks)` wildcard WITHOUT consuming the `[` token. The downstream
+    // parser then desynced, and fns like `takeIdCont` / `dropIdCont`
+    // (which use `listAppend [c] (...)`) emitted malformed match
+    // bodies. This slice adds two new `Expr` variants (`ENil` /
+    // `ECons`) plus parser + elaborator + HM + codegen plumbing,
+    // mirroring how `PNil` / `PCons` work in the Pat hierarchy.
+    //
+    // Fixture `20r-bootstrap-input-lists.lll` calls `head [1 2 3]`.
+    // Pre-fix, the bootstrap would silently produce a truncated /
+    // malformed body for `main`. Post-fix, the emitted F# contains
+    // a proper cons chain `(1L :: (2L :: (3L :: [])))`.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let listsPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20r-bootstrap-input-lists.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists listsPath, $"missing fixture: {listsPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(listsPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO `error`; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec head" || stdout.Contains "let head",
+            $"expected emitted F# to contain `let head` or `let rec head`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "(1L :: (2L :: (3L :: [])))",
+            $"expected emitted F# to contain `(1L :: (2L :: (3L :: [])))`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
