@@ -3696,3 +3696,127 @@ fixpoint (Phase 7.10). Bool type promotion (Phase
 7.9k, issue #6) remains deferred — it's an inference
 pass change, not a lexer/parser/codegen slice, and
 fits better into the Phase 7.10 fixpoint pass.
+
+### 2026-04 — Phase 7.9n: line comments (DONE)
+
+Fourteenth tick of **Phase 7.9**. The 7.9n slot
+originally scoped the unknown-char lexer diagnostic
+(#7), but a fresh fixpoint probe flipped priority:
+running the bootstrap compiler on its own source
+produced an empty output (just module header +
+prelude) because a single `--` line comment desynced
+`parseDecls` and silently dropped every subsequent
+decl. The bootstrap's own source begins with ~190
+lines of `-- header comment` before the first real
+`fn` — so without line-comment support, the fixpoint
+pass (Phase 7.10) couldn't even read the first decl.
+Issue #13 was filed and routed into this slot.
+
+**The proof was a 3-line fixture:**
+
+```
+module Examples.Clean
+-- this is a comment
+fn main() Int = 42
+```
+
+Pre-fix, `lllc run` on this file emitted 465 bytes
+of F# (module header + prelude + nothing). Post-fix,
+it emits the `main` fn plus `[<EntryPoint>]` wrapper.
+The lexer was hitting the `-` arm, calling
+`lexMinusOrArrow`, emitting a floating `TMinus`, and
+then re-entering `lexChars` on the comment body as
+though it were real tokens. The first char after
+`--` varies (letter → identifier, digit → int lit,
+etc.), so the desync was silent but total.
+
+**Changes:**
+
+* New top-level fn `skipLineComment(cs List[Char])
+  List[Token]` in 20-bootstrap-compiler.lll, placed
+  immediately before `lexMinusOrArrow`. Walks the
+  remaining char list, discarding every char until
+  it hits `\n`. When it finds the newline it emits
+  a `TNewline` (preserving the decl-terminator
+  semantics that `parseDecls` relies on) and
+  recurses into `lexChars rest`. EOF inside a
+  comment emits `[TEnd]`, matching the rest of the
+  lexer's lenient EOF handling.
+* `lexMinusOrArrow` extended with one new arm: if
+  the char after `-` is also `-`, hand off to
+  `skipLineComment rest`. The existing `-> vs -`
+  branch and the EOF tail are unchanged. No changes
+  to `lexChars` itself — all the wiring happens
+  inside the `-` helper.
+* New fixture `20l-bootstrap-input-comments.lll`
+  exercises three comment positions in one file:
+  a full-line comment immediately after the module
+  header, a trailing comment after a decl body
+  (`fn greet() Str = "hi"  -- trailing comment`),
+  and another full-line comment between the two
+  decls. All three must be skipped for the `greet`
+  and `main` decls to round-trip cleanly.
+* New regression test in `BootstrapCompilerTests.fs`
+  follows the same 20a-backup / copy-fixture /
+  restore pattern as 7.9h–7.9m. Asserts (a) no
+  `E002` / `E001` / `error` in output, (b) emitted
+  F# contains `let greet` or `let rec greet`,
+  (c) contains `let main` or `and main`,
+  (d) contains `[<EntryPoint>]`, (e) contains the
+  literal `"hi"` substring — proving the `greet`
+  body survived past the trailing comment.
+
+**Deliberately out of scope:**
+
+* **Block comments `{- -}`** — not used anywhere in
+  the bootstrap source or corpus. Nested-comment
+  tracking would roughly double the comment-handling
+  surface area for zero current benefit. Defer until
+  a fixture or the bootstrap itself grows a need.
+* **Doc-comment markers (`---`, `|||`, etc.)** —
+  with a `--` line comment, a third `-` is just a
+  regular char inside the comment body. No structured
+  doc-comment extraction.
+* **Comment tokens in the AST** — comments vanish
+  during lexing. The parser never sees them and the
+  codegen can't round-trip them into the emitted F#.
+  Formatters that need to preserve comments would
+  need a `TLineComment Str` token and a different
+  parser strategy; out of scope for bootstrap.
+* **Unknown-char lexer diagnostic (#7)** — the
+  original 7.9n scope, now pushed out to 7.9o or
+  later. Strictly a diagnostic-quality fix, not a
+  fixpoint blocker.
+
+Tests: 412 → 413 (+1 for the line-comment regression
+test).
+
+**Fixpoint-probe confirmation:** post-fix, swapping
+`20a-bootstrap-input.lll` for the bootstrap compiler's
+own source and running `lllc run` produces 531 bytes
+of emitted F# — the prelude plus a `type Maybe<'A>`
+declaration plus the start of `type Token`, which is
+where the *next* blocker surfaces (an unknown/
+placeholder ctor the emitter renders as `| ?`). One
+blocker down, one to go; each fixpoint tick peels one
+more layer off the self-host onion.
+
+**Surprise — trailing-comment edge case worked:**
+the trailing-comment path
+`fn greet() Str = "hi"  -- trailing\nfn main...`
+was the one I was most nervous about, because the
+decl-terminating `TNewline` is consumed *inside* the
+comment. The fix handles this correctly: when
+`skipLineComment` finds the `\n`, it emits a
+`TNewline` itself (via `listAppend [TNewline]
+(lexChars rest)`) before recursing, so the token
+stream seen by `parseDecls` is identical whether the
+newline arrived via `lexChars` or `skipLineComment`.
+No special-casing in the parser was needed.
+
+Next tick: **Phase 7.9o** — the next concrete blocker
+surfaced by the fixpoint probe. Most likely Bool type
+promotion (#6) in HM/typeCheck, which 7.9k deferred,
+or the unknown-ctor case visible in the `| ?` output
+above. A fresh probe after 7.9n will pick the
+definitive next step.
