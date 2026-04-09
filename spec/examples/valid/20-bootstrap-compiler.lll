@@ -1064,17 +1064,17 @@ fn parseLamParams(acc List[Str])(toks List[Token]) =
     | TLower name :: rest -> parseLamParams (listAppend acc [name]) rest
     | _ -> (acc, toks)
 
-fn wrapLamParams(__ll_params List[Str])(body Expr) Expr =
-  match __ll_params with
+fn wrapLamParams(parms List[Str])(body Expr) Expr =
+  match parms with
     | p :: rest -> ELam p (wrapLamParams rest body)
     | _ -> body
 
 fn parseLam(toks List[Token]) =
-  let (__ll_params, rest) = parseLamParams [] toks in
+  let (parms, rest) = parseLamParams [] toks in
   match rest with
     | TDot :: rest2 ->
       let (body, rest3) = parseExpr rest2 in
-      (wrapLamParams __ll_params body, rest3)
+      (wrapLamParams parms body, rest3)
     | _ -> (EInt 0, toks)
 
 -- `if c then a else b`. Each of the three sub-expressions is parsed via
@@ -1383,13 +1383,22 @@ fn parseAtomParenTail(e Expr)(toks List[Token]) =
 -- `[1 2 3]` / `[TKwModule]` where every element is a var / literal /
 -- ctor atom. A complex expression element would need `parseExpr` and
 -- an escalation to Phase 7.10b.
+-- Parse one list element: if the head token is an uppercase constructor
+-- (TUpper) use `parseApp` so `[TInt 42]` becomes one element `TInt 42`;
+-- otherwise fall back to `parseAtom` so `[1 2 3]` stays three elements.
+-- Mirrors the host parser's Phase 7.3b rule.
 fn parseListLit(toks List[Token]) =
-  let (e, rest) = parseAtom toks in
+  let (e, rest) = parseListElem toks in
   match rest with
     | TRBrack :: rest2 -> (ECons e ENil, rest2)
     | _ ->
       let (tail, rest3) = parseListLit rest in
       (ECons e tail, rest3)
+
+fn parseListElem(toks List[Token]) =
+  match toks with
+    | TUpper _ :: _ -> parseApp toks
+    | _ -> parseAtom toks
 
 -- ---------- Pretty printer ----------------------------------------------
 
@@ -1694,8 +1703,8 @@ fn checkArms(env Env)(pats List[Pat])(bodies List[Expr]) List[Str] =
 -- `DExport inner` recurses into the inner decl so an exported fn's
 -- body still gets name-resolved.
 fn checkFnBody(env Env)(fd FnDecl) List[Str] =
-  | MkFn _ __ll_params _ body ->
-    let bodyEnv = envAddAll env (paramNames __ll_params) in
+  | MkFn _ parms _ body ->
+    let bodyEnv = envAddAll env (paramNames parms) in
     checkExpr bodyEnv body
 
 fn checkLetBody(env Env)(ld LetDecl) List[Str] =
@@ -1840,8 +1849,8 @@ fn lastParamTypeName(ps List[Param]) Str =
 -- Run the exhaustiveness check on a single `FnDecl` body. Shared
 -- between the plain `DFn fd` arm and the `DExport (DFn fd)` unwrap.
 fn exhaustivenessFn(types List[TypeCtors])(fd FnDecl) List[Str] =
-  | MkFn _ __ll_params _ body ->
-    let lastTy = lastParamTypeName __ll_params in
+  | MkFn _ parms _ body ->
+    let lastTy = lastParamTypeName parms in
     if strLen lastTy == 0 then []
     else
       let required = lookupCtors types lastTy in
@@ -2107,9 +2116,9 @@ fn seedParams(env TypeEnv)(ps List[Param]) TypeEnv =
 -- Run the HM pass on a single `FnDecl` body. Seeds a fresh `TypeEnv`
 -- from the fn's params, then walks the body with `typeCheck`.
 fn hmFn(fd FnDecl) List[Str] =
-  | MkFn _ __ll_params _ body ->
+  | MkFn _ parms _ body ->
     let env0 = MkTypeEnv [] in
-    let env = seedParams env0 __ll_params in
+    let env = seedParams env0 parms in
     typeCheck env body
 
 -- Run the HM pass on a single decl. Only `DFn` contributes (fn bodies
@@ -2140,7 +2149,7 @@ fn hmCheck(decls List[Decl]) List[Str] =
 -- the self-hosted compiler's input programs too. Still a flat name
 -- list (no types) — the minimal HM pass in `hmCheck` skips unknowns.
 fn stdlibNames(_ignored Int) List[Str] =
-  ["strConcat" "strLen" "strChars" "strFromChars" "strToInt" "print" "printfn" "listMap" "listLen" "listAppend" "listIsEmpty" "listFold" "listReverse" "readFile" "true" "false" "charToInt" "charIsDigit" "charIsSpace" "intToStr"]
+  ["strConcat" "strLen" "strChars" "strFromChars" "strToInt" "print" "printfn" "listMap" "listLen" "listAppend" "listIsEmpty" "listFold" "listFilter" "listReverse" "readFile" "true" "false" "charToInt" "charIsDigit" "charIsSpace" "intToStr"]
 
 fn elaborate(decls List[Decl]) List[Str] =
   let env0 = MkEnv (stdlibNames 0) in
@@ -2205,12 +2214,28 @@ fn emitPat(p Pat) Str =
   | PWild -> "_"
   | PNil -> "[]"
   | PCons h t -> strConcat "(" (strConcat (emitPat h) (strConcat " :: " (strConcat (emitPat t) ")")))
-  | PCon name args -> strConcat "(" (strConcat name (strConcat (emitPatArgs args) ")"))
+  | PCon name args -> emitConPat name args
+
+-- Multi-arg ADT constructor patterns need tuple syntax in F#:
+-- `(MkFoo a b)` must become `(MkFoo (a, b))`.
+-- Single-arg constructors use `(MkFoo a)` (no tuple wrapping).
+fn emitConPat(name Str)(args List[Pat]) Str =
+  match args with
+    | [] -> strConcat "(" (strConcat name ")")
+    | _ :: [] ->
+      let arg = emitPatArgs args in
+      strConcat "(" (strConcat name (strConcat arg ")"))
+    | _ ->
+      let inner = emitPatArgsTuple args in
+      strConcat "(" (strConcat name (strConcat " (" (strConcat inner "))")))
 
 fn emitPatArgs(ps List[Pat]) Str =
   match ps with
     | [] -> ""
     | p :: rest -> strConcat " " (strConcat (emitPat p) (emitPatArgs rest))
+
+fn emitPatArgsTuple(ps List[Pat]) Str =
+  listFold (\acc p. if strLen acc == 0 then emitPat p else strConcat acc (strConcat ", " (emitPat p))) "" ps
 
 -- ---- Expression emission -----------------------------------------------
 
@@ -2293,10 +2318,44 @@ fn emitExpr(e Expr) Str =
 fn emitBin(l Expr)(r Expr)(op Str) Str =
   strConcat "(" (strConcat (emitExpr l) (strConcat op (strConcat (emitExpr r) ")")))
 
--- `EApp f a` -> `(<f> <a>)`. Same parens-unconditional rule as
--- `19-codegen-real.lll`'s `showApp`.
+-- Walk nested EApp chains to collect the head expression and all args
+-- (left-to-right). Returns (head, args) where args is the list of
+-- arguments in application order.
+fn gatherAppHead(e Expr)(acc List[Expr]) =
+  match e with
+    | EApp inner arg -> gatherAppHead inner (arg :: acc)
+    | _ -> (e, acc)
+
+-- True if the string starts with an uppercase letter (is a constructor name).
+fn isConstrName(s Str) Bool =
+  match strChars s with
+    | c :: _ -> isUpperChar c
+    | _ -> false
+
+-- Join a list of emitted F# expressions with ", " for tuple form.
+fn emitArgsTuple(args List[Str]) Str =
+  listFold (\acc a. if strLen acc == 0 then a else strConcat acc (strConcat ", " a)) "" args
+
+-- `EApp f a` — multi-arg ADT constructors need tuple syntax in F#
+-- (modern F# treats `of T1 * T2` as a tuple field, not curried args).
+-- Detect a constructor head with 2+ args and emit `(Con (a, b, ...))`;
+-- single-arg constructors and plain function application use the normal
+-- `(<f> <a>)` form.
 fn emitApp(f Expr)(a Expr) Str =
-  strConcat "(" (strConcat (emitExpr f) (strConcat " " (strConcat (emitExpr a) ")")))
+  let (head, args) = gatherAppHead f [a] in
+  match head with
+    | EVar name ->
+      if isConstrName name then
+        match args with
+          | _ :: _ :: _ ->
+            let strs = listMap emitExpr args in
+            strConcat "(" (strConcat name (strConcat " (" (strConcat (emitArgsTuple strs) "))")))
+          | _ ->
+            strConcat "(" (strConcat (emitExpr f) (strConcat " " (strConcat (emitExpr a) ")")))
+      else
+        strConcat "(" (strConcat (emitExpr f) (strConcat " " (strConcat (emitExpr a) ")")))
+    | _ ->
+      strConcat "(" (strConcat (emitExpr f) (strConcat " " (strConcat (emitExpr a) ")")))
 
 -- `ELam x body` -> `(fun <x> -> <body>)`. Single-param lambda only;
 -- multi-param surface lambdas are encoded as nested ELam in the parser.
@@ -2359,12 +2418,13 @@ fn emitArmsCons(p Pat)(prest List[Pat])(bs List[Expr]) Str =
 fn emitTypeParam(p Str) Str = strConcat "'" p
 
 -- Primitive-name mapping helper: `Int` -> `int64`, `Str` -> `string`,
--- `Bool` -> `bool`, anything else passes through verbatim. Same map
--- as `19-codegen-real.lll`'s `showTypeArgName`.
+-- `Bool` -> `bool`, `Char` -> `char`, anything else passes through verbatim.
+-- Same map as `19-codegen-real.lll`'s `showTypeArgName`.
 fn emitTypeArgName(n Str) Str =
   if n == "Int" then "int64"
   else if n == "Str" then "string"
   else if n == "Bool" then "bool"
+  else if n == "Char" then "char"
   else n
 
 -- Render a single `TypeArg` as its F# type string. Mirrors
@@ -2479,8 +2539,8 @@ fn emitFnParamsTail(first Str)(rest List[Str]) Str =
 -- decl walker to single out the entry-point fn so it gets the
 -- `[<EntryPoint>]` wrapper instead of the plain `let` form. Mirrors
 -- `19-codegen-real.lll`'s `isMainFn`.
-fn emitIsMainFn(name Str)(__ll_params List[Param]) Bool =
-  match __ll_params with
+fn emitIsMainFn(name Str)(parms List[Param]) Bool =
+  match parms with
     | _ :: _ -> false
     | _ -> if name == "main" then true else false
 
@@ -2547,9 +2607,9 @@ fn emitDeclStandalone(d Decl) Str =
   | DExport inner -> emitDeclStandalone inner
 
 fn emitDeclStandaloneFn(fd FnDecl) Str =
-  | MkFn name __ll_params _ body ->
-    let pnames = emitParamNames __ll_params in
-    if emitIsMainFn name __ll_params then emitMainDecl body
+  | MkFn name parms _ body ->
+    let pnames = emitParamNames parms in
+    if emitIsMainFn name parms then emitMainDecl body
     else emitFnPlain name pnames body
 
 -- Dispatch a single `DFn` to `emitFnFirst`. Used by `emitFnGroup`'s
@@ -2559,8 +2619,8 @@ fn emitDeclFnFirst(d Decl) Str =
   | _ -> ""
 
 fn emitDeclFnFirstUnwrap(fd FnDecl) Str =
-  | MkFn name __ll_params _ body ->
-    let pnames = emitParamNames __ll_params in
+  | MkFn name parms _ body ->
+    let pnames = emitParamNames parms in
     emitFnFirst name pnames body
 
 -- Dispatch a single `DFn` to `emitFnCont`. Same split shape as
@@ -2570,8 +2630,8 @@ fn emitDeclFnCont(d Decl) Str =
   | _ -> ""
 
 fn emitDeclFnContUnwrap(fd FnDecl) Str =
-  | MkFn name __ll_params _ body ->
-    let pnames = emitParamNames __ll_params in
+  | MkFn name parms _ body ->
+    let pnames = emitParamNames parms in
     emitFnCont name pnames body
 
 -- Emit a 2+ run of consecutive non-main `DFn` decls as a single
@@ -2651,8 +2711,8 @@ fn emitStepMain(d Decl)(rest List[Decl])(pending List[Decl])(acc Str) Str =
   emitGroupLoop rest [] acc3
 
 -- DFn branch dispatch: main → boundary; non-main → push onto pending.
-fn emitStepFn(d Decl)(name Str)(__ll_params List[Param])(rest List[Decl])(pending List[Decl])(acc Str) Str =
-  if emitIsMainFn name __ll_params then emitStepMain d rest pending acc
+fn emitStepFn(d Decl)(name Str)(parms List[Param])(rest List[Decl])(pending List[Decl])(acc Str) Str =
+  if emitIsMainFn name parms then emitStepMain d rest pending acc
   else emitGroupLoop rest (d :: pending) acc
 
 -- Per-step dispatch: look at the head decl and decide whether to
@@ -2670,7 +2730,7 @@ fn emitStep(d Decl)(rest List[Decl])(pending List[Decl])(acc Str) Str =
 -- decision in `emitStepFn`.
 fn emitStepFnUnwrap(d Decl)(fd FnDecl)(rest List[Decl])(pending List[Decl])(acc Str) Str =
   match fd with
-    | MkFn name __ll_params _ _ -> emitStepFn d name __ll_params rest pending acc
+    | MkFn name parms _ _ -> emitStepFn d name parms rest pending acc
 
 -- Generic boundary step: flush pending, emit `d` as a standalone
 -- block, keep walking. Shared by `DType` / `DLet` / `DTag` / `DImport`.
@@ -2688,34 +2748,70 @@ fn emitGroupLoop(decls List[Decl])(pending List[Decl])(acc Str) Str =
 fn emitGroupedDecls(decls List[Decl]) Str =
   emitGroupLoop decls [] ""
 
+-- Emit only the DType declarations from `decls` (preserving order).
+fn emitTypeDecls(decls List[Decl]) Str =
+  let types = listFilter (\d. match d with | DType _ -> true | _ -> false) decls in
+  emitGroupLoop types [] ""
+
+-- Emit only the non-DType declarations from `decls` (preserving order).
+fn emitNonTypeDecls(decls List[Decl]) Str =
+  let nontypes = listFilter (\d. match d with | DType _ -> false | _ -> true) decls in
+  emitGroupLoop nontypes [] ""
+
 -- ---- F# stdlib prelude block -------------------------------------------
 --
--- Minimal 5-binding subset of the host's `fsharpPreludeCore`. Same
--- selection as `19-codegen-real.lll`'s `fsharpPrelude`. Wrapped in a
--- single-arg fn taking an ignored `Int` to dodge ll-lang's lack of
--- zero-param fn-call surface (callers pass `0`).
+-- Full stdlib prelude matching the host's `fsharpPreludeCore` plus the
+-- Maybe-dependent helpers. Wrapped in a single-arg fn taking an ignored
+-- `Int` to dodge ll-lang's lack of zero-param fn-call surface (callers
+-- pass `0`).
 fn emitPrelude(_ignored Int) Str =
-  let l1 = "// --- ll-lang stdlib prelude (auto-generated) ---" in
-  let l2 = "let listMap f xs = List.map f xs" in
-  let l3 = "let listLen (xs: 'a list) : int64 = int64 (List.length xs)" in
-  let l4 = "let strLen (s: string) : int64 = int64 s.Length" in
-  let l5 = "let strConcat (a: string) (b: string) = a + b" in
-  let l6 = "let print (s: string) = System.Console.Write(s)" in
-  let l7 = "// --- end prelude ---" in
-  let lines = [l1 l2 l3 l4 l5 l6 l7] in
+  let l1  = "// --- ll-lang stdlib prelude (auto-generated) ---" in
+  let l2  = "let listMap f xs = List.map f xs" in
+  let l3  = "let listLen (xs: 'a list) : int64 = int64 (List.length xs)" in
+  let l4  = "let listAppend xs ys = List.append xs ys" in
+  let l5  = "let listIsEmpty (xs: 'a list) = List.isEmpty xs" in
+  let l6  = "let listFold f z xs = List.fold f z xs" in
+  let l7  = "let listFilter p xs = List.filter p xs" in
+  let l8  = "let listReverse xs = List.rev xs" in
+  let l9  = "let strLen (s: string) : int64 = int64 s.Length" in
+  let l10 = "let strConcat (a: string) (b: string) = a + b" in
+  let l11 = "let print (s: string) = System.Console.Write(s)" in
+  let l12 = "let printfn (s: string) = System.Console.WriteLine(s)" in
+  let l13 = "let strChars (s: string) = s |> Seq.toList" in
+  let l14 = "let charToInt (c: char) = int64 (int c)" in
+  let l15 = "let intToChar (n: int64) = char (int n)" in
+  let l16 = "let intToStr (n: int64) = string n" in
+  let l17 = "let strFromChars (cs: char list) = System.String(cs |> List.toArray)" in
+  let l18 = "let charIsDigit (c: char) = System.Char.IsDigit(c)" in
+  let l19 = "let charIsSpace (c: char) = System.Char.IsWhiteSpace(c)" in
+  let l20 = "let readFile (path: string) = System.IO.File.ReadAllText(path: string)" in
+  let l21 = "let exit (code: int64) : unit = System.Environment.Exit(int code)" in
+  let l22 = "// --- end prelude ---" in
+  let lines = [l1 l2 l3 l4 l5 l6 l7 l8 l9 l10 l11 l12 l13 l14 l15 l16 l17 l18 l19 l20 l21 l22] in
   emitJoinLines lines
+
+-- Maybe-dependent helpers: emitted after `type Maybe` is declared so that
+-- `Some` / `None` refer to the user-defined `Maybe<'A>` constructors rather
+-- than F#'s built-in `option`. This mirrors the host's `fsharpPreludeMaybe`.
+fn emitMaybePostlude(_ignored Int) Str =
+  let l1 = "let listHead xs = match xs with [] -> None | x :: _ -> Some x" in
+  let l2 = "let strToInt (s: string) = match System.Int64.TryParse(s: string) with | true, n -> Some n | false, _ -> None" in
+  emitJoinLines [l1 l2]
 
 -- ---- Top-level module emission -----------------------------------------
 
 -- Render the full F# source file: `module <path>` header, blank
--- line, prelude block, blank line, then every decl rendered via
--- `emitGroupedDecls`. Same shape as `19-codegen-real.lll`'s
--- `showModule` / `showModuleBody`.
+-- line, prelude block, blank line, type declarations, blank line,
+-- Maybe-dependent postlude, blank line, then fn/let declarations.
+-- The postlude (listHead, strToInt) must come after `type Maybe` so
+-- that `Some`/`None` resolve to the user-defined constructors.
 fn emitModuleBody(path Str)(decls List[Decl]) Str =
   let header = strConcat "module " path in
   let prelude = emitPrelude 0 in
-  let declBlock = emitGroupedDecls decls in
-  let parts = [header prelude declBlock] in
+  let typeBlock = emitTypeDecls decls in
+  let postlude = emitMaybePostlude 0 in
+  let fnBlock = emitNonTypeDecls decls in
+  let parts = [header prelude typeBlock postlude fnBlock] in
   emitJoinBlocks parts
 
 fn emitModule(m Module) Str =
@@ -2762,9 +2858,9 @@ fn main() =
   -- harness) must set its working directory to the repo root.
   let src = readFile "spec/examples/valid/20a-bootstrap-input.lll" in
   let toks = tokenize src in
-  let __ll_mod = parseModule toks in
-  match __ll_mod with
+  let modul = parseModule toks in
+  match modul with
     | MkModule _ decls ->
       let errs = elaborate decls in
-      if listIsEmpty errs then printfn (emitModule __ll_mod)
+      if listIsEmpty errs then printfn (emitModule modul)
       else printfn (showErrs errs)
