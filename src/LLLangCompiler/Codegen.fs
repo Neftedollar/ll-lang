@@ -100,6 +100,23 @@ let private binaryOp (op: string) : string option =
     | "==" -> Some "=" | "!=" -> Some "<>" | "<" -> Some "<" | ">" -> Some ">"
     | "<=" -> Some "<=" | ">=" -> Some ">=" | _ -> None
 
+/// Recognize the shape `((op l) r)` where `op` is a TEVar naming a known
+/// binary operator. Returns `Some (fop, l, r)` when `te` is a fully-applied
+/// binary op, where `fop` is the F# operator spelling; otherwise `None`.
+let private tryAsBinOp (te: TypedExpr) : (string * TypedExpr * TypedExpr) option =
+    match te.Expr with
+    | TEApp(outer, right) ->
+        match outer.Expr with
+        | TEApp(inner, left) ->
+            match inner.Expr with
+            | TEVar op ->
+                match binaryOp op with
+                | Some fop -> Some (fop, left, right)
+                | None -> None
+            | _ -> None
+        | _ -> None
+    | _ -> None
+
 // ---- Pattern emission --------------------------------------------------------
 
 let rec private emitPattern (p: Pattern) : string =
@@ -122,21 +139,16 @@ let rec private emitPattern (p: Pattern) : string =
 
 and private emitExpr (indent: int) (te: TypedExpr) : string =
     let ind = String.replicate indent " "
+    // Recognize fully-applied binary operators (`((+) a b)` etc.) up-front so
+    // the main match only has to deal with plain application shapes.
+    match tryAsBinOp te with
+    | Some (fop, a, b) ->
+        "(" + emitExpr indent a + " " + fop + " " + emitExpr indent b + ")"
+    | None ->
     match te.Expr with
     | TELit l  -> emitLit l
     | TEVar x  -> safeIdent x
     | TECon c  -> safeIdent c
-
-    | TEApp(outer, b) when (match outer.Expr with TEApp(inner, _) -> (match inner.Expr with TEVar op -> binaryOp op <> None | _ -> false) | _ -> false) ->
-        let (a, op) =
-            match outer.Expr with
-            | TEApp(inner, a) ->
-                match inner.Expr with
-                | TEVar op -> (a, op)
-                | _ -> failwith "unreachable"
-            | _ -> failwith "unreachable"
-        let fop = (binaryOp op).Value
-        "(" + emitExpr indent a + " " + fop + " " + emitExpr indent b + ")"
 
     | TEApp(f, a) ->
         // Multi-arg ADT constructors take a tuple in F#, not curried args.
