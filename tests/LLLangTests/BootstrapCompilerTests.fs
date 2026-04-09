@@ -272,11 +272,11 @@ let ``20-bootstrap-compiler.lll accepts < and > operators in fn body (Phase 7.9g
             combined.Contains "error",
             $"expected NO error output; combined:\n{combined}")
         Assert.True(
-            stdout.Contains "let neg",
-            $"expected emitted F# to contain `let neg`; stdout:\n{combined}")
+            stdout.Contains "let rec neg",
+            $"expected emitted F# to contain `let rec neg`; stdout:\n{combined}")
         Assert.True(
-            stdout.Contains "let pos",
-            $"expected emitted F# to contain `let pos`; stdout:\n{combined}")
+            stdout.Contains "and pos",
+            $"expected emitted F# to contain `and pos`; stdout:\n{combined}")
         Assert.True(
             stdout.Contains "let main",
             $"expected emitted F# to contain `let main`; stdout:\n{combined}")

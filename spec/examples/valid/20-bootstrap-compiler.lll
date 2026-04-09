@@ -212,6 +212,8 @@ type Token =
   | TRBrack
   | TEq
   | TEqEq
+  | TLt
+  | TGt
   | TBar
   | TDot
   | TBackslash
@@ -278,6 +280,8 @@ type Expr =
   | EMul Expr Expr
   | EDiv Expr Expr
   | EEq Expr Expr
+  | ELt Expr Expr
+  | EGt Expr Expr
   | EApp Expr Expr
   | ELam Str Expr
   | ELetIn Str Expr Expr
@@ -455,6 +459,8 @@ fn lexChars(cs List[Char]) List[Token] =
     else if c == '[' then listAppend [TLBrack] (lexChars rest)
     else if c == ']' then listAppend [TRBrack] (lexChars rest)
     else if c == '=' then lexEqOrEqEq rest
+    else if c == '<' then listAppend [TLt] (lexChars rest)
+    else if c == '>' then listAppend [TGt] (lexChars rest)
     else if c == '|' then listAppend [TBar] (lexChars rest)
     else if c == '.' then listAppend [TDot] (lexChars rest)
     else if c == '\\' then listAppend [TBackslash] (lexChars rest)
@@ -898,6 +904,12 @@ fn parseCompareTail(lhs Expr)(toks List[Token]) =
     | TEqEq :: r ->
       let (rhs, rest2) = parseAddSub r in
       parseCompareTail (EEq lhs rhs) rest2
+    | TLt :: r ->
+      let (rhs, rest2) = parseAddSub r in
+      parseCompareTail (ELt lhs rhs) rest2
+    | TGt :: r ->
+      let (rhs, rest2) = parseAddSub r in
+      parseCompareTail (EGt lhs rhs) rest2
     | _ -> (lhs, toks)
 
 -- Arithmetic precedence cascade, same shape as 13/14.
@@ -1067,6 +1079,8 @@ fn showExpr(e Expr) Str =
   | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " * ") (showExpr r)) ")"
   | EDiv l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " / ") (showExpr r)) ")"
   | EEq l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " == ") (showExpr r)) ")"
+  | ELt l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " < ") (showExpr r)) ")"
+  | EGt l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " > ") (showExpr r)) ")"
   | EApp f x -> strConcat (strConcat (strConcat (strConcat "(" (showExpr f)) " ") (showExpr x)) ")"
   | ELam n body -> strConcat (strConcat (strConcat (strConcat "(fun " n) " -> ") (showExpr body)) ")"
   | ELetIn n e1 e2 ->
@@ -1177,6 +1191,8 @@ fn checkExpr(env Env)(e Expr) List[Str] =
   | EMul l r -> listAppend (checkExpr env l) (checkExpr env r)
   | EDiv l r -> listAppend (checkExpr env l) (checkExpr env r)
   | EEq l r -> listAppend (checkExpr env l) (checkExpr env r)
+  | ELt l r -> listAppend (checkExpr env l) (checkExpr env r)
+  | EGt l r -> listAppend (checkExpr env l) (checkExpr env r)
   | EApp f x -> listAppend (checkExpr env f) (checkExpr env x)
   | ELam param body ->
     let env2 = envAdd env param in
@@ -1480,6 +1496,8 @@ fn inferExprType(env TypeEnv)(e Expr) TypeExpr =
   | EMul _ _ -> TyName "Int"
   | EDiv _ _ -> TyName "Int"
   | EEq _ _ -> TyName "Bool"
+  | ELt _ _ -> TyName "Bool"
+  | EGt _ _ -> TyName "Bool"
   | EIf _ thn _ -> inferExprType env thn
   | _ -> TyVar "?"
 
@@ -1544,6 +1562,14 @@ fn typeCheck(env TypeEnv)(e Expr) List[Str] =
     let rErrs = typeCheck env r in
     listAppend here (listAppend lErrs rErrs)
   | EEq l r ->
+    let lErrs = typeCheck env l in
+    let rErrs = typeCheck env r in
+    listAppend lErrs rErrs
+  | ELt l r ->
+    let lErrs = typeCheck env l in
+    let rErrs = typeCheck env r in
+    listAppend lErrs rErrs
+  | EGt l r ->
     let lErrs = typeCheck env l in
     let rErrs = typeCheck env r in
     listAppend lErrs rErrs
@@ -1710,6 +1736,8 @@ fn emitExpr(e Expr) Str =
   | EMul l r -> emitBin l r " * "
   | EDiv l r -> emitBin l r " / "
   | EEq l r -> emitBin l r " = "
+  | ELt l r -> emitBin l r " < "
+  | EGt l r -> emitBin l r " > "
   | EApp f x -> emitApp f x
   | ELam x body -> emitLam x body
   | ELetIn n e1 e2 -> emitLetIn n e1 e2
