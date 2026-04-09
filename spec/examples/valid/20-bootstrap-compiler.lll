@@ -1744,13 +1744,19 @@ fn armsHaveCatchAll(pats List[Pat]) Bool =
 -- `PInt` / `PNil` / `PCons`) contribute nothing — the catch-all /
 -- cons / literal cases are handled elsewhere (`armsHaveCatchAll` /
 -- coverage logic is disabled when a catch-all is present).
+-- Phase 7.10n: the inner `match p with` is hoisted into
+-- `coveredCtorsCons` so each outer arm body is a single call —
+-- same pattern as `showArmsCons` / `checkArmsCons`.
+fn coveredCtorsCons(p Pat)(tail List[Str]) List[Str] =
+  match p with
+    | PCon name _ -> listAppend [name] tail
+    | _ -> tail
+
 fn coveredCtors(pats List[Pat]) List[Str] =
   match pats with
     | p :: rest ->
       let tail = coveredCtors rest in
-      match p with
-        | PCon name _ -> listAppend [name] tail
-        | _ -> tail
+      coveredCtorsCons p tail
     | _ -> []
 
 -- For a given `required` ctor list and `covered` ctor list, return
@@ -1887,19 +1893,26 @@ fn showType(t TypeExpr) Str =
 -- way unknown types (EApp / ELam results) get to silently slip past
 -- the arithmetic / if checks. `TyVar` with any other name compares by
 -- variable name (treated as a rigid var in this slice, unused so far).
+-- Phase 7.10n: the two inner `match b with` blocks are hoisted into
+-- `typeEqTyVar` / `typeEqTyName` so each outer arm body of `typeEq`
+-- is a single call — same pattern as `showArmsCons` / `checkArmsCons`.
+fn typeEqTyVar(va Str)(b TypeExpr) Bool =
+  if va == "?" then true
+  else
+    match b with
+      | TyVar vb -> va == vb
+      | _ -> false
+
+fn typeEqTyName(na Str)(b TypeExpr) Bool =
+  match b with
+    | TyName nb -> na == nb
+    | TyVar vb -> vb == "?"
+    | _ -> false
+
 fn typeEq(a TypeExpr)(b TypeExpr) Bool =
   match a with
-    | TyVar va ->
-      if va == "?" then true
-      else
-        match b with
-          | TyVar vb -> va == vb
-          | _ -> false
-    | TyName na ->
-      match b with
-        | TyName nb -> na == nb
-        | TyVar vb -> vb == "?"
-        | _ -> false
+    | TyVar va -> typeEqTyVar va b
+    | TyName na -> typeEqTyName na b
 
 -- Infer the type of a single expression under `env`. No unification
 -- and no substitution — each arm just returns the obvious "surface"
