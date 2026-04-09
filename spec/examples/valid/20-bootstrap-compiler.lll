@@ -1621,16 +1621,21 @@ fn checkExpr(env Env)(e Expr) List[Str] =
 -- the scrutinee env with every binder the pattern introduces, then
 -- walk the body expression under the extended env. Pattern binders
 -- are only visible inside their own arm body, not across arms.
+-- The nested `match bodies with` is hoisted into `checkArmsCons` so
+-- each outer arm body is a single call — same pattern as
+-- `showArmsCons` from Phase 7.10l.
+fn checkArmsCons(env Env)(p Pat)(ps List[Pat])(bodies List[Expr]) List[Str] =
+  match bodies with
+    | b :: bs ->
+      let armEnv = envAddAll env (patBinders p) in
+      let armErrs = checkExpr armEnv b in
+      let restErrs = checkArms env ps bs in
+      listAppend armErrs restErrs
+    | _ -> []
+
 fn checkArms(env Env)(pats List[Pat])(bodies List[Expr]) List[Str] =
   match pats with
-    | p :: ps ->
-      match bodies with
-        | b :: bs ->
-          let armEnv = envAddAll env (patBinders p) in
-          let armErrs = checkExpr armEnv b in
-          let restErrs = checkArms env ps bs in
-          listAppend armErrs restErrs
-        | _ -> []
+    | p :: ps -> checkArmsCons env p ps bodies
     | _ -> []
 
 -- Walk a single decl under the top-level `env`. `DFn` extends `env`
