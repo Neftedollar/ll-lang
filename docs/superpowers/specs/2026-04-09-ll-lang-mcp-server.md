@@ -36,13 +36,18 @@ framing code is needed.
 
 ## 2. Entry point — `lllc mcp` subcommand, same binary
 
-**Decision:** extend `src/LLLangTool/Program.fs` with a third subcommand:
+**Decision:** extend `src/LLLangTool/Program.fs` with a new subcommand,
+slotted alongside the CLI surface defined by the project/module spec
+(`lllc build | run | test | mod {init,tidy,add,why} | version`):
 
 ```
-lllc build <file.lll>
-lllc run   <file.lll>
 lllc mcp                      # new — runs until stdin closes
 ```
+
+`mcp` is a top-level verb like `build` / `test`, not a sub-verb of
+`mod`. Routing lives in `Program.fs` next to the project-spec commands;
+dispatch precedence is defined by the project/module spec §7, and this
+spec adds exactly one row to that table.
 
 Rationale: keeps distribution to a single executable, keeps
 `LLLang.Compiler` reachable via direct F# references (no IPC shim
@@ -54,9 +59,20 @@ the compiler project reference.
 (`Host.CreateApplicationBuilder`), calls
 `AddMcpServer().WithStdioServerTransport().WithToolsFromAssembly()`,
 then awaits `RunAsync()`. On stdin EOF the host completes and `main`
-returns `0`. There is no persistent state across requests — every tool
-call re-reads files from disk and re-runs the pipeline. (Caching is a
-later optimization; the full pipeline for a typical file is <100 ms.)
+returns `0`. There is no persistent state *in the MCP layer* across
+requests — every tool call re-reads files from disk and re-runs the
+pipeline through `ProjectLoader` (project/module spec §5). The
+`.llcache/` directory owned by `ProjectLoader` is transparently
+reused when present; MCP never reads or writes it directly. The full
+cold pipeline for a typical file is <100 ms; warm rebuilds hit the
+cache.
+
+**Project root discovery.** Tools that take a path (`compile_file`,
+`check_file`, `run_file`, `project_info`) use the same walk-upward
+`ll.toml` search as `lllc build` (project/module spec §2). If no
+`ll.toml` is found, the tool falls back to single-file mode
+(project/module spec §8) — the same semantics a bare `lllc build
+foo.lll` would get. MCP never invents its own project notion.
 
 ## 3. Tool inventory (v0 — 8 tools)
 
@@ -69,11 +85,11 @@ records, not exceptions.
 | `compile_file` | Compile a `.lll` file end-to-end; return `{ ok, errors[], fsharp? }`. `fsharp` only populated when `ok && include_output`. |
 | `check_file` | Run lexer → parser → elaborator → H-M; skip codegen. Return `{ ok, errors[] }`. Fast path for "does it type-check?". |
 | `run_file` | Compile then shell out to `dotnet fsi` (reuses `cmdRun`). Capture stdout/stderr; return `{ exit_code, stdout, stderr, errors[] }`. |
-| `list_errors` | Enumerate every known error code (`E001..E008`) with short summaries. Static data; no file I/O. |
-| `lookup_error` | Given a code like `E003`, return long-form explanation + minimal repro snippet from `spec/examples/invalid/`. |
-| `stdlib_search` | Substring / prefix match against stdlib function names and signatures (`Math.*`, `List.*`, `Str.*`, etc.). Returns `{ name, signature, module, doc? }`. |
+| `list_errors` | Enumerate every known error code with short summaries. Sourced from the compiler's error-code table (currently `E001..E025` spanning lexer/parser/elaborator/H-M/project-loader); the range is not hardcoded in the tool — it enumerates whatever the compiler exposes. Static data per process; no file I/O. |
+| `lookup_error` | Given a code like `E003` or `E022`, return long-form explanation + minimal repro snippet from `spec/examples/invalid/`. |
+| `stdlib_search` | Substring / prefix match across the compiler's import-resolution scopes, in the order defined by project/module spec §3: built-in stdlib (`Std.*`), enabled `Platform.*` surface, and — when a project root is discovered — local modules and vendored deps. Returns `{ name, signature, module, scope, doc? }` where `scope ∈ {"stdlib","platform","local","vendor"}`. |
 | `grammar_lookup` | Given a rule name (`Expr`, `Pattern`, …), return the EBNF production from `spec/grammar.ebnf`. |
-| `project_info` | Walk the current project root (env-supplied or CWD), list `.lll` files with their module paths, imports, and per-file error counts. |
+| `project_info` | Walk upward from the supplied path (or CWD) to find `ll.toml` per project/module spec §2. Returns `{ root, manifest, modules[], deps[], platform_use[], errors[] }`: `manifest` is the parsed `[project]` table, `modules[]` lists each `.lll` file with its module path + imports + per-file error count, `deps[]` mirrors `ll.sum` entries (`{ path, version, sha256 }`), `platform_use[]` mirrors `[platform].use`. In single-file mode (no `ll.toml` found), `root` is null and only `modules[]` is populated. |
 
 **Deferred to v1** (explicitly not in v0):
 
@@ -136,13 +152,12 @@ phase.
 
 ## 7. CLI integration
 
-`Program.fs` pattern-matches `argv`:
+`Program.fs` pattern-matches `argv`. The full dispatch table is owned
+by the project/module spec §7 (`build`, `run`, `test`, `mod …`,
+`version`); this spec only adds one row:
 
 ```
-[| "build"; path |]   → cmdBuild path
-[| "run";   path |]   → cmdRun path
 [| "mcp" |]           → Mcp.runStdio () |> Async.RunSynchronously
-_                     → usage + exit 1
 ```
 
 `Mcp.runStdio` lives in `LLLangCompiler.dll` so Program.fs stays tiny.
@@ -247,3 +262,19 @@ Estimated size: ~400 LoC F# + ~200 LoC tests. Implementation gated on
 the maintainer having verified the `ModelContextProtocol` NuGet
 package version and API shape at implementation time — any drift from
 the snippets in §2 and §9 is a research step, not a design change.
+
+---
+
+## Reconciliation
+
+Reconciled with sibling spec `2026-04-09-ll-lang-project-system.md` on
+2026-04-09. Areas checked: CLI surface (union with `mod`/`test`),
+subcommand routing, project root discovery, file layout
+(`ll.toml`/`vendor/`/`bin/`/`.llcache/`), process lifecycle vs
+`ProjectLoader`, dependency model (`ll.sum` in `project_info`),
+stdlib/Platform/local/vendor resolution order in `stdlib_search`,
+config file interaction (MCP has none — no collision), error model
+(no hardcoded `E0xx` range), tool inventory coverage of project
+structure, terminology (`module`/`project`/`dep`/`import`). Edits
+applied to this spec only; project/module spec left unchanged
+per the "project-system owns CLI + layout + deps" boundary.

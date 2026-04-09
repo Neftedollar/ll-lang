@@ -284,3 +284,18 @@ hint to run `lllc mod init`).
 Each step is its own PR with its own error codes and corpus entries. Phase
 4 above (first four steps) is the minimum viable project system; everything
 after is bolt-on.
+
+---
+
+## Reconciliation
+
+Reconciled with sibling spec `2026-04-09-ll-lang-mcp-server.md` on
+2026-04-09. This spec is the owner of CLI structure, file layout, and
+dependency resolution; the MCP spec conforms. No edits were required
+here — the MCP spec was amended to reference §2 (root discovery), §3
+(import resolution order), §5 (`ProjectLoader`, `.llcache/`), §7 (CLI
+dispatch table), and §8 (single-file fallback), and to expose
+`ll.sum`-shaped dep info through its `project_info` tool. Areas
+verified: CLI union, file layout, project root discovery, process
+lifecycle, dependency model, config, error codes, tool inventory,
+terminology.
