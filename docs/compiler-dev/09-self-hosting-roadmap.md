@@ -3394,3 +3394,174 @@ means `typeCheck` can reject `if 1 then 0 else 1`
 args. Unblocks `EBool` as a dedicated AST variant,
 `TKwTrue` / `TKwFalse` keyword tokens, and the `&&` /
 `||` / `not` connectives that need Bool operands.
+
+### 2026-04 — Phase 7.9.newlines: layout-tolerant parsers (DONE)
+
+Twelfth tick of **Phase 7.9**. Bundles two sibling
+bugs — Neftedollar/ll-lang#8 (`parseLetIn` newline
+intolerance) and Neftedollar/ll-lang#12 (`parseArms`
+newline intolerance) — into a single GREEN commit
+because the root cause is identical: a parser peeks at
+the next token without first calling `skipNewlines`, so
+any intervening `TNewline` silently mis-parses.
+
+Before this slice, every bootstrap fixture had to cram
+match bodies and let-in chains onto a single line (see
+the explicit "multi-line match arms" caveat in the
+7.9l section above). That cramping is a direct blocker
+for any fixture that exercises real-world ll-lang
+layout — including every future self-hosting
+milestone where the bootstrap eats one of the host
+modules verbatim.
+
+**Bugs closed:**
+
+* **#8 — `parseLetIn`**: a multi-line `let x = rhs
+  in\n  body` fell into the wildcard arm of the
+  helper's body parse because `parseExpr` was called
+  on `TNewline :: ...`, whose `parseCompare` cascade
+  bottomed out at `parseAtom`'s `_ -> (EInt 0, toks)`
+  default, returning a bogus `EInt 0` and leaving the
+  whole body unconsumed. The decl that followed the
+  orphaned `in body` then got re-parsed as if it were
+  the body, corrupting the module-level decl list.
+* **#12 — `parseArms`**: a multi-line match
+  `match m with\n  | Some n -> n\n  | None -> 0`
+  silently dropped every arm after the first.
+  `parseArm`'s body parse stopped cleanly at the
+  trailing `TNewline`, but then `parseArms` recursed
+  on `TNewline :: TBar :: _`, which fell through the
+  `| TBar :: _` guard into the `_ -> (([], []), toks)`
+  terminator. Downstream, the leftover `| None ->
+  fallback` got re-parsed as a fresh module-level
+  construct and either desynced the decl list or got
+  silently discarded along with `main`.
+
+**Root cause:** identical in both. Any parser that
+peeks at `TTok :: _` needs to `skipNewlines` the token
+list first — the lexer emits `TNewline` as a
+first-class separator and the parser needs to be
+tolerant of whitespace between tokens that can legally
+appear at layout boundaries.
+
+**Changes (all in `20-bootstrap-compiler.lll`):**
+
+* `parseLetIn` now calls `skipNewlines` twice — once
+  after `TEq` (before parsing the RHS), once after
+  `TKwIn` (before parsing the body). Both handle the
+  multi-line shapes `let x =\n  rhs in ...` and
+  `let x = rhs in\n  body`.
+* `parseArms` now calls `skipNewlines` at the very
+  top and peeks at `toks2` instead of the raw `toks`.
+  Consumed leading newlines are safe to drop — they
+  only appear between arms or at a decl boundary, and
+  the module-level `parseDecls` always re-skips
+  newlines before every decl.
+* `parseFnDecl` calls `skipNewlines` after `TEq`
+  before `parseExpr` on the body — the fixture puts
+  the fn body on a fresh line, so the body parse
+  would otherwise hit `TNewline` immediately.
+* `parseLetDecl` calls `skipNewlines` after `TEq` for
+  symmetry with `parseFnDecl`. Module-level `let x =
+  \n  expr` decls can now span multiple lines the same
+  way fn decls already do.
+
+**Fixture:** `20j-bootstrap-input-layout.lll` exercises
+BOTH bugs in a single module:
+
+```
+module Examples.Clean
+type Maybe A = Some A | None
+fn describe(m Maybe[Int]) Int =
+  let fallback = 0 in
+  match m with
+    | Some n -> n
+    | None -> fallback
+fn main() Int = describe (Some 5)
+```
+
+The `let fallback = 0 in` + newline + `match m with`
+shape exercises `parseLetIn`'s tolerance after `in`.
+The multi-line match arms exercise `parseArms`'s
+tolerance between arms. The `fn describe(...) Int =\n
+  let ...` shape exercises `parseFnDecl`'s tolerance
+after `TEq`.
+
+**Test:** new `[<Fact>]` in
+`BootstrapCompilerTests.fs` swaps 20a → 20j, runs the
+bootstrap via `runBootstrap ()`, asserts no `E002` /
+`E001` / `error`, and checks the emitted F# contains
+`let describe` (or `let rec describe`), `let main`
+(or `and main`), `[<EntryPoint>]`, `| (Some n) ->`
+(proving the first arm survived), `| (None) ->`
+(proving the second arm survived), and `fallback`
+(proving the let-in body made it through).
+
+**RED shape:** the initial failing run emitted
+`let describe m = 0L` with a `0L` body (parseLetIn
+returned the default `EInt 0`) and `let fallback = 0L`
+as a stray orphan module-level decl (the inner `let
+fallback = 0 in` got re-parsed as a module-level let
+because the fn body had been truncated). No `main`
+decl at all. Classic cascade from a desynced parser.
+
+**Deliberately out of scope:**
+
+* **Full layout sensitivity in every parser** — only
+  the specific sites needed to round-trip the new
+  fixture got `skipNewlines` calls. `parseIf`,
+  `parseMatch`'s scrutinee, lambda bodies, and
+  parenthesised expressions still require their
+  sub-expressions to start on the same line as their
+  surrounding keyword. Follow-up if future fixtures
+  hit this.
+* **Leading newline in `parseExpr`** — a tempting
+  one-line fix at the top of `parseExpr` was rejected
+  to keep the change strictly additive: adding
+  `skipNewlines` to `parseExpr` could subtly change
+  the semantics of `parseCompareTail`, which stops at
+  newlines as a deliberate arm-body terminator. The
+  per-site fixes are narrower and easier to reason
+  about.
+* **String literal escape sequences** — tracked as
+  Phase 7.9m via issue #10, covering `\n` / `\t` /
+  `\\` / `\"` inside string literals (currently the
+  bootstrap's `lexStr` stops at the first `\` and
+  emits a broken token).
+
+Tests: 410 → 411 (+1 for the bundled layout
+regression test).
+
+**Surprises:**
+
+1. The initial fix scoped only to `parseLetIn` and
+   `parseArms` wasn't sufficient — the fn body itself
+   started with a `TNewline` after the `TEq`, so
+   `parseExpr` on the body hit its `parseCompare`
+   default cascade and returned `EInt 0` before ever
+   reaching the `TKwLet :: rest -> parseLetIn rest`
+   arm. The minimal fix required a third
+   `skipNewlines` call inside `parseFnDecl` (and, for
+   symmetry, `parseLetDecl`). The fixes are strictly
+   additive, so no existing single-line fixtures
+   regressed — 410 → 411 with no tests changing
+   status except the new one.
+2. The `parseArmBody` parser already tolerates the
+   arm-ending `TNewline` correctly — it cascades
+   through `parseCompare` → `parseAddSub` → `parseApp`
+   → `parseAtom`, each of which stops cleanly on any
+   non-operator / non-atom-starter token. The only
+   site that needed fixing was `parseArms` at the
+   recursion boundary between arms.
+3. No regression in any of the prior 7.9f/g/h/i/j/l
+   single-line fixtures — the `skipNewlines` calls
+   are no-ops when no `TNewline` is present.
+
+Next tick: **Phase 7.9m** — string literal escape
+sequences, per issue #10. The bootstrap's `lexStr`
+currently has no escape handling, so a literal `\n`
+inside a string breaks the tokenizer. Unblocks richer
+error messages (which need embedded newlines) and any
+fixture that stringifies ll-lang source with
+backslashes. Bool type promotion (Phase 7.9k, still
+pending) remains deferred.
