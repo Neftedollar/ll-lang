@@ -4513,3 +4513,83 @@ family (`isUpperChar`, `isLowerChar`, `isIdStart`,
 bootstrap's output has exceeded the pre-7.10a
 2726-byte baseline.
 
+
+## Phase 7.10d — PStr string literal patterns
+
+**Slice:** extend the bootstrap's `Pat` type with
+a `PStr Str` variant so match arms like
+`| "module" -> TKwModule` parse and render
+correctly. Previously, `parsePrimaryPat` had no
+`TStr _` arm — string literal patterns fell
+through to the catch-all `| _ -> (PWild, toks)`
+which silently turned every literal arm into
+a `PWild`, collapsing all subsequent arms into a
+single wildcard. The 7.10c probe exposed this
+directly: `classifyIdent` emitted a one-arm
+match (`| _ -> "module"`) instead of the full
+14-keyword dispatch.
+
+**Change sites (6):**
+
+1. `type Pat` — new `PStr Str` variant
+2. `parsePrimaryPat` — `| TStr s :: rest ->
+   (PStr s, rest)` between the `TInt` and
+   `TUnder` arms
+3. `showPat` — `PStr s -> "\"" ^ s ^ "\""`
+4. `patBinders` — `PStr _ -> []`
+5. `patIsCatchAll` — `PStr _ -> false`
+6. `emitPat` — `PStr s -> "\"" ^ s ^ "\""`
+   (F# accepts string-literal patterns verbatim)
+
+**Fixture + test:**
+`20u-bootstrap-input-str-pat.lll`:
+
+```
+module Examples.Clean
+fn kind(s Str) Int =
+  match s with
+    | "one" -> 1
+    | "two" -> 2
+    | _ -> 0
+fn main() Int = kind "two"
+```
+
+Regression test `20-bootstrap-compiler.lll
+supports string literal patterns (Phase 7.10d)`
+asserts NO `E002`/`E001`/`error`, and the emitted
+F# contains `| "one"` and `| "two"` plus
+`[<EntryPoint>]`.
+
+**Fixpoint-probe confirmation:**
+
+| Metric | Before 7.10d | After 7.10d |
+|---|---|---|
+| stdout+stderr bytes | 3338 | 1609 |
+| stdout+stderr lines | 131 | 11 |
+| errors reported | 0 (but truncated emit) | 2 (`E002 UnboundVar strChars`, `E002 UnboundVar s`) |
+| halt point | `classifyIdent` emitted `\| _ -> "module"` (single wildcard; all 13 keyword arms silently dropped) | elaborator flags `strChars` unbound in `classifyIdent` wildcard body |
+| main branch taken | emit branch (truncated output) | `printfn (showErrs errs)` |
+
+The byte count appears to shrink (3338 → 1609)
+because the bootstrap now fails faster at
+elaboration rather than silently emitting
+truncated F#. This is **forward progress**: the
+bootstrap now successfully parses all 14
+keyword arms of `classifyIdent`, reaches the
+previously-unreached wildcard-arm body
+`let cs = strChars s in ...`, and correctly
+flags `strChars` as an unbound name. The earlier
+3338-byte "success" was a false positive —
+arms after `"module"` were all being dropped
+into a single `PWild`.
+
+**Next blocker:** **Phase 7.10e** — the bootstrap
+references `strChars` (and `strFromChars`) at
+lines 409/417/579/1995 of
+`20-bootstrap-compiler.lll`, but `strChars` is
+not in the bootstrap's `stdlibNames` mirror list.
+Same shape as 7.9p / 7.9r / 7.10c — add the bare
+name(s) so the minimal HM pass accepts them as
+builtins. The `s` unbound is a likely cascade
+from the failed `let cs = strChars s in` binding.
+
