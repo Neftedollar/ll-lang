@@ -3163,6 +3163,106 @@ char, if it's `\` then consume and decode the next char
 the raw char as today. Roughly doubles the size of
 `lexCharLit` and adds a small escape-decoding helper.
 
+### 2026-04 — Phase 7.9j: char escape sequences (DONE)
+
+Tenth tick of **Phase 7.9**. Direct follow-up to 7.9i's
+basic char literal (`'c'`) slice: the bootstrap
+compiler's own source `20-bootstrap-compiler.lll` uses
+`'\n'` on the `lexChars` newline arm and `'\\'` on the
+backslash arm, so without escape handling the bootstrap
+compiler cannot lex its own source — a hard blocker for
+the self-host fixpoint. This slice extends `lexCharLit`
+to recognise a leading `\` and dispatch to an escape
+decoder that maps the four needed escapes (`\n`, `\t`,
+`\\`, `\'`) back to their raw char values.
+
+**Changes:**
+
+* New helper `fn decodeEscape(c Char) Char` maps the four
+  escape content chars to their raw char values: `n` →
+  `'\n'`, `t` → `'\t'`, `\\` → `'\\'`, `'` → `'\''`.
+  Unknown escapes pass through raw (lenient — mirrors the
+  catch-all leniency elsewhere in `lexChars`).
+* New helper `fn lexCharEsc(cs List[Char]) List[Token]`
+  consumes one escape content char after `\`, expects the
+  closing `'`, and emits `TChar (decodeEscape esc)`.
+  Missing closing quote silently falls through, matching
+  the leniency of `lexCharLit`.
+* `lexCharLit` extended: after binding the first content
+  char `ch`, checks `if ch == '\\' then lexCharEsc rest`
+  before the plain-char path. The plain-char path is
+  unchanged.
+* New helper `fn emitChar(c Char) Str` re-encodes a `Char`
+  as a valid F# char literal by inverting the escape
+  mapping: `'\n'` → `"'\\n'"`, `'\t'` → `"'\\t'"`, `'\\'`
+  → `"'\\\\'"`, `'\''` → `"'\\''"`, and everything else
+  wrapped verbatim as before. Without this, 7.9i's raw
+  `'<c>'` emission would inject a literal newline /
+  backslash into the generated F# source and break the
+  host compile.
+* `emitExpr`'s `EChar c` arm now delegates to `emitChar c`
+  instead of the inline `strConcat` wrap.
+* New fixture `20h-bootstrap-input-char-esc.lll` exercises
+  `'\n'` and `'\\'` in two conditionals:
+  `fn nl(n Int) Int = if '\n' == '\n' then n else 0` and
+  `fn bs(n Int) Int = if '\\' == '\\' then n else 0`
+  plus a `main` that calls `nl 5`.
+* New regression test in `BootstrapCompilerTests.fs`
+  swaps the 20a input for 20h, runs the bootstrap
+  compiler, and asserts (a) no `E002` / `E001` / `error`,
+  (b) emitted F# contains `let nl`/`let rec nl`, `and bs`
+  or `let bs`, `and main` or `let main`, `[<EntryPoint>]`,
+  and the `'\n'` + `'\\'` char literal substrings. Same
+  swap/restore pattern as 7.9h / 7.9i.
+
+**Deliberately out of scope:**
+
+* **`\r` / `\0` / `\u....`** — only the four escapes
+  actually used in the bootstrap compiler's own source
+  (`\n`, `\t`, `\\`, `\'`) are supported. Adding the
+  others is a one-line extension to `decodeEscape` when
+  the bootstrap or fixtures grow a need.
+* **String-literal escapes** — `lexStr` / `takeStrBody`
+  still copy string bodies verbatim, so `"foo\nbar"`
+  stays a raw 4-char-then-newline-then-3-char sequence.
+  No bootstrap source currently needs string escapes; a
+  separate slice can extend `takeStrBody` symmetrically
+  later.
+* **Unterminated escape diagnostic** — `'\` with no
+  follow-up char or `'\n` with no closing quote silently
+  drops, matching the leniency of plain `lexCharLit`.
+* **Unicode-aware escapes** — `Char` stays single-byte
+  ASCII. Proper unicode is deferred beyond the self-host
+  fixpoint.
+
+Tests: 408 → 409 (+1 for the char escape regression
+test).
+
+**Observation worth noting** — the GREEN step turned
+out to require a *second* change site beyond the lexer:
+`emitExpr`'s `EChar c` arm had been emitting the raw
+char wrapped in single quotes, which worked fine for
+printable ASCII (7.9i's `'='` test) but silently injects
+a literal newline / backslash into the generated F#
+source when the char IS newline / backslash. Without the
+new `emitChar` helper re-escaping on emission, the
+generated F# is syntactically invalid
+(`'<literal newline>'` is not a char literal in F#).
+This is the mirror image of the lexer's `decodeEscape` —
+the round trip `source → token → AST → emit` must
+preserve the escape encoding at the boundaries. Good
+reminder that new primitive literals aren't done after
+just the lexer extension; the emitter has to symmetric-
+ally re-escape whenever it crosses back into source
+form.
+
+Next tick: **Phase 7.9k** — Bool type promotion in HM /
+`typeCheck`. Deferred from the original 7.9i slot and
+still pending. Promotes `Bool` from an inference-only
+phantom type to a real consumed type, unblocking
+rejection of non-`Bool` guards (`if 1 then ... else ...`)
+and enforcement of `Int`-only comparison operands.
+
 ### Phase 7.9k (planned): Bool type promotion in HM
 
 Deferred from the original 7.9i slot. Currently
