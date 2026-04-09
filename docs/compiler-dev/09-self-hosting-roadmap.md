@@ -4460,3 +4460,56 @@ significantly larger output than the pre-7.10a
 2726-byte baseline, with emission flowing into
 the `parseIntStr` / `classifyId` / `lex*` family.
 
+
+## Phase 7.10c — strToInt in stdlibNames
+
+**Slice:** add `"strToInt"` to the bootstrap's
+`stdlibNames` flat list so the minimal HM pass
+accepts the name as a builtin, mirroring the
+7.9p (`charToInt`) and 7.9r (`charIsDigit`)
+slices. The host elaborator already knows
+`strToInt` as a builtin; the bootstrap's mirror
+list was the only gap.
+
+**Change site (1):**
+
+```
+fn stdlibNames(_ignored Int) List[Str] =
+  [... "charToInt" "charIsDigit" "strToInt"]
+```
+
+**Fixture + test:**
+`20t-bootstrap-input-strtoint.lll`:
+
+```
+module Examples.Clean
+fn useIt(s Str) Int = let x = strToInt s in 0
+fn main() Int = useIt "42"
+```
+
+Regression test `20-bootstrap-compiler.lll
+resolves strToInt via stdlibNames (Phase 7.10c)`
+asserts NO `E002 UnboundVar strToInt`, and the
+emitted F# contains `let useIt` / `let rec useIt`
+plus `[<EntryPoint>]`.
+
+**Fixpoint-probe confirmation:**
+
+| Metric | Before 7.10c | After 7.10c |
+|---|---|---|
+| stdout bytes | 153 | 3338 |
+| stdout lines | 5 | 131 |
+| errors reported | 1 (`E002 UnboundVar strToInt`) | 0 |
+| halt point | elaborator flags `strToInt` unbound | emit succeeds; main prints types + fn bodies |
+| main branch taken | `printfn (showErrs errs)` | `printfn (emitModule mod)` |
+
+The byte count jumped from 153 to 3338 — `main`
+flipped back to the emit branch, and emission now
+flows through the type decls and the lex-helper
+family (`isUpperChar`, `isLowerChar`, `isIdStart`,
+`isIdCont`, `takeIdCont`, `dropIdCont`,
+`takeDigit`, `dropDigit`, `parseIntStr`,
+`classifyIdent`). This is the first time the
+bootstrap's output has exceeded the pre-7.10a
+2726-byte baseline.
+
