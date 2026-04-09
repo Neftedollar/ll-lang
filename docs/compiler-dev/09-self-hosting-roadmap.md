@@ -2758,8 +2758,73 @@ program that uses `strConcat` / `listMap` / `printfn` / `readFile`
 
 Tests: 403 → 404 (+1 for the stdlib-env regression test).
 
-Next tick: **Phase 7.9f** — comparison ops (`<` / `>` / `==`)
-and `Bool` type support, so `if n < 0 then 0 - n else n` can
-parse. Requires new lexer tokens, new `Expr` variants, new
-codegen arms, and a Bool type in the minimal HM layer — a
-meaningfully larger slice than 7.9c/d/e.
+Next tick: **Phase 7.9f** — `==` operator only, so
+`if 1 == 1 then 0 else 1` can round-trip. New lexer token,
+new `Expr` variant, new parser precedence layer, new codegen
+arm — `<` / `>` / `!=` / `&&` / `||` punted to 7.9g+.
+
+### 2026-04 — Phase 7.9f: == operator (DONE)
+
+Sixth tick of **Phase 7.9**. Probing with
+`fn main() Int = if 1 == 1 then 0 else 1` surfaced the next
+gap: the bootstrap lexer only emitted `TEq` for a single `=`
+and had no two-char `==` token, so the parser could not
+handle equality comparison. Blocks any input program that
+uses the `==` operator — which includes most ll-lang
+branching on integer equality.
+
+**Changes:**
+
+* New lexer token `TEqEq` in `20-bootstrap-compiler.lll`'s
+  `Token` sum, alongside the existing `TEq`.
+* New helper `lexEqOrEqEq` mirroring `lexColonOrCons` /
+  `lexMinusOrArrow`: the main loop consumes the first `=`
+  and hands the tail to the helper, which peeks for a second
+  `=`; if found, emits `TEqEq` and recurses past both, else
+  emits `TEq` and re-lexes starting at the non-`=` head.
+* New `EEq Expr Expr` variant in `Expr`.
+* New `parseCompare` / `parseCompareTail` layer in the
+  precedence cascade, slotted between `parseExpr` and
+  `parseAddSub` (comparison is looser than `+/-`). Left
+  associative, same shape as `parseAddSubTail`. `parseArmBody`
+  also promoted from `parseAddSub` to `parseCompare` so match
+  arm bodies can use `==`.
+* `checkExpr` / `inferExprType` / `typeCheck` / `showExpr` /
+  `emitExpr` each get one new `EEq` arm. `inferExprType`
+  returns `TyName "Bool"` — just a string tag in this slice,
+  no Bool-type machinery (no `typeEq Bool Bool` arm, no
+  `checkIfBranches` refinement).
+* `emitExpr` uses `emitBin l r " = "` — F# uses a single `=`
+  for equality, so `EEq (EInt 1) (EInt 1)` emits `(1L = 1L)`
+  (the `L` suffix comes from `emitInt`).
+* New fixture `20d-bootstrap-input-eqeq.lll` exercises
+  `fn main() Int = if 1 == 1 then 0 else 1`.
+* New regression test in `BootstrapCompilerTests.fs` swaps
+  the 20a input for 20d, runs the bootstrap compiler, and
+  asserts (a) no `E002` / no `error` in combined output,
+  (b) emitted F# contains `let main` + `[<EntryPoint>]` +
+  `(1L = 1L)`.
+
+**Deliberately out of scope:**
+
+* **`<` / `>` / `<=` / `>=` / `!=`** — only `==` in this
+  slice. The new `parseCompare` layer is structured as a
+  precedence tier so more comparison operators can be added
+  with a second pattern arm in `parseCompareTail` (and new
+  lexer tokens) without restructuring the cascade.
+* **`Bool` type machinery** — `TyName "Bool"` is just a
+  string tag. No `typeEq Bool Bool` refinement, no
+  `checkIfBranches` narrowing on `EEq` guards, no Bool
+  literals (`true` / `false`). An input program that tries
+  to bind a comparison result to a variable and then pass
+  it to a fn expecting `Int` will still parse and emit — HM
+  just rubber-stamps the `TyVar "?"` mismatch.
+* **Boolean connectives** — `&&` / `||` / `not` all stay in
+  Phase 7.9g+.
+
+Tests: 404 → 405 (+1 for the `==` regression test).
+
+Next tick: **Phase 7.9g** — `<` / `>` comparison operators,
+so `if n < 0 then 0 - n else n` can parse. Reuses the
+`parseCompare` layer shipped in 7.9f — only new lexer
+tokens, new `Expr` variants, and new emit arms needed.

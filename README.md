@@ -19,7 +19,7 @@ Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting 
 
 ## Status
 
-Working end-to-end compiler with a **404-test** suite, written in F# / .NET 10. All 7 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins).
+Working end-to-end compiler with a **405-test** suite, written in F# / .NET 10. All 7 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins).
 
 **Bootstrap progress (Phase 7 — ll-lang hosting itself):**
 
@@ -60,6 +60,7 @@ Still to come: elaborator, HM-inference, and codegen rewrites in ll-lang, then b
 | **7.9c** | **Bootstrap compiler reads source from file** — driver now calls `readFile "spec/examples/valid/20a-bootstrap-input.lll"` instead of a hardcoded string literal. New 5-line corpus file holds the clean input module. First concrete step toward `compiler₁ = compile(compiler.lll)` — any .lll file on disk can be the input, which unblocks progressive feature-gap discovery. New file-reading-path regression test (renames input → asserts failure → restores) proves the source flows through `readFile` | ✅ |
 | **7.9d** | **Bracket-form types in fn signatures** — `parseParamGroups` / `parseReturnType` now consume `Upper[type][type]...` chains (`Maybe[Int]`, `List[Str]`, `Result[A][E]`) via a new `parseSkipBrackType` helper. Previously, a fn with `Maybe[Int]` return type made the parser desync and silently drop the subsequent `main` decl entirely. New fixture `20b-bootstrap-input-maybe.lll` + regression test prove `wrap(v Int) Maybe[Int] = Some v` now emits both `wrap` and `main` | ✅ |
 | **7.9e** | **Stdlib builtins in elaborator env** — `elaborate` now seeds `env0` with `strConcat` / `strLen` / `print` / `printfn` / `listMap` / `listLen` / `listAppend` / `listIsEmpty` / `listFold` / `readFile` via a new `stdlibNames` helper, so fn bodies that call stdlib builtins no longer fire `E002 UnboundVar`. New fixture `20c-bootstrap-input-stdlib.lll` + regression test exercise `strConcat "hi " n` in a fn body | ✅ |
+| **7.9f** | **`==` operator in bootstrap compiler** — new two-char `TEqEq` lexer token via a `lexEqOrEqEq` helper, new `EEq Expr Expr` AST variant, new `parseCompare` / `parseCompareTail` precedence layer between `parseExpr` and `parseAddSub` (so comparison binds looser than `+/-`), and a new `EEq` arm threaded through `checkExpr` / `inferExprType` / `typeCheck` / `showExpr` / `emitExpr`. Emits `(<l> = <r>)` from codegen — F# uses a single `=` for equality. New fixture `20d-bootstrap-input-eqeq.lll` + regression test exercise `fn main() Int = if 1 == 1 then 0 else 1`. `<` / `>` / `!=` / `&&` / `\|\|` and full `Bool`-type machinery stay in 7.9g+ | ✅ |
 | 7.10 | Bootstrap fixpoint | ⏳ |
 
 ## Getting Started
