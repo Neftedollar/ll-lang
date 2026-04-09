@@ -332,3 +332,71 @@ let ``20-bootstrap-compiler.lll parses Maybe[Int] return type and emits main (br
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll accepts true and false literals in fn body (Phase 7.9h)`` () =
+    // Phase 7.9h: before the fix, the bootstrap compiler's elaborator
+    // fired `E002 UnboundVar true` / `E002 UnboundVar false` for any
+    // program that used bare `true` / `false` literals. The bootstrap
+    // lexer already produces `TLower "true"` / `TLower "false"`,
+    // `parseAtom` already wraps them in `EVar "true"` / `EVar "false"`,
+    // `emitExpr`'s `EVar x -> x` arm already emits them as valid F#
+    // boolean literals, and `inferExprType`'s `EVar name ->
+    // typeEnvLookup env name` arm already returns `TyVar "?"` for
+    // unknown names (which `typeEq` short-circuits on). The ONLY gap
+    // was the elaborator's name-scope check: `"true"` / `"false"`
+    // were not in `stdlibNames`, so `checkExpr`'s `EVar name` arm
+    // fired E002. The fix is two strings appended to `stdlibNames`.
+    //
+    // This test swaps the 20a input for a variant with two fns:
+    // `choose(n Int)` does `if n > 0 then 1 else 0` (smoke test that
+    // the existing `<` / `>` from 7.9g still works under the new
+    // stdlib env), and `flag()` does `if true == false then 1 else 0`
+    // — exercising both `true` and `false` as bare identifiers in
+    // expression position (then/else branch of an EEq comparison).
+    // Single-line fn bodies only: the bootstrap parser's `parseLetIn`
+    // doesn't tolerate a `TNewline` between `in` and the body expr
+    // (unrelated multi-line bug, out of scope for this slice).
+    // Asserts codegen reaches the F# output (contains `let choose`,
+    // `let main`, `[<EntryPoint>]`, and both `true` and `false` as
+    // substrings).
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let boolPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20f-bootstrap-input-bool-lits.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists boolPath,  $"missing fixture: {boolPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(boolPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001 TypeMismatch error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO error output; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let choose",
+            $"expected emitted F# to contain `let choose`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "let main",
+            $"expected emitted F# to contain `let main`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "true",
+            $"expected emitted F# to contain `true`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "false",
+            $"expected emitted F# to contain `false`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
