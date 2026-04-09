@@ -194,6 +194,50 @@ let ``20-bootstrap-compiler.lll accepts stdlib builtin strConcat in fn body (Pha
             File.Move(backupPath, inputPath)
 
 [<Fact>]
+let ``20-bootstrap-compiler.lll accepts == operator in fn body (Phase 7.9f)`` () =
+    // Phase 7.9f: before the fix, the bootstrap compiler's lexer only
+    // emitted `TEq` for a single `=` and had no double-`=` token, so a
+    // fn body like `if 1 == 1 then 0 else 1` could not parse. The fix
+    // adds a two-char `TEqEq` token via a new `lexEqOrEqEq` helper,
+    // introduces `EEq Expr Expr` in the AST, slots `parseCompare` into
+    // the precedence cascade between `parseExpr` and `parseAddSub`,
+    // threads `EEq` through checkExpr / inferExprType / showExpr, and
+    // emits `(<l> = <r>)` from emitExpr (F# uses single `=` for
+    // equality). This test swaps the 20a input for a variant whose
+    // main body uses `1 == 1` and asserts the pipeline reaches codegen.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let eqeqPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20d-bootstrap-input-eqeq.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists eqeqPath,  $"missing fixture: {eqeqPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(eqeqPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO error output; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let main",
+            $"expected emitted F# to contain `let main`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "(1 = 1)",
+            $"expected emitted F# to contain `(1 = 1)`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
+
+[<Fact>]
 let ``20-bootstrap-compiler.lll parses Maybe[Int] return type and emits main (bracket-form types in fn signatures)`` () =
     // Phase 7.9d: the bootstrap compiler's parseParamGroups /
     // parseReturnType only accepted bare `Upper` type names. A fn with
