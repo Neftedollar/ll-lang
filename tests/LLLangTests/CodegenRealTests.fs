@@ -79,6 +79,12 @@ let ``19-codegen-real.lll runs and emits F# source lines for each TDFn`` () =
     //   prelude body  — 5-line subset of host `fsharpPreludeCore`
     //                   (listMap, listLen, strLen, strConcat, print)
     //   prelude end   — "// --- end prelude ---"
+    // Plus Phase 7.8e: mutually-recursive `let rec ... and ...` grouping
+    // for 2+ consecutive TDFns, and `[<EntryPoint>]` on a zero-param
+    // `main` fn. The seven existing non-main fns now collapse into a
+    // single `let rec inc ... and greet ... and ...` block, and the
+    // added `main` fn emits the `[<EntryPoint>]\nlet main (argv: string[])`
+    // form with a trailing `0` exit code.
     let expected =
         [ "module Examples.Generated"
           "// --- ll-lang stdlib prelude (auto-generated) ---"
@@ -88,13 +94,13 @@ let ``19-codegen-real.lll runs and emits F# source lines for each TDFn`` () =
           "let strConcat (a: string) (b: string) = a + b"
           "let print (s: string) = System.Console.Write(s)"
           "// --- end prelude ---"
-          "let inc x = (x + 1L)"
-          "let greet = \"hello\""
-          "let addOne x = (let y = (x + 1L) in y)"
-          "let callInc x = (inc x)"
-          "let choose b = (if b then 1L else 2L)"
-          "let double = (fun x -> (x + x))"
-          "let classify x = (match x with | 0L -> \"zero\" | _ -> \"other\")"
+          "let rec inc x = (x + 1L)"
+          "and greet = \"hello\""
+          "and addOne x = (let y = (x + 1L) in y)"
+          "and callInc x = (inc x)"
+          "and choose b = (if b then 1L else 2L)"
+          "and double = (fun x -> (x + x))"
+          "and classify x = (match x with | 0L -> \"zero\" | _ -> \"other\")"
           "type Maybe<'A> ="
           "    | Some of 'A"
           "    | None"
@@ -103,7 +109,11 @@ let ``19-codegen-real.lll runs and emits F# source lines for each TDFn`` () =
           "    | Rect of int64 * int64"
           "    | Empty"
           "type Pair<'A, 'B> ="
-          "    | MkPair of 'A * 'B" ]
+          "    | MkPair of 'A * 'B"
+          "[<EntryPoint>]"
+          "let main (argv: string[]) ="
+          "    (print \"hello\")"
+          "    0" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),
