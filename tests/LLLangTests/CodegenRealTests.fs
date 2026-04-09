@@ -69,6 +69,10 @@ let ``19-codegen-real.lll runs and emits F# source lines for each TDFn`` () =
     //   choose   — TEIf (Phase 7.8b)
     //   double   — TELam bound at top level (Phase 7.8b)
     //   classify — TEMatch with PInt + PWild + TEStr branches (Phase 7.8b)
+    // Plus three TDType sum decls (Phase 7.8c):
+    //   Maybe — parametric `<'A>`, arg-bearing + nullary ctors
+    //   Shape — no type params, mixed nullary and multi-arg TAName ctors
+    //   Pair  — two-arg TAVar ctor ensuring the `*` join shape
     let expected =
         [ "let inc x = (x + 1L)"
           "let greet = \"hello\""
@@ -76,7 +80,16 @@ let ``19-codegen-real.lll runs and emits F# source lines for each TDFn`` () =
           "let callInc x = (inc x)"
           "let choose b = (if b then 1L else 2L)"
           "let double = (fun x -> (x + x))"
-          "let classify x = (match x with | 0L -> \"zero\" | _ -> \"other\")" ]
+          "let classify x = (match x with | 0L -> \"zero\" | _ -> \"other\")"
+          "type Maybe<'A> ="
+          "    | Some of 'A"
+          "    | None"
+          "type Shape ="
+          "    | Circle"
+          "    | Rect of int64 * int64"
+          "    | Empty"
+          "type Pair<'A, 'B> ="
+          "    | MkPair of 'A * 'B" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),
