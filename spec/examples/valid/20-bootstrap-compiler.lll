@@ -796,7 +796,17 @@ fn parseBrackArgs(acc List[TypeArg])(toks List[Token]) =
 
 -- ---------- Fn-decl parser (adapted from 13-fnparser-real.lll) ----------
 
--- Single fn decl: 'fn' lower paramGroup* typeName? '=' expr
+-- Single fn decl: 'fn' lower paramGroup* typeName? '=' (clauseSugar | expr)
+-- Phase 7.10g: fn bodies may use clause-sugar `| pat -> body | ...`
+-- directly, without a leading `match scrut with`. `parseFnBody` peeks
+-- at the post-skipNewlines head and dispatches: `TBar :: _` means
+-- clause-sugar and desugars to `EMatch <lastParamVar> pats bodies`
+-- (mirroring the host compiler's Phase 4 elaborator rule — the
+-- scrutinee is the LAST curried param); anything else falls through
+-- to `parseExpr` unchanged. Pre-fix every clause-sugar fn body fell
+-- through `parseCompare -> ... -> parseAtom`, bottomed out at
+-- `(EInt 0, toks)` without consuming the leading `TBar`, and the
+-- entire body silently became `0`.
 fn parseFnDecl(toks List[Token]) =
   | TKwFn :: TLower name :: rest ->
     let (prms, rest2) = parseParamGroups rest in
@@ -805,9 +815,42 @@ fn parseFnDecl(toks List[Token]) =
       | TEq :: r -> skipNewlines r
       | _ -> rest3
     in
-    let (body, rest5) = parseExpr rest4 in
+    let (body, rest5) = parseFnBody prms rest4 in
     (MkFn name prms retTy body, rest5)
   | _ -> (MkFn "?" [] None (EInt 0), toks)
+
+-- Phase 7.10g: the fn body dispatcher. If the first non-newline token
+-- is `TBar`, we're looking at clause-sugar — parse the arm list via
+-- `parseArms` (which already returns `((pats, bodies), rest)` from its
+-- use in `parseMatch`) and wrap the result in an `EMatch` scrutinising
+-- the last curried param as an `EVar`. Otherwise fall through to
+-- `parseExpr`. Zero-param fns can't use clause-sugar (there's no
+-- scrutinee), so `lastParamVar` returns `EInt 0` as a neutral default
+-- for that degenerate case — it'll never actually fire because
+-- `parseArms` on an empty arm list returns `(([], []), toks)` and a
+-- zero-param fn with a clause-sugar body is a malformed source anyway.
+fn parseFnBody(prms List[Param])(toks List[Token]) =
+  let toks2 = skipNewlines toks in
+  match toks2 with
+    | TBar :: _ ->
+      let (armLists, rest) = parseArms toks2 in
+      let (pats, bodies) = armLists in
+      let scrut = lastParamVar prms in
+      (EMatch scrut pats bodies, rest)
+    | _ -> parseExpr toks2
+
+-- Extract the last param as an `EVar name`. Recurses to the tail so
+-- the last `MkParam n _` wins — used by `parseFnBody` to build the
+-- scrutinee for a clause-sugar fn body. Mirrors the host elaborator's
+-- "clause sugar scrutinises the LAST curried param" rule. Uses an
+-- explicit `match` with `MkParam n _ :: []` / `_ :: rest` arms rather
+-- than clause-sugar so the desugarer doesn't need to be self-hosting
+-- on itself during the transitional build.
+fn lastParamVar(prms List[Param]) Expr =
+  match prms with
+    | [] -> EInt 0
+    | MkParam n _ :: [] -> EVar n
+    | _ :: rest -> lastParamVar rest
 
 -- Phase 7.9d: after a head `TUpper` has been read in param / return
 -- type position, consume any trailing `[ ... ]` bracket groups (e.g.
