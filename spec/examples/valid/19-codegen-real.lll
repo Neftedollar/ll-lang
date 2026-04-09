@@ -90,11 +90,48 @@ module Examples.CodegenReal
 --     value instead of printing each decl individually, and
 --     `printfn`s its `showModule` rendering.
 --
+-- Phase 7.8e scope ("slice E" — mutual-recursion grouping + entry point):
+--   * New `isMainFn : Str -> List[Str] -> Bool` predicate that matches
+--     the zero-param `main` fn.
+--   * New `showMainDecl : TExpr -> Str` that emits the F# entry-point
+--     form `[<EntryPoint>]\nlet main (argv: string[]) = <body>\n    0`
+--     — mirrors the host's `TDFn isMainFn` arm in `Codegen.fs` line
+--     270 area.
+--   * `showFnDecl` split into four variants:
+--       showFnDeclPlain — `let <name> <args> = <body>` (singleton run)
+--       showFnDeclFirst — `let rec <name> <args> = <body>` (head of group)
+--       showFnDeclCont  — `and <name> <args> = <body>`     (tail of group)
+--       showFnDeclDispatch — routes TDFn to plain or main
+--   * New `showFnGroup : List[TDecl] -> Str` rendering a 2+ run of
+--     TDFns as a single `let rec ... and ... and ...` block, joined
+--     with `"\n"` separators (same shape as the host's `emitDeclGroup`
+--     in `Codegen.fs` line 348 area).
+--   * New `splitAndShowDecls : List[TDecl] -> Str` walker that
+--     partitions the module decl list into groups and renders each
+--     group as its own blank-line-separated block:
+--       TDType                → standalone `showTypeDecl`
+--       zero-param main TDFn  → standalone `showMainDecl`
+--       singleton non-main fn → standalone `showFnDeclPlain`
+--       2+ consecutive fns    → single `let rec ... and ...` block
+--     Uses an accumulator-style recursive loop — same trick as
+--     `joinLines` / `joinBlocks` — with a `pending` non-main-fn run
+--     that flushes on every TDType or main boundary.
+--   * Simplification: "always rec for 2+" — no recursion-detection
+--     walker. F# accepts `let rec` on non-recursive bindings; this
+--     trades a tiny bit of output churn for a much simpler impl.
+--   * `main` grows an extra `TDFn "main" [] (TEApp (TEVar "print")
+--     (TEStr "hello"))` decl to exercise the new `[<EntryPoint>]`
+--     branch.
+--
 -- Out of scope (later slices in the Phase 7.8 umbrella):
 --   * Multi-line match emission and constructor-application / tagged-
 --     type (`TECon`) emission — a later slice.
---   * Mutual-recursion grouping (`let rec ... and ...`) and
---     `[<EntryPoint>]` on `main` — Phase 7.8e.
+--   * Proper recursion-detection walker (`containsVar` in the host)
+--     that picks between `let` and `let rec` for 2+ runs — Phase 7.8e
+--     uses the "always rec for 2+" simplification instead.
+--   * Mutual-recursion **dependency splitting** — this slice keeps
+--     every contiguous non-main fn run as one group, even if the fns
+--     don't actually reference each other.
 --   * Record (`TBRecord`) and wrapped (`TBWrapped`) type bodies — only
 --     sum bodies are supported in 7.8c.
 --   * Parametric type applications in ctor args (`Some (Maybe A)`) —
@@ -113,7 +150,8 @@ module Examples.CodegenReal
 --   * Keyword-safe ident rewriting (`safeIdent` in Codegen.fs) —
 --     every hardcoded test name is already a non-keyword.
 --
--- Hardcoded test plan in `main`: seven `TDFn`s + three `TDType`s.
+-- Hardcoded test plan in `main`: seven non-main `TDFn`s + three
+-- `TDType`s + one zero-param `main` TDFn (Phase 7.8e).
 --   TDFn "inc"      ["x"] (TEAdd (TEVar "x") (TEInt 1))          -- 7.8a
 --   TDFn "greet"    []    (TEStr "hello")                         -- 7.8a
 --   TDFn "addOne"   ["x"] (TELet "y" (TEAdd (TEVar "x") (TEInt 1)) (TEVar "y"))  -- 7.8a
@@ -124,9 +162,11 @@ module Examples.CodegenReal
 --   TDType "Maybe" ["A"] [MkCtor "Some" [TAVar "A"], MkCtor "None" []]  -- 7.8c
 --   TDType "Shape" []    [MkCtor "Circle" [], MkCtor "Rect" [TAName "Int", TAName "Int"], MkCtor "Empty" []]  -- 7.8c
 --   TDType "Pair"  ["A" "B"] [MkCtor "MkPair" [TAVar "A", TAVar "B"]]  -- 7.8c
+--   TDFn "main"    []    (TEApp (TEVar "print") (TEStr "hello")) -- 7.8e
 --
--- Expected stdout (Phase 7.8d: wrapped in a full F# module shell with
--- `module` header + stdlib prelude block, then types + fns):
+-- Expected stdout (Phase 7.8e: full F# module shell with `module`
+-- header, stdlib prelude block, types, `let rec` fn group, and a
+-- `[<EntryPoint>]`-wrapped `main` fn at the bottom):
 --   module Examples.Generated
 --
 --   // --- ll-lang stdlib prelude (auto-generated) ---
@@ -149,19 +189,18 @@ module Examples.CodegenReal
 --   type Pair<'A, 'B> =
 --       | MkPair of 'A * 'B
 --
---   let inc x = (x + 1L)
+--   let rec inc x = (x + 1L)
+--   and greet = "hello"
+--   and addOne x = (let y = (x + 1L) in y)
+--   and callInc x = (inc x)
+--   and choose b = (if b then 1L else 2L)
+--   and double = (fun x -> (x + x))
+--   and classify x = (match x with | 0L -> "zero" | _ -> "other")
 --
---   let greet = "hello"
---
---   let addOne x = (let y = (x + 1L) in y)
---
---   let callInc x = (inc x)
---
---   let choose b = (if b then 1L else 2L)
---
---   let double = (fun x -> (x + x))
---
---   let classify x = (match x with | 0L -> "zero" | _ -> "other")
+--   [<EntryPoint>]
+--   let main (argv: string[]) =
+--       (print "hello")
+--       0
 
 -- ---------- Maybe -------------------------------------------------------
 
@@ -489,27 +528,122 @@ fn showTypeParamsBody(first Str)(rest List[Str]) Str =
 
 -- ---------- Declaration emission ----------------------------------------
 
--- Walk a `TDecl` and produce its F# source rendering. Dispatches on
--- the two variants: `TDFn` hits `showFnDecl` (same behavior as Phase
--- 7.8a/b); `TDType` hits `showTypeDecl` (new in Phase 7.8c). Mirrors
--- the F# host's `emitDecl` in `src/LLLangCompiler/Codegen.fs` line 244
--- area, minus the mutual-recursion grouping, `main` entry-point, and
--- the `TBRecord` / `TBWrapped` / `TBTrait` / `TDImpl` arms.
+-- Walk a `TDecl` and produce its F# source rendering for a **standalone**
+-- (non-grouped) decl. Phase 7.8e splits the fn arms by main-ness:
+--   * `TDFn "main" [] body` — hits `showMainDecl`, emitting the
+--     `[<EntryPoint>]\nlet main (argv: string[]) = <body>\n    0` form.
+--   * `TDFn name ps body`   — hits `showFnDeclPlain` (old behavior:
+--     `let <name> <params> = <body>`).
+--   * `TDType name tps cs`  — hits `showTypeDecl` (unchanged from 7.8c).
+-- Mutually recursive groups of 2+ non-main fns route through
+-- `showFnGroup` / `showFnDeclFirst` / `showFnDeclCont` instead of this
+-- single-decl entry point; see `splitAndShowDecls` below. Mirrors the
+-- host's `emitDecl` in `src/LLLangCompiler/Codegen.fs` line 244 area.
 fn showDecl(d TDecl) Str =
   match d with
-    | TDFn name ps body -> showFnDecl name ps body
+    | TDFn name ps body -> showFnDeclDispatch name ps body
     | TDType name tps ctors -> showTypeDecl name tps ctors
 
--- Helper: the zero-params branch drops the param segment entirely.
--- Non-empty params get a leading space + `showParams`. Split from
--- `showDecl` so the outer match stays shallow.
-fn showFnDecl(name Str)(ps List[Str])(body TExpr) Str =
+-- Route a `TDFn` to the right emitter: main with zero params goes to
+-- `showMainDecl`; everything else falls through to `showFnDeclPlain`.
+-- Split from `showDecl` so the outer `match d` stays one level deep.
+fn showFnDeclDispatch(name Str)(ps List[Str])(body TExpr) Str =
+  if isMainFn name ps then showMainDecl body
+  else showFnDeclPlain name ps body
+
+-- `True` iff `name` is the string `"main"` **and** `ps` is empty. Used
+-- by `showFnDeclDispatch` / `splitAndShowDecls` to single out the entry
+-- point. Mirrors the host's `isMainFn` check in `Codegen.fs` line 268
+-- area, minus the `TypedFnSig` wrapping.
+fn isMainFn(name Str)(ps List[Str]) Bool =
+  match ps with
+    | _ :: _ -> false
+    | _ -> if name == "main" then true else false
+
+-- Plain non-recursive function emission — `let <name> <params> = <body>`
+-- for non-empty params, `let <name> = <body>` for the zero-params
+-- branch. Same behavior as Phase 7.8a-d's `showFnDecl`, renamed to
+-- make the Phase 7.8e split with `showFnDeclFirst` / `showFnDeclCont`
+-- explicit. Only called for a **singleton** non-main fn group (a run
+-- of length 1); 2+ runs go through `showFnGroup` instead.
+fn showFnDeclPlain(name Str)(ps List[Str])(body TExpr) Str =
   match ps with
     | _ :: _ ->
       let paramStr = showParams ps in
       strConcat "let " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
     | _ ->
       strConcat "let " (strConcat name (strConcat " = " (showTExpr body)))
+
+-- First-in-group form — `let rec <name> <params> = <body>`. Used for
+-- the head of a `let rec f1 ... and f2 ... and f3 ...` block. Phase
+-- 7.8e's "always rec for 2+" simplification trusts F# to accept
+-- `let rec` even when the fns don't actually reference each other —
+-- it's stricter, not wrong. Host `Codegen.fs` line 360 area builds
+-- the same shape via `"let rec " + first`.
+fn showFnDeclFirst(name Str)(ps List[Str])(body TExpr) Str =
+  match ps with
+    | _ :: _ ->
+      let paramStr = showParams ps in
+      strConcat "let rec " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
+    | _ ->
+      strConcat "let rec " (strConcat name (strConcat " = " (showTExpr body)))
+
+-- Continuation-in-group form — `and <name> <params> = <body>`. Every
+-- non-first fn in a 2+ `let rec` block gets this prefix. Same shape
+-- as `showFnDeclFirst` just with `"and "` instead of `"let rec "`.
+-- Mirrors `Codegen.fs` line 362 area's `"and " + c` mapping.
+fn showFnDeclCont(name Str)(ps List[Str])(body TExpr) Str =
+  match ps with
+    | _ :: _ ->
+      let paramStr = showParams ps in
+      strConcat "and " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
+    | _ ->
+      strConcat "and " (strConcat name (strConcat " = " (showTExpr body)))
+
+-- Dispatch a single TDFn to `showFnDeclFirst`. Extracted so
+-- `showFnGroup`'s outer `match` stays one level deep.
+fn showFnDeclFirstD(d TDecl) Str =
+  match d with
+    | TDFn name ps body -> showFnDeclFirst name ps body
+    | _ -> ""
+
+-- Dispatch a single TDFn to `showFnDeclCont`. Same split reason as
+-- `showFnDeclFirstD`.
+fn showFnDeclContD(d TDecl) Str =
+  match d with
+    | TDFn name ps body -> showFnDeclCont name ps body
+    | _ -> ""
+
+-- `[<EntryPoint>]` form for a zero-param `main` fn. F# requires the
+-- entry point to have signature `string[] -> int`, so we wrap the
+-- user body with a dummy `argv` parameter and a trailing `0` exit
+-- code. Mirrors the host's `Codegen.fs` line 270 area:
+--   `"[<EntryPoint>]\nlet main (argv: string[]) =\n    " + body + "\n    0"`
+fn showMainDecl(body TExpr) Str =
+  let header = "[<EntryPoint>]\nlet main (argv: string[]) =\n    " in
+  let trailer = "\n    0" in
+  strConcat header (strConcat (showTExpr body) trailer)
+
+-- Emit a run of 2+ consecutive non-main TDFns as a single `let rec
+-- ... and ... and ...` block. Single-element runs fall through to
+-- `showFnDeclPlain` via `showDecl`. Mirrors `emitDeclGroup` in
+-- `Codegen.fs` line 348 area. Uses `showFnDeclFirstD` for the head
+-- and `listMap showFnDeclContD` + `joinLines` for the tail.
+fn showFnGroup(fns List[TDecl]) Str =
+  match fns with
+    | d :: rest -> showFnGroupCons d rest
+    | _ -> ""
+
+-- Split helper: `d` is the head of a 2+ run, `rest` is the remaining
+-- tail. Emits `<let rec head>\n<and cont1>\n<and cont2>...` — each
+-- continuation on its own line, no blank-line separator (F# accepts
+-- adjacent `and` lines without vertical spacing, just like the host's
+-- `String.concat "\n"` call in `Codegen.fs` line 362).
+fn showFnGroupCons(first TDecl)(rest List[TDecl]) Str =
+  let head = showFnDeclFirstD first in
+  let tails = listMap showFnDeclContD rest in
+  let tailStr = joinLines tails in
+  if strLen tailStr == 0 then head else strConcat head (strConcat "\n" tailStr)
 
 -- Emit a sum-type decl as multi-line F# source. Shape:
 --   `type <name><typeParams> =\n    | <ctor1>\n    | <ctor2> ...`
@@ -576,30 +710,134 @@ fn fsharpPrelude(_ignored Int) Str =
   let preludeLines = [l1 l2 l3 l4 l5 l6 l7] in
   joinLines preludeLines
 
--- ---------- Module emission (Phase 7.8d) --------------------------------
+-- ---------- Module emission (Phase 7.8d + 7.8e) -------------------------
 
 -- Walk a `Module` and render a full F# source file: header, blank line,
 -- prelude, blank line, decls separated by blank lines. Mirrors the F#
 -- host's `emitModule` in `src/LLLangCompiler/Codegen.fs` line 454 area,
--- minus the mutual-recursion grouping (7.8e), conditional prelude
--- (host's `assemblePrelude`), and type-decl-first reordering (host
--- emits types before the prelude so the prelude can reference user
--- Maybe/Result ctors — this slice just walks decls in their declared
--- order because the minimal prelude has no user-type dependencies).
+-- minus the conditional prelude (host's `assemblePrelude`) and
+-- type-decl-first reordering (host emits types before the prelude so
+-- the prelude can reference user Maybe/Result ctors — this slice just
+-- walks decls in their declared order because the minimal prelude has
+-- no user-type dependencies).
+--
+-- Phase 7.8e adds mutual-recursion grouping (`let rec ... and ...` for
+-- 2+ consecutive non-main TDFns) and `[<EntryPoint>]` on the zero-
+-- param `main` fn — both routed through `splitAndShowDecls`.
 fn showModule(m Module) Str =
   match m with
     | MkModule path decls -> showModuleBody path decls
 
 -- Split helper so `showModule`'s outer match stays one level deep.
 -- Emits `module <path>`, then the prelude block, then every decl
--- rendered via `showDecl`, all glued with blank-line separators.
+-- rendered via `splitAndShowDecls` (which handles the Phase 7.8e
+-- `let rec` grouping + `[<EntryPoint>]` main slicing), all glued with
+-- blank-line separators.
 fn showModuleBody(path Str)(decls List[TDecl]) Str =
   let header = strConcat "module " path in
   let prelude = fsharpPrelude 0 in
-  let declLines = listMap showDecl decls in
-  let declBlock = joinBlocks declLines in
+  let declBlock = splitAndShowDecls decls in
   let parts = [header prelude declBlock] in
   joinBlocks parts
+
+-- ---------- Phase 7.8e: decl grouping walker ---------------------------
+
+-- Walk a `List[TDecl]` and return a single blank-line-joined string
+-- that respects the Phase 7.8e grouping rules:
+--   * Every `TDType` is its own block.
+--   * Every zero-param `main` fn is its own block (emits via
+--     `showMainDecl`, i.e. the `[<EntryPoint>]` form).
+--   * Every **singleton** run of a non-main TDFn emits via
+--     `showFnDeclPlain` (plain `let ...`).
+--   * Every **2+** run of consecutive non-main TDFns collapses into
+--     one `let rec ... and ...` block via `showFnGroup`.
+--
+-- Simplification used: "always rec for 2+" — we don't bother running
+-- a recursion-detection walker to decide between `let` and `let rec`
+-- for multi-fn runs. F# accepts `let rec` on non-recursive bindings,
+-- it's just stricter. Matches the task-spec path of least complexity.
+--
+-- Implementation detail: walks `decls` left-to-right carrying two
+-- accumulators — `pending` is the reversed list of non-main TDFns
+-- currently being collected into a potential rec group, and `acc` is
+-- the accumulated output string (blank-line-joined). On hitting a
+-- non-fn boundary (TDType or main) we flush `pending` as either a
+-- singleton `showDecl` or a `showFnGroup` rec block, then emit the
+-- boundary decl and continue. End-of-list also flushes `pending`.
+fn splitAndShowDecls(decls List[TDecl]) Str =
+  splitAndShowLoop decls [] ""
+
+-- Main loop of the grouping walker. `decls` is the remaining input;
+-- `pending` is the reversed list of non-main TDFns waiting to be
+-- flushed; `acc` is the output string built so far.
+fn splitAndShowLoop(decls List[TDecl])(pending List[TDecl])(acc Str) Str =
+  match decls with
+    | d :: rest -> splitAndShowStep d rest pending acc
+    | _ -> flushPendingFns pending acc
+
+-- Per-step dispatch: look at the head decl and decide whether to
+-- push it onto `pending` (non-main fn) or flush and emit it as its
+-- own block (TDType or main fn). Split from `splitAndShowLoop` so
+-- the outer `match decls` stays one level deep.
+fn splitAndShowStep(d TDecl)(rest List[TDecl])(pending List[TDecl])(acc Str) Str =
+  match d with
+    | TDFn name ps body -> splitAndShowStepFn d name ps rest pending acc
+    | TDType _ _ _ ->
+      let acc2 = flushPendingFns pending acc in
+      let typeBlock = showDecl d in
+      let acc3 = appendBlockStr typeBlock acc2 in
+      splitAndShowLoop rest [] acc3
+
+-- TDFn branch of `splitAndShowStep`: main goes to the boundary-flush
+-- path (its own block, then keep walking); non-main goes onto the
+-- `pending` run. Pre-computes `isMainFn name ps` once and branches
+-- on the result.
+fn splitAndShowStepFn(d TDecl)(name Str)(ps List[Str])(rest List[TDecl])(pending List[TDecl])(acc Str) Str =
+  if isMainFn name ps then splitAndShowStepMain d rest pending acc
+  else splitAndShowLoop rest (d :: pending) acc
+
+-- Main-boundary branch of `splitAndShowStepFn`: flush any pending
+-- non-main fn run, emit the main fn as its own block, then keep
+-- walking. Split out so `splitAndShowStepFn`'s body stays one line
+-- per branch (the parser needs `if ... then EXPR else EXPR` to live
+-- on a single logical line).
+fn splitAndShowStepMain(d TDecl)(rest List[TDecl])(pending List[TDecl])(acc Str) Str =
+  let acc2 = flushPendingFns pending acc in
+  let mainBlock = showDecl d in
+  let acc3 = appendBlockStr mainBlock acc2 in
+  splitAndShowLoop rest [] acc3
+
+-- Flush a `pending` run of non-main TDFns into the accumulator. The
+-- list is reversed (most recently pushed at the head), so first
+-- `listReverse` to restore source order, then dispatch: empty →
+-- no-op, singleton → plain `showDecl` block, 2+ → `showFnGroup`
+-- (let rec ... and ...).
+fn flushPendingFns(pending List[TDecl])(acc Str) Str =
+  match pending with
+    | _ :: _ -> flushPendingFnsNonEmpty (listReverse pending) acc
+    | _ -> acc
+
+-- Non-empty branch of `flushPendingFns`. Takes the **already-reversed**
+-- (source-order) fn list and dispatches on its length-shape:
+-- singleton goes through `showDecl` (plain `let`), 2+ goes through
+-- `showFnGroup` (let rec ... and ...).
+fn flushPendingFnsNonEmpty(fns List[TDecl])(acc Str) Str =
+  match fns with
+    | d :: rest ->
+      let block =
+        match rest with
+          | _ :: _ -> showFnGroup fns
+          | _ -> showDecl d
+      in
+      appendBlockStr block acc
+    | _ -> acc
+
+-- Blank-line-joined append: glue `block` onto `acc` with a `"\n\n"`
+-- separator if `acc` is non-empty, else just return `block`. Same
+-- shape as `joinBlocks`'s fold body, just extracted for the
+-- incremental append pattern `splitAndShowLoop` needs.
+fn appendBlockStr(block Str)(acc Str) Str =
+  if strLen acc == 0 then block else strConcat acc (strConcat "\n\n" block)
 
 -- ---------- main --------------------------------------------------------
 
@@ -669,15 +907,20 @@ fn main() =
   let pairMk = MkCtor "MkPair" pairArgs in
   let pairCtors = [pairMk] in
   let d10 = TDType "Pair" ["A" "B"] pairCtors in
-  -- Phase 7.8d: wrap the ten decls in a `Module` value and render via
-  -- `showModule`, which prepends the `module Examples.Generated`
+  -- Phase 7.8e: an extra zero-param `main` fn exercising the
+  -- `[<EntryPoint>]` emission path. The body is a simple `print "hello"`
+  -- TEApp — enough to prove that the body still routes through
+  -- `showTExpr` and that the `\n    0` exit-code trailer lands after it.
+  let d11 = TDFn "main" [] (TEApp (TEVar "print") (TEStr "hello")) in
+  -- Phase 7.8d/e: wrap the eleven decls in a `Module` value and render
+  -- via `showModule`, which prepends the `module Examples.Generated`
   -- header and the F# stdlib prelude block before walking the decls.
-  -- Types come before fns in the list so the output mirrors the
-  -- host's `emitModule` layout (types first, prelude next, fns last).
-  -- This slice doesn't bother splitting the decl list by kind inside
-  -- `showModule`; it just trusts the caller to order them correctly.
-  -- Phase 7.8e+ may add a kind-aware sort once mutual-recursion
-  -- grouping lands.
-  let allDecls = [d8 d9 d10 d1 d2 d3 d4 d5 d6 d7] in
+  -- Types come before fns in the list so the output mirrors the host's
+  -- `emitModule` layout (types first, prelude next, non-main fns
+  -- grouped into a `let rec ... and ...` block, main fn last with
+  -- `[<EntryPoint>]`). Phase 7.8e's `splitAndShowDecls` walker handles
+  -- the grouping + main splitting automatically — the caller still
+  -- just passes a flat decl list in the desired source order.
+  let allDecls = [d8 d9 d10 d1 d2 d3 d4 d5 d6 d7 d11] in
   let m = MkModule "Examples.Generated" allDecls in
   printfn (showModule m)
