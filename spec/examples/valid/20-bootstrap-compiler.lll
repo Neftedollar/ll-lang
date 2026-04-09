@@ -903,17 +903,32 @@ fn parseLam(toks List[Token]) =
   | _ -> (EInt 0, toks)
 
 -- `if c then a else b`. Each of the three sub-expressions is parsed via
--- the full parseExpr so nested `if`s work naturally.
+-- the full parseExpr so nested `if`s work naturally. Phase 7.9q adds
+-- newline tolerance around `then`/`else`: the bootstrap's own source
+-- uses the multi-line form
+--   if c < 65 then false
+--   else if c > 90 then false
+--   else true
+-- which tokenises as `... TNewline TKwElse ...` between arms. Before
+-- 7.9q the `TKwElse :: r` match arm missed the leading `TNewline` and
+-- fell through, so `parseExpr` was called on `TNewline :: TKwElse :: ...`,
+-- bottomed out in `parseAtom`'s wildcard as `(EInt 0, toks)`, and the
+-- stray `TKwElse` was left on the stream — which then terminated
+-- `parseDecls` at the next iteration and silently dropped every
+-- remaining decl. Mirrors the host parser's `skipNewlines c` calls
+-- around the same `KwThen`/`KwElse` sites in `Parser.fs`.
 fn parseIf(toks List[Token]) =
   let (c, rest) = parseExpr toks in
-  let rest2 = match rest with
-    | TKwThen :: r -> r
-    | _ -> rest
+  let rest1 = skipNewlines rest in
+  let rest2 = match rest1 with
+    | TKwThen :: r -> skipNewlines r
+    | _ -> rest1
   in
   let (a, rest3) = parseExpr rest2 in
-  let rest4 = match rest3 with
-    | TKwElse :: r -> r
-    | _ -> rest3
+  let rest3a = skipNewlines rest3 in
+  let rest4 = match rest3a with
+    | TKwElse :: r -> skipNewlines r
+    | _ -> rest3a
   in
   let (b, rest5) = parseExpr rest4 in
   (EIf c a b, rest5)
