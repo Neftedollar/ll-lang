@@ -347,14 +347,29 @@ fn isIdCont(c Char) Bool =
 
 -- ---------- Lexer --------------------------------------------------------
 
--- Greedy take/drop while predicate, shared shape with every earlier slice.
-fn takeWhilePred(p)(cs List[Char]) List[Char] =
-  | c :: rest -> if p c then listAppend [c] (takeWhilePred p rest) else []
-  | _ -> []
+-- Greedy take/drop while predicate. Phase 7.9s: inlined into four
+-- monomorphic helpers (one per predicate) to sidestep the host HM's
+-- refusal to apply a rigid type variable to an argument. Each fn has
+-- exactly one typed param, so no untyped-param ambiguity remains.
+fn takeIdCont(cs List[Char]) List[Char] =
+  match cs with
+    | c :: rest -> if isIdCont c then listAppend [c] (takeIdCont rest) else []
+    | _ -> []
 
-fn dropWhilePred(p)(cs List[Char]) List[Char] =
-  | c :: rest -> if p c then dropWhilePred p rest else cs
-  | _ -> []
+fn dropIdCont(cs List[Char]) List[Char] =
+  match cs with
+    | c :: rest -> if isIdCont c then dropIdCont rest else cs
+    | _ -> []
+
+fn takeDigit(cs List[Char]) List[Char] =
+  match cs with
+    | c :: rest -> if charIsDigit c then listAppend [c] (takeDigit rest) else []
+    | _ -> []
+
+fn dropDigit(cs List[Char]) List[Char] =
+  match cs with
+    | c :: rest -> if charIsDigit c then dropDigit rest else cs
+    | _ -> []
 
 -- Unwrap `strToInt` into a raw Int; the lexer only calls this on strings
 -- that are already all-digits, so the `None` branch is defensive.
@@ -394,14 +409,14 @@ fn classifyIdent(s Str) Token =
         | _ -> TLower s
 
 fn lexId(cs List[Char]) List[Token] =
-  let idChars = takeWhilePred isIdCont cs in
-  let leftover = dropWhilePred isIdCont cs in
+  let idChars = takeIdCont cs in
+  let leftover = dropIdCont cs in
   let tok = classifyIdent (strFromChars idChars) in
   listAppend [tok] (lexChars leftover)
 
 fn lexNum(cs List[Char]) List[Token] =
-  let digits = takeWhilePred charIsDigit cs in
-  let leftover = dropWhilePred charIsDigit cs in
+  let digits = takeDigit cs in
+  let leftover = dropDigit cs in
   listAppend [TInt (parseIntStr (strFromChars digits))] (lexChars leftover)
 
 -- Collect a string literal body: the opening `"` has already been
