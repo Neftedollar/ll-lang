@@ -529,3 +529,62 @@ let ``20-bootstrap-compiler.lll accepts char escape sequences in fn body (Phase 
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll accepts constructor patterns in match arms (Phase 7.9l)`` () =
+    // Phase 7.9l: before the fix, the bootstrap compiler's
+    // `parsePrimaryPat` had no `TUpper`-headed arm, so constructor
+    // patterns like `| Some n -> ...` and `| None -> ...` fell through
+    // to the `PWild` catch-all, losing the constructor name entirely
+    // and effectively turning every ctor arm into a wildcard.
+    //
+    // The fix adds a new `PCon Str List[Pat]` variant to the `Pat`
+    // type, a `TUpper name :: rest -> parseCtorArgs name rest` arm in
+    // `parsePrimaryPat`, helper fns `parseCtorArgs` / `parsePatArgs` /
+    // `parsePatArgsCons` that eagerly consume a sequence of atomic
+    // sub-patterns (var / wildcard / int / empty-list) until hitting a
+    // non-pattern-starter token, and threads `PCon` through
+    // `showPat` / `patBinders` / `patIsCatchAll` / `emitPat`. F#
+    // discriminated-union patterns use the shape `(Name arg1 arg2)`,
+    // same bracketing as the bootstrap's existing `PCons` emission.
+    //
+    // Fixture `20i-bootstrap-input-ctor-pat.lll` exercises both
+    // `Some n` (ctor with one arg binder) and `None` (nullary ctor)
+    // in a `match m with | Some n -> n | None -> 0` expression.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let ctorPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20i-bootstrap-input-ctor-pat.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists ctorPath,  $"missing fixture: {ctorPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(ctorPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001 TypeMismatch error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO error output; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec unwrap" || stdout.Contains "let unwrap",
+            $"expected emitted F# to contain `let unwrap` or `let rec unwrap`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "| (Some n) ->",
+            $"expected emitted F# to contain `| (Some n) ->`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "| (None) ->",
+            $"expected emitted F# to contain `| (None) ->`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
