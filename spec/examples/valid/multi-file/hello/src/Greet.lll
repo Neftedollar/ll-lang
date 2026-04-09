@@ -1,0 +1,3 @@
+module Hello.Greet
+
+export fn greet(name Str) Str = "Hello, " ++ name ++ "!"

@@ -498,5 +498,84 @@ let private emitModule (tm: TypedModule) : string =
 /// Emit a fully-inferred module as F# source.
 let emit (tm: TypedModule) : string = emitModule tm
 
+/// Assemble a combined prelude across multiple modules (union of type names).
+let private assembleCombinedPrelude (tms: TypedModule list) : string =
+    let typeNames =
+        tms
+        |> List.collect (fun tm ->
+            tm.Decls |> List.choose (fun (d, _) ->
+                match d with TDType(n, _, _) -> Some n | _ -> None))
+        |> Set.ofList
+    let hasMaybe  = Set.contains "Maybe"  typeNames
+    let hasResult = Set.contains "Result" typeNames
+    let sections =
+        [ yield fsharpPreludeCore
+          if hasMaybe  then yield fsharpPreludeMaybe
+          if hasResult then yield fsharpPreludeResult
+          yield preludeEnd ]
+    String.concat "\n" sections
+
+/// Emit a single module body WITHOUT its own prelude block.
+/// Used in project builds where the prelude is emitted once at the top.
+let private emitModuleNoPrelude (tm: TypedModule) : string =
+    let header = "module " + String.concat "." tm.Path
+    let isTypeDecl (d: TypedDecl) =
+        match d with TDType _ -> true | _ -> false
+    let typeDecls  = tm.Decls |> List.filter (fun (d, _) -> isTypeDecl d)
+    let otherDecls = tm.Decls |> List.filter (fun (d, _) -> not (isTypeDecl d))
+    let typeStr =
+        typeDecls
+        |> List.map (fun (d, _) -> emitDecl d)
+        |> List.filter (fun s -> s <> "")
+        |> String.concat "\n\n"
+    let otherStr =
+        groupDecls otherDecls
+        |> List.map emitDeclGroup
+        |> List.filter (fun s -> s <> "")
+        |> String.concat "\n\n"
+    let parts =
+        [ header
+          (if typeStr  = "" then "" else typeStr)
+          (if otherStr = "" then "" else otherStr) ]
+        |> List.filter (fun s -> s <> "")
+    String.concat "\n\n" parts
+
+/// Emit multiple modules as a single F# source string.
+/// Prelude is emitted once (before the first module that needs it).
+let emitProjectModules (tms: TypedModule list) : string =
+    match tms with
+    | [] -> ""
+    | _ ->
+        let prelude = assembleCombinedPrelude tms
+        // First module gets the prelude injected after its type declarations.
+        // Remaining modules are emitted without prelude.
+        let first = List.head tms
+        let rest  = List.tail tms
+
+        let firstHeader = "module " + String.concat "." first.Path
+        let isTypeDecl (d: TypedDecl) = match d with TDType _ -> true | _ -> false
+        let firstTypeDecls  = first.Decls |> List.filter (fun (d, _) -> isTypeDecl d)
+        let firstOtherDecls = first.Decls |> List.filter (fun (d, _) -> not (isTypeDecl d))
+        let firstTypeStr =
+            firstTypeDecls
+            |> List.map (fun (d, _) -> emitDecl d)
+            |> List.filter (fun s -> s <> "")
+            |> String.concat "\n\n"
+        let firstOtherStr =
+            groupDecls firstOtherDecls
+            |> List.map emitDeclGroup
+            |> List.filter (fun s -> s <> "")
+            |> String.concat "\n\n"
+        let firstParts =
+            [ firstHeader
+              (if firstTypeStr  = "" then "" else firstTypeStr)
+              prelude
+              (if firstOtherStr = "" then "" else firstOtherStr) ]
+            |> List.filter (fun s -> s <> "")
+        let firstStr = String.concat "\n\n" firstParts
+
+        let restStrs = rest |> List.map emitModuleNoPrelude
+        String.concat "\n\n" (firstStr :: restStrs)
+
 /// Expose the core F# prelude block as a public constant (for tests).
 let preludeBlock : string = fsharpPreludeCore

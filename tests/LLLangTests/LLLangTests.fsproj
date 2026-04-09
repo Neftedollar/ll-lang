@@ -35,5 +35,6 @@
     <Compile Include="HMInferRealTests.fs" />
     <Compile Include="CodegenRealTests.fs" />
     <Compile Include="BootstrapCompilerTests.fs" />
+    <Compile Include="ModuleSystemTests.fs" />
   </ItemGroup>
 </Project>
