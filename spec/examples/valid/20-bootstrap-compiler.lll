@@ -407,12 +407,28 @@ fn lexNum(cs List[Char]) List[Token] =
 -- Collect a string literal body: the opening `"` has already been
 -- consumed, now greedily take chars until the closing `"`. Returns
 -- (body-chars, leftover). Lifted from 14-exprparser-real.lll.
+--
+-- Phase 7.9m: detect `\` inside the body and delegate to
+-- `takeStrBodyEsc`, which consumes+decodes the next char via
+-- `decodeEscape` (reused from 7.9j). This lets `"say \"hi\"\n"`
+-- round-trip without the `\"` terminating the string prematurely.
 fn takeStrBody(cs List[Char]) =
   | c :: rest ->
     if c == '"' then ([], rest)
+    else if c == '\\' then takeStrBodyEsc rest
     else
       let (body, leftover) = takeStrBody rest in
       (c :: body, leftover)
+  | _ -> ([], [])
+
+-- Phase 7.9m: consume one escape inside a string body. The `\` has
+-- already been consumed by `takeStrBody`; `cs` points at the escape
+-- content char. Decode it via `decodeEscape`, then recurse into
+-- `takeStrBody` to keep collecting the rest of the body.
+fn takeStrBodyEsc(cs List[Char]) =
+  | esc :: rest ->
+    let (body, leftover) = takeStrBody rest in
+    (decodeEscape esc :: body, leftover)
   | _ -> ([], [])
 
 fn lexStr(cs List[Char]) List[Token] =
@@ -420,14 +436,17 @@ fn lexStr(cs List[Char]) List[Token] =
   listAppend [TStr (strFromChars body)] (lexChars leftover)
 
 -- Phase 7.9j: decode one escape-sequence content char. Supports the
--- four escapes needed for self-host: `\n` → newline, `\t` → tab,
--- `\\` → backslash, `\'` → single-quote. Unknown escapes pass
--- through raw (lenient — mirrors the catch-all in `lexChars`).
+-- escapes needed for self-host: `\n` → newline, `\t` → tab,
+-- `\\` → backslash, `\'` → single-quote. Phase 7.9m extends this
+-- with `\"` → double-quote for string-literal escape support.
+-- Unknown escapes pass through raw (lenient — mirrors the catch-all
+-- in `lexChars`).
 fn decodeEscape(c Char) Char =
   if c == 'n' then '\n'
   else if c == 't' then '\t'
   else if c == '\\' then '\\'
   else if c == '\'' then '\''
+  else if c == '"' then '"'
   else c
 
 -- Phase 7.9j: lex the tail of an escaped single-char literal
@@ -1849,11 +1868,34 @@ fn emitPatArgs(ps List[Pat]) Str =
 -- F# `int64` so every literal carries the `L` suffix.
 fn emitInt(n Int) Str = strConcat (intToStr n) "L"
 
--- `EStr s` -> `"<s>"` raw — the hardcoded test strings are simple
--- ASCII with no embedded quotes / backslashes, so the simplest
--- possible emission works. Same shortcut as 19-codegen-real.lll's
--- `showStr`; a real implementation would escape `\"` / `\\` / `\n`.
-fn emitStr(s Str) Str = strConcat "\"" (strConcat s "\"")
+-- Phase 7.9m: re-encode a single Char as it would appear inside an
+-- F# string literal body. Symmetric to `decodeEscape` on the lexer
+-- side: `\n` → `\n`, `\t` → `\t`, `\\` → `\\`, `\"` → `\"`. Other
+-- chars pass through verbatim wrapped via `strFromChars`. Mirrors
+-- `emitChar` but for string-context escape set (`\"` instead of
+-- `\'`), so the emitted F# source is valid after the lexer decoded
+-- any escape sequences in the original ll-lang source.
+fn encodeStrEscape(c Char) Str =
+  if c == '\n' then "\\n"
+  else if c == '\t' then "\\t"
+  else if c == '\\' then "\\\\"
+  else if c == '"' then "\\\""
+  else strFromChars [c]
+
+-- Phase 7.9m: walk a list of decoded chars and re-encode each one
+-- via `encodeStrEscape`, concatenating the results. Uses `listFold`
+-- for linearity (same pattern as `showParams`, `showCtors`, etc).
+fn emitStrBody(cs List[Char]) Str =
+  listFold (\acc c. strConcat acc (encodeStrEscape c)) "" cs
+
+-- Phase 7.9m: `EStr s` -> `"<re-encoded s>"`. Before 7.9m this just
+-- wrapped `s` raw in quotes, which was fine while the lexer passed
+-- `\n` through literally. Now the lexer decodes escapes to raw
+-- bytes, so the emitter must invert the mapping — otherwise a raw
+-- newline gets injected into the F# source mid-literal. Round-trip:
+-- `"a\nb"` -> body chars `[a, <LF>, b]` -> emitted `"a\nb"`.
+fn emitStr(s Str) Str =
+  strConcat "\"" (strConcat (emitStrBody (strChars s)) "\"")
 
 -- Phase 7.9j: re-encode a `Char` as an F#-compatible char literal.
 -- The lexer decoded `'\n'` / `'\\'` / `'\''` / `'\t'` into raw
