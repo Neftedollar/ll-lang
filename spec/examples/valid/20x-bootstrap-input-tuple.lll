@@ -1,0 +1,3 @@
+module Examples.Clean
+fn pair() = (1, 2)
+fn main() = pair ()

@@ -1405,3 +1405,67 @@ let ``20-bootstrap-compiler.lll desugars clause-sugar fn bodies (Phase 7.10g)`` 
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll emits tuple literal expressions (Phase 7.10q)`` () =
+    // Phase 7.10q: before this slice, the bootstrap compiler had no
+    // `TComma` token, no `ETuple2` AST node, and `parseAtom` only handled
+    // `(e)` paren-grouping (not `(e1, e2)` tuples). Every tuple site in
+    // the bootstrap's own source — the `(value, leftover)` pairs returned
+    // by every parseX helper — was therefore malformed: `,` was silently
+    // dropped by the lexer, so `(a, b)` tokenised as `TLParen a b TRParen`
+    // and `parseAtom` just returned `a` with `b TRParen` still on the
+    // stream.
+    //
+    // The fix has four sites:
+    //   1. Add `TComma` to the `Token` ADT.
+    //   2. Emit `TComma` in `lexChars` for `,`.
+    //   3. Add `ETuple2 Expr Expr` to the `Expr` ADT.
+    //   4. In `parseAtom`, after parsing the first sub-expression inside
+    //      `(`, call `parseAtomParenTail` which checks for a `TComma`:
+    //      if present, parse the second element and return `ETuple2`;
+    //      otherwise return the plain paren-grouped expression.
+    //   5. Update `parseLetIn`'s tuple-destructuring arm to use
+    //      `TComma` between the two var names.
+    //   6. Thread `ETuple2` through `showExpr` / `checkExpr` /
+    //      `inferExprType` / `typeCheck` / `emitExpr`.
+    //
+    // Fixture `20x-bootstrap-input-tuple.lll` defines `fn pair() = (1, 2)`
+    // and calls it from `main`. Pre-fix, the `,` was dropped so the
+    // bootstrap parsed `(1 2)` as application `(EApp (EInt 1) (EInt 2))`
+    // and emitted `(1L 2L)` — malformed F#. Post-fix, the emitted F#
+    // contains `(1L, 2L)`.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let tuplePath =
+        Path.Combine(repoRoot, "spec/examples/valid/20x-bootstrap-input-tuple.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath,  $"missing fixture: {inputPath}")
+    Assert.True(File.Exists tuplePath,  $"missing fixture: {tuplePath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(tuplePath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO `error`; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let pair" || stdout.Contains "let rec pair",
+            $"expected emitted F# to contain `let pair` or `let rec pair`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "(1L, 2L)",
+            $"expected emitted F# to contain `(1L, 2L)` (tuple literal); stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)

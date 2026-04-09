@@ -225,6 +225,7 @@ type Token =
   | TMinus
   | TStar
   | TSlash
+  | TComma
   | TNewline
   | TEnd
 
@@ -301,6 +302,11 @@ type Expr =
   | EMatch Expr List[Pat] List[Expr]
   | ENil
   | ECons Expr Expr
+  -- Phase 7.10q: 2-element tuple literal `(e1, e2)`. The comma is now a
+  -- real token (`TComma`); `parseAtom` emits `ETuple2` when it sees
+  -- `(e1 , e2)`. Used for returning `(value, leftover)` pairs from
+  -- every parseX helper. Emitted as `(<e1>, <e2>)` in F#.
+  | ETuple2 Expr Expr
 
 -- Phase 7.5a: `let name = expr` at module level. Lives alongside type and
 -- fn decls inside the top-level `Decl` sum.
@@ -594,6 +600,7 @@ fn lexChars(cs List[Char]) List[Token] =
     else if c == '-' then lexMinusOrArrow rest
     else if c == '*' then listAppend [TStar] (lexChars rest)
     else if c == '/' then listAppend [TSlash] (lexChars rest)
+    else if c == ',' then listAppend [TComma] (lexChars rest)
     else lexChars rest
   | _ -> [TEnd]
 
@@ -1010,15 +1017,15 @@ fn skipTKwInNewlines(toks List[Token]) List[Token] =
 -- and further let-in chains) works on either side.
 fn parseLetIn(toks List[Token]) =
   -- Phase 7.10h: 2-element tuple-destructuring let form
-  -- `let (a, b) = rhs in body`. Commas are lexed as nothing (the
-  -- catch-all in `lexChars` silently skips `,`), so the opening tuple
-  -- pattern tokenises as `TLParen :: TLower a :: TLower b :: TRParen ::
+  -- `let (a, b) = rhs in body`. Phase 7.10q: now that commas are a real
+  -- TComma token (the lexer emits them), the opening tuple pattern
+  -- tokenises as `TLParen :: TLower a :: TComma :: TLower b :: TRParen ::
   -- TEq :: rhs ...`. Without this arm, `parseLetIn` fell through to
   -- the wildcard, returned `(EInt 0, toks)` without consuming, and the
   -- outer parseArms desynced on the leftover `TLParen` — silently
   -- dropping every decl after the offending fn. First occurrence is
   -- `takeStrBody` at line 433.
-  | TLParen :: TLower a :: TLower b :: TRParen :: TEq :: rest ->
+  | TLParen :: TLower a :: TComma :: TLower b :: TRParen :: TEq :: rest ->
     let rest0 = skipNewlines rest in
     let (e1, rest2) = parseExpr rest0 in
     let rest3 = skipTKwInNewlines rest2 in
@@ -1343,10 +1350,31 @@ fn parseAtom(toks List[Token]) =
   | TLBrack :: rest -> parseListLit rest
   | TLParen :: rest ->
     let (e, rest2) = parseExpr rest in
-    match rest2 with
-      | TRParen :: rest3 -> (e, rest3)
-      | _ -> (e, rest2)
+    parseAtomParenTail e rest2
   | _ -> (EInt 0, toks)
+
+-- Phase 7.10q: after parsing the second element of a `(e1, e2)` tuple,
+-- close the tuple by consuming the mandatory `)`. Returns the finished
+-- `ETuple2` node. Extracted so the `TComma` arm of `parseAtomParenTail`
+-- stays one level deep.
+fn parseAtomTupleTail(e1 Expr)(e2 Expr)(toks List[Token]) =
+  match toks with
+    | TRParen :: rest -> (ETuple2 e1 e2, rest)
+    | _ -> (ETuple2 e1 e2, toks)
+
+-- Phase 7.10q: after parsing the first sub-expression inside `(`,
+-- decide whether this is a plain grouping `(e)` or a tuple `(e1, e2)`.
+-- `TComma` → parse second element then close via `parseAtomTupleTail`.
+-- `TRParen` → plain grouping, return `e`.
+-- Anything else → return `e` without consuming.
+fn parseAtomParenTail(e Expr)(toks List[Token]) =
+  match toks with
+    | TComma :: rest ->
+      let rest2 = skipNewlines rest in
+      let (e2, rest3) = parseExpr rest2 in
+      parseAtomTupleTail e e2 rest3
+    | TRParen :: rest -> (e, rest)
+    | _ -> (e, toks)
 
 -- Phase 7.10a: parse a list literal body (after `[` is consumed).
 -- Reads atoms until `TRBrack`, folding right-associatively into
@@ -1502,6 +1530,7 @@ fn showExpr(e Expr) Str =
     strConcat (strConcat head (showArms pats bodies)) ")"
   | ENil -> "[]"
   | ECons h t -> strConcat (strConcat (strConcat (strConcat "(" (showExpr h)) " :: ") (showExpr t)) ")"
+  | ETuple2 a b -> strConcat "(" (strConcat (showExpr a) (strConcat ", " (strConcat (showExpr b) ")")))
 
 fn showFnDecl(d FnDecl) Str =
   | MkFn name prms ret body ->
@@ -1635,6 +1664,7 @@ fn checkExpr(env Env)(e Expr) List[Str] =
     listAppend scrutErrs armErrs
   | ENil -> []
   | ECons h t -> listAppend (checkExpr env h) (checkExpr env t)
+  | ETuple2 a b -> listAppend (checkExpr env a) (checkExpr env b)
 
 -- Walk the two parallel arm lists in lockstep. For each arm, extend
 -- the scrutinee env with every binder the pattern introduces, then
@@ -1953,6 +1983,7 @@ fn inferExprType(env TypeEnv)(e Expr) TypeExpr =
   | EIf _ thn _ -> inferExprType env thn
   | ENil -> TyName "List"
   | ECons _ _ -> TyName "List"
+  | ETuple2 a _ -> inferExprType env a
   | _ -> TyVar "?"
 
 -- Emit a single `E001 TypeMismatch <l> vs <r>` string built from the
@@ -2047,6 +2078,7 @@ fn typeCheck(env TypeEnv)(e Expr) List[Str] =
     listAppend sErrs bodiesErrs
   | ENil -> []
   | ECons h t -> listAppend (typeCheck env h) (typeCheck env t)
+  | ETuple2 a b -> listAppend (typeCheck env a) (typeCheck env b)
 
 -- Walk every arm body in a match expression under the same outer env
 -- (pattern binders are NOT re-introduced in this slice — the HM pass
@@ -2250,6 +2282,8 @@ fn emitExpr(e Expr) Str =
   | EMatch scr ps bs -> emitMatchExpr scr ps bs
   | ENil -> "[]"
   | ECons h t -> strConcat "(" (strConcat (emitExpr h) (strConcat " :: " (strConcat (emitExpr t) ")")))
+  | ETuple2 a b ->
+    strConcat "(" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) ")")))
 
 -- Shared shape for `+ - * /` arms: `(<l><op><r>)` with unconditional
 -- parens (mirrors the host's binaryOp arm in `Codegen.fs`). Pulls the
