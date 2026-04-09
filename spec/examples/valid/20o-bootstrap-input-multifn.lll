@@ -1,0 +1,10 @@
+module Examples.Clean
+fn one(c Int) Int =
+  if c < 65 then 0
+  else if c > 90 then 0
+  else 1
+fn two() Int = 2
+fn three() Int = 3
+fn four() Int = 4
+fn five() Int = 5
+fn main() Int = one 0

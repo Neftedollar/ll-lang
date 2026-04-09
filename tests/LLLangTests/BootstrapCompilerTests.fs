@@ -942,3 +942,73 @@ let ``20-bootstrap-compiler.lll resolves charToInt via stdlibNames (Phase 7.9p)`
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll parses multi-line if-then-else and keeps emitting subsequent fns (Phase 7.9q)`` () =
+    // Phase 7.9q: before the fix, the bootstrap compiler's `parseIf`
+    // had no newline tolerance around `then`/`else`. A multi-line
+    // if form
+    //   if c < 65 then 0
+    //   else if c > 90 then 0
+    //   else 1
+    // tokenised as `... TInt 0 TNewline TKwElse ...`. `parseIf`
+    // parsed the condition + `then` branch, then its `TKwElse :: r`
+    // match arm missed the leading `TNewline` and fell through,
+    // so `parseExpr` was called on `TNewline :: TKwElse :: ...`.
+    // `parseAtom`'s wildcard returned `(EInt 0, toks)` without
+    // consuming, and `parseIf` returned `EIf cond thenE (EInt 0)`
+    // with the stray `TKwElse` still on the stream. Back in
+    // `parseDecls` (after the enclosing `parseFnDecl` returned),
+    // `skipNewlines` ate the newline but the head was now `TKwElse`,
+    // which matched no decl arm — the wildcard `| _ -> []` fired
+    // and **every remaining decl was silently dropped**.
+    //
+    // Discovered via fixpoint probe on its own source: after 7.9p
+    // cleared the last E002, the probe output jumped from 26 bytes
+    // to ~2253 bytes but halted mid-emission after the FIRST non-
+    // main fn (`isUpperChar`) — whose `else if` body is the first
+    // multi-line if in the bootstrap. Surface symptom looked like
+    // a codegen walker halt; root cause was the parser truncating
+    // the decl list.
+    //
+    // Fix: `parseIf` calls `skipNewlines` before checking for
+    // `TKwThen` / `TKwElse`, mirroring the host parser's
+    // `skipNewlines c` calls at the same positions. Also
+    // `skipNewlines` after matching them, so `then\n body` and
+    // `else\n body` layouts both parse cleanly.
+    //
+    // Fixture `20o-bootstrap-input-multifn.lll` exercises a single
+    // multi-line `if-then-else-if-then-else` body followed by four
+    // more non-main fns. Before the fix, only the first fn emits
+    // (as a singleton `let`, not `let rec`) and everything after
+    // is dropped. After the fix, all five non-main fns collapse
+    // into a `let rec one ... and two ... and five ...` block
+    // and the `[<EntryPoint>]` main wrapper is emitted.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let multifnPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20o-bootstrap-input-multifn.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath,   $"missing fixture: {inputPath}")
+    Assert.True(File.Exists multifnPath, $"missing fixture: {multifnPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(multifnPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.True(
+            stdout.Contains "let rec one" || stdout.Contains "let one",
+            $"expected emitted F# to contain `let one` or `let rec one`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "and five" || stdout.Contains "let five",
+            $"expected emitted F# to contain `let five` or `and five`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "and main" || stdout.Contains "let main",
+            $"expected emitted F# to contain `let main` or `and main`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
