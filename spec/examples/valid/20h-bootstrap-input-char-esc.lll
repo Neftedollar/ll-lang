@@ -1,0 +1,4 @@
+module Examples.Clean
+fn nl(n Int) Int = if '\n' == '\n' then n else 0
+fn bs(n Int) Int = if '\\' == '\\' then n else 0
+fn main() Int = nl 5
