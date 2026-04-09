@@ -1,0 +1,212 @@
+module Examples.CodegenReal
+
+-- Phase 7.8a: the first slice of **F# codegen written in ll-lang
+-- itself**. After Phase 7.7 closed out the HM middle of self-hosting
+-- (18-hminfer-real.lll: TypeExpr / Subst / unify / Env / inferExpr
+-- over EInt / EStr / EBool / EVar / EAdd / EApp / ELam / ELet / EIf),
+-- this file starts the **back end**: a tiny `TExpr` / `TDecl` AST —
+-- a stand-in for the host's TypedAST — plus a `showTExpr` family of
+-- walkers that emit F# source strings, mirroring the F# host's
+-- `src/LLLangCompiler/Codegen.fs` `emitExpr` / `emitDecl`.
+--
+-- After this slice lands, all four compiler stages have ll-lang
+-- representations (lex / parse / elaborate / HM-infer / codegen), so
+-- the next umbrella (`bootstrap/compiler.lll`) can stitch them into a
+-- single end-to-end program.
+--
+-- Scope ("slice A" — keep tight):
+--   * `TExpr` = TEInt / TEStr / TEVar / TEAdd / TEApp / TELet.
+--     No TELam, no TEIf, no TEMatch, no TETagged, no TEList — those
+--     land in slice B. This is just enough to render the four hard-
+--     coded test fns below.
+--   * `TDecl` = TDFn Str List[Str] TExpr (name + params + body). No
+--     TDType, no TDImpl, no TDLet, no `main` entry-point handling.
+--     The host's `Codegen.fs` grows a `[<EntryPoint>]` preamble for
+--     `fn main()` decls; this slice doesn't model that either.
+--   * Emission mirrors the host's offside-safe inline forms:
+--       TEInt n        -> "<n>L"         (F# int64 literal)
+--       TEStr s        -> "\"<s>\""      (no escaping — test strings
+--                                         are simple ASCII)
+--       TEVar x        -> "<x>"
+--       TEAdd a b      -> "(<a> + <b>)"
+--       TEApp f x      -> "(<f> <x>)"
+--       TELet n e1 e2  -> "(let <n> = <e1> in <e2>)"
+--     `TDFn` empty-params -> `let <name> = <body>`;
+--     non-empty         -> `let <name> p1 p2 ... = <body>`.
+--
+-- Out of scope (later slices in the Phase 7.8 umbrella):
+--   * F# prelude block (the stdlib shim in `Codegen.fs` `fsharpPrelude*`)
+--   * Multi-line match emission, mutual-recursion grouping (`let rec`
+--     ... `and`), tagged types, `[<EntryPoint>]` on main
+--   * Real `TypeScheme`-carrying TypedAST — this slice just walks a
+--     plain `TExpr`/`TDecl` without touching type info
+--   * Consuming the output of `18-hminfer-real.lll` — integration is
+--     a separate tick after both sides stabilise
+--   * Keyword-safe ident rewriting (`safeIdent` in Codegen.fs) —
+--     every hardcoded test name is already a non-keyword
+--
+-- Hardcoded test plan in `main`: four `TDFn`s, one per supported TExpr
+-- shape except `TEVar` which appears as sub-expressions inside the
+-- others:
+--   TDFn "inc"     ["x"] (TEAdd (TEVar "x") (TEInt 1))
+--   TDFn "greet"   []    (TEStr "hello")
+--   TDFn "addOne"  ["x"] (TELet "y" (TEAdd (TEVar "x") (TEInt 1)) (TEVar "y"))
+--   TDFn "callInc" ["x"] (TEApp (TEVar "inc") (TEVar "x"))
+--
+-- Expected stdout (one F# source line per `TDFn`, joined with "\n"
+-- via `joinLines` so `fn main` has a single-expression body):
+--   let inc x = (x + 1L)
+--   let greet = "hello"
+--   let addOne x = (let y = (x + 1L) in y)
+--   let callInc x = (inc x)
+
+-- ---------- Maybe -------------------------------------------------------
+
+-- Local `Maybe` kept only so the codegen prelude wires the Maybe-
+-- dependent stdlib helpers (same reason as `18-hminfer-real.lll`).
+-- Nothing in this file actually uses `Some` / `None` at runtime.
+type Maybe A = Some A | None
+
+-- ---------- TExpr -------------------------------------------------------
+
+-- Minimal typed-expression AST. Mirrors a tiny slice of the F# host's
+-- `LLLang.TypedAST.TypedExpr` minus every variant this slice doesn't
+-- emit. Each constructor is the `TE`-prefixed cousin of a surface
+-- `Expr` variant — the "T" in the name is a nod to the host's typed
+-- AST but carries no actual type info. Slice B grows the `TypeScheme`
+-- payload once the pipeline starts consuming real inferred output.
+type TExpr =
+  | TEInt Int
+  | TEStr Str
+  | TEVar Str
+  | TEAdd TExpr TExpr
+  | TEApp TExpr TExpr
+  | TELet Str TExpr TExpr
+
+-- ---------- TDecl -------------------------------------------------------
+
+-- Minimal typed declaration: a function with name, curried param
+-- names (as a `List[Str]` — no type annotations yet), and a single
+-- `TExpr` body. The host's `TypedDecl.TDFn` carries a `TypedFnSig`
+-- and a `TypeScheme`; this slice drops both. Slice B adds them back.
+type TDecl = TDFn Str List[Str] TExpr
+
+-- ---------- Expression emission -----------------------------------------
+
+-- Walk a `TExpr` and produce its F# source rendering. Mirrors the F#
+-- host's `emitExpr` in `src/LLLangCompiler/Codegen.fs` line 123 area.
+-- The arms stay shallow — every non-leaf recursive case is split into
+-- its own helper so `match` nesting never goes two levels deep. Same
+-- trick as `18-hminfer-real.lll`'s `unify` / `inferExpr` spines use.
+fn showTExpr(e TExpr) Str =
+  match e with
+    | TEInt n -> showInt n
+    | TEStr s -> showStr s
+    | TEVar x -> x
+    | TEAdd a b -> showAdd a b
+    | TEApp f a -> showApp f a
+    | TELet n e1 e2 -> showLet n e1 e2
+
+-- `TEInt n` -> `"<n>L"` (F# `int64` literal). Uses the stdlib's
+-- `intToStr` builtin and suffixes `L` because ll-lang's `Int` maps to
+-- F# `int64` in the host codegen.
+fn showInt(n Int) Str =
+  strConcat (intToStr n) "L"
+
+-- `TEStr s` -> `"\"<s>\""` (raw, no escape handling). The hardcoded
+-- test strings below (`"hello"`) contain no embedded quotes or
+-- backslashes, so the simplest possible emission works. Slice B adds
+-- real escape handling when user-authored strings start appearing.
+fn showStr(s Str) Str =
+  strConcat "\"" (strConcat s "\"")
+
+-- `TEAdd a b` -> `"(<a> + <b>)"`. Parens are unconditional — mirrors
+-- the host's `emitExpr` `binaryOp` arm which also always parenthesises
+-- to dodge F# operator-precedence ambiguity.
+fn showAdd(a TExpr)(b TExpr) Str =
+  strConcat "(" (strConcat (showTExpr a) (strConcat " + " (strConcat (showTExpr b) ")")))
+
+-- `TEApp f a` -> `"(<f> <a>)"`. Host's `emitExpr` wraps every
+-- application in parens too, for the same reason — curried apps are
+-- left-associative in F# but left-leaning chains like `f a b c` would
+-- need extra context tracking to drop them safely. Parens are free.
+fn showApp(f TExpr)(a TExpr) Str =
+  strConcat "(" (strConcat (showTExpr f) (strConcat " " (strConcat (showTExpr a) ")")))
+
+-- `TELet n e1 e2` -> `"(let <n> = <e1> in <e2>)"` — the host's
+-- offside-safe inline form from `Codegen.fs` line 162 area. A
+-- multi-line let-in would need indentation tracking that this slice
+-- doesn't bother with; inline form costs long lines but works in any
+-- expression position.
+fn showLet(n Str)(e1 TExpr)(e2 TExpr) Str =
+  strConcat "(let " (strConcat n (strConcat " = " (strConcat (showTExpr e1) (strConcat " in " (strConcat (showTExpr e2) ")")))))
+
+-- ---------- Parameter-list emission -------------------------------------
+
+-- Render a `List[Str]` of param names as space-separated idents. Used
+-- by `showDecl` for the non-empty-param branch. Empty list returns the
+-- empty string; `showDecl`'s own match keeps the empty case out of the
+-- caller path anyway but defending here costs nothing.
+fn showParams(ps List[Str]) Str =
+  match ps with
+    | p :: rest -> showParamsTail p rest
+    | _ -> ""
+
+-- Tail-helper: we've already consumed one head, now glue the rest on
+-- with single-space separators. Split out of `showParams` so the outer
+-- function's `match` stays one level deep (same trick as the rest of
+-- the file).
+fn showParamsTail(first Str)(rest List[Str]) Str =
+  match rest with
+    | p :: more -> strConcat first (strConcat " " (showParamsTail p more))
+    | _ -> first
+
+-- ---------- Declaration emission ----------------------------------------
+
+-- Walk a `TDecl` and produce its F# source rendering. Mirrors the F#
+-- host's `emitDecl` `TDFn` arm in `src/LLLangCompiler/Codegen.fs` line
+-- 268 area, minus the mutual-recursion grouping (`let rec ... and ...`)
+-- and the `main` entry-point special case. Zero-param fns get
+-- `let name = body`; non-zero-param fns get `let name p1 p2 ... =
+-- body`, same as the host — the difference matters because F# rejects
+-- `let greet () = "hello"` bindings with a stray `()` param that the
+-- host's empty-param-fn form doesn't emit.
+fn showDecl(d TDecl) Str =
+  match d with
+    | TDFn name ps body -> showFnDecl name ps body
+
+-- Helper: the zero-params branch drops the param segment entirely.
+-- Non-empty params get a leading space + `showParams`. Split from
+-- `showDecl` so the outer match stays shallow.
+fn showFnDecl(name Str)(ps List[Str])(body TExpr) Str =
+  match ps with
+    | _ :: _ ->
+      let paramStr = showParams ps in
+      strConcat "let " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
+    | _ ->
+      strConcat "let " (strConcat name (strConcat " = " (showTExpr body)))
+
+-- ---------- Line joiner -------------------------------------------------
+
+-- Fold a `List[Str]` of emitted lines into a single newline-joined
+-- string — same helper as `18-hminfer-real.lll`'s `joinLines`. Needed
+-- because `fn main` has a single-expression body and ll-lang has no
+-- statement sequencing, so all four emitted decls have to funnel into
+-- a single `printfn` argument.
+fn joinLines(xs List[Str]) Str =
+  listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n") s) "" xs
+
+-- ---------- main --------------------------------------------------------
+
+fn main() =
+  -- Four hardcoded `TDecl`s, each exercising one supported TExpr
+  -- shape. `inc` covers TEAdd + TEVar + TEInt; `greet` covers TEStr
+  -- and the empty-params branch; `addOne` covers TELet; `callInc`
+  -- covers TEApp. See the header block for the expected emission.
+  let d1 = TDFn "inc"     ["x"] (TEAdd (TEVar "x") (TEInt 1)) in
+  let d2 = TDFn "greet"   []    (TEStr "hello") in
+  let d3 = TDFn "addOne"  ["x"] (TELet "y" (TEAdd (TEVar "x") (TEInt 1)) (TEVar "y")) in
+  let d4 = TDFn "callInc" ["x"] (TEApp (TEVar "inc") (TEVar "x")) in
+  let decls = [d1 d2 d3 d4] in
+  let lines = listMap showDecl decls in
+  printfn (joinLines lines)
