@@ -724,3 +724,72 @@ let ``20-bootstrap-compiler.lll accepts multi-line let-in and match arm layout (
         if File.Exists inputPath then File.Delete inputPath
         if File.Exists backupPath then
             File.Move(backupPath, inputPath)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll skips `--` line comments (Phase 7.9n)`` () =
+    // Phase 7.9n: before the fix, the bootstrap compiler's `lexChars`
+    // had zero handling for `--` line comments — it just hit the `-`
+    // arm, went into `lexMinusOrArrow`, emitted a `TMinus`, and kept
+    // lexing the comment body as tokens. Since `parseDecls` doesn't
+    // know what to do with a floating `TMinus` between decls, a
+    // single commented line desynced the stream and every subsequent
+    // decl was silently dropped (emitted F# contained only module
+    // header + prelude).
+    //
+    // Discovered via fixpoint probe: the bootstrap compiler's own
+    // source (~190 lines of header comments before the first real
+    // decl) can't be read by itself without line-comment support,
+    // blocking Phase 7.10 fixpoint. A 3-line fixture
+    //   module Examples.Clean
+    //   -- comment
+    //   fn main() Int = 42
+    // produced empty output pre-fix.
+    //
+    // The fix extends `lexMinusOrArrow` into `lexMinusOrDashOrArrow`
+    // which peeks the char after `-`: if it's another `-`, hand off
+    // to `skipLineComment` which eats chars up to and including `\n`
+    // then recurses into `lexChars`; otherwise fall through to the
+    // existing `-> vs -` logic. Block comments `{- -}` and doc-comment
+    // markers remain deliberately out of scope.
+    //
+    // Fixture `20l-bootstrap-input-comments.lll` exercises three
+    // comment positions: full-line at top, trailing after a decl
+    // body (`fn greet() Str = "hi"  -- trailing`), and another
+    // full-line between decls.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let commentsPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20l-bootstrap-input-comments.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath,    $"missing fixture: {inputPath}")
+    Assert.True(File.Exists commentsPath, $"missing fixture: {commentsPath}")
+    File.Move(inputPath, backupPath)
+    File.Copy(commentsPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001 TypeMismatch error; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "error",
+            $"expected NO error output; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec greet" || stdout.Contains "let greet",
+            $"expected emitted F# to contain `let greet` or `let rec greet`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "and main" || stdout.Contains "let main",
+            $"expected emitted F# to contain `let main` or `and main`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "\"hi\"",
+            $"expected emitted F# to contain `\"hi\"` (greet body survived past trailing comment); stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath)
