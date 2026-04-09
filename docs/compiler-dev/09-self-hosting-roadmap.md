@@ -3820,3 +3820,169 @@ promotion (#6) in HM/typeCheck, which 7.9k deferred,
 or the unknown-ctor case visible in the `| ?` output
 above. A fresh probe after 7.9n will pick the
 definitive next step.
+
+### 2026-04 — Phase 7.9o: type decl layout (DONE)
+
+Fifteenth tick of **Phase 7.9**. The Phase 7.9n
+fixpoint probe had shown the `| ?` placeholder under
+`type Token =` — revealing that the `| ?` was not an
+"unknown ctor name" emission but a *real* parse
+failure. The bootstrap compiler's own `type Token`
+uses the multi-line form:
+
+```
+type Token =
+  | TKwModule
+  | TKwType
+  | TKwFn
+  | TKwExport
+  ...
+```
+
+and `parseTypeDecl` / `parseCtors` / `parseCtorsTail`
+had zero newline tolerance around the constructor
+list. Two compounding bugs:
+
+1. **No `skipNewlines` after `TEq`.** `parseTypeDecl`
+   passed `TNewline :: TBar :: TUpper "TKwModule" :: ...`
+   straight to `parseCtors`, which passed it to
+   `parseCtor`, whose `TUpper name :: rest` arm never
+   matched because the head was `TNewline`. Fell
+   through to the `MkCtor "?" []` catch-all.
+2. **No acceptance of optional leading `|`.** Even if
+   the newlines were stripped, the multi-line form
+   starts with `TBar` before the *first* ctor — and
+   `parseCtors` called `parseCtor` directly with no
+   `TBar`-eating step. Would have produced the same
+   `MkCtor "?" []` placeholder.
+
+The single-line form `type Maybe A = Some A | None`
+has NO leading `|`, so the pre-fix code happened to
+work for it (the 7.9l fixture and regression tests
+rely on this). Both forms must work.
+
+**The proof was a 10-line fixture:**
+
+```
+module Examples.Clean
+type Color =
+  | Red
+  | Green
+  | Blue
+fn label(c Color) Int =
+  match c with
+    | Red -> 1
+    | Green -> 2
+    | Blue -> 3
+fn main() Int = label Red
+```
+
+Pre-fix, `lllc run` on this file emitted a `type Color =`
+header followed by `    | ?` and stopped — every ctor
+became the `?` placeholder and `parseCtorsTail` never
+consumed more than one. Post-fix, all three ctors
+round-trip and the `label` match body walks them
+cleanly.
+
+**Changes in `20-bootstrap-compiler.lll`:**
+
+* `parseTypeDecl` (~line 693) — `TEq :: r -> r`
+  becomes `TEq :: r -> skipNewlines r`. The `| _ ->
+  rest2` fallback for headerless/error shapes stays
+  unchanged.
+* `parseCtors` (~line 714) — no longer passes `toks`
+  straight to `parseCtor`. Two-step strip: first
+  `skipNewlines` at the head, then match the leading
+  `TBar :: r` and `skipNewlines r` (or fall through
+  with the unchanged token list). The result feeds
+  `parseCtor` and `parseCtorsTail`.
+* `parseCtorsTail` (~line 718) — peeks at
+  `skipNewlines toks` instead of `toks` directly, so
+  inter-ctor newlines (`\n  | Green`) don't prematurely
+  terminate the list via the `| _ -> (acc, toks)`
+  fall-through. After consuming a `TBar`, also
+  `skipNewlines` before the next `parseCtor` call
+  so a line-wrapped ctor name parses. **Important:**
+  the fall-through still returns the *original* `toks`
+  (not the skipped one), so the caller
+  (`parseTypeDecl`) sees the inter-decl `TNewline`
+  that `parseDecls` needs as a decl-terminator.
+* New fixture `20m-bootstrap-input-type-layout.lll`
+  — 10 lines, exercises `type Color =\n  | Red\n
+  | Green\n  | Blue` and a `label` fn whose body is
+  a multi-line match over all three ctors. The
+  multi-line match already works since Phase
+  7.9.newlines, so only the type-decl path is
+  exercising new behavior.
+* New regression test in `BootstrapCompilerTests.fs`
+  follows the same 20a-backup / copy-fixture /
+  restore pattern as 7.9h–7.9n. Asserts (a) no
+  `E002` / `E001` / `error`, (b) the emitted output
+  does NOT contain `| ?` (the placeholder that
+  signals broken ctor parsing), (c) each of `| Red`
+  / `| Green` / `| Blue` (or `Red of` / etc.) is
+  present in the emitted F#, (d) `let rec label`
+  or `let label`, (e) `[<EntryPoint>]`.
+
+**Backward-compat with single-line form:**
+
+The fixes are strictly additive. `skipNewlines` over
+zero newlines is a no-op, and the optional
+`TBar :: r -> skipNewlines r` match doesn't fire on
+a single-line decl that starts with `TUpper name`
+(first-ctor name directly after `=`). The existing
+20b Maybe / 20i ctor-pat tests (which use the
+single-line form) still pass without modification.
+
+**Deliberately out of scope:**
+
+* **Dedicated error messages for malformed type
+  decls** — the `| _ -> (MkTypeDecl "?" [] [], toks)`
+  fall-through still silently emits a placeholder
+  instead of a real error. Fine for bootstrap; the
+  host F# compiler catches anything the bootstrap
+  lets slide.
+* **GADT / existential / record-like ctors** — the
+  bootstrap only needs nullary / positional sum-type
+  ctors to self-compile. `type Result A E = Ok A
+  | Err E` already works; `{ x: Int; y: Int }` and
+  `type Expr where ...` are out of scope forever.
+
+Tests: 413 → 414 (+1 for the multi-line type-decl
+regression test).
+
+**Fixpoint-probe confirmation:** post-fix, swapping
+`20a-bootstrap-input.lll` for the bootstrap compiler's
+own source and running `lllc run` produces a **26-byte
+stdout** containing `E002 UnboundVar charToInt`. This
+is a huge forward step — the parser now successfully
+consumes the *entire* bootstrap source (all
+`type Token | ... ` constructors, all multi-line
+helper fns, ~1800 lines of real ll-lang), reaches the
+elaborator's 7.9a error-reporter path, and the error
+list is short enough that it short-circuits the
+codegen pass. Pre-fix, the parser died at line ~200
+and emitted a 403-byte stub; post-fix, parsing
+completes and the next blocker is an **elaborator**
+issue, not a parser issue.
+
+**Surprise — the fix composed cleanly with 7.9l.**
+The 7.9l ctor-pattern parser (which uses
+`TUpper name :: rest -> parseCtorArgs name rest`)
+had no interaction with the type-decl ctor list —
+they share a `Ctor` type and a `parseCtor` function
+name but the parser flows are independent. The fix
+to `parseCtors` did not require any tweaks to the
+match-arm pattern parser.
+
+Next tick: **Phase 7.9p** — `charToInt` is the
+immediate blocker. Either add it to `stdlibNames`
+(one-line fix), OR — if the bootstrap source uses
+several more stdlib functions beyond `charToInt` —
+audit `20-bootstrap-compiler.lll` for all calls to
+functions not in `stdlibNames` and batch-seed them.
+A single `E002` is the fastest unblock, but given
+the bootstrap's complexity, more unbound-var errors
+are likely hiding just behind `charToInt`. The
+fixpoint probe after 7.9p should reveal the next
+layer.
