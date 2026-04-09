@@ -4664,3 +4664,117 @@ extension. Start with a printf-debug at
 `checkDecls` to find which fn's body owns the
 stray `s` reference.
 
+## Phase 7.10f — skipNewlines in parseArmBody
+
+**Slice:** the residual `E002 UnboundVar s`
+was not a scoping bug at all — it was a
+**parser-layer desync**. A multi-line match arm
+body in the form
+
+```
+| _ ->
+  let cs = strChars s in
+  <body>
+```
+
+tokenises as `TBar TUnder TArrow TNewline
+TKwLet TLower cs TEq ...`. `parseArmBody`
+pattern-matched on `TKwLet` / `TKwIf` directly,
+so the leading `TNewline` fell through to
+`parseCompare`, which bottomed out at
+`(EInt 0, toks)` with zero tokens consumed. The
+arm body became `EInt 0`, the enclosing match
+returned, and the orphaned `let cs = ... in
+<body>` was then re-parsed by the top-level
+`parseDecls` loop as a standalone `DLet` —
+losing the outer fn param scope entirely. The
+`<body>` (`if isUpperChar c then TUpper s
+else TLower s`) ran at top-level where `s`
+was not defined, producing the phantom
+`E002 UnboundVar s`. Pinpointed in
+`classifyIdent` at lines 393–412.
+
+**Change site (1):**
+
+`fn parseArmBody(toks List[Token]) =` at
+line 1016 of `20-bootstrap-compiler.lll`:
+convert the clause-sugar match to the
+`let toks2 = skipNewlines toks in match toks2
+with` shape already used by `parseArms`, so the
+`TKwIf` / `TKwLet` special-form dispatch runs
+on the post-newline-skip tokens. Only the
+dispatch sees `toks2`; the fallthrough to
+`parseCompare toks2` also uses the skipped list
+so the compare chain resumes cleanly. 15-line
+diff (one let + one match wrap).
+
+**Regression test:** the existing 23 bootstrap
+tests (filtered via
+`FullyQualifiedName~Bootstrap|bootstrap`) all
+stay green — the fix is a pure `parseArmBody`
+tightening and doesn't touch any other parser
+slice, elaborator pass, or codegen.
+
+**Fixpoint-probe confirmation:**
+
+| Metric | Before 7.10f | After 7.10f |
+|---|---|---|
+| stdout+stderr bytes | 146 | 178 |
+| stdout+stderr lines | 5 | 6 |
+| errors reported | 1 (`s`) | 2 (`lexChars` x2) |
+| halt point | `classifyIdent` wildcard arm body ejects `let cs = strChars s in ...` to top-level, loses `s` scope | parser now correctly keeps the let-in inside the arm body; `s` is resolved fine, and the SURVIVING errors are the next blocker below |
+
+The byte count grew 146 → 178 because the
+bootstrap now flags two fresh errors instead of
+the one phantom `s`. This is **progress** — the
+`s` phantom was masking the real next issue,
+which only surfaces once the parser stops
+mis-rebasing arm-body let-ins into top-level
+decl position.
+
+**Next blocker:** **Phase 7.10g** — the
+bootstrap's `parseExpr` / `parseFnDecl` does
+**not** handle clause-sugar fn bodies at the top
+level. A decl like
+
+```
+fn lexChars(cs List[Char]) List[Token] =
+  | c :: rest -> ...
+  | _ -> [TEnd]
+```
+
+enters `parseFnDecl`, which calls `parseExpr`
+on the body; `parseExpr` has no `TBar :: _ ->`
+dispatch, so it falls through to `parseCompare
+-> parseAddSub -> parseApp -> parseAtom`, which
+sees the leading `TBar` as an unknown atom and
+returns `(EInt 0, toks)` with zero tokens
+consumed. Every clause-sugar fn in the bootstrap
+gets silently rewritten to `fn f args = 0`.
+(Verified by running the bootstrap on an
+isolated fixture — the emitted F# for `fn f
+(c Char) Token = | _ -> TA` is `let f c = 0L`.)
+This is why only two `lexChars` errors surface:
+most fns with `lexChars` references are
+themselves clause-sugar fns, so their entire
+body gets replaced with `EInt 0` and the
+`lexChars` reference vanishes along with it;
+the two surviving references are in the two
+fns whose bodies are NOT clause-sugar and DO
+reach the elaborator intact.
+
+The fix for 7.10g is a parser extension: add a
+`TBar :: _ ->` dispatch in `parseFnDecl` (or,
+more precisely, a clause-sugar desugarer
+between `parseFnDecl` and `parseExpr`) that
+rewrites `| pat -> body ...` fn bodies into an
+`EMatch` scrutinising the last fn param —
+mirroring the host compiler's Phase 4
+elaborator clause-sugar desugaring. Estimated
+at ~30 lines; the desugarer already exists in
+spirit (see `lastParamTypeName` at line 1595
+which already knows how to find the last
+param, and `parseArms` at line 974 which
+already knows how to build the two parallel
+arm lists from a `TBar`-led stream).
+
