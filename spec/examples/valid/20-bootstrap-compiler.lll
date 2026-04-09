@@ -292,6 +292,8 @@ type Expr =
   | ELetIn Str Expr Expr
   | EIf Expr Expr Expr
   | EMatch Expr List[Pat] List[Expr]
+  | ENil
+  | ECons Expr Expr
 
 -- Phase 7.5a: `let name = expr` at module level. Lives alongside type and
 -- fn decls inside the top-level `Decl` sum.
@@ -871,6 +873,7 @@ fn isAtomStart(t Token) Bool =
   | TLower _ -> true
   | TUpper _ -> true
   | TLParen -> true
+  | TLBrack -> true
   | _ -> false
 
 -- Top-level expression dispatcher. Phase 7.5a added `match` as a second
@@ -1142,12 +1145,29 @@ fn parseAtom(toks List[Token]) =
   | TChar c :: rest -> (EChar c, rest)
   | TLower s :: rest -> (EVar s, rest)
   | TUpper s :: rest -> (EVar s, rest)
+  | TLBrack :: TRBrack :: rest -> (ENil, rest)
+  | TLBrack :: rest -> parseListLit rest
   | TLParen :: rest ->
     let (e, rest2) = parseExpr rest in
     match rest2 with
       | TRParen :: rest3 -> (e, rest3)
       | _ -> (e, rest2)
   | _ -> (EInt 0, toks)
+
+-- Phase 7.10a: parse a list literal body (after `[` is consumed).
+-- Reads atoms until `TRBrack`, folding right-associatively into
+-- `ECons`. Elements are parsed via `parseAtom` (not `parseExpr`) —
+-- the bootstrap source only uses simple list literals like `[c]` /
+-- `[1 2 3]` / `[TKwModule]` where every element is a var / literal /
+-- ctor atom. A complex expression element would need `parseExpr` and
+-- an escalation to Phase 7.10b.
+fn parseListLit(toks List[Token]) =
+  let (e, rest) = parseAtom toks in
+  match rest with
+    | TRBrack :: rest2 -> (ECons e ENil, rest2)
+    | _ ->
+      let (tail, rest3) = parseListLit rest in
+      (ECons e tail, rest3)
 
 -- ---------- Pretty printer ----------------------------------------------
 
@@ -1272,6 +1292,8 @@ fn showExpr(e Expr) Str =
   | EMatch scrut pats bodies ->
     let head = strConcat (strConcat "(match " (showExpr scrut)) " with " in
     strConcat (strConcat head (showArms pats bodies)) ")"
+  | ENil -> "[]"
+  | ECons h t -> strConcat (strConcat (strConcat (strConcat "(" (showExpr h)) " :: ") (showExpr t)) ")"
 
 fn showFnDecl(d FnDecl) Str =
   | MkFn name prms ret body ->
@@ -1396,6 +1418,8 @@ fn checkExpr(env Env)(e Expr) List[Str] =
     let scrutErrs = checkExpr env scrut in
     let armErrs = checkArms env pats bodies in
     listAppend scrutErrs armErrs
+  | ENil -> []
+  | ECons h t -> listAppend (checkExpr env h) (checkExpr env t)
 
 -- Walk the two parallel arm lists in lockstep. For each arm, extend
 -- the scrutinee env with every binder the pattern introduces, then
@@ -1693,6 +1717,8 @@ fn inferExprType(env TypeEnv)(e Expr) TypeExpr =
   | ELt _ _ -> TyName "Bool"
   | EGt _ _ -> TyName "Bool"
   | EIf _ thn _ -> inferExprType env thn
+  | ENil -> TyName "List"
+  | ECons _ _ -> TyName "List"
   | _ -> TyVar "?"
 
 -- Emit a single `E001 TypeMismatch <l> vs <r>` string built from the
@@ -1783,6 +1809,8 @@ fn typeCheck(env TypeEnv)(e Expr) List[Str] =
     let sErrs = typeCheck env scrut in
     let bodiesErrs = typeCheckBodies env bodies in
     listAppend sErrs bodiesErrs
+  | ENil -> []
+  | ECons h t -> listAppend (typeCheck env h) (typeCheck env t)
 
 -- Walk every arm body in a match expression under the same outer env
 -- (pattern binders are NOT re-introduced in this slice — the HM pass
@@ -1982,6 +2010,8 @@ fn emitExpr(e Expr) Str =
   | ELetIn n e1 e2 -> emitLetIn n e1 e2
   | EIf c t el -> emitIfExpr c t el
   | EMatch scr ps bs -> emitMatchExpr scr ps bs
+  | ENil -> "[]"
+  | ECons h t -> strConcat "(" (strConcat (emitExpr h) (strConcat " :: " (strConcat (emitExpr t) ")")))
 
 -- Shared shape for `+ - * /` arms: `(<l><op><r>)` with unconditional
 -- parens (mirrors the host's binaryOp arm in `Codegen.fs`). Pulls the
