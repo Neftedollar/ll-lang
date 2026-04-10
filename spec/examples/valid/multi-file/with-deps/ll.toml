@@ -2,4 +2,4 @@
 name = "demo"
 
 [deps]
-std = { path = "../../../../stdlib" }
+std = { path = "../../../../../stdlib" }

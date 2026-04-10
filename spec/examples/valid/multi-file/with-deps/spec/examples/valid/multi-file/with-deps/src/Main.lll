@@ -1,0 +1,8 @@
+module Demo.Main
+import Std.Map
+
+main() =
+  m = mapInsert intCmp 1 "one" (mapEmpty)
+  match mapLookup intCmp 1 m
+    | Some v -> printfn v
+    | _ -> printfn "not found"
