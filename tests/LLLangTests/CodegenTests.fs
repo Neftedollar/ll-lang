@@ -416,7 +416,7 @@ let ``runtime: cons expression builds list matched by literal`` () =
     let src =
         "module Tmp.ConsBuild\n" +
         "fn main() =\n" +
-        "  let xs = 1 :: 2 :: 3 :: [4 5] in\n" +
+        "  let xs = 1 :: 2 :: 3 :: [4 5]\n" +
         "  printfn (intToStr (listLen xs))"
     let stdout = runLLLangSrc src
     Assert.Contains("5", stdout)
@@ -426,7 +426,7 @@ let ``runtime: match-as-expression in let binding`` () =
     let src =
         "module Tmp.MatchExpr\n" +
         "fn main() =\n" +
-        "  let v = match 0 with | 0 -> \"zero\" | _ -> \"other\" in\n" +
+        "  let v = match 0 with | 0 -> \"zero\" | _ -> \"other\"\n" +
         "  printfn v"
     let stdout = runLLLangSrc src
     Assert.Contains("zero", stdout)
@@ -439,7 +439,8 @@ let ``codegen: nested let-tuple in fn body emits let (a, b) =`` () =
     let src =
         "module M\n" +
         "fn addPair(p) Int =\n" +
-        "  let (a, b) = p in a + b"
+        "  let (a, b) = p\n" +
+        "  a + b"
     let fs = codegenSrc src
     Assert.Contains("let (a, b) =", fs)
 
@@ -448,7 +449,8 @@ let ``codegen: let wildcard emits let _ =`` () =
     let src =
         "module M\n" +
         "fn f() Int =\n" +
-        "  let _ = 99 in 1"
+        "  let _ = 99\n" +
+        "  1"
     let fs = codegenSrc src
     Assert.Contains("let _ =", fs)
 
@@ -462,7 +464,8 @@ let ``runtime: let wildcard destructuring discards rhs`` () =
     let src =
         "module Tmp.LetWild\n" +
         "fn run() Int =\n" +
-        "  let _ = 99 in 7\n" +
+        "  let _ = 99\n" +
+        "  7\n" +
         "fn main() = printfn (intToStr run)"
     let stdout = runLLLangSrc src
     Assert.Contains("7", stdout)
@@ -486,8 +489,9 @@ let ``codegen: tuple literal + destructure in fn body`` () =
     let src =
         "module M\n" +
         "fn run() Int =\n" +
-        "  let p = (1, 2) in\n" +
-        "  let (a, b) = p in a"
+        "  let p = (1, 2)\n" +
+        "  let (a, b) = p\n" +
+        "  a"
     let fs = codegenSrc src
     Assert.Contains("(1L, 2L)", fs)
     Assert.Contains("let (a, b) =", fs)
@@ -498,9 +502,10 @@ let ``runtime: tuple literal + destructure end-to-end prints first elem`` () =
         "module Tmp.TupLit\n" +
         "fn pair(a Int)(b Int) = (a, b)\n" +
         "fn fst(p) Int =\n" +
-        "  let (a, b) = p in a\n" +
+        "  let (a, b) = p\n" +
+        "  a\n" +
         "fn main() =\n" +
-        "  let p = pair 1 2 in\n" +
+        "  let p = pair 1 2\n" +
         "  printfn (intToStr (fst p))"
     let stdout = runLLLangSrc src
     Assert.Contains("1", stdout)
@@ -520,7 +525,7 @@ let ``runtime: cons CON [LIT] passes a single-element list as a fresh arg`` () =
         "type Token = TPlus | TMinus\n" +
         "fn cons2(t Token)(ts List[Token]) List[Token] = t :: ts\n" +
         "fn main() =\n" +
-        "  let xs = cons2 TPlus [TMinus] in\n" +
+        "  let xs = cons2 TPlus [TMinus]\n" +
         "  printfn (intToStr (listLen xs))"
     let stdout = runLLLangSrc src
     Assert.Contains("2", stdout)
@@ -563,8 +568,8 @@ let ``Bug1 runtime: clause-sugar wildcard arm with multi-line let-in returns 30`
         "fn f(t Tag) Int =\n" +
         "  | A -> 1\n" +
         "  | _ ->\n" +
-        "    let p = (10, 20) in\n" +
-        "    let (x, y) = p in\n" +
+        "    let p = (10, 20)\n" +
+        "    let (x, y) = p\n" +
         "    x + y\n" +
         "fn main() = printfn (intToStr (f B))"
     let stdout = runLLLangSrc src
@@ -588,9 +593,9 @@ let ``Bug2 runtime: mixed cons / empty-list / wildcard arms all reached`` () =
         "  | [] -> 2\n" +
         "  | _ -> 3\n" +
         "fn main() =\n" +
-        "  let a = f [TEnd] in\n" +
-        "  let b = f [] in\n" +
-        "  let c = f [TMore] in\n" +
+        "  let a = f [TEnd]\n" +
+        "  let b = f []\n" +
+        "  let c = f [TMore]\n" +
         "  printfn (intToStr (a + b + c))"
     let stdout = runLLLangSrc src
     Assert.Contains("6", stdout)

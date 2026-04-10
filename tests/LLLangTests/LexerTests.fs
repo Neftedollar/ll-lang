@@ -20,9 +20,9 @@ let ``keyword let`` () =
 
 [<Fact>]
 let ``all keywords recognized`` () =
-    let kws = "fn let in type tag unit trait impl import export module if then else"
+    let kws = "fn let type tag unit trait impl import export module if then else"
     let expected = [
-        KwFn; KwLet; KwIn; KwType; KwTag; KwUnit
+        KwFn; KwLet; KwType; KwTag; KwUnit
         KwTrait; KwImpl; KwImport; KwExport; KwModule
         KwIf; KwThen; KwElse
     ]

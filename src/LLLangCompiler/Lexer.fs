@@ -5,7 +5,7 @@ open LLLang.Token
 
 let private keywords =
     Map.ofList [
-        "fn", KwFn; "let", KwLet; "in", KwIn; "type", KwType
+        "fn", KwFn; "let", KwLet; "type", KwType
         "tag", KwTag; "unit", KwUnit; "trait", KwTrait; "impl", KwImpl
         "import", KwImport; "export", KwExport; "module", KwModule
         "if", KwIf; "then", KwThen; "else", KwElse

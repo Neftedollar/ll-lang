@@ -232,8 +232,8 @@ fn unifyFn(a1 TypeExpr)(r1 TypeExpr)(t2 TypeExpr) Outcome[Subst] =
     | TyFn a2 r2 ->
       match unify a1 a2 with
         | OkR s1 ->
-          let r1b = applyType s1 r1 in
-          let r2b = applyType s1 r2 in
+          let r1b = applyType s1 r1
+          let r2b = applyType s1 r2
           unifyResults s1 r1b r2b
         | ErrR m -> ErrR m
     | _ -> ErrR "E001 TypeMismatch TyFn vs non-fn"
@@ -274,7 +274,7 @@ fn showType(t TypeExpr) Str =
     | TyName n -> n
     | TyVar v -> v
     | TyFn a r ->
-      let inner = strConcat (strConcat (showType a) " -> ") (showType r) in
+      let inner = strConcat (strConcat (showType a) " -> ") (showType r)
       strConcat (strConcat "(" inner) ")"
 
 -- Return the first key in a `Subst` (for the `t3` "ok bound a" line).
@@ -300,10 +300,10 @@ fn substFirstKey(s Subst) Str =
 -- `ErrR` message prefix so the E008 (occurs check) line for t17 is
 -- distinguishable from the E001 (type mismatch) lines for t2/t5.
 fn runTest(label Str)(t1 TypeExpr)(t2 TypeExpr) Str =
-  let header = strConcat (strConcat (strConcat (strConcat label " unify ") (showType t1)) " ") (showType t2) in
+  let header = strConcat (strConcat (strConcat (strConcat label " unify ") (showType t1)) " ") (showType t2)
   match unify t1 t2 with
     | OkR s ->
-      let key = substFirstKey s in
+      let key = substFirstKey s
       if strLen key == 0 then strConcat header " ok"
       else strConcat (strConcat header " ok bound ") key
     | ErrR m ->
@@ -386,7 +386,7 @@ fn applySchemeList(s Subst)(schs List[TypeScheme]) List[TypeScheme] =
 fn applyScheme(s Subst)(sch TypeScheme) TypeScheme =
   match sch with
     | MkScheme vars body ->
-      let sRestricted = substRemoveAll s vars in
+      let sRestricted = substRemoveAll s vars
       MkScheme vars (applyType sRestricted body)
 
 -- Remove a list of keys from a `Subst`. Used by `applyScheme` so
@@ -443,7 +443,7 @@ fn listDiffStr(xs List[Str])(ys List[Str]) List[Str] =
 fn listDedupStr(xs List[Str]) List[Str] =
   match xs with
     | x :: rest ->
-      let tail = listDedupStr rest in
+      let tail = listDedupStr rest
       if listContainsStr x tail then tail else x :: tail
     | _ -> []
 
@@ -477,9 +477,9 @@ fn ftvSchemeList(schs List[TypeScheme]) List[Str] =
 -- `generalize env t`: produce `MkScheme (ftv(t) - ftv(env)) t`. Quant
 -- order is first-seen in the body walk.
 fn generalize(e Env)(t TypeExpr) TypeScheme =
-  let tFtv = listDedupStr (ftvType t) in
-  let envFtv = ftvEnv e in
-  let quant = listDiffStr tFtv envFtv in
+  let tFtv = listDedupStr (ftvType t)
+  let envFtv = ftvEnv e
+  let quant = listDiffStr tFtv envFtv
   MkScheme quant t
 
 -- `instantiate n sch`: allocate a fresh unification var for each
@@ -488,7 +488,7 @@ fn generalize(e Env)(t TypeExpr) TypeScheme =
 fn instantiate(n Int)(sch TypeScheme) =
   match sch with
     | MkScheme vars body ->
-      let (subst, n1) = freshSubstFor vars n in
+      let (subst, n1) = freshSubstFor vars n
       (applyType subst body, n1)
 
 -- Build a `Subst` that maps each `vars[i]` to a fresh `$n+i`. Threads
@@ -496,8 +496,8 @@ fn instantiate(n Int)(sch TypeScheme) =
 fn freshSubstFor(vars List[Str])(n Int) =
   match vars with
     | v :: rest ->
-      let (fresh, n1) = freshVar n in
-      let (tailSubst, n2) = freshSubstFor rest n1 in
+      let (fresh, n1) = freshVar n
+      let (tailSubst, n2) = freshSubstFor rest n1
       match tailSubst with
         | MkSubst ks vs -> (MkSubst (v :: ks) (fresh :: vs), n2)
     | _ -> (emptySubst 0, n)
@@ -599,7 +599,7 @@ fn inferExpr(env Env)(n Int)(e Expr) Outcome[InferResult] =
 fn inferVar(env Env)(n Int)(name Str) Outcome[InferResult] =
   match envLookup env name with
     | Some sch ->
-      let (t, n1) = instantiate n sch in
+      let (t, n1) = instantiate n sch
       OkR (MkInferResult t (emptySubst 0) n1)
     | _ -> ErrR (strConcat "E002 UnboundVar " name)
 
@@ -634,9 +634,9 @@ fn inferAddUnify(sl Subst)(sr Subst)(tl TypeExpr)(tr TypeExpr)(n Int) Outcome[In
 fn inferAddUnify2(sl Subst)(sr Subst)(s3 Subst)(tr TypeExpr)(n Int) Outcome[InferResult] =
   match unify tr (TyName "Int") with
     | OkR s4 ->
-      let s12 = composeSubst sl sr in
-      let s123 = composeSubst s12 s3 in
-      let sAll = composeSubst s123 s4 in
+      let s12 = composeSubst sl sr
+      let s123 = composeSubst s12 s3
+      let sAll = composeSubst s123 s4
       OkR (MkInferResult (TyName "Int") sAll n)
     | ErrR m -> ErrR m
 
@@ -665,13 +665,13 @@ fn inferAppA(sf Subst)(tf TypeExpr)(aRes InferResult) Outcome[InferResult] =
 -- unify the (substituted) function type against `TyFn ta beta`, and
 -- return the substituted `beta` as the result type.
 fn inferAppFresh(sf Subst)(sa Subst)(tf TypeExpr)(ta TypeExpr)(n Int) Outcome[InferResult] =
-  let (beta, n1) = freshVar n in
-  let tfApplied = applyType sa tf in
+  let (beta, n1) = freshVar n
+  let tfApplied = applyType sa tf
   match unify tfApplied (TyFn ta beta) with
     | OkR s3 ->
-      let s12 = composeSubst sf sa in
-      let sAll = composeSubst s12 s3 in
-      let retTy = applyType sAll beta in
+      let s12 = composeSubst sf sa
+      let sAll = composeSubst s12 s3
+      let retTy = applyType sAll beta
       OkR (MkInferResult retTy sAll n1)
     | ErrR m -> ErrR m
 
@@ -684,8 +684,8 @@ fn inferAppFresh(sf Subst)(sa Subst)(tf TypeExpr)(ta TypeExpr)(n Int) Outcome[In
 -- the multi-param curry — this slice only supports single-param
 -- lambdas, which is all `\x. x`, `\x. x + 1`, etc. need).
 fn inferLam(env Env)(n Int)(name Str)(body Expr) Outcome[InferResult] =
-  let (alpha, n1) = freshVar n in
-  let env2 = envExtend env name alpha in
+  let (alpha, n1) = freshVar n
+  let env2 = envExtend env name alpha
   match inferExpr env2 n1 body with
     | OkR bRes -> OkR (inferLamOk alpha bRes)
     | ErrR m -> ErrR m
@@ -693,7 +693,7 @@ fn inferLam(env Env)(n Int)(name Str)(body Expr) Outcome[InferResult] =
 fn inferLamOk(alpha TypeExpr)(bRes InferResult) InferResult =
   match bRes with
     | MkInferResult tBody sBody nBody ->
-      let paramTy = applyType sBody alpha in
+      let paramTy = applyType sBody alpha
       MkInferResult (TyFn paramTy tBody) sBody nBody
 
 -- `ELet name e1 e2`: infer `e1`, generalize τ1 over vars not free in
@@ -715,9 +715,9 @@ fn inferLetOk(env Env)(name Str)(r1 InferResult)(e2 Expr) Outcome[InferResult] =
 -- type against that env, extends with the resulting scheme, recurses
 -- into `e2`, and composes the subst.
 fn inferLetBody(env Env)(s1 Subst)(n Int)(name Str)(t1 TypeExpr)(e2 Expr) Outcome[InferResult] =
-  let env2 = applyEnv s1 env in
-  let sch = generalize env2 t1 in
-  let env3 = envExtendScheme env2 name sch in
+  let env2 = applyEnv s1 env
+  let sch = generalize env2 t1
+  let env3 = envExtendScheme env2 name sch
   match inferExpr env3 n e2 with
     | OkR r2 -> OkR (inferLetCompose s1 r2)
     | ErrR m -> ErrR m
@@ -725,7 +725,7 @@ fn inferLetBody(env Env)(s1 Subst)(n Int)(name Str)(t1 TypeExpr)(e2 Expr) Outcom
 fn inferLetCompose(s1 Subst)(r2 InferResult) InferResult =
   match r2 with
     | MkInferResult t2 s2 n2 ->
-      let sAll = composeSubst s1 s2 in
+      let sAll = composeSubst s1 s2
       MkInferResult t2 sAll n2
 
 -- `EIf cond thn els`: infer `cond`, unify it with `TyName "Bool"`, infer
@@ -745,13 +745,13 @@ fn inferIfCond(env Env)(r InferResult)(thn Expr)(els Expr) Outcome[InferResult] 
 fn inferIfCondBool(env Env)(sc Subst)(n Int)(tc TypeExpr)(thn Expr)(els Expr) Outcome[InferResult] =
   match unify tc (TyName "Bool") with
     | OkR scb ->
-      let s1 = composeSubst sc scb in
+      let s1 = composeSubst sc scb
       inferIfThen env s1 n thn els
     | ErrR m -> ErrR m
 
 -- Infer the `then` branch under the env with the head subst applied.
 fn inferIfThen(env Env)(s1 Subst)(n Int)(thn Expr)(els Expr) Outcome[InferResult] =
-  let env1 = applyEnv s1 env in
+  let env1 = applyEnv s1 env
   match inferExpr env1 n thn with
     | OkR r -> inferIfThenOk env1 s1 r els
     | ErrR m -> ErrR m
@@ -763,8 +763,8 @@ fn inferIfThenOk(env1 Env)(s1 Subst)(r InferResult)(els Expr) Outcome[InferResul
 -- Infer the `else` branch under the env with the head subst + then-
 -- subst applied, then dispatch to the final branch-unify step.
 fn inferIfElse(env Env)(s1 Subst)(st Subst)(n Int)(tt TypeExpr)(els Expr) Outcome[InferResult] =
-  let s12 = composeSubst s1 st in
-  let env2 = applyEnv st env in
+  let s12 = composeSubst s1 st
+  let env2 = applyEnv st env
   match inferExpr env2 n els with
     | OkR r -> inferIfElseOk s12 tt r
     | ErrR m -> ErrR m
@@ -778,9 +778,9 @@ fn inferIfElseOk(s12 Subst)(tt TypeExpr)(r InferResult) Outcome[InferResult] =
 fn inferIfUnify(s12 Subst)(se Subst)(tt TypeExpr)(te TypeExpr)(n Int) Outcome[InferResult] =
   match unify tt te with
     | OkR sbr ->
-      let s123 = composeSubst s12 se in
-      let sAll = composeSubst s123 sbr in
-      let retTy = applyType sAll tt in
+      let s123 = composeSubst s12 se
+      let sAll = composeSubst s123 sbr
+      let retTy = applyType sAll tt
       OkR (MkInferResult retTy sAll n)
     | ErrR m -> ErrR m
 
@@ -808,8 +808,8 @@ fn inferMatch(env Env)(n Int)(scr Expr)(pats List[Pat])(bodies List[Expr]) Outco
 fn inferMatchScrut(env Env)(r InferResult)(pats List[Pat])(bodies List[Expr]) Outcome[InferResult] =
   match r with
     | MkInferResult tScrut sScrut nScrut ->
-      let (beta, n1) = freshVar nScrut in
-      let env1 = applyEnv sScrut env in
+      let (beta, n1) = freshVar nScrut
+      let env1 = applyEnv sScrut env
       inferMatchBranches env1 sScrut n1 tScrut beta pats bodies
 
 -- Walk parallel `pats` / `bodies` lists in lockstep. Accumulates the
@@ -824,17 +824,17 @@ fn inferMatchBranches(env Env)(sAcc Subst)(n Int)(tScrut TypeExpr)(beta TypeExpr
             | OkR r -> inferMatchBranchNext env tScrut r ps bs
             | ErrR m -> ErrR m
         | _ ->
-          let retTy = applyType sAcc beta in
+          let retTy = applyType sAcc beta
           OkR (MkInferResult retTy sAcc n)
     | _ ->
-      let retTy = applyType sAcc beta in
+      let retTy = applyType sAcc beta
       OkR (MkInferResult retTy sAcc n)
 
 fn inferMatchBranchNext(env Env)(tScrut TypeExpr)(r InferResult)(ps List[Pat])(bs List[Expr]) Outcome[InferResult] =
   match r with
     | MkInferResult betaNew sNew nNew ->
-      let envNew = applyEnv sNew env in
-      let tScrutNew = applyType sNew tScrut in
+      let envNew = applyEnv sNew env
+      let tScrutNew = applyType sNew tScrut
       inferMatchBranches envNew sNew nNew tScrutNew betaNew ps bs
 
 -- Infer a single (pat, body) branch: derive patTy, unify with tScrut,
@@ -843,11 +843,11 @@ fn inferMatchBranch(env Env)(sAcc Subst)(n Int)(tScrut TypeExpr)(beta TypeExpr)(
   match p with
     | PInt _ -> inferMatchBranchUnify env sAcc n tScrut beta (TyName "Int") env body
     | PVar x ->
-      let (alpha, n1) = freshVar n in
-      let envExt = envExtend env x alpha in
+      let (alpha, n1) = freshVar n
+      let envExt = envExtend env x alpha
       inferMatchBranchUnify envExt sAcc n1 tScrut beta alpha envExt body
     | PWild ->
-      let (alpha, n1) = freshVar n in
+      let (alpha, n1) = freshVar n
       inferMatchBranchUnify env sAcc n1 tScrut beta alpha env body
 
 -- After deriving `patTy`, unify it with the running scrutinee type, infer
@@ -856,8 +856,8 @@ fn inferMatchBranch(env Env)(sAcc Subst)(n Int)(tScrut TypeExpr)(beta TypeExpr)(
 fn inferMatchBranchUnify(env Env)(sAcc Subst)(n Int)(tScrut TypeExpr)(beta TypeExpr)(patTy TypeExpr)(envBody Env)(body Expr) Outcome[InferResult] =
   match unify patTy tScrut with
     | OkR sPat ->
-      let sAcc2 = composeSubst sAcc sPat in
-      let envBody1 = applyEnv sPat envBody in
+      let sAcc2 = composeSubst sAcc sPat
+      let envBody1 = applyEnv sPat envBody
       inferMatchBranchBody sAcc2 beta envBody1 n body
     | ErrR m -> ErrR m
 
@@ -869,13 +869,13 @@ fn inferMatchBranchBody(sAcc Subst)(beta TypeExpr)(envBody Env)(n Int)(body Expr
 fn inferMatchBranchJoin(sAcc Subst)(beta TypeExpr)(r InferResult) Outcome[InferResult] =
   match r with
     | MkInferResult tBody sBody nBody ->
-      let sAccBody = composeSubst sAcc sBody in
-      let betaApplied = applyType sAccBody beta in
-      let tBodyApplied = applyType sAccBody tBody in
+      let sAccBody = composeSubst sAcc sBody
+      let betaApplied = applyType sAccBody beta
+      let tBodyApplied = applyType sAccBody tBody
       match unify betaApplied tBodyApplied with
         | OkR sJoin ->
-          let sAll = composeSubst sAccBody sJoin in
-          let newBeta = applyType sAll beta in
+          let sAll = composeSubst sAccBody sJoin
+          let newBeta = applyType sAll beta
           OkR (MkInferResult newBeta sAll nBody)
         | ErrR m -> ErrR m
 
@@ -892,7 +892,7 @@ fn inferMatchBranchJoin(sAcc Subst)(beta TypeExpr)(r InferResult) Outcome[InferR
 -- (`E001 TypeMismatch ...`, `E002 UnboundVar ...`, `E008 InfiniteType
 -- ...`) instead of the old `TyName "ERROR"` sentinel.
 fn runInferTest(label Str)(desc Str)(env Env)(e Expr) Str =
-  let header = strConcat (strConcat (strConcat label " infer ") desc) " : " in
+  let header = strConcat (strConcat (strConcat label " infer ") desc) " : "
   match inferExpr env 0 e with
     | OkR r ->
       match r with
@@ -903,86 +903,86 @@ fn runInferTest(label Str)(desc Str)(env Env)(e Expr) Str =
 
 fn main() =
   -- Concrete leaf types reused across the cases.
-  let tyInt = TyName "Int" in
-  let tyStr = TyName "Str" in
-  let tyBool = TyName "Bool" in
-  let tyVarA = TyVar "a" in
-  let intToStrFn = TyFn tyInt tyStr in
-  let intToStrFn2 = TyFn tyInt tyStr in
-  let intToBoolFn = TyFn tyInt tyBool in
-  let intToIntFn = TyFn tyInt tyInt in
+  let tyInt = TyName "Int"
+  let tyStr = TyName "Str"
+  let tyBool = TyName "Bool"
+  let tyVarA = TyVar "a"
+  let intToStrFn = TyFn tyInt tyStr
+  let intToStrFn2 = TyFn tyInt tyStr
+  let intToBoolFn = TyFn tyInt tyBool
+  let intToIntFn = TyFn tyInt tyInt
   -- Five hardcoded unify cases — see header for full plan.
-  let line1 = runTest "t1" tyInt tyInt in
-  let line2 = runTest "t2" tyInt tyStr in
-  let line3 = runTest "t3" tyVarA tyInt in
-  let line4 = runTest "t4" intToStrFn intToStrFn2 in
-  let line5 = runTest "t5" intToBoolFn intToStrFn in
+  let line1 = runTest "t1" tyInt tyInt
+  let line2 = runTest "t2" tyInt tyStr
+  let line3 = runTest "t3" tyVarA tyInt
+  let line4 = runTest "t4" intToStrFn intToStrFn2
+  let line5 = runTest "t5" intToBoolFn intToStrFn
   -- Phase 7.7b inference cases. Env for t8-t10 binds `x : Int` and
   -- `double : Int -> Int`; t6 / t7 use `emptyEnv` because their
   -- expressions are closed.
-  let envXInt = envExtend (emptyEnv 0) "x" tyInt in
-  let envDouble = envExtend (emptyEnv 0) "double" intToIntFn in
-  let line6 = runInferTest "t6" "42" (emptyEnv 0) (EInt 42) in
-  let line7 = runInferTest "t7" "(1 + 2)" (emptyEnv 0) (EAdd (EInt 1) (EInt 2)) in
-  let line8 = runInferTest "t8" "x in env" envXInt (EVar "x") in
-  let line9 = runInferTest "t9" "(double 5) in env" envDouble (EApp (EVar "double") (EInt 5)) in
-  let line10 = runInferTest "t10" "(double \"x\") in env" envDouble (EApp (EVar "double") (EStr "x")) in
+  let envXInt = envExtend (emptyEnv 0) "x" tyInt
+  let envDouble = envExtend (emptyEnv 0) "double" intToIntFn
+  let line6 = runInferTest "t6" "42" (emptyEnv 0) (EInt 42)
+  let line7 = runInferTest "t7" "(1 + 2)" (emptyEnv 0) (EAdd (EInt 1) (EInt 2))
+  let line8 = runInferTest "t8" "x in env" envXInt (EVar "x")
+  let line9 = runInferTest "t9" "(double 5) in env" envDouble (EApp (EVar "double") (EInt 5))
+  let line10 = runInferTest "t10" "(double \"x\") in env" envDouble (EApp (EVar "double") (EStr "x"))
   -- Phase 7.7c inference cases: ELam / ELet / EIf. All closed, so the
   -- env is empty. Expressions hand-built from the Expr AST (no surface
   -- lambda / let / if parser in this file); the description string is
   -- the surface rendering for human-readable stdout.
-  let identFn = ELam "x" (EVar "x") in
-  let addOneFn = ELam "x" (EAdd (EVar "x") (EInt 1)) in
-  let letExpr = ELet "x" (EInt 5) (EAdd (EVar "x") (EInt 1)) in
-  let ifIntExpr = EIf (EBool true) (EInt 1) (EInt 2) in
-  let ifBadExpr = EIf (EBool true) (EInt 1) (EStr "x") in
-  let line11 = runInferTest "t11" "(\\x. x)" (emptyEnv 0) identFn in
-  let line12 = runInferTest "t12" "(\\x. x + 1)" (emptyEnv 0) addOneFn in
-  let line13 = runInferTest "t13" "(let x = 5 in x + 1)" (emptyEnv 0) letExpr in
-  let line14 = runInferTest "t14" "(if true then 1 else 2)" (emptyEnv 0) ifIntExpr in
-  let line15 = runInferTest "t15" "(if true then 1 else \"x\")" (emptyEnv 0) ifBadExpr in
+  let identFn = ELam "x" (EVar "x")
+  let addOneFn = ELam "x" (EAdd (EVar "x") (EInt 1))
+  let letExpr = ELet "x" (EInt 5) (EAdd (EVar "x") (EInt 1))
+  let ifIntExpr = EIf (EBool true) (EInt 1) (EInt 2)
+  let ifBadExpr = EIf (EBool true) (EInt 1) (EStr "x")
+  let line11 = runInferTest "t11" "(\\x. x)" (emptyEnv 0) identFn
+  let line12 = runInferTest "t12" "(\\x. x + 1)" (emptyEnv 0) addOneFn
+  let line13 = runInferTest "t13" "(let x = 5 in x + 1)" (emptyEnv 0) letExpr
+  let line14 = runInferTest "t14" "(if true then 1 else 2)" (emptyEnv 0) ifIntExpr
+  let line15 = runInferTest "t15" "(if true then 1 else \"x\")" (emptyEnv 0) ifBadExpr
   -- Phase 7.7d cases: occurs check + EMatch inference.
   -- t16: higher-order lambda (\f. \x. f x) — demonstrates the unify
   -- chain correctly infers `($1 -> $2) -> $1 -> $2` without let-gen.
-  let hoLam = ELam "f" (ELam "x" (EApp (EVar "f") (EVar "x"))) in
+  let hoLam = ELam "f" (ELam "x" (EApp (EVar "f") (EVar "x")))
   -- t17: occurs check fires on `unify a (a -> Int)` — E008 InfiniteType.
-  let tyAFn = TyFn tyVarA tyInt in
+  let tyAFn = TyFn tyVarA tyInt
   -- t18: match 1 with 0 -> "zero" | _ -> "other" -> Str.
   -- List literal elements are let-bound individually because bracketed
   -- TypeId-starting atoms like `[PInt 0 PWild]` would otherwise parse as
   -- a single curried ctor app (same trick as 16-elaborator-real.lll
   -- line 446 area).
-  let matchScrut1 = EInt 1 in
-  let matchPat18a = PInt 0 in
-  let matchPat18b = PWild in
-  let matchPats18 = [matchPat18a matchPat18b] in
-  let matchBody18a = EStr "zero" in
-  let matchBody18b = EStr "other" in
-  let matchBodies18 = [matchBody18a matchBody18b] in
-  let matchStrExpr = EMatch matchScrut1 matchPats18 matchBodies18 in
+  let matchScrut1 = EInt 1
+  let matchPat18a = PInt 0
+  let matchPat18b = PWild
+  let matchPats18 = [matchPat18a matchPat18b]
+  let matchBody18a = EStr "zero"
+  let matchBody18b = EStr "other"
+  let matchBodies18 = [matchBody18a matchBody18b]
+  let matchStrExpr = EMatch matchScrut1 matchPats18 matchBodies18
   -- t19: match 1 with 0 -> "zero" | 1 -> 42 -> E001 (branch mismatch)
-  let matchPat19a = PInt 0 in
-  let matchPat19b = PInt 1 in
-  let matchPats19 = [matchPat19a matchPat19b] in
-  let matchBody19a = EStr "zero" in
-  let matchBody19b = EInt 42 in
-  let matchBodies19 = [matchBody19a matchBody19b] in
-  let matchBadExpr = EMatch matchScrut1 matchPats19 matchBodies19 in
+  let matchPat19a = PInt 0
+  let matchPat19b = PInt 1
+  let matchPats19 = [matchPat19a matchPat19b]
+  let matchBody19a = EStr "zero"
+  let matchBody19b = EInt 42
+  let matchBodies19 = [matchBody19a matchBody19b]
+  let matchBadExpr = EMatch matchScrut1 matchPats19 matchBodies19
   -- t20: match 1 with x -> x + 1 -> Int (PVar extends env with `x : Int`)
-  let matchPat20 = PVar "x" in
-  let matchPats20 = [matchPat20] in
-  let matchBody20 = EAdd (EVar "x") (EInt 1) in
-  let matchBodies20 = [matchBody20] in
-  let matchBindExpr = EMatch matchScrut1 matchPats20 matchBodies20 in
-  let line16 = runInferTest "t16" "(\\f. \\x. f x)" (emptyEnv 0) hoLam in
-  let line17 = runTest "t17" tyVarA tyAFn in
-  let line18 = runInferTest "t18" "(match 1 | 0 -> \"zero\" | _ -> \"other\")" (emptyEnv 0) matchStrExpr in
-  let line19 = runInferTest "t19" "(match 1 | 0 -> \"zero\" | 1 -> 42)" (emptyEnv 0) matchBadExpr in
-  let line20 = runInferTest "t20" "(match 1 | x -> x + 1)" (emptyEnv 0) matchBindExpr in
+  let matchPat20 = PVar "x"
+  let matchPats20 = [matchPat20]
+  let matchBody20 = EAdd (EVar "x") (EInt 1)
+  let matchBodies20 = [matchBody20]
+  let matchBindExpr = EMatch matchScrut1 matchPats20 matchBodies20
+  let line16 = runInferTest "t16" "(\\f. \\x. f x)" (emptyEnv 0) hoLam
+  let line17 = runTest "t17" tyVarA tyAFn
+  let line18 = runInferTest "t18" "(match 1 | 0 -> \"zero\" | _ -> \"other\")" (emptyEnv 0) matchStrExpr
+  let line19 = runInferTest "t19" "(match 1 | 0 -> \"zero\" | 1 -> 42)" (emptyEnv 0) matchBadExpr
+  let line20 = runInferTest "t20" "(match 1 | x -> x + 1)" (emptyEnv 0) matchBindExpr
   -- t21: `let id = \x. x in id 5` -> Int.
   -- Works with or without let-gen — included here as the basic
   -- let-bound lambda case. The deeper test is t22 below.
-  let letIdExpr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EInt 5)) in
+  let letIdExpr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EInt 5))
   -- t22: `let id = \x. x in if true then id 1 else id "hi"` — requires
   -- let-gen to type-check. Without generalization the first use pins
   -- `id : Int -> Int`, the second use then hits an E001 on `id "hi"`.
@@ -1000,11 +1000,11 @@ fn main() =
   -- `Str -> Str`, so the whole expression types at `Str`. Without
   -- let-gen, `id 5` pins id to `Int -> Int`, and `id "hi"` then
   -- fails E001 at the second use.
-  let letIdUseInt = EApp (EVar "id") (EInt 5) in
-  let letIdUseStr = EApp (EVar "id") (EStr "hi") in
-  let letIdInner = ELet "i" letIdUseInt letIdUseStr in
-  let letIdPoly = ELet "id" (ELam "x" (EVar "x")) letIdInner in
-  let line21 = runInferTest "t21" "(let id = \\x. x in id 5)" (emptyEnv 0) letIdExpr in
-  let line22 = runInferTest "t22" "(let id = \\x. x in let i = id 5 in id \"hi\")" (emptyEnv 0) letIdPoly in
-  let lines = [line1 line2 line3 line4 line5 line6 line7 line8 line9 line10 line11 line12 line13 line14 line15 line16 line17 line18 line19 line20 line21 line22] in
+  let letIdUseInt = EApp (EVar "id") (EInt 5)
+  let letIdUseStr = EApp (EVar "id") (EStr "hi")
+  let letIdInner = ELet "i" letIdUseInt letIdUseStr
+  let letIdPoly = ELet "id" (ELam "x" (EVar "x")) letIdInner
+  let line21 = runInferTest "t21" "(let id = \\x. x in id 5)" (emptyEnv 0) letIdExpr
+  let line22 = runInferTest "t22" "(let id = \\x. x in let i = id 5 in id \"hi\")" (emptyEnv 0) letIdPoly
+  let lines = [line1 line2 line3 line4 line5 line6 line7 line8 line9 line10 line11 line12 line13 line14 line15 line16 line17 line18 line19 line20 line21 line22]
   printfn (joinLines lines)

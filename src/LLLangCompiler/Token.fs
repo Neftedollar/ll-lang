@@ -3,7 +3,7 @@ module LLLang.Token
 /// All token types produced by the lexer.
 type Token =
     // Keywords
-    | KwFn | KwLet | KwIn | KwType | KwTag | KwUnit
+    | KwFn | KwLet | KwType | KwTag | KwUnit
     | KwTrait | KwImpl | KwImport | KwExport | KwModule
     | KwIf | KwThen | KwElse | KwTrue | KwFalse
     | KwMatch | KwWith

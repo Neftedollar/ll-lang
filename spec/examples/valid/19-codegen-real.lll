@@ -404,8 +404,8 @@ fn showArms(ps List[Pat])(bs List[TExpr]) Str =
 fn showArmsCons(p Pat)(prest List[Pat])(bs List[TExpr]) Str =
   match bs with
     | b :: brest ->
-      let head = strConcat "| " (strConcat (showPat p) (strConcat " -> " (showTExpr b))) in
-      let rest = showArms prest brest in
+      let head = strConcat "| " (strConcat (showPat p) (strConcat " -> " (showTExpr b)))
+      let rest = showArms prest brest
       if strLen rest == 0 then head else strConcat head (strConcat " " rest)
     | _ -> ""
 
@@ -489,7 +489,7 @@ fn showCtor(c Ctor) Str =
 fn showCtorBody(name Str)(args List[TypeArg]) Str =
   match args with
     | _ :: _ ->
-      let argStr = showCtorArgs args in
+      let argStr = showCtorArgs args
       strConcat "    | " (strConcat name (strConcat " of " argStr))
     | _ ->
       strConcat "    | " name
@@ -569,7 +569,7 @@ fn isMainFn(name Str)(ps List[Str]) Bool =
 fn showFnDeclPlain(name Str)(ps List[Str])(body TExpr) Str =
   match ps with
     | _ :: _ ->
-      let paramStr = showParams ps in
+      let paramStr = showParams ps
       strConcat "let " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
     | _ ->
       strConcat "let " (strConcat name (strConcat " = " (showTExpr body)))
@@ -583,7 +583,7 @@ fn showFnDeclPlain(name Str)(ps List[Str])(body TExpr) Str =
 fn showFnDeclFirst(name Str)(ps List[Str])(body TExpr) Str =
   match ps with
     | _ :: _ ->
-      let paramStr = showParams ps in
+      let paramStr = showParams ps
       strConcat "let rec " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
     | _ ->
       strConcat "let rec " (strConcat name (strConcat " = " (showTExpr body)))
@@ -595,7 +595,7 @@ fn showFnDeclFirst(name Str)(ps List[Str])(body TExpr) Str =
 fn showFnDeclCont(name Str)(ps List[Str])(body TExpr) Str =
   match ps with
     | _ :: _ ->
-      let paramStr = showParams ps in
+      let paramStr = showParams ps
       strConcat "and " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
     | _ ->
       strConcat "and " (strConcat name (strConcat " = " (showTExpr body)))
@@ -620,8 +620,8 @@ fn showFnDeclContD(d TDecl) Str =
 -- code. Mirrors the host's `Codegen.fs` line 270 area:
 --   `"[<EntryPoint>]\nlet main (argv: string[]) =\n    " + body + "\n    0"`
 fn showMainDecl(body TExpr) Str =
-  let header = "[<EntryPoint>]\nlet main (argv: string[]) =\n    " in
-  let trailer = "\n    0" in
+  let header = "[<EntryPoint>]\nlet main (argv: string[]) =\n    "
+  let trailer = "\n    0"
   strConcat header (strConcat (showTExpr body) trailer)
 
 -- Emit a run of 2+ consecutive non-main TDFns as a single `let rec
@@ -640,9 +640,9 @@ fn showFnGroup(fns List[TDecl]) Str =
 -- adjacent `and` lines without vertical spacing, just like the host's
 -- `String.concat "\n"` call in `Codegen.fs` line 362).
 fn showFnGroupCons(first TDecl)(rest List[TDecl]) Str =
-  let head = showFnDeclFirstD first in
-  let tails = listMap showFnDeclContD rest in
-  let tailStr = joinLines tails in
+  let head = showFnDeclFirstD first
+  let tails = listMap showFnDeclContD rest
+  let tailStr = joinLines tails
   if strLen tailStr == 0 then head else strConcat head (strConcat "\n" tailStr)
 
 -- Emit a sum-type decl as multi-line F# source. Shape:
@@ -653,8 +653,8 @@ fn showFnGroupCons(first TDecl)(rest List[TDecl]) Str =
 -- lines once they're left-anchored. Phase 7.8d+ adds records and
 -- wrapped types; this slice only handles sum bodies.
 fn showTypeDecl(name Str)(tps List[Str])(ctors List[Ctor]) Str =
-  let paramStr = showTypeParams tps in
-  let arms = showCtors ctors in
+  let paramStr = showTypeParams tps
+  let arms = showCtors ctors
   strConcat "type " (strConcat name (strConcat paramStr (strConcat " =\n" arms)))
 
 -- ---------- Line joiner -------------------------------------------------
@@ -700,14 +700,14 @@ fn joinBlocks(xs List[Str]) Str =
 -- accept `fnName ()` as an expression — callers pass `0` and the
 -- body discards it.
 fn fsharpPrelude(_ignored Int) Str =
-  let l1 = "// --- ll-lang stdlib prelude (auto-generated) ---" in
-  let l2 = "let listMap f xs = List.map f xs" in
-  let l3 = "let listLen (xs: 'a list) : int64 = int64 (List.length xs)" in
-  let l4 = "let strLen (s: string) : int64 = int64 s.Length" in
-  let l5 = "let strConcat (a: string) (b: string) = a + b" in
-  let l6 = "let print (s: string) = System.Console.Write(s)" in
-  let l7 = "// --- end prelude ---" in
-  let preludeLines = [l1 l2 l3 l4 l5 l6 l7] in
+  let l1 = "// --- ll-lang stdlib prelude (auto-generated) ---"
+  let l2 = "let listMap f xs = List.map f xs"
+  let l3 = "let listLen (xs: 'a list) : int64 = int64 (List.length xs)"
+  let l4 = "let strLen (s: string) : int64 = int64 s.Length"
+  let l5 = "let strConcat (a: string) (b: string) = a + b"
+  let l6 = "let print (s: string) = System.Console.Write(s)"
+  let l7 = "// --- end prelude ---"
+  let preludeLines = [l1 l2 l3 l4 l5 l6 l7]
   joinLines preludeLines
 
 -- ---------- Module emission (Phase 7.8d + 7.8e) -------------------------
@@ -734,10 +734,10 @@ fn showModule(m Module) Str =
 -- `let rec` grouping + `[<EntryPoint>]` main slicing), all glued with
 -- blank-line separators.
 fn showModuleBody(path Str)(decls List[TDecl]) Str =
-  let header = strConcat "module " path in
-  let prelude = fsharpPrelude 0 in
-  let declBlock = splitAndShowDecls decls in
-  let parts = [header prelude declBlock] in
+  let header = strConcat "module " path
+  let prelude = fsharpPrelude 0
+  let declBlock = splitAndShowDecls decls
+  let parts = [header prelude declBlock]
   joinBlocks parts
 
 -- ---------- Phase 7.8e: decl grouping walker ---------------------------
@@ -783,9 +783,9 @@ fn splitAndShowStep(d TDecl)(rest List[TDecl])(pending List[TDecl])(acc Str) Str
   match d with
     | TDFn name ps body -> splitAndShowStepFn d name ps rest pending acc
     | TDType _ _ _ ->
-      let acc2 = flushPendingFns pending acc in
-      let typeBlock = showDecl d in
-      let acc3 = appendBlockStr typeBlock acc2 in
+      let acc2 = flushPendingFns pending acc
+      let typeBlock = showDecl d
+      let acc3 = appendBlockStr typeBlock acc2
       splitAndShowLoop rest [] acc3
 
 -- TDFn branch of `splitAndShowStep`: main goes to the boundary-flush
@@ -802,9 +802,9 @@ fn splitAndShowStepFn(d TDecl)(name Str)(ps List[Str])(rest List[TDecl])(pending
 -- per branch (the parser needs `if ... then EXPR else EXPR` to live
 -- on a single logical line).
 fn splitAndShowStepMain(d TDecl)(rest List[TDecl])(pending List[TDecl])(acc Str) Str =
-  let acc2 = flushPendingFns pending acc in
-  let mainBlock = showDecl d in
-  let acc3 = appendBlockStr mainBlock acc2 in
+  let acc2 = flushPendingFns pending acc
+  let mainBlock = showDecl d
+  let acc3 = appendBlockStr mainBlock acc2
   splitAndShowLoop rest [] acc3
 
 -- Flush a `pending` run of non-main TDFns into the accumulator. The
@@ -828,7 +828,7 @@ fn flushPendingFnsNonEmpty(fns List[TDecl])(acc Str) Str =
         match rest with
           | _ :: _ -> showFnGroup fns
           | _ -> showDecl d
-      in
+     
       appendBlockStr block acc
     | _ -> acc
 
@@ -849,26 +849,26 @@ fn main() =
   -- `double` covers TELam (bound as a top-level value, not as a
   -- function param); `classify` covers TEMatch with PInt / PWild
   -- branches. See the header block for the expected emission.
-  let d1 = TDFn "inc"     ["x"] (TEAdd (TEVar "x") (TEInt 1)) in
-  let d2 = TDFn "greet"   []    (TEStr "hello") in
-  let d3 = TDFn "addOne"  ["x"] (TELet "y" (TEAdd (TEVar "x") (TEInt 1)) (TEVar "y")) in
-  let d4 = TDFn "callInc" ["x"] (TEApp (TEVar "inc") (TEVar "x")) in
+  let d1 = TDFn "inc"     ["x"] (TEAdd (TEVar "x") (TEInt 1))
+  let d2 = TDFn "greet"   []    (TEStr "hello")
+  let d3 = TDFn "addOne"  ["x"] (TELet "y" (TEAdd (TEVar "x") (TEInt 1)) (TEVar "y"))
+  let d4 = TDFn "callInc" ["x"] (TEApp (TEVar "inc") (TEVar "x"))
   -- Phase 7.8b: TEIf / TELam / TEMatch.
-  let d5 = TDFn "choose"  ["b"] (TEIf (TEVar "b") (TEInt 1) (TEInt 2)) in
-  let d6 = TDFn "double"  []    (TELam "x" (TEAdd (TEVar "x") (TEVar "x"))) in
+  let d5 = TDFn "choose"  ["b"] (TEIf (TEVar "b") (TEInt 1) (TEInt 2))
+  let d6 = TDFn "double"  []    (TELam "x" (TEAdd (TEVar "x") (TEVar "x")))
   -- TEMatch parallel-list construction: list-literal elements that
   -- start with a TypeId ctor app have to be let-bound individually
   -- so the parser doesn't treat `[PInt 0 PWild]` as a single curried
   -- ctor application. Same workaround `18-hminfer-real.lll`'s t18
   -- match case (line 955 area) uses.
-  let classifyPat1 = PInt 0 in
-  let classifyPat2 = PWild in
-  let classifyPats = [classifyPat1 classifyPat2] in
-  let classifyBody1 = TEStr "zero" in
-  let classifyBody2 = TEStr "other" in
-  let classifyBodies = [classifyBody1 classifyBody2] in
-  let classifyExpr = TEMatch (TEVar "x") classifyPats classifyBodies in
-  let d7 = TDFn "classify" ["x"] classifyExpr in
+  let classifyPat1 = PInt 0
+  let classifyPat2 = PWild
+  let classifyPats = [classifyPat1 classifyPat2]
+  let classifyBody1 = TEStr "zero"
+  let classifyBody2 = TEStr "other"
+  let classifyBodies = [classifyBody1 classifyBody2]
+  let classifyExpr = TEMatch (TEVar "x") classifyPats classifyBodies
+  let d7 = TDFn "classify" ["x"] classifyExpr
   -- Phase 7.8c: three TDType sum-type decls exercising every
   -- `showTypeDecl` sub-case.
   --   `Maybe` — parametric (`<'A>`), mixes an arg-bearing ctor (`Some
@@ -887,31 +887,31 @@ fn main() =
   -- so each `MkCtor` call is let-bound individually before being
   -- stitched into the outer `[...]` literal. Same workaround applies
   -- to the inner `TAVar` / `TAName` element lists.
-  let maybeArg1 = TAVar "A" in
-  let maybeSomeArgs = [maybeArg1] in
-  let maybeSome = MkCtor "Some" maybeSomeArgs in
-  let maybeNone = MkCtor "None" [] in
-  let maybeCtors = [maybeSome maybeNone] in
-  let d8 = TDType "Maybe" ["A"] maybeCtors in
-  let rectArg1 = TAName "Int" in
-  let rectArg2 = TAName "Int" in
-  let rectArgs = [rectArg1 rectArg2] in
-  let shapeCircle = MkCtor "Circle" [] in
-  let shapeRect = MkCtor "Rect" rectArgs in
-  let shapeEmpty = MkCtor "Empty" [] in
-  let shapeCtors = [shapeCircle shapeRect shapeEmpty] in
-  let d9 = TDType "Shape" [] shapeCtors in
-  let pairArg1 = TAVar "A" in
-  let pairArg2 = TAVar "B" in
-  let pairArgs = [pairArg1 pairArg2] in
-  let pairMk = MkCtor "MkPair" pairArgs in
-  let pairCtors = [pairMk] in
-  let d10 = TDType "Pair" ["A" "B"] pairCtors in
+  let maybeArg1 = TAVar "A"
+  let maybeSomeArgs = [maybeArg1]
+  let maybeSome = MkCtor "Some" maybeSomeArgs
+  let maybeNone = MkCtor "None" []
+  let maybeCtors = [maybeSome maybeNone]
+  let d8 = TDType "Maybe" ["A"] maybeCtors
+  let rectArg1 = TAName "Int"
+  let rectArg2 = TAName "Int"
+  let rectArgs = [rectArg1 rectArg2]
+  let shapeCircle = MkCtor "Circle" []
+  let shapeRect = MkCtor "Rect" rectArgs
+  let shapeEmpty = MkCtor "Empty" []
+  let shapeCtors = [shapeCircle shapeRect shapeEmpty]
+  let d9 = TDType "Shape" [] shapeCtors
+  let pairArg1 = TAVar "A"
+  let pairArg2 = TAVar "B"
+  let pairArgs = [pairArg1 pairArg2]
+  let pairMk = MkCtor "MkPair" pairArgs
+  let pairCtors = [pairMk]
+  let d10 = TDType "Pair" ["A" "B"] pairCtors
   -- Phase 7.8e: an extra zero-param `main` fn exercising the
   -- `[<EntryPoint>]` emission path. The body is a simple `print "hello"`
   -- TEApp — enough to prove that the body still routes through
   -- `showTExpr` and that the `\n    0` exit-code trailer lands after it.
-  let d11 = TDFn "main" [] (TEApp (TEVar "print") (TEStr "hello")) in
+  let d11 = TDFn "main" [] (TEApp (TEVar "print") (TEStr "hello"))
   -- Phase 7.8d/e: wrap the eleven decls in a `Module` value and render
   -- via `showModule`, which prepends the `module Examples.Generated`
   -- header and the F# stdlib prelude block before walking the decls.
@@ -921,6 +921,6 @@ fn main() =
   -- `[<EntryPoint>]`). Phase 7.8e's `splitAndShowDecls` walker handles
   -- the grouping + main splitting automatically — the caller still
   -- just passes a flat decl list in the desired source order.
-  let allDecls = [d8 d9 d10 d1 d2 d3 d4 d5 d6 d7 d11] in
-  let m = MkModule "Examples.Generated" allDecls in
+  let allDecls = [d8 d9 d10 d1 d2 d3 d4 d5 d6 d7 d11]
+  let m = MkModule "Examples.Generated" allDecls
   printfn (showModule m)

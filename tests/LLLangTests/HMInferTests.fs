@@ -250,7 +250,7 @@ let ``infer indented let without in: multi-line fn body`` () =
 
 [<Fact>]
 let ``infer indented let: single vs multi-line give same type`` () =
-    let singleLine = "module M\nfn g() = let x = 1 in let y = 2 in x + y"
+    let singleLine = "module M\nfn g() =\n  let x = 1\n  let y = 2\n  x + y"
     let multiLine  = "module M\nfn g() =\n  let x = 1\n  let y = 2\n  x + y"
     let t1 = (schemeOf (inferOk singleLine) "g").Body
     let t2 = (schemeOf (inferOk multiLine)  "g").Body
@@ -355,7 +355,7 @@ let ``instantiation is fresh per use`` () =
 let ``nested let captures outer variable`` () =
     let src =
         "module M\n" +
-        "let outer = \\x. (let inner = \\y. x in inner)"
+        "fn outer(x) = \\y. x"
     let tm = inferOk src
     let sch = schemeOf tm "outer"
     Assert.InRange(List.length sch.Vars, 1, 2)
@@ -789,7 +789,8 @@ let ``infer let-tuple destructuring binds components at correct types`` () =
     let src =
         "module M\n" +
         "fn addPair(p) Int =\n" +
-        "  let (a, b) = p in a + b"
+        "  let (a, b) = p\n" +
+        "  a + b"
     let tm = inferOk src
     let sch = schemeOf tm "addPair"
     // Body type is `(Int, Int) -> Int` encoded as
@@ -804,7 +805,8 @@ let ``infer let wildcard destructuring`` () =
     let src =
         "module M\n" +
         "fn f() Int =\n" +
-        "  let _ = 99 in 1"
+        "  let _ = 99\n" +
+        "  1"
     let tm = inferOk src
     Assert.Equal(TyName "Int", (schemeOf tm "f").Body)
 
@@ -816,7 +818,8 @@ let ``infer top-level let-tuple destructuring exposes a and b in env`` () =
     let src =
         "module M\n" +
         "fn pairFst(p) Int =\n" +
-        "  let (a, _) = p in a"
+        "  let (a, _) = p\n" +
+        "  a"
     let tm = inferOk src
     // pairFst should be polymorphic over the tuple's second element.
     let sch = schemeOf tm "pairFst"
@@ -844,8 +847,8 @@ let ``infer let pair = (1, "x") in let (a, b) = pair in a + 1`` () =
     let src =
         "module M\n" +
         "fn run() Int =\n" +
-        "  let pair = (1, \"x\") in\n" +
-        "  let (a, b) = pair in\n" +
+        "  let pair = (1, \"x\")\n" +
+        "  let (a, b) = pair\n" +
         "  a + 1"
     let tm = inferOk src
     let sch = schemeOf tm "run"
@@ -860,8 +863,9 @@ let ``infer literal tuple matches PTuple encoding round-trip`` () =
     let src =
         "module M\n" +
         "fn fst3(unused Int) Int =\n" +
-        "  let t = (10, 20, 30) in\n" +
-        "  let (a, _, _) = t in a"
+        "  let t = (10, 20, 30)\n" +
+        "  let (a, _, _) = t\n" +
+        "  a"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "fst3").Body)
 
@@ -881,8 +885,8 @@ let ``Bug1: clause-sugar wildcard arm with multi-line let-in scopes bindings`` (
         "fn f(t Tag) Int =\n" +
         "  | A -> 1\n" +
         "  | _ ->\n" +
-        "    let p = (10, 20) in\n" +
-        "    let (x, y) = p in\n" +
+        "    let p = (10, 20)\n" +
+        "    let (x, y) = p\n" +
         "    x + y"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Tag", TyName "Int"), (schemeOf tm "f").Body)

@@ -344,13 +344,13 @@ type Module = MkModule Str List[Decl]
 -- ASCII uppercase / lowercase tests, same shape as 12/13/14. ll-lang lacks
 -- `&&` so each predicate is two nested `if`s.
 fn isUpperChar(c Char) Bool =
-  let n = charToInt c in
+  let n = charToInt c
   if n < 65 then false
   else if n > 90 then false
   else true
 
 fn isLowerChar(c Char) Bool =
-  let n = charToInt c in
+  let n = charToInt c
   if n < 97 then false
   else if n > 122 then false
   else true
@@ -430,14 +430,14 @@ fn classifyIdent(s Str) Token =
     | _ -> classifyIdentByHead s (strChars s)
 
 fn lexId(cs List[Char]) List[Token] =
-  let idChars = takeIdCont cs in
-  let leftover = dropIdCont cs in
-  let tok = classifyIdent (strFromChars idChars) in
+  let idChars = takeIdCont cs
+  let leftover = dropIdCont cs
+  let tok = classifyIdent (strFromChars idChars)
   listAppend [tok] (lexChars leftover)
 
 fn lexNum(cs List[Char]) List[Token] =
-  let digits = takeDigit cs in
-  let leftover = dropDigit cs in
+  let digits = takeDigit cs
+  let leftover = dropDigit cs
   listAppend [TInt (parseIntStr (strFromChars digits))] (lexChars leftover)
 
 -- Collect a string literal body: the opening `"` has already been
@@ -453,7 +453,7 @@ fn takeStrBody(cs List[Char]) =
     if c == '"' then ([], rest)
     else if c == '\\' then takeStrBodyEsc rest
     else
-      let (body, leftover) = takeStrBody rest in
+      let (body, leftover) = takeStrBody rest
       (c :: body, leftover)
   | _ -> ([], [])
 
@@ -463,12 +463,12 @@ fn takeStrBody(cs List[Char]) =
 -- `takeStrBody` to keep collecting the rest of the body.
 fn takeStrBodyEsc(cs List[Char]) =
   | esc :: rest ->
-    let (body, leftover) = takeStrBody rest in
+    let (body, leftover) = takeStrBody rest
     (decodeEscape esc :: body, leftover)
   | _ -> ([], [])
 
 fn lexStr(cs List[Char]) List[Token] =
-  let (body, leftover) = takeStrBody cs in
+  let (body, leftover) = takeStrBody cs
   listAppend [TStr (strFromChars body)] (lexChars leftover)
 
 -- Phase 7.9j: decode one escape-sequence content char. Supports the
@@ -621,7 +621,7 @@ fn skipNewlines(toks List[Token]) List[Token] =
 -- the first non-dot token it stops.
 fn parseModuleNameTail(acc Str)(toks List[Token]) =
   | TDot :: TUpper seg :: rest ->
-    let acc2 = strConcat (strConcat acc ".") seg in
+    let acc2 = strConcat (strConcat acc ".") seg
     parseModuleNameTail acc2 rest
   | _ -> (acc, toks)
 
@@ -633,8 +633,8 @@ fn parseModuleHeader(toks List[Token]) =
 
 -- Top-level driver. Reads the module header, then drives a decl loop.
 fn parseModule(toks List[Token]) Module =
-  let (name, rest) = parseModuleHeader toks in
-  let decls = parseDecls (skipNewlines rest) in
+  let (name, rest) = parseModuleHeader toks
+  let decls = parseDecls (skipNewlines rest)
   MkModule name decls
 
 -- Main decl loop. Cons-pattern fast paths dispatch on the first token.
@@ -653,22 +653,22 @@ fn parseDecls(toks List[Token]) List[Decl] =
   | TKwTag :: _ -> consDecl (parseTagDecl toks)
   | TKwImport :: _ -> consDecl (parseImportDecl toks)
   | TKwExport :: rest ->
-    let (inner, rest2) = parseOneDecl rest in
+    let (inner, rest2) = parseOneDecl rest
     DExport inner :: parseDecls (skipNewlines rest2)
   | _ -> []
 
 -- Helper: turn a (TypeDecl, leftover) pair into the recursive list.
 fn consTypeDecl(pair) List[Decl] =
-  let (td, rest) = pair in
+  let (td, rest) = pair
   DType td :: parseDecls (skipNewlines rest)
 
 -- Same shape for let decls (Phase 7.5a).
 fn consLetDecl(pair) List[Decl] =
-  let (ld, rest) = pair in
+  let (ld, rest) = pair
   DLet ld :: parseDecls (skipNewlines rest)
 
 fn consFnDecl(pair) List[Decl] =
-  let (fd, rest) = pair in
+  let (fd, rest) = pair
   DFn fd :: parseDecls (skipNewlines rest)
 
 -- Phase 7.5e: generic `(Decl, leftover) -> List[Decl]` cons helper for
@@ -676,7 +676,7 @@ fn consFnDecl(pair) List[Decl] =
 -- import decls build `DTag` / `DImport` directly, unlike the type /
 -- let / fn paths whose helpers return the inner decl body).
 fn consDecl(pair) List[Decl] =
-  let (d, rest) = pair in
+  let (d, rest) = pair
   d :: parseDecls (skipNewlines rest)
 
 -- Phase 7.5e: parse exactly one decl, returning `(Decl, leftover)`.
@@ -689,13 +689,13 @@ fn consDecl(pair) List[Decl] =
 -- immediately surface at the next parseDecls call.
 fn parseOneDecl(toks List[Token]) =
   | TKwType :: _ ->
-    let (td, rest) = parseTypeDecl toks in
+    let (td, rest) = parseTypeDecl toks
     (DType td, rest)
   | TKwLet :: _ ->
-    let (ld, rest) = parseLetDecl toks in
+    let (ld, rest) = parseLetDecl toks
     (DLet ld, rest)
   | TKwFn :: _ ->
-    let (fd, rest) = parseFnDecl toks in
+    let (fd, rest) = parseFnDecl toks
     (DFn fd, rest)
   | TKwTag :: _ -> parseTagDecl toks
   | TKwImport :: _ -> parseImportDecl toks
@@ -718,7 +718,7 @@ fn parseTagDecl(toks List[Token]) =
 -- pretty printer later renders it.
 fn parseImportDecl(toks List[Token]) =
   | TKwImport :: TUpper head :: rest ->
-    let (path, rest2) = parseModuleNameTail head rest in
+    let (path, rest2) = parseModuleNameTail head rest
     (DImport path, rest2)
   | _ -> (DImport "?", toks)
 
@@ -730,8 +730,8 @@ fn parseImportDecl(toks List[Token]) =
 fn parseLetDecl(toks List[Token]) =
   | TKwLet :: TLower name :: TEq :: rest ->
     -- Phase 7.9.newlines: tolerate `let x =\n  expr` module-level decls.
-    let rest0 = skipNewlines rest in
-    let (body, rest2) = parseExpr rest0 in
+    let rest0 = skipNewlines rest
+    let (body, rest2) = parseExpr rest0
     (MkLet name body, rest2)
   | _ -> (MkLet "?" (EInt 0), toks)
 
@@ -752,9 +752,9 @@ fn skipTEqNewlines(toks List[Token]) List[Token] =
 -- Single decl: 'type' Upper param* '=' ctor ('|' ctor)*
 fn parseTypeDecl(toks List[Token]) =
   | TKwType :: TUpper name :: rest ->
-    let (prms, rest2) = parseTypeParams rest in
-    let rest3 = skipTEqNewlines rest2 in
-    let (ctors, rest4) = parseCtors rest3 in
+    let (prms, rest2) = parseTypeParams rest
+    let rest3 = skipTEqNewlines rest2
+    let (ctors, rest4) = parseCtors rest3
     (MkTypeDecl name prms ctors, rest4)
   | _ -> (MkTypeDecl "?" [] [], toks)
 
@@ -763,7 +763,7 @@ fn parseTypeDecl(toks List[Token]) =
 fn parseTypeParams(toks List[Token]) =
   | TUpper s :: rest ->
     if strLen s == 1 then
-      let (ps, rest2) = parseTypeParams rest in
+      let (ps, rest2) = parseTypeParams rest
       (s :: ps, rest2)
     else ([], toks)
   | _ -> ([], toks)
@@ -772,25 +772,25 @@ fn parseTypeParams(toks List[Token]) =
 -- Phase 7.9o: tolerate multi-line form with newlines before/between
 -- ctors and an optional leading `|` before the first ctor.
 fn parseCtors(toks List[Token]) =
-  let toks2 = skipNewlines toks in
+  let toks2 = skipNewlines toks
   let toks3 = match toks2 with
     | TBar :: r -> skipNewlines r
     | _ -> toks2
-  in
-  let (c, rest) = parseCtor toks3 in
+ 
+  let (c, rest) = parseCtor toks3
   parseCtorsTail [c] rest
 
 fn parseCtorsTail(acc List[Ctor])(toks List[Token]) =
   match skipNewlines toks with
     | TBar :: rest ->
-      let rest2 = skipNewlines rest in
-      let (c, rest3) = parseCtor rest2 in
+      let rest2 = skipNewlines rest
+      let (c, rest3) = parseCtor rest2
       parseCtorsTail (listAppend acc [c]) rest3
     | _ -> (acc, toks)
 
 fn parseCtor(toks List[Token]) =
   | TUpper name :: rest ->
-    let (args, rest2) = parseTypeArgs rest in
+    let (args, rest2) = parseTypeArgs rest
     (MkCtor name args, rest2)
   | _ -> (MkCtor "?" [], toks)
 
@@ -800,8 +800,8 @@ fn parseCtor(toks List[Token]) =
 -- form parametric application (`Maybe[Int]`, `Result[A][E]`).
 fn parseTypeArgs(toks List[Token]) =
   | TUpper _ :: _ ->
-    let (arg, rest) = parseOneTypeArg toks in
-    let (args, rest2) = parseTypeArgs rest in
+    let (arg, rest) = parseOneTypeArg toks
+    let (args, rest2) = parseTypeArgs rest
     (arg :: args, rest2)
   | _ -> ([], toks)
 
@@ -813,9 +813,9 @@ fn parseTypeArgs(toks List[Token]) =
 -- application (`Foo[Bar[Baz]]`).
 fn parseOneTypeArg(toks List[Token]) =
   | TUpper s :: rest ->
-    let (brackArgs, rest2) = parseBrackArgs [] rest in
+    let (brackArgs, rest2) = parseBrackArgs [] rest
     if listIsEmpty brackArgs then
-      let arg = if strLen s == 1 then TAVar s else TACon s in
+      let arg = if strLen s == 1 then TAVar s else TACon s
       (arg, rest2)
     else (TAApp s brackArgs, rest2)
   | _ -> (TACon "?", toks)
@@ -833,8 +833,8 @@ fn skipTRBrack(toks List[Token]) List[Token] =
 -- resulting arg list should become a `TAApp` or a plain bare form.
 fn parseBrackArgs(acc List[TypeArg])(toks List[Token]) =
   | TLBrack :: rest ->
-    let (inner, rest2) = parseOneTypeArg rest in
-    let rest3 = skipTRBrack rest2 in
+    let (inner, rest2) = parseOneTypeArg rest
+    let rest3 = skipTRBrack rest2
     parseBrackArgs (listAppend acc [inner]) rest3
   | _ -> (acc, toks)
 
@@ -853,10 +853,10 @@ fn parseBrackArgs(acc List[TypeArg])(toks List[Token]) =
 -- entire body silently became `0`.
 fn parseFnDecl(toks List[Token]) =
   | TKwFn :: TLower name :: rest ->
-    let (prms, rest2) = parseParamGroups rest in
-    let (retTy, rest3) = parseReturnType rest2 in
-    let rest4 = skipTEqNewlines rest3 in
-    let (body, rest5) = parseFnBody prms rest4 in
+    let (prms, rest2) = parseParamGroups rest
+    let (retTy, rest3) = parseReturnType rest2
+    let rest4 = skipTEqNewlines rest3
+    let (body, rest5) = parseFnBody prms rest4
     (MkFn name prms retTy body, rest5)
   | _ -> (MkFn "?" [] None (EInt 0), toks)
 
@@ -871,12 +871,12 @@ fn parseFnDecl(toks List[Token]) =
 -- `parseArms` on an empty arm list returns `(([], []), toks)` and a
 -- zero-param fn with a clause-sugar body is a malformed source anyway.
 fn parseFnBody(prms List[Param])(toks List[Token]) =
-  let toks2 = skipNewlines toks in
+  let toks2 = skipNewlines toks
   match toks2 with
     | TBar :: _ ->
-      let (armLists, rest) = parseArms toks2 in
-      let (pats, bodies) = armLists in
-      let scrut = lastParamVar prms in
+      let (armLists, rest) = parseArms toks2
+      let (pats, bodies) = armLists
+      let scrut = lastParamVar prms
       (EMatch scrut pats bodies, rest)
     | _ -> parseExpr toks2
 
@@ -905,11 +905,11 @@ fn lastParamVar(prms List[Param]) Expr =
 -- `parseSkipBrackType` on each inner `TUpper`.
 fn parseSkipBrackType(toks List[Token]) =
   | TLBrack :: TUpper _ :: rest ->
-    let rest2 = parseSkipBrackType rest in
+    let rest2 = parseSkipBrackType rest
     let rest3 = match rest2 with
       | TRBrack :: r -> r
       | _ -> rest2
-    in
+   
     parseSkipBrackType rest3
   | _ -> toks
 
@@ -923,12 +923,12 @@ fn parseSkipBrackType(toks List[Token]) =
 fn parseParamGroups(toks List[Token]) =
   | TLParen :: TRParen :: rest -> ([], rest)
   | TLParen :: TLower pname :: TUpper tname :: rest ->
-    let rest2 = parseSkipBrackType rest in
+    let rest2 = parseSkipBrackType rest
     let rest3 = match rest2 with
       | TRParen :: r -> r
       | _ -> rest2
-    in
-    let (ps, rest4) = parseParamGroups rest3 in
+   
+    let (ps, rest4) = parseParamGroups rest3
     (MkParam pname (TR tname) :: ps, rest4)
   -- Phase 7.10p: underscore-prefixed unused param `(_name Type)`. The
   -- lexer splits `_ignored` into `TUnder :: TLower "ignored"` (since
@@ -942,19 +942,19 @@ fn parseParamGroups(toks List[Token]) =
   -- the list-literal body into the subsequent decl stream, dropping
   -- ~83 decls from the fixpoint probe output.
   | TLParen :: TUnder :: TLower pname :: TUpper tname :: rest ->
-    let rest2 = parseSkipBrackType rest in
+    let rest2 = parseSkipBrackType rest
     let rest3 = match rest2 with
       | TRParen :: r -> r
       | _ -> rest2
-    in
-    let (ps, rest4) = parseParamGroups rest3 in
+   
+    let (ps, rest4) = parseParamGroups rest3
     (MkParam (strConcat "_" pname) (TR tname) :: ps, rest4)
   -- Phase 7.10h: untyped param `(pname)`. The bootstrap's own source
   -- uses this form for pair-accepting helpers (`consTypeDecl(pair)`
   -- etc.) where the host compiler infers the type via HM. Store a
   -- dummy `TR "?"` so the rest of the pipeline doesn't care.
   | TLParen :: TLower pname :: TRParen :: rest ->
-    let (ps, rest2) = parseParamGroups rest in
+    let (ps, rest2) = parseParamGroups rest
     (MkParam pname (TR "?") :: ps, rest2)
   | _ -> ([], toks)
 
@@ -966,7 +966,7 @@ fn parseParamGroups(toks List[Token]) =
 -- can still find the trailing `=` and proceed into the body.
 fn parseReturnType(toks List[Token]) =
   | TUpper tname :: rest ->
-    let rest2 = parseSkipBrackType rest in
+    let rest2 = parseSkipBrackType rest
     (Some (TR tname), rest2)
   | _ -> (None, toks)
 
@@ -1011,7 +1011,7 @@ fn parseExpr(toks List[Token]) =
 fn skipTKwInNewlines(toks List[Token]) List[Token] =
   match toks with
     | TKwIn :: r -> skipNewlines r
-    | _ -> toks
+    | _ -> skipNewlines toks
 
 -- `let name = e1 in e2`. Single-binder let-in. Chains are expressed by
 -- nesting another `let ... in ...` in the `e2` slot (right-recursive).
@@ -1029,19 +1029,19 @@ fn parseLetIn(toks List[Token]) =
   -- dropping every decl after the offending fn. First occurrence is
   -- `takeStrBody` at line 433.
   | TLParen :: TLower a :: TComma :: TLower b :: TRParen :: TEq :: rest ->
-    let rest0 = skipNewlines rest in
-    let (e1, rest2) = parseExpr rest0 in
-    let rest3 = skipTKwInNewlines rest2 in
-    let (e2, rest4) = parseExpr rest3 in
+    let rest0 = skipNewlines rest
+    let (e1, rest2) = parseExpr rest0
+    let rest3 = skipTKwInNewlines rest2
+    let (e2, rest4) = parseExpr rest3
     (ELetInTup2 a b e1 e2, rest4)
   | TLower name :: TEq :: rest ->
     -- Phase 7.9.newlines (#8): `let x =\n  rhs` and `in\n  body` both
     -- need to tolerate a `TNewline` before their sub-expression, so
     -- we `skipNewlines` before each `parseExpr` call below.
-    let rest0 = skipNewlines rest in
-    let (e1, rest2) = parseExpr rest0 in
-    let rest3 = skipTKwInNewlines rest2 in
-    let (e2, rest4) = parseExpr rest3 in
+    let rest0 = skipNewlines rest
+    let (e1, rest2) = parseExpr rest0
+    let rest3 = skipTKwInNewlines rest2
+    let (e2, rest4) = parseExpr rest3
     (ELetIn name e1 e2, rest4)
   | _ -> (EInt 0, toks)
 
@@ -1073,10 +1073,10 @@ fn wrapLamParams(parms List[Str])(body Expr) Expr =
     | _ -> body
 
 fn parseLam(toks List[Token]) =
-  let (parms, rest) = parseLamParams [] toks in
+  let (parms, rest) = parseLamParams [] toks
   match rest with
     | TDot :: rest2 ->
-      let (body, rest3) = parseExpr rest2 in
+      let (body, rest3) = parseExpr rest2
       (wrapLamParams parms body, rest3)
     | _ -> (EInt 0, toks)
 
@@ -1096,19 +1096,19 @@ fn parseLam(toks List[Token]) =
 -- remaining decl. Mirrors the host parser's `skipNewlines c` calls
 -- around the same `KwThen`/`KwElse` sites in `Parser.fs`.
 fn parseIf(toks List[Token]) =
-  let (c, rest) = parseExpr toks in
-  let rest1 = skipNewlines rest in
+  let (c, rest) = parseExpr toks
+  let rest1 = skipNewlines rest
   let rest2 = match rest1 with
     | TKwThen :: r -> skipNewlines r
     | _ -> rest1
-  in
-  let (a, rest3) = parseExpr rest2 in
-  let rest3a = skipNewlines rest3 in
+ 
+  let (a, rest3) = parseExpr rest2
+  let rest3a = skipNewlines rest3
   let rest4 = match rest3a with
     | TKwElse :: r -> skipNewlines r
     | _ -> rest3a
-  in
-  let (b, rest5) = parseExpr rest4 in
+ 
+  let (b, rest5) = parseExpr rest4
   (EIf c a b, rest5)
 
 -- `match scrut with | pat -> body | pat -> body ...`. Same shape as the
@@ -1117,13 +1117,13 @@ fn parseIf(toks List[Token]) =
 -- nor an arithmetic operator), then `parseArms` pulls the two parallel
 -- arm lists out of the rest of the token stream.
 fn parseMatch(toks List[Token]) =
-  let (scrut, rest) = parseExpr toks in
+  let (scrut, rest) = parseExpr toks
   let rest2 = match rest with
     | TKwWith :: r -> r
     | _ -> rest
-  in
-  let (armLists, rest3) = parseArms rest2 in
-  let (pats, bodies) = armLists in
+ 
+  let (armLists, rest3) = parseArms rest2
+  let (pats, bodies) = armLists
   (EMatch scrut pats bodies, rest3)
 
 -- Collect arms while the next token is `|`. Returns `((pats, bodies),
@@ -1136,13 +1136,13 @@ fn parseArms(toks List[Token]) =
   -- leading `TBar` only AFTER skipping newlines. Otherwise the first
   -- `TNewline :: TBar :: _` falls through to the `(([], []), toks)`
   -- branch and silently drops every subsequent arm.
-  let toks2 = skipNewlines toks in
+  let toks2 = skipNewlines toks
   match toks2 with
     | TBar :: _ ->
-      let (armPair, rest) = parseArm toks2 in
-      let (p, b) = armPair in
-      let (moreLists, rest2) = parseArms rest in
-      let (ps, bs) = moreLists in
+      let (armPair, rest) = parseArm toks2
+      let (p, b) = armPair
+      let (moreLists, rest2) = parseArms rest
+      let (ps, bs) = moreLists
       ((p :: ps, b :: bs), rest2)
     | _ -> (([], []), toks2)
 
@@ -1160,9 +1160,9 @@ fn skipTArrow(toks List[Token]) List[Token] =
 -- `((pat, body), leftover)` so the caller can destructure cleanly.
 fn parseArm(toks List[Token]) =
   | TBar :: rest ->
-    let (p, rest2) = parsePat rest in
-    let rest3 = skipTArrow rest2 in
-    let (body, rest4) = parseArmBody rest3 in
+    let (p, rest2) = parsePat rest
+    let rest3 = skipTArrow rest2
+    let (body, rest4) = parseArmBody rest3
     ((p, body), rest4)
   | _ -> ((PWild, EInt 0), toks)
 
@@ -1189,7 +1189,7 @@ fn parseArm(toks List[Token]) =
 -- from that scope used inside the let body. Mirrors the
 -- `skipNewlines` pattern in `parseArms`.
 fn parseArmBody(toks List[Token]) =
-  let toks2 = skipNewlines toks in
+  let toks2 = skipNewlines toks
   match toks2 with
     | TKwIf :: rest -> parseIf rest
     | TKwLet :: rest -> parseLetIn rest
@@ -1211,15 +1211,15 @@ fn parsePatArgs(toks List[Token]) =
     | _ -> ([], toks)
 
 fn parsePatArgsCons(toks List[Token]) =
-  let (p, rest) = parsePrimaryPat toks in
-  let (ps, rest2) = parsePatArgs rest in
+  let (p, rest) = parsePrimaryPat toks
+  let (ps, rest2) = parsePatArgs rest
   (listAppend [p] ps, rest2)
 
 -- Phase 7.9l: fold a `TUpper name :: rest` constructor pattern into a
 -- `PCon name args` node. Consumes the ctor name plus any trailing
 -- atomic sub-patterns via `parsePatArgs`.
 fn parseCtorArgs(name Str)(toks List[Token]) =
-  let (args, rest) = parsePatArgs toks in
+  let (args, rest) = parsePatArgs toks
   (PCon name args, rest)
 
 -- Primary pattern: int literal, lowercase var binder, wildcard `_`,
@@ -1243,10 +1243,10 @@ fn parsePrimaryPat(toks List[Token]) =
 -- `a :: b :: rest` fold right-associatively into `PCons a (PCons b
 -- (PVar "rest"))`. Phase 7.5c added `PNil` and `PCons`.
 fn parsePat(toks List[Token]) =
-  let (p, rest) = parsePrimaryPat toks in
+  let (p, rest) = parsePrimaryPat toks
   match rest with
     | TColonColon :: rest2 ->
-      let (tail, rest3) = parsePat rest2 in
+      let (tail, rest3) = parsePat rest2
       (PCons p tail, rest3)
     | _ -> (p, rest)
 
@@ -1256,19 +1256,19 @@ fn parsePat(toks List[Token]) =
 -- `!=` stay in Phase 7.9g+. Left-associative via the tail helper, same
 -- shape as parseAddSubTail.
 fn parseCompare(toks List[Token]) =
-  let (e, rest) = parseCons toks in
+  let (e, rest) = parseCons toks
   parseCompareTail e rest
 
 fn parseCompareTail(lhs Expr)(toks List[Token]) =
   match toks with
     | TEqEq :: r ->
-      let (rhs, rest2) = parseCons r in
+      let (rhs, rest2) = parseCons r
       parseCompareTail (EEq lhs rhs) rest2
     | TLt :: r ->
-      let (rhs, rest2) = parseCons r in
+      let (rhs, rest2) = parseCons r
       parseCompareTail (ELt lhs rhs) rest2
     | TGt :: r ->
-      let (rhs, rest2) = parseCons r in
+      let (rhs, rest2) = parseCons r
       parseCompareTail (EGt lhs rhs) rest2
     | _ -> (lhs, toks)
 
@@ -1280,51 +1280,51 @@ fn parseCompareTail(lhs Expr)(toks List[Token]) =
 -- `(head :: tail, leftover)` pairs which the expression parser had no
 -- way to consume before this slice.
 fn parseCons(toks List[Token]) =
-  let (head, rest) = parseAddSub toks in
+  let (head, rest) = parseAddSub toks
   match rest with
     | TColonColon :: rest2 ->
-      let (tail, rest3) = parseCons rest2 in
+      let (tail, rest3) = parseCons rest2
       (ECons head tail, rest3)
     | _ -> (head, rest)
 
 -- Arithmetic precedence cascade, same shape as 13/14.
 fn parseAddSub(toks List[Token]) =
-  let (e, rest) = parseMulDiv toks in
+  let (e, rest) = parseMulDiv toks
   parseAddSubTail e rest
 
 fn parseAddSubTail(lhs Expr)(toks List[Token]) =
   | TPlus :: rest ->
-    let (r, rest2) = parseMulDiv rest in
+    let (r, rest2) = parseMulDiv rest
     parseAddSubTail (EAdd lhs r) rest2
   | TMinus :: rest ->
-    let (r, rest2) = parseMulDiv rest in
+    let (r, rest2) = parseMulDiv rest
     parseAddSubTail (ESub lhs r) rest2
   | _ -> (lhs, toks)
 
 fn parseMulDiv(toks List[Token]) =
-  let (e, rest) = parseApp toks in
+  let (e, rest) = parseApp toks
   parseMulDivTail e rest
 
 fn parseMulDivTail(lhs Expr)(toks List[Token]) =
   | TStar :: rest ->
-    let (r, rest2) = parseApp rest in
+    let (r, rest2) = parseApp rest
     parseMulDivTail (EMul lhs r) rest2
   | TSlash :: rest ->
-    let (r, rest2) = parseApp rest in
+    let (r, rest2) = parseApp rest
     parseMulDivTail (EDiv lhs r) rest2
   | _ -> (lhs, toks)
 
 -- Application layer: left-associative juxtaposition. Collects atom args
 -- while the head token is an atom-starter.
 fn parseApp(toks List[Token]) =
-  let (e, rest) = parseAtom toks in
+  let (e, rest) = parseAtom toks
   parseAppTail e rest
 
 fn parseAppTail(lhs Expr)(toks List[Token]) =
   match toks with
     | t :: _ ->
       if isAtomStart t then
-        let (arg, rest) = parseAtom toks in
+        let (arg, rest) = parseAtom toks
         parseAppTail (EApp lhs arg) rest
       else (lhs, toks)
     | _ -> (lhs, toks)
@@ -1352,7 +1352,7 @@ fn parseAtom(toks List[Token]) =
   | TLBrack :: TRBrack :: rest -> (ENil, rest)
   | TLBrack :: rest -> parseListLit rest
   | TLParen :: rest ->
-    let (e, rest2) = parseExpr rest in
+    let (e, rest2) = parseExpr rest
     parseAtomParenTail e rest2
   | _ -> (EInt 0, toks)
 
@@ -1373,8 +1373,8 @@ fn parseAtomTupleTail(e1 Expr)(e2 Expr)(toks List[Token]) =
 fn parseAtomParenTail(e Expr)(toks List[Token]) =
   match toks with
     | TComma :: rest ->
-      let rest2 = skipNewlines rest in
-      let (e2, rest3) = parseExpr rest2 in
+      let rest2 = skipNewlines rest
+      let (e2, rest3) = parseExpr rest2
       parseAtomTupleTail e e2 rest3
     | TRParen :: rest -> (e, rest)
     | _ -> (e, toks)
@@ -1391,11 +1391,11 @@ fn parseAtomParenTail(e Expr)(toks List[Token]) =
 -- otherwise fall back to `parseAtom` so `[1 2 3]` stays three elements.
 -- Mirrors the host parser's Phase 7.3b rule.
 fn parseListLit(toks List[Token]) =
-  let (e, rest) = parseListElem toks in
+  let (e, rest) = parseListElem toks
   match rest with
     | TRBrack :: rest2 -> (ECons e ENil, rest2)
     | _ ->
-      let (tail, rest3) = parseListLit rest in
+      let (tail, rest3) = parseListLit rest
       (ECons e tail, rest3)
 
 fn parseListElem(toks List[Token]) =
@@ -1427,7 +1427,7 @@ fn showBrackArgs(args List[TypeArg]) Str =
 fn showArgs(args List[TypeArg]) Str =
   if listIsEmpty args then ""
   else
-    let inner = listFold (\acc a. if strLen acc == 0 then showTypeArg a else strConcat (strConcat acc ", ") (showTypeArg a)) "" args in
+    let inner = listFold (\acc a. if strLen acc == 0 then showTypeArg a else strConcat (strConcat acc ", ") (showTypeArg a)) "" args
     strConcat (strConcat "(" inner) ")"
 
 fn showCtor(c Ctor) Str =
@@ -1442,7 +1442,7 @@ fn showTypeParams(ps List[Str]) Str =
 
 fn showTypeDecl(d TypeDecl) Str =
   | MkTypeDecl name prms ctors ->
-    let head = strConcat (strConcat "type " name) (showTypeParams prms) in
+    let head = strConcat (strConcat "type " name) (showTypeParams prms)
     strConcat (strConcat head " = ") (showCtors ctors)
 
 -- Fn-decl pretty printer, matching the shape used by 13-fnparser-real.lll.
@@ -1493,8 +1493,8 @@ fn showArm(p Pat)(body Expr) Str =
 fn showArmsCons(p Pat)(ps List[Pat])(bodies List[Expr]) Str =
   match bodies with
     | b :: bs ->
-      let head = showArm p b in
-      let tail = showArms ps bs in
+      let head = showArm p b
+      let tail = showArms ps bs
       if strLen tail == 0 then head
       else strConcat (strConcat head " ") tail
     | _ -> ""
@@ -1525,20 +1525,20 @@ fn showExpr(e Expr) Str =
   | EApp f x -> strConcat (strConcat (strConcat (strConcat "(" (showExpr f)) " ") (showExpr x)) ")"
   | ELam n body -> strConcat (strConcat (strConcat (strConcat "(fun " n) " -> ") (showExpr body)) ")"
   | ELetIn n e1 e2 ->
-    let p1 = strConcat (strConcat "(let " n) " = " in
-    let p2 = strConcat (strConcat p1 (showExpr e1)) " in " in
+    let p1 = strConcat (strConcat "(let " n) " = "
+    let p2 = strConcat (strConcat p1 (showExpr e1)) " in "
     strConcat (strConcat p2 (showExpr e2)) ")"
   | ELetInTup2 a b e1 e2 ->
-    let p1 = strConcat (strConcat "(let (" a) ", " in
-    let p2 = strConcat (strConcat p1 b) ") = " in
-    let p3 = strConcat (strConcat p2 (showExpr e1)) " in " in
+    let p1 = strConcat (strConcat "(let (" a) ", "
+    let p2 = strConcat (strConcat p1 b) ") = "
+    let p3 = strConcat (strConcat p2 (showExpr e1)) " in "
     strConcat (strConcat p3 (showExpr e2)) ")"
   | EIf c a b ->
-    let p1 = strConcat "(if " (showExpr c) in
-    let p2 = strConcat (strConcat p1 " then ") (showExpr a) in
+    let p1 = strConcat "(if " (showExpr c)
+    let p2 = strConcat (strConcat p1 " then ") (showExpr a)
     strConcat (strConcat (strConcat p2 " else ") (showExpr b)) ")"
   | EMatch scrut pats bodies ->
-    let head = strConcat (strConcat "(match " (showExpr scrut)) " with " in
+    let head = strConcat (strConcat "(match " (showExpr scrut)) " with "
     strConcat (strConcat head (showArms pats bodies)) ")"
   | ENil -> "[]"
   | ECons h t -> strConcat (strConcat (strConcat (strConcat "(" (showExpr h)) " :: ") (showExpr t)) ")"
@@ -1546,8 +1546,8 @@ fn showExpr(e Expr) Str =
 
 fn showFnDecl(d FnDecl) Str =
   | MkFn name prms ret body ->
-    let headPart = strConcat (strConcat "fn " name) (showFnParams prms) in
-    let arrowPart = strConcat (strConcat headPart " -> ") (showReturn ret) in
+    let headPart = strConcat (strConcat "fn " name) (showFnParams prms)
+    let arrowPart = strConcat (strConcat headPart " -> ") (showReturn ret)
     strConcat (strConcat arrowPart " = ") (showExpr body)
 
 -- Let-decl pretty printer (Phase 7.5a): `let <name> = <show expr>`.
@@ -1575,7 +1575,7 @@ fn showDecls(ds List[Decl]) Str =
 
 fn showModule(m Module) Str =
   | MkModule name decls ->
-    let header = strConcat "module " name in
+    let header = strConcat "module " name
     if listIsEmpty decls then header
     else strConcat (strConcat header "\n") (showDecls decls)
 
@@ -1640,7 +1640,7 @@ fn checkExpr(env Env)(e Expr) List[Str] =
   | EVar name ->
     if envHas env name then []
     else
-      let msg = strConcat "E002 UnboundVar " name in
+      let msg = strConcat "E002 UnboundVar " name
       [msg]
   | ETagged inner _ -> checkExpr env inner
   | EAdd l r -> listAppend (checkExpr env l) (checkExpr env r)
@@ -1652,27 +1652,27 @@ fn checkExpr(env Env)(e Expr) List[Str] =
   | EGt l r -> listAppend (checkExpr env l) (checkExpr env r)
   | EApp f x -> listAppend (checkExpr env f) (checkExpr env x)
   | ELam param body ->
-    let env2 = envAdd env param in
+    let env2 = envAdd env param
     checkExpr env2 body
   | ELetIn name rhs body ->
-    let rhsErrs = checkExpr env rhs in
-    let env2 = envAdd env name in
-    let bodyErrs = checkExpr env2 body in
+    let rhsErrs = checkExpr env rhs
+    let env2 = envAdd env name
+    let bodyErrs = checkExpr env2 body
     listAppend rhsErrs bodyErrs
   | ELetInTup2 a b rhs body ->
-    let rhsErrs = checkExpr env rhs in
-    let env2 = envAdd env a in
-    let env3 = envAdd env2 b in
-    let bodyErrs = checkExpr env3 body in
+    let rhsErrs = checkExpr env rhs
+    let env2 = envAdd env a
+    let env3 = envAdd env2 b
+    let bodyErrs = checkExpr env3 body
     listAppend rhsErrs bodyErrs
   | EIf cnd thn els ->
-    let ce = checkExpr env cnd in
-    let te = checkExpr env thn in
-    let ee = checkExpr env els in
+    let ce = checkExpr env cnd
+    let te = checkExpr env thn
+    let ee = checkExpr env els
     listAppend (listAppend ce te) ee
   | EMatch scrut pats bodies ->
-    let scrutErrs = checkExpr env scrut in
-    let armErrs = checkArms env pats bodies in
+    let scrutErrs = checkExpr env scrut
+    let armErrs = checkArms env pats bodies
     listAppend scrutErrs armErrs
   | ENil -> []
   | ECons h t -> listAppend (checkExpr env h) (checkExpr env t)
@@ -1688,9 +1688,9 @@ fn checkExpr(env Env)(e Expr) List[Str] =
 fn checkArmsCons(env Env)(p Pat)(ps List[Pat])(bodies List[Expr]) List[Str] =
   match bodies with
     | b :: bs ->
-      let armEnv = envAddAll env (patBinders p) in
-      let armErrs = checkExpr armEnv b in
-      let restErrs = checkArms env ps bs in
+      let armEnv = envAddAll env (patBinders p)
+      let armErrs = checkExpr armEnv b
+      let restErrs = checkArms env ps bs
       listAppend armErrs restErrs
     | _ -> []
 
@@ -1707,7 +1707,7 @@ fn checkArms(env Env)(pats List[Pat])(bodies List[Expr]) List[Str] =
 -- body still gets name-resolved.
 fn checkFnBody(env Env)(fd FnDecl) List[Str] =
   | MkFn _ parms _ body ->
-    let bodyEnv = envAddAll env (paramNames parms) in
+    let bodyEnv = envAddAll env (paramNames parms)
     checkExpr bodyEnv body
 
 fn checkLetBody(env Env)(ld LetDecl) List[Str] =
@@ -1816,7 +1816,7 @@ fn coveredCtorsCons(p Pat)(tail List[Str]) List[Str] =
 fn coveredCtors(pats List[Pat]) List[Str] =
   match pats with
     | p :: rest ->
-      let tail = coveredCtors rest in
+      let tail = coveredCtors rest
       coveredCtorsCons p tail
     | _ -> []
 
@@ -1826,11 +1826,11 @@ fn coveredCtors(pats List[Pat]) List[Str] =
 fn missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) List[Str] =
   match required with
     | c :: rest ->
-      let tail = missingCtorErrs ty rest covered in
-      let isCovered = listFold (\acc x. if acc then true else if x == c then true else false) false covered in
+      let tail = missingCtorErrs ty rest covered
+      let isCovered = listFold (\acc x. if acc then true else if x == c then true else false) false covered
       if isCovered then tail
       else
-        let msg = strConcat (strConcat (strConcat "E003 NonExhaustiveMatch " ty) " missing ") c in
+        let msg = strConcat (strConcat (strConcat "E003 NonExhaustiveMatch " ty) " missing ") c
         listAppend [msg] tail
     | _ -> []
 
@@ -1853,17 +1853,17 @@ fn lastParamTypeName(ps List[Param]) Str =
 -- between the plain `DFn fd` arm and the `DExport (DFn fd)` unwrap.
 fn exhaustivenessFn(types List[TypeCtors])(fd FnDecl) List[Str] =
   | MkFn _ parms _ body ->
-    let lastTy = lastParamTypeName parms in
+    let lastTy = lastParamTypeName parms
     if strLen lastTy == 0 then []
     else
-      let required = lookupCtors types lastTy in
+      let required = lookupCtors types lastTy
       if listIsEmpty required then []
       else
         match body with
           | EMatch _ pats _ ->
             if armsHaveCatchAll pats then []
             else
-              let covered = coveredCtors pats in
+              let covered = coveredCtors pats
               missingCtorErrs lastTy required covered
           | _ -> []
 
@@ -2002,7 +2002,7 @@ fn inferExprType(env TypeEnv)(e Expr) TypeExpr =
 -- two `TypeExpr` operands' `showType` renderings. Shared helper so the
 -- arithmetic arms and the `if` arm produce identically-shaped messages.
 fn mkTypeMismatch(tl TypeExpr)(tr TypeExpr) Str =
-  let head = strConcat "E001 TypeMismatch " (showType tl) in
+  let head = strConcat "E001 TypeMismatch " (showType tl)
   strConcat (strConcat head " vs ") (showType tr)
 
 -- Check that both operands of a `+ - * /` expression infer to `Int`.
@@ -2011,19 +2011,19 @@ fn mkTypeMismatch(tl TypeExpr)(tr TypeExpr) Str =
 -- (via typeEq) to silent — so `EVar` references to unbound names and
 -- `EApp` results never produce false positives.
 fn checkArith(env TypeEnv)(l Expr)(r Expr) List[Str] =
-  let tl = inferExprType env l in
-  let tr = inferExprType env r in
-  let tyInt = TyName "Int" in
-  let lErr = if typeEq tl tyInt then [] else [(mkTypeMismatch tyInt tl)] in
-  let rErr = if typeEq tr tyInt then [] else [(mkTypeMismatch tyInt tr)] in
+  let tl = inferExprType env l
+  let tr = inferExprType env r
+  let tyInt = TyName "Int"
+  let lErr = if typeEq tl tyInt then [] else [(mkTypeMismatch tyInt tl)]
+  let rErr = if typeEq tr tyInt then [] else [(mkTypeMismatch tyInt tr)]
   listAppend lErr rErr
 
 -- Check that the `then` / `else` branches of an `if` expression agree
 -- on type. One E001 per mismatched pair; silent when either branch
 -- infers to `TyVar "?"`.
 fn checkIfBranches(env TypeEnv)(thn Expr)(els Expr) List[Str] =
-  let tt = inferExprType env thn in
-  let te = inferExprType env els in
+  let tt = inferExprType env thn
+  let te = inferExprType env els
   if typeEq tt te then []
   else [(mkTypeMismatch tt te)]
 
@@ -2040,36 +2040,36 @@ fn typeCheck(env TypeEnv)(e Expr) List[Str] =
   | EVar _ -> []
   | ETagged inner _ -> typeCheck env inner
   | EAdd l r ->
-    let here = checkArith env l r in
-    let lErrs = typeCheck env l in
-    let rErrs = typeCheck env r in
+    let here = checkArith env l r
+    let lErrs = typeCheck env l
+    let rErrs = typeCheck env r
     listAppend here (listAppend lErrs rErrs)
   | ESub l r ->
-    let here = checkArith env l r in
-    let lErrs = typeCheck env l in
-    let rErrs = typeCheck env r in
+    let here = checkArith env l r
+    let lErrs = typeCheck env l
+    let rErrs = typeCheck env r
     listAppend here (listAppend lErrs rErrs)
   | EMul l r ->
-    let here = checkArith env l r in
-    let lErrs = typeCheck env l in
-    let rErrs = typeCheck env r in
+    let here = checkArith env l r
+    let lErrs = typeCheck env l
+    let rErrs = typeCheck env r
     listAppend here (listAppend lErrs rErrs)
   | EDiv l r ->
-    let here = checkArith env l r in
-    let lErrs = typeCheck env l in
-    let rErrs = typeCheck env r in
+    let here = checkArith env l r
+    let lErrs = typeCheck env l
+    let rErrs = typeCheck env r
     listAppend here (listAppend lErrs rErrs)
   | EEq l r ->
-    let lErrs = typeCheck env l in
-    let rErrs = typeCheck env r in
+    let lErrs = typeCheck env l
+    let rErrs = typeCheck env r
     listAppend lErrs rErrs
   | ELt l r ->
-    let lErrs = typeCheck env l in
-    let rErrs = typeCheck env r in
+    let lErrs = typeCheck env l
+    let rErrs = typeCheck env r
     listAppend lErrs rErrs
   | EGt l r ->
-    let lErrs = typeCheck env l in
-    let rErrs = typeCheck env r in
+    let lErrs = typeCheck env l
+    let rErrs = typeCheck env r
     listAppend lErrs rErrs
   | EApp f x ->
     listAppend (typeCheck env f) (typeCheck env x)
@@ -2079,14 +2079,14 @@ fn typeCheck(env TypeEnv)(e Expr) List[Str] =
   | ELetInTup2 _ _ rhs body ->
     listAppend (typeCheck env rhs) (typeCheck env body)
   | EIf c t el ->
-    let ce = typeCheck env c in
-    let te = typeCheck env t in
-    let ee = typeCheck env el in
-    let branchErrs = checkIfBranches env t el in
+    let ce = typeCheck env c
+    let te = typeCheck env t
+    let ee = typeCheck env el
+    let branchErrs = checkIfBranches env t el
     listAppend (listAppend (listAppend ce te) ee) branchErrs
   | EMatch scrut _ bodies ->
-    let sErrs = typeCheck env scrut in
-    let bodiesErrs = typeCheckBodies env bodies in
+    let sErrs = typeCheck env scrut
+    let bodiesErrs = typeCheckBodies env bodies
     listAppend sErrs bodiesErrs
   | ENil -> []
   | ECons h t -> listAppend (typeCheck env h) (typeCheck env t)
@@ -2120,8 +2120,8 @@ fn seedParams(env TypeEnv)(ps List[Param]) TypeEnv =
 -- from the fn's params, then walks the body with `typeCheck`.
 fn hmFn(fd FnDecl) List[Str] =
   | MkFn _ parms _ body ->
-    let env0 = MkTypeEnv [] in
-    let env = seedParams env0 parms in
+    let env0 = MkTypeEnv []
+    let env = seedParams env0 parms
     typeCheck env body
 
 -- Run the HM pass on a single decl. Only `DFn` contributes (fn bodies
@@ -2155,12 +2155,12 @@ fn stdlibNames(_ignored Int) List[Str] =
   ["strConcat" "strLen" "strChars" "strFromChars" "strToInt" "print" "printfn" "listMap" "listLen" "listAppend" "listIsEmpty" "listFold" "listFilter" "listReverse" "readFile" "true" "false" "charToInt" "charIsDigit" "charIsSpace" "intToStr"]
 
 fn elaborate(decls List[Decl]) List[Str] =
-  let env0 = MkEnv (stdlibNames 0) in
-  let env = collectDecls env0 decls in
-  let types = collectTypes decls in
-  let nameErrs = checkDecls env decls in
-  let exhErrs = exhaustivenessCheck types decls in
-  let hmErrs = hmCheck decls in
+  let env0 = MkEnv (stdlibNames 0)
+  let env = collectDecls env0 decls
+  let types = collectTypes decls
+  let nameErrs = checkDecls env decls
+  let exhErrs = exhaustivenessCheck types decls
+  let hmErrs = hmCheck decls
   listAppend (listAppend nameErrs exhErrs) hmErrs
 
 -- Render the error list as one message per line. Empty list prints a
@@ -2226,10 +2226,10 @@ fn emitConPat(name Str)(args List[Pat]) Str =
   match args with
     | [] -> strConcat "(" (strConcat name ")")
     | _ :: [] ->
-      let arg = emitPatArgs args in
+      let arg = emitPatArgs args
       strConcat "(" (strConcat name (strConcat arg ")"))
     | _ ->
-      let inner = emitPatArgsTuple args in
+      let inner = emitPatArgsTuple args
       strConcat "(" (strConcat name (strConcat " (" (strConcat inner "))")))
 
 fn emitPatArgs(ps List[Pat]) Str =
@@ -2345,13 +2345,13 @@ fn emitArgsTuple(args List[Str]) Str =
 -- single-arg constructors and plain function application use the normal
 -- `(<f> <a>)` form.
 fn emitApp(f Expr)(a Expr) Str =
-  let (head, args) = gatherAppHead f [a] in
+  let (head, args) = gatherAppHead f [a]
   match head with
     | EVar name ->
       if isConstrName name then
         match args with
           | _ :: _ :: _ ->
-            let strs = listMap emitExpr args in
+            let strs = listMap emitExpr args
             strConcat "(" (strConcat name (strConcat " (" (strConcat (emitArgsTuple strs) "))")))
           | _ ->
             strConcat "(" (strConcat (emitExpr f) (strConcat " " (strConcat (emitExpr a) ")")))
@@ -2375,13 +2375,13 @@ fn emitLetIn(n Str)(e1 Expr)(e2 Expr) Str =
 -- F# native tuple-destructuring let. Used by every parseX helper that
 -- returns a `(result, leftover)` pair.
 fn emitLetInTup2(a Str)(b Str)(e1 Expr)(e2 Expr) Str =
-  let head = strConcat "(let (" a in
-  let head2 = strConcat head ", " in
-  let head3 = strConcat head2 b in
-  let head4 = strConcat head3 ") = " in
-  let head5 = strConcat head4 (emitExpr e1) in
-  let head6 = strConcat head5 " in " in
-  let head7 = strConcat head6 (emitExpr e2) in
+  let head = strConcat "(let (" a
+  let head2 = strConcat head ", "
+  let head3 = strConcat head2 b
+  let head4 = strConcat head3 ") = "
+  let head5 = strConcat head4 (emitExpr e1)
+  let head6 = strConcat head5 " in "
+  let head7 = strConcat head6 (emitExpr e2)
   strConcat head7 ")"
 
 -- `EIf c t e` -> `(if <c> then <t> else <e>)`. Unconditionally
@@ -2410,8 +2410,8 @@ fn emitArms(ps List[Pat])(bs List[Expr]) Str =
 fn emitArmsCons(p Pat)(prest List[Pat])(bs List[Expr]) Str =
   match bs with
     | b :: brest ->
-      let head = strConcat "| " (strConcat (emitPat p) (strConcat " -> " (emitExpr b))) in
-      let rest = emitArms prest brest in
+      let head = strConcat "| " (strConcat (emitPat p) (strConcat " -> " (emitExpr b)))
+      let rest = emitArms prest brest
       if strLen rest == 0 then head else strConcat head (strConcat " " rest)
     | _ -> ""
 
@@ -2439,7 +2439,7 @@ fn emitTypeArg(a TypeArg) Str =
   | TAVar v -> emitTypeParam v
   | TACon n -> emitTypeArgName n
   | TAApp head args ->
-    let body = emitTypeArgsInner args in
+    let body = emitTypeArgsInner args
     strConcat (emitTypeArgName head) (strConcat "<" (strConcat body ">"))
 
 -- Comma-joined inner type-arg list for `TAApp`. Pulled out into its
@@ -2476,7 +2476,7 @@ fn emitCtorOne(c Ctor) Str =
 fn emitCtorBody(name Str)(args List[TypeArg]) Str =
   match args with
     | _ :: _ ->
-      let argStr = emitCtorArgs args in
+      let argStr = emitCtorArgs args
       strConcat "    | " (strConcat name (strConcat " of " argStr))
     | _ -> strConcat "    | " name
 
@@ -2510,8 +2510,8 @@ fn emitTypeParamsBody(first Str)(rest List[Str]) Str =
 -- `type Name<'A, 'B> =\n    | Ctor1\n    | Ctor2 of T1 * T2 ...`.
 -- Sum bodies only — records and wrapped types are out of scope.
 fn emitTypeDeclBody(name Str)(prms List[Str])(ctors List[Ctor]) Str =
-  let header = strConcat "type " (strConcat name (emitTypeParamsHeader prms)) in
-  let arms = emitCtorList ctors in
+  let header = strConcat "type " (strConcat name (emitTypeParamsHeader prms))
+  let arms = emitCtorList ctors
   strConcat header (strConcat " =\n" arms)
 
 fn emitTypeDecl(td TypeDecl) Str =
@@ -2552,8 +2552,8 @@ fn emitIsMainFn(name Str)(parms List[Param]) Bool =
 -- we add a dummy `argv` parameter and a trailing `0` exit code.
 -- Mirrors `19-codegen-real.lll`'s `showMainDecl`.
 fn emitMainDecl(body Expr) Str =
-  let header = "[<EntryPoint>]\nlet main (argv: string[]) =\n    " in
-  let trailer = "\n    0" in
+  let header = "[<EntryPoint>]\nlet main (argv: string[]) =\n    "
+  let trailer = "\n    0"
   strConcat header (strConcat (emitExpr body) trailer)
 
 -- Plain `let <name> <params> = <body>` (or `let <name> = <body>`
@@ -2561,7 +2561,7 @@ fn emitMainDecl(body Expr) Str =
 fn emitFnPlain(name Str)(ps List[Str])(body Expr) Str =
   match ps with
     | _ :: _ ->
-      let paramStr = emitFnParams ps in
+      let paramStr = emitFnParams ps
       strConcat "let " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (emitExpr body)))))
     | _ ->
       strConcat "let " (strConcat name (strConcat " = " (emitExpr body)))
@@ -2570,7 +2570,7 @@ fn emitFnPlain(name Str)(ps List[Str])(body Expr) Str =
 fn emitFnFirst(name Str)(ps List[Str])(body Expr) Str =
   match ps with
     | _ :: _ ->
-      let paramStr = emitFnParams ps in
+      let paramStr = emitFnParams ps
       strConcat "let rec " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (emitExpr body)))))
     | _ ->
       strConcat "let rec " (strConcat name (strConcat " = " (emitExpr body)))
@@ -2580,7 +2580,7 @@ fn emitFnFirst(name Str)(ps List[Str])(body Expr) Str =
 fn emitFnCont(name Str)(ps List[Str])(body Expr) Str =
   match ps with
     | _ :: _ ->
-      let paramStr = emitFnParams ps in
+      let paramStr = emitFnParams ps
       strConcat "and " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (emitExpr body)))))
     | _ ->
       strConcat "and " (strConcat name (strConcat " = " (emitExpr body)))
@@ -2611,7 +2611,7 @@ fn emitDeclStandalone(d Decl) Str =
 
 fn emitDeclStandaloneFn(fd FnDecl) Str =
   | MkFn name parms _ body ->
-    let pnames = emitParamNames parms in
+    let pnames = emitParamNames parms
     if emitIsMainFn name parms then emitMainDecl body
     else emitFnPlain name pnames body
 
@@ -2623,7 +2623,7 @@ fn emitDeclFnFirst(d Decl) Str =
 
 fn emitDeclFnFirstUnwrap(fd FnDecl) Str =
   | MkFn name parms _ body ->
-    let pnames = emitParamNames parms in
+    let pnames = emitParamNames parms
     emitFnFirst name pnames body
 
 -- Dispatch a single `DFn` to `emitFnCont`. Same split shape as
@@ -2634,7 +2634,7 @@ fn emitDeclFnCont(d Decl) Str =
 
 fn emitDeclFnContUnwrap(fd FnDecl) Str =
   | MkFn name parms _ body ->
-    let pnames = emitParamNames parms in
+    let pnames = emitParamNames parms
     emitFnCont name pnames body
 
 -- Emit a 2+ run of consecutive non-main `DFn` decls as a single
@@ -2647,9 +2647,9 @@ fn emitFnGroup(fns List[Decl]) Str =
     | _ -> ""
 
 fn emitFnGroupCons(first Decl)(rest List[Decl]) Str =
-  let head = emitDeclFnFirst first in
-  let tails = listMap emitDeclFnCont rest in
-  let tailStr = emitJoinLines tails in
+  let head = emitDeclFnFirst first
+  let tails = listMap emitDeclFnCont rest
+  let tailStr = emitJoinLines tails
   if strLen tailStr == 0 then head else strConcat head (strConcat "\n" tailStr)
 
 -- Newline-joined fold over a `List[Str]`. Same shape as
@@ -2697,7 +2697,7 @@ fn emitFlushPendingNonEmpty(fns List[Decl])(acc Str) Str =
         match rest with
           | _ :: _ -> emitFnGroup fns
           | _ -> emitDeclStandalone d
-      in
+     
       emitAppendBlock block acc
     | _ -> acc
 
@@ -2708,9 +2708,9 @@ fn emitFlushPending(pending List[Decl])(acc Str) Str =
 
 -- Main-boundary branch: flush pending, emit the main fn, keep walking.
 fn emitStepMain(d Decl)(rest List[Decl])(pending List[Decl])(acc Str) Str =
-  let acc2 = emitFlushPending pending acc in
-  let mainBlock = emitDeclStandalone d in
-  let acc3 = emitAppendBlock mainBlock acc2 in
+  let acc2 = emitFlushPending pending acc
+  let mainBlock = emitDeclStandalone d
+  let acc3 = emitAppendBlock mainBlock acc2
   emitGroupLoop rest [] acc3
 
 -- DFn branch dispatch: main → boundary; non-main → push onto pending.
@@ -2738,9 +2738,9 @@ fn emitStepFnUnwrap(d Decl)(fd FnDecl)(rest List[Decl])(pending List[Decl])(acc 
 -- Generic boundary step: flush pending, emit `d` as a standalone
 -- block, keep walking. Shared by `DType` / `DLet` / `DTag` / `DImport`.
 fn emitStepBoundary(d Decl)(rest List[Decl])(pending List[Decl])(acc Str) Str =
-  let acc2 = emitFlushPending pending acc in
-  let block = emitDeclStandalone d in
-  let acc3 = emitAppendBlock block acc2 in
+  let acc2 = emitFlushPending pending acc
+  let block = emitDeclStandalone d
+  let acc3 = emitAppendBlock block acc2
   emitGroupLoop rest [] acc3
 
 fn emitGroupLoop(decls List[Decl])(pending List[Decl])(acc Str) Str =
@@ -2753,12 +2753,12 @@ fn emitGroupedDecls(decls List[Decl]) Str =
 
 -- Emit only the DType declarations from `decls` (preserving order).
 fn emitTypeDecls(decls List[Decl]) Str =
-  let types = listFilter (\d. match d with | DType _ -> true | _ -> false) decls in
+  let types = listFilter (\d. match d with | DType _ -> true | _ -> false) decls
   emitGroupLoop types [] ""
 
 -- Emit only the non-DType declarations from `decls` (preserving order).
 fn emitNonTypeDecls(decls List[Decl]) Str =
-  let nontypes = listFilter (\d. match d with | DType _ -> false | _ -> true) decls in
+  let nontypes = listFilter (\d. match d with | DType _ -> false | _ -> true) decls
   emitGroupLoop nontypes [] ""
 
 -- ---- F# stdlib prelude block -------------------------------------------
@@ -2768,37 +2768,37 @@ fn emitNonTypeDecls(decls List[Decl]) Str =
 -- `Int` to dodge ll-lang's lack of zero-param fn-call surface (callers
 -- pass `0`).
 fn emitPrelude(_ignored Int) Str =
-  let l1  = "// --- ll-lang stdlib prelude (auto-generated) ---" in
-  let l2  = "let listMap f xs = List.map f xs" in
-  let l3  = "let listLen (xs: 'a list) : int64 = int64 (List.length xs)" in
-  let l4  = "let listAppend xs ys = List.append xs ys" in
-  let l5  = "let listIsEmpty (xs: 'a list) = List.isEmpty xs" in
-  let l6  = "let listFold f z xs = List.fold f z xs" in
-  let l7  = "let listFilter p xs = List.filter p xs" in
-  let l8  = "let listReverse xs = List.rev xs" in
-  let l9  = "let strLen (s: string) : int64 = int64 s.Length" in
-  let l10 = "let strConcat (a: string) (b: string) = a + b" in
-  let l11 = "let print (s: string) = System.Console.Write(s)" in
-  let l12 = "let printfn (s: string) = System.Console.WriteLine(s)" in
-  let l13 = "let strChars (s: string) = s |> Seq.toList" in
-  let l14 = "let charToInt (c: char) = int64 (int c)" in
-  let l15 = "let intToChar (n: int64) = char (int n)" in
-  let l16 = "let intToStr (n: int64) = string n" in
-  let l17 = "let strFromChars (cs: char list) = System.String(cs |> List.toArray)" in
-  let l18 = "let charIsDigit (c: char) = System.Char.IsDigit(c)" in
-  let l19 = "let charIsSpace (c: char) = System.Char.IsWhiteSpace(c)" in
-  let l20 = "let readFile (path: string) = System.IO.File.ReadAllText(path: string)" in
-  let l21 = "let exit (code: int64) : unit = System.Environment.Exit(int code)" in
-  let l22 = "// --- end prelude ---" in
-  let lines = [l1 l2 l3 l4 l5 l6 l7 l8 l9 l10 l11 l12 l13 l14 l15 l16 l17 l18 l19 l20 l21 l22] in
+  let l1  = "// --- ll-lang stdlib prelude (auto-generated) ---"
+  let l2  = "let listMap f xs = List.map f xs"
+  let l3  = "let listLen (xs: 'a list) : int64 = int64 (List.length xs)"
+  let l4  = "let listAppend xs ys = List.append xs ys"
+  let l5  = "let listIsEmpty (xs: 'a list) = List.isEmpty xs"
+  let l6  = "let listFold f z xs = List.fold f z xs"
+  let l7  = "let listFilter p xs = List.filter p xs"
+  let l8  = "let listReverse xs = List.rev xs"
+  let l9  = "let strLen (s: string) : int64 = int64 s.Length"
+  let l10 = "let strConcat (a: string) (b: string) = a + b"
+  let l11 = "let print (s: string) = System.Console.Write(s)"
+  let l12 = "let printfn (s: string) = System.Console.WriteLine(s)"
+  let l13 = "let strChars (s: string) = s |> Seq.toList"
+  let l14 = "let charToInt (c: char) = int64 (int c)"
+  let l15 = "let intToChar (n: int64) = char (int n)"
+  let l16 = "let intToStr (n: int64) = string n"
+  let l17 = "let strFromChars (cs: char list) = System.String(cs |> List.toArray)"
+  let l18 = "let charIsDigit (c: char) = System.Char.IsDigit(c)"
+  let l19 = "let charIsSpace (c: char) = System.Char.IsWhiteSpace(c)"
+  let l20 = "let readFile (path: string) = System.IO.File.ReadAllText(path: string)"
+  let l21 = "let exit (code: int64) : unit = System.Environment.Exit(int code)"
+  let l22 = "// --- end prelude ---"
+  let lines = [l1 l2 l3 l4 l5 l6 l7 l8 l9 l10 l11 l12 l13 l14 l15 l16 l17 l18 l19 l20 l21 l22]
   emitJoinLines lines
 
 -- Maybe-dependent helpers: emitted after `type Maybe` is declared so that
 -- `Some` / `None` refer to the user-defined `Maybe<'A>` constructors rather
 -- than F#'s built-in `option`. This mirrors the host's `fsharpPreludeMaybe`.
 fn emitMaybePostlude(_ignored Int) Str =
-  let l1 = "let listHead xs = match xs with [] -> None | x :: _ -> Some x" in
-  let l2 = "let strToInt (s: string) = match System.Int64.TryParse(s: string) with | true, n -> Some n | false, _ -> None" in
+  let l1 = "let listHead xs = match xs with [] -> None | x :: _ -> Some x"
+  let l2 = "let strToInt (s: string) = match System.Int64.TryParse(s: string) with | true, n -> Some n | false, _ -> None"
   emitJoinLines [l1 l2]
 
 -- ---- Top-level module emission -----------------------------------------
@@ -2809,12 +2809,12 @@ fn emitMaybePostlude(_ignored Int) Str =
 -- The postlude (listHead, strToInt) must come after `type Maybe` so
 -- that `Some`/`None` resolve to the user-defined constructors.
 fn emitModuleBody(path Str)(decls List[Decl]) Str =
-  let header = strConcat "module " path in
-  let prelude = emitPrelude 0 in
-  let typeBlock = emitTypeDecls decls in
-  let postlude = emitMaybePostlude 0 in
-  let fnBlock = emitNonTypeDecls decls in
-  let parts = [header prelude typeBlock postlude fnBlock] in
+  let header = strConcat "module " path
+  let prelude = emitPrelude 0
+  let typeBlock = emitTypeDecls decls
+  let postlude = emitMaybePostlude 0
+  let fnBlock = emitNonTypeDecls decls
+  let parts = [header prelude typeBlock postlude fnBlock]
   emitJoinBlocks parts
 
 fn emitModule(m Module) Str =
@@ -2859,11 +2859,11 @@ fn emitModule(m Module) Str =
 fn main() =
   -- Path is relative to the repo root; `lllc run` (and the test
   -- harness) must set its working directory to the repo root.
-  let src = readFile "spec/examples/valid/20a-bootstrap-input.lll" in
-  let toks = tokenize src in
-  let modul = parseModule toks in
+  let src = readFile "spec/examples/valid/20a-bootstrap-input.lll"
+  let toks = tokenize src
+  let modul = parseModule toks
   match modul with
     | MkModule _ decls ->
-      let errs = elaborate decls in
+      let errs = elaborate decls
       if listIsEmpty errs then printfn (emitModule modul)
       else printfn (showErrs errs)

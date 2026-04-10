@@ -30,5 +30,5 @@ fn joinTokens(toks List[Token]) Str =
   listFold (\acc. \t. if strLen acc == 0 then tokenName t else strConcat (strConcat acc ",") (tokenName t)) "" toks
 
 fn main() =
-  let toks = listMap classify (strChars "ab 12 (x+y)") in
+  let toks = listMap classify (strChars "ab 12 (x+y)")
   printfn (joinTokens toks)

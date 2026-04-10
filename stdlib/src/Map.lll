@@ -60,7 +60,7 @@ fn balance(c Color)(left RBMap[K][V])(k K)(v V)(right RBMap[K][V]) RBMap[K][V] =
     | Black ->
       match left with
         | Node (Red) _ _ _ _ ->
-          let result = balanceLeft left k v right in
+          let result = balanceLeft left k v right
           match result with
             | Node (Red) _ _ _ _ -> result
             | _ -> balanceRight left k v right
@@ -71,14 +71,14 @@ fn ins(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) RBMap[K][V] =
   match m with
     | Leaf -> Node (Red) Leaf k v Leaf
     | Node c left nk nv right ->
-      let d = cmp k nk in
+      let d = cmp k nk
       if d < 0 then balance c (ins cmp k v left) nk nv right
       else if d > 0 then balance c left nk nv (ins cmp k v right)
       else Node c left nk v right
 
 -- mapInsert: insert k->v into map, replacing value if key exists
 fn mapInsert(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) RBMap[K][V] =
-  let t = ins cmp k v m in
+  let t = ins cmp k v m
   match t with
     | Leaf -> Leaf
     | Node _ left nk nv right -> Node (Black) left nk nv right
@@ -88,7 +88,7 @@ fn mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) Maybe[V] =
   match m with
     | Leaf -> None
     | Node _ left nk nv right ->
-      let d = cmp k nk in
+      let d = cmp k nk
       if d < 0 then mapLookup cmp k left
       else if d > 0 then mapLookup cmp k right
       else Some nv
@@ -104,8 +104,8 @@ fn mapFold(f B -> K -> V -> B)(acc B)(m RBMap[K][V]) B =
   match m with
     | Leaf -> acc
     | Node _ left k v right ->
-      let acc1 = mapFold f acc left in
-      let acc2 = f acc1 k v in
+      let acc1 = mapFold f acc left
+      let acc2 = f acc1 k v
       mapFold f acc2 right
 
 -- mapKeys: return list of keys in sorted (in-order) order
@@ -113,8 +113,8 @@ fn mapKeys(m RBMap[K][V]) List[K] =
   match m with
     | Leaf -> []
     | Node _ left k _ right ->
-      let lkeys = mapKeys left in
-      let rkeys = mapKeys right in
+      let lkeys = mapKeys left
+      let rkeys = mapKeys right
       listAppend lkeys (k :: rkeys)
 
 -- Integer comparator
@@ -132,92 +132,92 @@ fn strCmp(a Str)(b Str) Int =
 -- Test helper: print OK or FAIL
 fn check(label Str)(ok Bool) Int =
   if ok then
-    let _ = printfn (strConcat "OK " label) in
+    let _ = printfn (strConcat "OK " label)
     0
   else
-    let _ = printfn (strConcat "FAIL " label) in
+    let _ = printfn (strConcat "FAIL " label)
     1
 
 -- Main: exercise all API functions
 fn main() Int =
   -- mapEmpty / mapSize
-  let m0 = mapEmpty in
-  let _ = check "1 mapEmpty size=0" (mapSize m0 == 0) in
+  let m0 = mapEmpty
+  let _ = check "1 mapEmpty size=0" (mapSize m0 == 0)
 
   -- mapInsert + mapSize
-  let m1 = mapInsert intCmp 3 "three" m0 in
-  let m2 = mapInsert intCmp 1 "one" m1 in
-  let m3 = mapInsert intCmp 5 "five" m2 in
-  let m4 = mapInsert intCmp 2 "two" m3 in
-  let m5 = mapInsert intCmp 4 "four" m4 in
-  let _ = check "2 mapInsert size=5" (mapSize m5 == 5) in
+  let m1 = mapInsert intCmp 3 "three" m0
+  let m2 = mapInsert intCmp 1 "one" m1
+  let m3 = mapInsert intCmp 5 "five" m2
+  let m4 = mapInsert intCmp 2 "two" m3
+  let m5 = mapInsert intCmp 4 "four" m4
+  let _ = check "2 mapInsert size=5" (mapSize m5 == 5)
 
   -- mapLookup: found
-  let r1 = mapLookup intCmp 3 m5 in
+  let r1 = mapLookup intCmp 3 m5
   let ok1 = match r1 with
     | Some v -> v == "three"
     | None -> false
-  in
-  let _ = check "3 mapLookup found" ok1 in
+ 
+  let _ = check "3 mapLookup found" ok1
 
   -- mapLookup: not found
-  let r2 = mapLookup intCmp 99 m5 in
+  let r2 = mapLookup intCmp 99 m5
   let ok2 = match r2 with
     | Some _ -> false
     | None -> true
-  in
-  let _ = check "4 mapLookup missing" ok2 in
+ 
+  let _ = check "4 mapLookup missing" ok2
 
   -- mapContains
-  let _ = check "5 mapContains present" (mapContains intCmp 2 m5) in
-  let _ = check "6 mapContains absent" (mapContains intCmp 99 m5 == false) in
+  let _ = check "5 mapContains present" (mapContains intCmp 2 m5)
+  let _ = check "6 mapContains absent" (mapContains intCmp 99 m5 == false)
 
   -- mapFold: sum all keys
-  let keySum = mapFold (\acc k v. acc + k) 0 m5 in
-  let _ = check "7 mapFold sum keys" (keySum == 15) in
+  let keySum = mapFold (\acc k v. acc + k) 0 m5
+  let _ = check "7 mapFold sum keys" (keySum == 15)
 
   -- mapKeys: in-order keys
-  let keys = mapKeys m5 in
-  let _ = check "8 mapKeys length" (listLen keys == 5) in
+  let keys = mapKeys m5
+  let _ = check "8 mapKeys length" (listLen keys == 5)
 
   -- strCmp
-  let ms = mapInsert strCmp "banana" 2 (mapInsert strCmp "apple" 1 (mapEmpty)) in
-  let r3 = mapLookup strCmp "apple" ms in
+  let ms = mapInsert strCmp "banana" 2 (mapInsert strCmp "apple" 1 (mapEmpty))
+  let r3 = mapLookup strCmp "apple" ms
   let ok3 = match r3 with
     | Some n -> n == 1
     | None -> false
-  in
-  let _ = check "9 strCmp lookup" ok3 in
+ 
+  let _ = check "9 strCmp lookup" ok3
 
   -- mapEmpty() usage
-  let me = mapEmpty in
-  let _ = check "10 mapEmpty size=0" (mapSize me == 0) in
+  let me = mapEmpty
+  let _ = check "10 mapEmpty size=0" (mapSize me == 0)
 
   -- Duplicate key insert: size stays same, value updated
-  let md1 = mapInsert intCmp 42 "first" (mapEmpty) in
-  let md2 = mapInsert intCmp 42 "second" md1 in
+  let md1 = mapInsert intCmp 42 "first" (mapEmpty)
+  let md2 = mapInsert intCmp 42 "second" md1
   let okDup = match mapLookup intCmp 42 md2 with
     | Some v -> v == "second"
     | None -> false
-  in
-  let _ = check "11 duplicate key insert" (if mapSize md2 == 1 then okDup else false) in
+ 
+  let _ = check "11 duplicate key insert" (if mapSize md2 == 1 then okDup else false)
 
   -- Sorted order: insert [5,3,1,4,2], mapKeys returns [1,2,3,4,5]
-  let ms1 = mapInsert intCmp 5 0 (mapEmpty) in
-  let ms2 = mapInsert intCmp 3 0 ms1 in
-  let ms3 = mapInsert intCmp 1 0 ms2 in
-  let ms4 = mapInsert intCmp 4 0 ms3 in
-  let ms5 = mapInsert intCmp 2 0 ms4 in
-  let skeys = mapKeys ms5 in
+  let ms1 = mapInsert intCmp 5 0 (mapEmpty)
+  let ms2 = mapInsert intCmp 3 0 ms1
+  let ms3 = mapInsert intCmp 1 0 ms2
+  let ms4 = mapInsert intCmp 4 0 ms3
+  let ms5 = mapInsert intCmp 2 0 ms4
+  let skeys = mapKeys ms5
   let firstOk = match skeys with
     | h :: _ -> h == 1
     | [] -> false
-  in
-  let lastKey = listAt skeys 4 in
+ 
+  let lastKey = listAt skeys 4
   let lastOk = match lastKey with
     | Some v -> v == 5
     | None -> false
-  in
-  let _ = check "12 sorted order" (if firstOk then lastOk else false) in
+ 
+  let _ = check "12 sorted order" (if firstOk then lastOk else false)
 
   0

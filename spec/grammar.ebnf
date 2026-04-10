@@ -14,7 +14,7 @@ INDENT  ::= synthetic token — emitted when indentation increases
 DEDENT  ::= synthetic token — emitted when indentation decreases
 
 (* --- Keywords ----------------------------------------------- *)
-KW ::= "fn" | "let" | "in" | "type" | "tag" | "unit"
+KW ::= "fn" | "let" | "type" | "tag" | "unit"
      | "trait" | "impl" | "import" | "export" | "module"
      | "match" | "if" | "then" | "else" | "true" | "false"
 
@@ -92,9 +92,8 @@ tagged-lit  ::= atom OP_LBRACK TYPEID OP_RBRACK
 list-lit    ::= OP_LBRACK expr* OP_RBRACK          (* space-separated elements *)
 tuple-lit   ::= expr OP_COMMA expr (OP_COMMA expr)* (* comma = tuple *)
 
-(* let binding — "in" form for local scope; bare form for top-level or do-notation style *)
-let-expr    ::= "let" IDENT "=" expr "in" expr
-              | "let" IDENT "=" expr
+(* let binding — bare form only; continuations chain via layout (parseBlockExpr) *)
+let-expr    ::= "let" IDENT "=" expr
 
 (* lambda *)
 lambda-expr ::= OP_LAMBDA IDENT+ OP_DOT expr

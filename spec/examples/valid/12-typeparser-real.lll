@@ -44,13 +44,13 @@ type TypeDecl = MkTypeDecl Str List[Str] List[Ctor]
 
 -- ASCII uppercase test, written without `&&` (which ll-lang lacks).
 fn isUpperChar(c Char) Bool =
-  let n = charToInt c in
+  let n = charToInt c
   if n < 65 then false
   else if n > 90 then false
   else true
 
 fn isLowerChar(c Char) Bool =
-  let n = charToInt c in
+  let n = charToInt c
   if n < 97 then false
   else if n > 122 then false
   else true
@@ -78,15 +78,15 @@ fn classifyIdent(s Str) Token =
   match s with
     | "type" -> TKwType
     | _ ->
-      let cs = strChars s in
+      let cs = strChars s
       match cs with
         | c :: _ -> if isUpperChar c then TUpper s else TLower s
         | _ -> TLower s
 
 fn lexId(cs List[Char]) List[Token] =
-  let idChars = takeWhilePred isIdCont cs in
-  let leftover = dropWhilePred isIdCont cs in
-  let tok = classifyIdent (strFromChars idChars) in
+  let idChars = takeWhilePred isIdCont cs
+  let leftover = dropWhilePred isIdCont cs
+  let tok = classifyIdent (strFromChars idChars)
   listAppend [tok] (lexChars leftover)
 
 fn lexChars(cs List[Char]) List[Token] =
@@ -125,18 +125,18 @@ fn parseDeclsClean(toks List[Token]) List[TypeDecl] =
 -- the multi-line body out of the parseDeclsClean wildcard arm so each
 -- clause body stays single-line.
 fn consDecl(pair) List[TypeDecl] =
-  let (d, rest) = pair in
+  let (d, rest) = pair
   d :: parseTypeDecls rest
 
 -- Single decl: 'type' Upper param* '=' ctor ('|' ctor)*
 fn parseTypeDecl(toks List[Token]) =
   | TKwType :: TUpper name :: rest ->
-    let (prms, rest2) = parseParams rest in
+    let (prms, rest2) = parseParams rest
     let rest3 = match rest2 with
       | TEq :: r -> r
       | _ -> rest2
-    in
-    let (ctors, rest4) = parseCtors rest3 in
+   
+    let (ctors, rest4) = parseCtors rest3
     (MkTypeDecl name prms ctors, rest4)
   | _ -> (MkTypeDecl "?" [] [], toks)
 
@@ -144,7 +144,7 @@ fn parseTypeDecl(toks List[Token]) =
 fn parseParams(toks List[Token]) =
   | TUpper s :: rest ->
     if strLen s == 1 then
-      let (ps, rest2) = parseParams rest in
+      let (ps, rest2) = parseParams rest
       (s :: ps, rest2)
     else ([], toks)
   | _ -> ([], toks)
@@ -152,19 +152,19 @@ fn parseParams(toks List[Token]) =
 -- Collect ctors separated by '|'. The first ctor is mandatory; each
 -- subsequent ctor is preceded by a TBar.
 fn parseCtors(toks List[Token]) =
-  let (c, rest) = parseCtor toks in
+  let (c, rest) = parseCtor toks
   parseCtorsTail [c] rest
 
 fn parseCtorsTail(acc List[Ctor])(toks List[Token]) =
   | TBar :: rest ->
-    let (c, rest2) = parseCtor rest in
+    let (c, rest2) = parseCtor rest
     parseCtorsTail (listAppend acc [c]) rest2
   | _ -> (acc, toks)
 
 -- Single ctor: Upper typeArg*
 fn parseCtor(toks List[Token]) =
   | TUpper name :: rest ->
-    let (args, rest2) = parseTypeArgs rest in
+    let (args, rest2) = parseTypeArgs rest
     (MkCtor name args, rest2)
   | _ -> (MkCtor "?" [], toks)
 
@@ -172,8 +172,8 @@ fn parseCtor(toks List[Token]) =
 -- anything else that ends a ctor body.
 fn parseTypeArgs(toks List[Token]) =
   | TUpper s :: rest ->
-    let arg = if strLen s == 1 then TAVar s else TACon s in
-    let (args, rest2) = parseTypeArgs rest in
+    let arg = if strLen s == 1 then TAVar s else TACon s
+    let (args, rest2) = parseTypeArgs rest
     (arg :: args, rest2)
   | _ -> ([], toks)
 
@@ -189,7 +189,7 @@ fn showTypeArg(a TypeArg) Str =
 fn showArgs(args List[TypeArg]) Str =
   if listIsEmpty args then ""
   else
-    let inner = listFold (\acc a. if strLen acc == 0 then showTypeArg a else strConcat (strConcat acc ", ") (showTypeArg a)) "" args in
+    let inner = listFold (\acc a. if strLen acc == 0 then showTypeArg a else strConcat (strConcat acc ", ") (showTypeArg a)) "" args
     strConcat (strConcat "(" inner) ")"
 
 fn showCtor(c Ctor) Str =
@@ -211,7 +211,7 @@ fn show(ds List[TypeDecl]) Str =
 -- ---------- Driver -------------------------------------------------------
 
 fn main() =
-  let src = "type Maybe A = Some A | None\ntype Result A E = Ok A | Err E\ntype Shape = Circle | Rect | Empty\ntype Wrapped = MkWrapped Int" in
-  let toks = tokenize src in
-  let decls = parseTypeDecls toks in
+  let src = "type Maybe A = Some A | None\ntype Result A E = Ok A | Err E\ntype Shape = Circle | Rect | Empty\ntype Wrapped = MkWrapped Int"
+  let toks = tokenize src
+  let decls = parseTypeDecls toks
   printfn (show decls)

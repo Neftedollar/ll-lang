@@ -40,9 +40,9 @@ fn keywordOrIdent(s Str) Token =
 -- Lex an identifier (already verified the head char is alpha): collect the
 -- identifier prefix, classify it as a keyword or `TIdent`, and continue.
 fn lexId(cs List[Char]) List[Token] =
-  let idChars = takeWhilePred isIdCont cs in
-  let leftover = dropWhilePred isIdCont cs in
-  let tok = keywordOrIdent (strFromChars idChars) in
+  let idChars = takeWhilePred isIdCont cs
+  let leftover = dropWhilePred isIdCont cs
+  let tok = keywordOrIdent (strFromChars idChars)
   listAppend [tok] (lexChars leftover)
 
 -- Lex a multi-digit integer (already verified the head char is a digit).
@@ -50,8 +50,8 @@ fn lexId(cs List[Char]) List[Token] =
 -- the ctor already applied, so the `let tok = ... in` helper has been
 -- inlined into the final listAppend call.
 fn lexNum(cs List[Char]) List[Token] =
-  let digits = takeWhilePred charIsDigit cs in
-  let leftover = dropWhilePred charIsDigit cs in
+  let digits = takeWhilePred charIsDigit cs
+  let leftover = dropWhilePred charIsDigit cs
   listAppend [TInt (strFromChars digits)] (lexChars leftover)
 
 -- Lex a single-char operator / punctuation token via inline match.
@@ -67,7 +67,7 @@ fn lexOp(c Char)(rest List[Char]) List[Token] =
     | '(' -> TLParen
     | ')' -> TRParen
     | _ -> TUnknown (strFromChars [c])
-  in listAppend [tok] (lexChars rest)
+  listAppend [tok] (lexChars rest)
 
 -- Main lexer loop on a list of chars. Cons-pattern destructures the
 -- input directly; the empty case returns an empty token list.
@@ -105,6 +105,6 @@ fn joinNames(ts List[Token]) Str =
   listFold (\acc t. if strLen acc == 0 then tokenName t else strConcat (strConcat acc " ") (tokenName t)) "" ts
 
 fn main() =
-  let src = "fn add(a)(b) = a + b" in
-  let toks = tokenize src in
+  let src = "fn add(a)(b) = a + b"
+  let toks = tokenize src
   printfn (joinNames toks)

@@ -1,7 +1,7 @@
 module Examples.Clean
 type Maybe A = Some A | None
 fn describe(m Maybe[Int]) Int =
-  let fallback = 0 in
+  let fallback = 0
   match m with
     | Some n -> n
     | None -> fallback

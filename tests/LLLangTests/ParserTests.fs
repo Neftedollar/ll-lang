@@ -112,11 +112,6 @@ let ``parse if expression`` () =
 let ``parse let without in`` () =
     Assert.Equal(ELet("x", ELit (LInt 5L), None), parseExprStr "let x = 5")
 
-[<Fact>]
-let ``parse let with in`` () =
-    let expected = ELet("x", ELit (LInt 5L), Some (EVar "x"))
-    Assert.Equal(expected, parseExprStr "let x = 5 in x")
-
 // --- Tagged literal ---
 
 [<Fact>]
@@ -372,14 +367,6 @@ let private fnBody (m: LLModule) : Expr =
     | d -> failwith $"Expected DFn, got {d}"
 
 [<Fact>]
-let ``indented let without in: single-line with 'in' baseline`` () =
-    let src = "module M\nfn f() = let x = 1 in let y = 2 in x + y"
-    let m = parseModuleStr src
-    match fnBody m with
-    | ELet("x", ELit(LInt 1L), Some(ELet("y", ELit(LInt 2L), Some(_)))) -> ()
-    | e -> failwith $"Expected nested ELets, got {e}"
-
-[<Fact>]
 let ``indented let without in: multi-line no 'in' keyword`` () =
     // fn f() =
     //   let x = 1
@@ -540,13 +527,6 @@ let ``parse match expression with cons pattern`` () =
 // --- Phase 7.1.6: let pattern destructuring ---
 
 [<Fact>]
-let ``parse let with tuple pattern in expression`` () =
-    // let (a, b) = pair in a + b
-    match parseExprStr "let (a, b) = pair in a + b" with
-    | ELetPat(PTuple [PVar "a"; PVar "b"], EVar "pair", Some _) -> ()
-    | e -> failwith $"Expected ELetPat (a, b) = pair in ..., got {e}"
-
-[<Fact>]
 let ``parse let with tuple pattern, no in`` () =
     match parseExprStr "let (a, b) = pair" with
     | ELetPat(PTuple [PVar "a"; PVar "b"], EVar "pair", None) -> ()
@@ -616,12 +596,12 @@ let ``parse let with tuple literal RHS`` () =
 
 [<Fact>]
 let ``parse let-pat with tuple literal RHS round-trip`` () =
-    // The classic "construct + destructure" pattern.
-    match parseExprStr "let (a, b) = (1, 2) in a" with
+    // The classic "construct + destructure" pattern (no in; body=None).
+    match parseExprStr "let (a, b) = (1, 2)" with
     | ELetPat(PTuple [PVar "a"; PVar "b"],
               ETuple [ELit (LInt 1L); ELit (LInt 2L)],
-              Some (EVar "a")) -> ()
-    | e -> failwith $"Expected ELetPat (a, b) = (1, 2) in a, got {e}"
+              None) -> ()
+    | e -> failwith $"Expected ELetPat (a, b) = (1, 2) None, got {e}"
 
 [<Fact>]
 let ``parse trailing comma in tuple literal is rejected`` () =
@@ -847,7 +827,7 @@ let ``bug2: curried multi-arg fn with keyword param name surfaces as parse error
         "module M\n" +
         "fn helper(tag Int)(x Int) Int = tag + x\n" +
         "fn main() =\n" +
-        "  let r = helper 1 2 in\n" +
+        "  let r = helper 1 2\n" +
         "  printfn (intToStr r)"
     let toks =
         match tokenize src with

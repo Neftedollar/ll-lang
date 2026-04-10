@@ -60,13 +60,13 @@ type FnDecl = MkFn Str List[Param] Maybe[TypeRef] Expr
 -- ---------- Char predicates ---------------------------------------------
 
 fn isUpperChar(c Char) Bool =
-  let n = charToInt c in
+  let n = charToInt c
   if n < 65 then false
   else if n > 90 then false
   else true
 
 fn isLowerChar(c Char) Bool =
-  let n = charToInt c in
+  let n = charToInt c
   if n < 97 then false
   else if n > 122 then false
   else true
@@ -101,23 +101,23 @@ fn classifyIdent(s Str) Token =
   match s with
     | "fn" -> TKwFn
     | _ ->
-      let cs = strChars s in
+      let cs = strChars s
       match cs with
         | c :: _ -> if isUpperChar c then TUpper s else TLower s
         | _ -> TLower s
 
 fn lexId(cs List[Char]) List[Token] =
-  let idChars = takeWhilePred isIdCont cs in
-  let leftover = dropWhilePred isIdCont cs in
-  let tok = classifyIdent (strFromChars idChars) in
+  let idChars = takeWhilePred isIdCont cs
+  let leftover = dropWhilePred isIdCont cs
+  let tok = classifyIdent (strFromChars idChars)
   listAppend [tok] (lexChars leftover)
 
 -- Phase 7.3b-fixes bug 1: `[TNum (...)]` is now a single-element list with
 -- the ctor already applied, so the `let tok = ... in` helper has been
 -- inlined into the final listAppend call.
 fn lexNum(cs List[Char]) List[Token] =
-  let digits = takeWhilePred charIsDigit cs in
-  let leftover = dropWhilePred charIsDigit cs in
+  let digits = takeWhilePred charIsDigit cs
+  let leftover = dropWhilePred charIsDigit cs
   listAppend [TNum (parseIntStr (strFromChars digits))] (lexChars leftover)
 
 fn lexChars(cs List[Char]) List[Token] =
@@ -154,19 +154,19 @@ fn parseDeclsClean(toks List[Token]) List[FnDecl] =
   | _ -> []
 
 fn consDecl(pair) List[FnDecl] =
-  let (d, rest) = pair in
+  let (d, rest) = pair
   d :: parseFnDecls rest
 
 -- Single fn decl: 'fn' lower param* typeName? '=' expr
 fn parseFnDecl(toks List[Token]) =
   | TKwFn :: TLower name :: rest ->
-    let (prms, rest2) = parseParamGroups rest in
-    let (retTy, rest3) = parseReturnType rest2 in
+    let (prms, rest2) = parseParamGroups rest
+    let (retTy, rest3) = parseReturnType rest2
     let rest4 = match rest3 with
       | TEq :: r -> r
       | _ -> rest3
-    in
-    let (body, rest5) = parseExpr rest4 in
+   
+    let (body, rest5) = parseExpr rest4
     (MkFn name prms retTy body, rest5)
   | _ -> (MkFn "?" [] None (ENum 0), toks)
 
@@ -175,7 +175,7 @@ fn parseFnDecl(toks List[Token]) =
 fn parseParamGroups(toks List[Token]) =
   | TLParen :: TRParen :: rest -> ([], rest)
   | TLParen :: TLower pname :: TUpper tname :: TRParen :: rest ->
-    let (ps, rest2) = parseParamGroups rest in
+    let (ps, rest2) = parseParamGroups rest
     (MkParam pname (TR tname) :: ps, rest2)
   | _ -> ([], toks)
 
@@ -190,28 +190,28 @@ fn parseReturnType(toks List[Token]) =
 -- Five-way mutual recursion. Same shape as the arithmetic parser, but
 -- parseFactor also accepts TLower as a variable reference.
 fn parseExpr(toks List[Token]) =
-  let (e, rest) = parseTerm toks in
+  let (e, rest) = parseTerm toks
   parseExprTail e rest
 
 fn parseExprTail(lhs Expr)(toks List[Token]) =
   | TPlus :: rest ->
-    let (r, rest2) = parseTerm rest in
+    let (r, rest2) = parseTerm rest
     parseExprTail (EAdd lhs r) rest2
   | TMinus :: rest ->
-    let (r, rest2) = parseTerm rest in
+    let (r, rest2) = parseTerm rest
     parseExprTail (ESub lhs r) rest2
   | _ -> (lhs, toks)
 
 fn parseTerm(toks List[Token]) =
-  let (e, rest) = parseFactor toks in
+  let (e, rest) = parseFactor toks
   parseTermTail e rest
 
 fn parseTermTail(lhs Expr)(toks List[Token]) =
   | TStar :: rest ->
-    let (r, rest2) = parseFactor rest in
+    let (r, rest2) = parseFactor rest
     parseTermTail (EMul lhs r) rest2
   | TSlash :: rest ->
-    let (r, rest2) = parseFactor rest in
+    let (r, rest2) = parseFactor rest
     parseTermTail (EDiv lhs r) rest2
   | _ -> (lhs, toks)
 
@@ -219,7 +219,7 @@ fn parseFactor(toks List[Token]) =
   | TNum n :: rest -> (ENum n, rest)
   | TLower s :: rest -> (EVar s, rest)
   | TLParen :: rest ->
-    let (e, rest2) = parseExpr rest in
+    let (e, rest2) = parseExpr rest
     match rest2 with
       | TRParen :: rest3 -> (e, rest3)
       | _ -> (e, rest2)
@@ -256,8 +256,8 @@ fn showReturn(r Maybe[TypeRef]) Str =
 
 fn showDecl(d FnDecl) Str =
   | MkFn name prms ret body ->
-    let headPart = strConcat (strConcat "fn " name) (showParams prms) in
-    let arrowPart = strConcat (strConcat headPart " -> ") (showReturn ret) in
+    let headPart = strConcat (strConcat "fn " name) (showParams prms)
+    let arrowPart = strConcat (strConcat headPart " -> ") (showReturn ret)
     strConcat (strConcat arrowPart " = ") (showExpr body)
 
 fn show(ds List[FnDecl]) Str =
@@ -266,7 +266,7 @@ fn show(ds List[FnDecl]) Str =
 -- ---------- Driver -------------------------------------------------------
 
 fn main() =
-  let src = "fn add(a Int)(b Int) Int = a + b\nfn double(x Int) = x * 2\nfn const(a Int)(b Int) Int = a\nfn answer() Int = 42" in
-  let toks = tokenize src in
-  let decls = parseFnDecls toks in
+  let src = "fn add(a Int)(b Int) Int = a + b\nfn double(x Int) = x * 2\nfn const(a Int)(b Int) Int = a\nfn answer() Int = 42"
+  let toks = tokenize src
+  let decls = parseFnDecls toks
   printfn (show decls)

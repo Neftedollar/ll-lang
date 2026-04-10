@@ -45,7 +45,7 @@ type Expr =
 fn takeDigits(cs List[Char]) =
   | c :: rest ->
     if charIsDigit c then
-      let (ds, leftover) = takeDigits rest in
+      let (ds, leftover) = takeDigits rest
       (c :: ds, leftover)
     else ([], cs)
   | _ -> ([], [])
@@ -66,8 +66,8 @@ fn lexChars(cs List[Char]) List[Token] =
   | c :: rest ->
     if charIsSpace c then lexChars rest
     else if charIsDigit c then
-      let (ds, leftover) = takeDigits cs in
-      let n = parseIntStr (strFromChars ds) in
+      let (ds, leftover) = takeDigits cs
+      let n = parseIntStr (strFromChars ds)
       consTok (TNum n) (lexChars leftover)
     else if c == '+' then consTok TPlus (lexChars rest)
     else if c == '-' then consTok TMinus (lexChars rest)
@@ -88,35 +88,35 @@ fn tokenize(src Str) List[Token] = lexChars (strChars src)
 -- already-parsed left-hand side as their first curried argument.
 
 fn parseExpr(toks List[Token]) =
-  let (e, rest) = parseTerm toks in
+  let (e, rest) = parseTerm toks
   parseExprTail e rest
 
 fn parseExprTail(lhs Expr)(toks List[Token]) =
   | TPlus :: rest ->
-    let (r, rest2) = parseTerm rest in
+    let (r, rest2) = parseTerm rest
     parseExprTail (EAdd lhs r) rest2
   | TMinus :: rest ->
-    let (r, rest2) = parseTerm rest in
+    let (r, rest2) = parseTerm rest
     parseExprTail (ESub lhs r) rest2
   | _ -> (lhs, toks)
 
 fn parseTerm(toks List[Token]) =
-  let (e, rest) = parseFactor toks in
+  let (e, rest) = parseFactor toks
   parseTermTail e rest
 
 fn parseTermTail(lhs Expr)(toks List[Token]) =
   | TStar :: rest ->
-    let (r, rest2) = parseFactor rest in
+    let (r, rest2) = parseFactor rest
     parseTermTail (EMul lhs r) rest2
   | TSlash :: rest ->
-    let (r, rest2) = parseFactor rest in
+    let (r, rest2) = parseFactor rest
     parseTermTail (EDiv lhs r) rest2
   | _ -> (lhs, toks)
 
 fn parseFactor(toks List[Token]) =
   | TNum n :: rest -> (ENum n, rest)
   | TLParen :: rest ->
-    let (e, rest2) = parseExpr rest in
+    let (e, rest2) = parseExpr rest
     match rest2 with
       | TRParen :: rest3 -> (e, rest3)
       | _ -> (e, rest2)
@@ -138,6 +138,6 @@ fn show(e Expr) Str =
 -- ---------- Driver -------------------------------------------------------
 
 fn main() =
-  let toks = tokenize "1 + 2 * 3" in
-  let (e, _) = parseExpr toks in
+  let toks = tokenize "1 + 2 * 3"
+  let (e, _) = parseExpr toks
   printfn (show e)

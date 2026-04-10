@@ -365,13 +365,7 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
                 match parseExprInner c with
                 | Error e -> Error e
                 | Ok e1 ->
-                    let body =
-                        if curTok c = KwIn then
-                            advance c
-                            match parseExprInner c with
-                            | Ok e2 -> Some e2
-                            | Error _ -> None
-                        else None
+                    let body = None
                     match pat with
                     | PVar name -> Ok (ELet(name, e1, body))
                     | _ -> Ok (ELetPat(pat, e1, body))

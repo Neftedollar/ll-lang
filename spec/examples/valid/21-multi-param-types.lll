@@ -12,5 +12,5 @@ fn rbSize(m RBMap[K][V]) Int =
     | Node _ left _ _ right -> 1 + rbSize left + rbSize right
 
 fn main() Int =
-  let m = rbEmpty in
+  let m = rbEmpty
   rbSize m
