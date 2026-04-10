@@ -1,108 +1,121 @@
 module Std.Map
 
--- Map implemented as a sorted association list (parallel key/value lists).
+-- Map implemented as an Okasaki red-black tree.
 -- Keys are compared via an explicit comparator: cmp a b
 --   returns negative if a < b, zero if a == b, positive if a > b
---
--- NOTE: This implementation uses a parallel-list representation to work
--- around a codegen limitation with multi-param recursive types. The
--- Color/Black/Red types are included to satisfy the API spec.
 
 type Color = Red | Black
 
--- The Map type stores keys and values in two parallel sorted lists.
--- MkMap keys values
-type Map K V = MkMap (List[K]) (List[V])
+-- RBMap K V = Leaf | Node Color (RBMap K V) K V (RBMap K V)
+type RBMap K V = Leaf | Node Color (RBMap K V) K V (RBMap K V)
 
 type Maybe A = Some A | None
 
 -- Empty map
-fn mapEmpty() Map[K][V] = MkMap [] []
+fn mapEmpty() RBMap[K][V] = Leaf
 
 -- Size of map
-fn mapSize(m Map[K][V]) Int =
+fn mapSize(m RBMap[K][V]) Int =
   match m with
-    | MkMap ks _ -> listLen ks
+    | Leaf -> 0
+    | Node _ left _ _ right -> 1 + mapSize left + mapSize right
 
--- Find insertion position (index where k should go)
--- Returns the index into ks where k belongs (0-based)
-fn findPos(cmp K -> K -> Int)(k K)(ks List[K]) Int =
-  match ks with
-    | [] -> 0
-    | h :: rest ->
-      let d = cmp k h in
-      if d < 0 then 0
-      else if d == 0 then 0
-      else 1 + findPos cmp k rest
+-- balance helpers: detect and fix each of the 4 red-violation cases.
+-- Called only when the top node colour is Black.
 
--- Insert at a given index (0-based) into a list
-fn listInsertAt(i Int)(x A)(xs List[A]) List[A] =
-  if i == 0 then x :: xs
-  else match xs with
-    | [] -> [x]
-    | h :: rest -> h :: listInsertAt (i - 1) x rest
+-- Try to fix left-left violation: Black (Red (Red a x xv b) y yv c) z zv d
+fn balanceLeft(left RBMap[K][V])(k K)(v V)(right RBMap[K][V]) RBMap[K][V] =
+  match left with
+    | Node (Red) ll lk lv lr ->
+      match ll with
+        | Node (Red) a xk xv b ->
+          Node (Red) (Node (Black) a xk xv b) lk lv (Node (Black) lr k v right)
+        | _ ->
+          match lr with
+            | Node (Red) b yk yv c ->
+              Node (Red) (Node (Black) ll lk lv b) yk yv (Node (Black) c k v right)
+            | _ -> Node (Black) left k v right
+    | _ -> Node (Black) left k v right
 
--- Replace at index (0-based)
-fn listReplaceAt(i Int)(x A)(xs List[A]) List[A] =
-  if i == 0 then match xs with
-    | [] -> [x]
-    | _ :: rest -> x :: rest
-  else match xs with
-    | [] -> [x]
-    | h :: rest -> h :: listReplaceAt (i - 1) x rest
+-- Try to fix right violations: Black a x xv (Red (Red b y yv c) z zv d)
+--                          or: Black a x xv (Red b y yv (Red c z zv d))
+fn balanceRight(left RBMap[K][V])(k K)(v V)(right RBMap[K][V]) RBMap[K][V] =
+  match right with
+    | Node (Red) rl rk rv rr ->
+      match rl with
+        | Node (Red) b yk yv c ->
+          Node (Red) (Node (Black) left k v b) yk yv (Node (Black) c rk rv rr)
+        | _ ->
+          match rr with
+            | Node (Red) c zk zv d ->
+              Node (Red) (Node (Black) left k v rl) rk rv (Node (Black) c zk zv d)
+            | _ -> Node (Black) left k v right
+    | _ -> Node (Black) left k v right
 
--- Check if key at index equals k (cmp returns 0)
-fn keyAt(cmp K -> K -> Int)(k K)(ks List[K])(i Int) Bool =
-  match ks with
-    | [] -> false
-    | h :: rest ->
-      if i == 0 then cmp k h == 0
-      else keyAt cmp k rest (i - 1)
+-- balance: Okasaki RB-tree rebalancing (4 cases)
+-- Only needs to act when color is Black
+fn balance(c Color)(left RBMap[K][V])(k K)(v V)(right RBMap[K][V]) RBMap[K][V] =
+  match c with
+    | Red -> Node (Red) left k v right
+    | Black ->
+      match left with
+        | Node (Red) _ _ _ _ ->
+          let result = balanceLeft left k v right in
+          match result with
+            | Node (Red) _ _ _ _ -> result
+            | _ -> balanceRight left k v right
+        | _ -> balanceRight left k v right
 
--- mapInsert: insert k->v, replacing if key exists
-fn mapInsert(cmp K -> K -> Int)(k K)(v V)(m Map[K][V]) Map[K][V] =
+-- ins: recursive insert helper (preserves RB invariants via balance)
+fn ins(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) RBMap[K][V] =
   match m with
-    | MkMap ks vs ->
-      let idx = findPos cmp k ks in
-      if keyAt cmp k ks idx then
-        MkMap ks (listReplaceAt idx v vs)
-      else
-        MkMap (listInsertAt idx k ks) (listInsertAt idx v vs)
+    | Leaf -> Node (Red) Leaf k v Leaf
+    | Node c left nk nv right ->
+      let d = cmp k nk in
+      if d < 0 then balance c (ins cmp k v left) nk nv right
+      else if d > 0 then balance c left nk nv (ins cmp k v right)
+      else Node c left nk v right
+
+-- mapInsert: insert k->v into map, replacing value if key exists
+fn mapInsert(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) RBMap[K][V] =
+  let t = ins cmp k v m in
+  match t with
+    | Leaf -> Leaf
+    | Node _ left nk nv right -> Node (Black) left nk nv right
 
 -- mapLookup: lookup key k
-fn mapLookup(cmp K -> K -> Int)(k K)(m Map[K][V]) Maybe[V] =
+fn mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) Maybe[V] =
   match m with
-    | MkMap ks vs ->
-      let idx = findPos cmp k ks in
-      if keyAt cmp k ks idx then
-        listAt vs idx
-      else
-        None
+    | Leaf -> None
+    | Node _ left nk nv right ->
+      let d = cmp k nk in
+      if d < 0 then mapLookup cmp k left
+      else if d > 0 then mapLookup cmp k right
+      else Some nv
 
 -- mapContains: check if key k is in map
-fn mapContains(cmp K -> K -> Int)(k K)(m Map[K][V]) Bool =
+fn mapContains(cmp K -> K -> Int)(k K)(m RBMap[K][V]) Bool =
   match mapLookup cmp k m with
     | Some _ -> true
     | None -> false
 
--- mapFold: fold over key-value pairs (in sorted order)
-fn mapFoldHelper(f B -> K -> V -> B)(acc B)(ks List[K])(vs List[V]) B =
-  match ks with
-    | [] -> acc
-    | k :: krest ->
-      match vs with
-        | [] -> acc
-        | v :: vrest ->
-          mapFoldHelper f (f acc k v) krest vrest
-
-fn mapFold(f B -> K -> V -> B)(acc B)(m Map[K][V]) B =
+-- mapFold: in-order fold over key-value pairs
+fn mapFold(f B -> K -> V -> B)(acc B)(m RBMap[K][V]) B =
   match m with
-    | MkMap ks vs -> mapFoldHelper f acc ks vs
+    | Leaf -> acc
+    | Node _ left k v right ->
+      let acc1 = mapFold f acc left in
+      let acc2 = f acc1 k v in
+      mapFold f acc2 right
 
--- mapKeys: return list of keys in sorted order
-fn mapKeys(m Map[K][V]) List[K] =
+-- mapKeys: return list of keys in sorted (in-order) order
+fn mapKeys(m RBMap[K][V]) List[K] =
   match m with
-    | MkMap ks _ -> ks
+    | Leaf -> []
+    | Node _ left k _ right ->
+      let lkeys = mapKeys left in
+      let rkeys = mapKeys right in
+      listAppend lkeys (k :: rkeys)
 
 -- Integer comparator
 fn intCmp(a Int)(b Int) Int =
