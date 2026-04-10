@@ -5,12 +5,16 @@ module LLLang.Manifest
 //           key = ["a", "b", ...] string arrays, # comment lines.
 // Unknown keys / tables are silently ignored (forward compatibility).
 
+type DepSource =
+    | GitDep of url: string * ref: string
+    | PathDep of path: string
+
 type LLManifest = {
-    Name     : string              // project.name — required
-    Version  : string              // project.version — default "0.0.0"
-    Entry    : string              // project.entry — default "src/Main.lll"
-    Deps     : Map<string, string> // [deps] module-path → version
-    Platform : string list         // [platform] use = [...]
+    Name     : string                  // project.name — required
+    Version  : string                  // project.version — default "0.0.0"
+    Entry    : string                  // project.entry — default "src/Main.lll"
+    Deps     : Map<string, DepSource>  // [deps] name → source
+    Platform : string list             // [platform] use = [...]
 }
 
 // ---- Tokeniser helpers ---------------------------------------------------------
@@ -18,9 +22,17 @@ type LLManifest = {
 let private isWhitespace (c: char) = c = ' ' || c = '\t' || c = '\r'
 
 let private trimLine (s: string) =
-    // Strip inline comment, then trim
-    let commentIdx = s.IndexOf('#')
-    let noComment = if commentIdx >= 0 then s.[..commentIdx - 1] else s
+    // Strip inline comment (# outside of quoted strings), then trim
+    let mutable i = 0
+    let mutable inQuote = false
+    let mutable commentStart = -1
+    while i < s.Length && commentStart < 0 do
+        match s.[i] with
+        | '"' -> inQuote <- not inQuote; i <- i + 1
+        | '\\' when inQuote && i + 1 < s.Length -> i <- i + 2  // skip escape
+        | '#' when not inQuote -> commentStart <- i
+        | _ -> i <- i + 1
+    let noComment = if commentStart >= 0 then s.[..commentStart - 1] else s
     noComment.Trim()
 
 // Parse a quoted string value starting at index `i` (which should point at
@@ -88,6 +100,44 @@ let private parseStringArray (s: string) (i: int) : Result<string list * int, st
 
 // ---- Line-by-line parser -------------------------------------------------------
 
+// Parse an inline table value like { path = "../ll-json" }
+// Returns Some path if it contains a path key, else None.
+let private parseInlineTablePath (s: string) : string option =
+    // Find "path" key followed by = and a quoted string
+    let pathIdx = s.IndexOf("path")
+    if pathIdx < 0 then None
+    else
+        let afterPath = s.[pathIdx + 4..].TrimStart()
+        if afterPath.Length = 0 || afterPath.[0] <> '=' then None
+        else
+            let afterEq = afterPath.[1..].TrimStart()
+            if afterEq.Length = 0 || afterEq.[0] <> '"' then None
+            else
+                match parseQuotedString afterEq 0 with
+                | Ok (v, _) -> Some v
+                | Error _ -> None
+
+/// Parse a dep value string into a DepSource.
+/// "https://github.com/user/repo#v0.1.0" → GitDep("url", "v0.1.0")
+/// "https://github.com/user/repo"        → GitDep("url", "main")
+/// "{ path = \"../ll-json\" }"           → PathDep("../ll-json")
+let private parseDepSource (valueRaw: string) : DepSource option =
+    if valueRaw.StartsWith("{") then
+        // Inline table
+        match parseInlineTablePath valueRaw with
+        | Some p -> Some (PathDep p)
+        | None -> None
+    elif valueRaw.StartsWith("\"") then
+        match parseQuotedString valueRaw 0 with
+        | Error _ -> None
+        | Ok (url, _) ->
+            let hashIdx = url.IndexOf('#')
+            if hashIdx >= 0 then
+                Some (GitDep (url.[..hashIdx - 1], url.[hashIdx + 1..]))
+            else
+                Some (GitDep (url, "main"))
+    else None
+
 type private Section = Project | Deps | Platform | Other
 
 /// Parse a TOML-subset manifest string.
@@ -97,7 +147,7 @@ let parseManifest (src: string) : Result<LLManifest, string> =
     let mutable projectName: string option = None
     let mutable projectVersion = "0.0.0"
     let mutable projectEntry = "src/Main.lll"
-    let mutable deps: (string * string) list = []
+    let mutable deps: (string * DepSource) list = []
     let mutable platform: string list = []
     let mutable error: string option = None
     let mutable lineNum = 0
@@ -139,7 +189,7 @@ let parseManifest (src: string) : Result<LLManifest, string> =
                     else
                         () // ignore non-string values
                 | Deps ->
-                    // key is a module path (may be quoted), value is a version string
+                    // key is a dep name (may be quoted), value is a URL string or inline table
                     let parseKey (k: string) =
                         if k.StartsWith("\"") then
                             match parseQuotedString k 0 with
@@ -147,14 +197,9 @@ let parseManifest (src: string) : Result<LLManifest, string> =
                             | Error _ -> None
                         else Some k
                     let parsedKey = parseKey key
-                    let parsedVal =
-                        if valueRaw.StartsWith("\"") then
-                            match parseQuotedString valueRaw 0 with
-                            | Ok (v, _) -> Some v
-                            | Error _ -> None
-                        else None
-                    match parsedKey, parsedVal with
-                    | Some k, Some v -> deps <- deps @ [(k, v)]
+                    let parsedSource = parseDepSource valueRaw
+                    match parsedKey, parsedSource with
+                    | Some k, Some src -> deps <- deps @ [(k, src)]
                     | _ -> () // skip malformed dep entries
                 | Platform ->
                     if key = "use" && valueRaw.StartsWith("[") then

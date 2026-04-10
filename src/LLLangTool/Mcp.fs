@@ -369,8 +369,12 @@ let projectInfoTool (args: ProjectInfoArgs) : Task<Result<Content list, McpError
                             sprintf "{\"path\":%s,\"module\":%s}"
                                 (js lf.FilePath) (js (String.concat "." lf.ModulePath)))
                     let deps =
-                        proj.Manifest.Deps |> Map.toList |> List.map (fun (k, v) ->
-                            sprintf "{\"path\":%s,\"version\":%s}" (js k) (js v))
+                        proj.Manifest.Deps |> Map.toList |> List.map (fun (k, src) ->
+                            let srcStr =
+                                match src with
+                                | LLLang.Manifest.GitDep(url, ref) -> sprintf "%s#%s" url ref
+                                | LLLang.Manifest.PathDep(path) -> sprintf "path:%s" path
+                            sprintf "{\"name\":%s,\"source\":%s}" (js k) (js srcStr))
                     let platforms = proj.Manifest.Platform |> List.map js
                     return! ok (sprintf
                         "{\"root\":%s,\"manifest\":{\"name\":%s,\"version\":%s},\"modules\":[%s],\"deps\":[%s],\"platform_use\":[%s],\"errors\":[]}"

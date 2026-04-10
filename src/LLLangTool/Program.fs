@@ -5,6 +5,7 @@ open System.IO
 open System.Diagnostics
 open LLLang.Elaborator
 open LLLang.Compiler
+open LLLang.Manifest
 open LLLang.ProjectLoader
 
 let private printErrors (es: LLError list) =
@@ -131,6 +132,44 @@ let private cmdRun (path: string) : int =
         eprintfn "lllc: %s" ex.Message
         1
 
+/// Install dependencies listed in ll.toml into .ll-deps/. Returns exit code.
+let private cmdInstall (rootDir: string) : int =
+    try
+        let tomlPath = Path.Combine(rootDir, "ll.toml")
+        let manifest =
+            match parseManifest (File.ReadAllText tomlPath) with
+            | Ok m -> m
+            | Error e ->
+                eprintfn "lllc: manifest error: %s" e
+                { Name = ""; Version = ""; Entry = ""; Deps = Map.empty; Platform = [] }
+        let depDir = Path.Combine(rootDir, ".ll-deps")
+        Directory.CreateDirectory(depDir) |> ignore
+        for KeyValue(name, source) in manifest.Deps do
+            let targetDir = Path.Combine(depDir, name)
+            if Directory.Exists(targetDir) then
+                printfn "  skip %s (already installed)" name
+            else
+                match source with
+                | GitDep(url, ref) ->
+                    printfn "  fetch %s from %s#%s" name url ref
+                    let psi = ProcessStartInfo("git", sprintf "clone --depth 1 --branch %s %s \"%s\"" ref url targetDir)
+                    psi.UseShellExecute <- false
+                    let proc = Process.Start(psi)
+                    proc.WaitForExit()
+                    if proc.ExitCode <> 0 then
+                        eprintfn "  error: git clone failed for %s" name
+                | PathDep(path) ->
+                    let resolved = Path.GetFullPath(Path.Combine(rootDir, path))
+                    printfn "  link %s -> %s" name resolved
+                    let psi = ProcessStartInfo("ln", sprintf "-s \"%s\" \"%s\"" resolved targetDir)
+                    psi.UseShellExecute <- false
+                    Process.Start(psi).WaitForExit() |> ignore
+        printfn "Installed %d dependencies." manifest.Deps.Count
+        0
+    with ex ->
+        eprintfn "lllc: %s" ex.Message
+        1
+
 /// Scaffold a new project. Returns exit code.
 let private cmdNew (name: string) : int =
     try
@@ -171,6 +210,12 @@ let main (argv: string[]) : int =
             1
     | ["run"; path] -> cmdRun path
     | ["new"; name] -> cmdNew name
+    | "install" :: _ ->
+        let root =
+            match findProjectRoot (Directory.GetCurrentDirectory()) with
+            | Some r -> r
+            | None -> Directory.GetCurrentDirectory()
+        cmdInstall root
     | ["mcp"] -> Mcp.runServer (); 0
     | _ ->
         eprintfn "Usage:"
@@ -178,6 +223,7 @@ let main (argv: string[]) : int =
         eprintfn "  lllc build [--target fs|ts|py] [dir]       compile project (reads ll.toml)"
         eprintfn "  lllc run   <file.lll>                      compile and run single file"
         eprintfn "  lllc new   <name>                          scaffold new project"
+        eprintfn "  lllc install                               install dependencies from ll.toml"
         eprintfn "  lllc mcp                                   run MCP server (stdio transport)"
         eprintfn ""
         eprintfn "  --target fs   emit F# (default)"

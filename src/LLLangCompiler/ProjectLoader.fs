@@ -99,6 +99,35 @@ let private topoSort (nodes: 'a list) (deps: Map<'a, 'a list>) : Result<'a list,
         let cycleNodes = nodes |> List.filter (fun n -> inDegree[n] > 0)
         Error cycleNodes
 
+// ---- Dep loading -----------------------------------------------------------
+
+/// Load .lll files from .ll-deps/{depName}/src/ for all installed deps.
+let private loadDepFiles (rootDir: string) (manifest: LLManifest) : LoadedFile list =
+    let depBaseDir = Path.Combine(rootDir, ".ll-deps")
+    [ for KeyValue(depName, _source) in manifest.Deps do
+        let depDir = Path.Combine(depBaseDir, depName)
+        if Directory.Exists(depDir) then
+            // Read dep's own ll.toml to get its project name
+            let depManifestPath = Path.Combine(depDir, "ll.toml")
+            let depProjectName =
+                if File.Exists(depManifestPath) then
+                    match parseManifest (File.ReadAllText depManifestPath) with
+                    | Ok m -> m.Name
+                    | Error _ -> depName
+                else depName
+            let depSrcDir = Path.Combine(depDir, "src")
+            for filePath in globLllFiles depSrcDir do
+                let src =
+                    try Some (File.ReadAllText filePath)
+                    with _ -> None
+                match src with
+                | None -> ()
+                | Some srcText ->
+                    // Derive module path using dep's project name as prefix
+                    let modulePath = fileToExpectedModulePath depDir depProjectName filePath
+                    yield { ModulePath = modulePath; FilePath = filePath; Src = srcText }
+    ]
+
 // ---- Main entry point ------------------------------------------------------
 
 /// Load and topo-sort all .lll files in a project rooted at rootDir.
@@ -152,15 +181,19 @@ let loadProject (rootDir: string) : Result<LLProject, LLError list> =
 
     if not errors.IsEmpty then Error errors
     else
+    // 4b. Merge dep files (from .ll-deps/) with main project files
+    let depFiles = loadDepFiles rootDir manifest
+    let allLoadedFiles = depFiles @ loadedFiles
+
     // 5. Build import graph for topo-sort
     // Map each module path to its imports
     let modulePathOf (lf: LoadedFile) = lf.ModulePath
-    let allPaths = loadedFiles |> List.map modulePathOf
+    let allPaths = allLoadedFiles |> List.map modulePathOf
 
     // We need to re-parse to get imports for topo-sort
     // Build map: modulePath → import paths
     let importMap : Map<string list, string list list> =
-        loadedFiles
+        allLoadedFiles
         |> List.map (fun lf ->
             match tokenize lf.Src with
             | Ok toks ->
@@ -172,10 +205,10 @@ let loadProject (rootDir: string) : Result<LLProject, LLError list> =
 
     // Build dependency map: path → list of paths it depends on
     let depsMap : Map<string list, string list list> =
-        loadedFiles
+        allLoadedFiles
         |> List.map (fun lf ->
             let imports = importMap |> Map.tryFind lf.ModulePath |> Option.defaultValue []
-            // Filter to only imports that are part of this project; dedup to avoid false cycles
+            // Filter to only imports that are part of this project (incl. deps); dedup to avoid false cycles
             let projectImports = imports |> List.distinct |> List.filter (fun imp -> List.contains imp allPaths)
             lf.ModulePath, projectImports)
         |> Map.ofList
@@ -186,7 +219,7 @@ let loadProject (rootDir: string) : Result<LLProject, LLError list> =
         let cycleNames = cyclePaths |> List.map (String.concat ".")
         Error [e024 cycleNames]
     | Ok sortedPaths ->
-        let filesByPath = loadedFiles |> List.map (fun lf -> lf.ModulePath, lf) |> Map.ofList
+        let filesByPath = allLoadedFiles |> List.map (fun lf -> lf.ModulePath, lf) |> Map.ofList
         let sortedFiles =
             sortedPaths
             |> List.choose (fun p -> Map.tryFind p filesByPath)

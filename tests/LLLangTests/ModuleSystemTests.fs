@@ -24,7 +24,7 @@ let ``parseManifest: minimal manifest with name only`` () =
 
 [<Fact>]
 let ``parseManifest: full manifest with all sections`` () =
-    let src = "[project]\nname = \"myapp\"\nversion = \"1.2.3\"\nentry = \"src/App.lll\"\n\n[deps]\n\"github.com/alice/json\" = \"v1.0.0\"\n\n[platform]\nuse = [\"Platform.IO\", \"Platform.Math\"]\n"
+    let src = "[project]\nname = \"myapp\"\nversion = \"1.2.3\"\nentry = \"src/App.lll\"\n\n[deps]\njson = \"https://github.com/alice/json#v1.0.0\"\n\n[platform]\nuse = [\"Platform.IO\", \"Platform.Math\"]\n"
     match parseManifest src with
     | Error e -> Assert.Fail(sprintf "Expected Ok but got Error: %s" e)
     | Ok m ->
@@ -32,7 +32,7 @@ let ``parseManifest: full manifest with all sections`` () =
         Assert.Equal("1.2.3", m.Version)
         Assert.Equal("src/App.lll", m.Entry)
         Assert.Equal(1, m.Deps.Count)
-        Assert.Equal("v1.0.0", m.Deps.["github.com/alice/json"])
+        Assert.Equal(GitDep("https://github.com/alice/json", "v1.0.0"), m.Deps.["json"])
         Assert.Equal<string list>(["Platform.IO"; "Platform.Math"], m.Platform)
 
 [<Fact>]
@@ -149,4 +149,81 @@ let ``loadProject: single-file project loads correctly`` () =
             Assert.Equal("single", proj.Manifest.Name)
             Assert.Equal(1, proj.Files.Length)
             Assert.Equal<string list>(["Single"; "Main"], proj.Files.[0].ModulePath)
+    )
+
+// ---- DepSource parsing tests ------------------------------------------------
+
+[<Fact>]
+let ``parseManifest: git dep with ref parses to GitDep`` () =
+    let src = "[project]\nname = \"app\"\n\n[deps]\nstd = \"https://github.com/user/repo#v0.1.0\"\n"
+    match parseManifest src with
+    | Error e -> Assert.Fail(sprintf "Expected Ok but got Error: %s" e)
+    | Ok m ->
+        Assert.Equal(1, m.Deps.Count)
+        match m.Deps.["std"] with
+        | GitDep(url, ref) ->
+            Assert.Equal("https://github.com/user/repo", url)
+            Assert.Equal("v0.1.0", ref)
+        | PathDep _ -> Assert.Fail("Expected GitDep but got PathDep")
+
+[<Fact>]
+let ``parseManifest: git dep without ref defaults to main`` () =
+    let src = "[project]\nname = \"app\"\n\n[deps]\nstd = \"https://github.com/user/repo\"\n"
+    match parseManifest src with
+    | Error e -> Assert.Fail(sprintf "Expected Ok but got Error: %s" e)
+    | Ok m ->
+        match m.Deps.["std"] with
+        | GitDep(url, ref) ->
+            Assert.Equal("https://github.com/user/repo", url)
+            Assert.Equal("main", ref)
+        | PathDep _ -> Assert.Fail("Expected GitDep but got PathDep")
+
+[<Fact>]
+let ``parseManifest: path dep parses to PathDep`` () =
+    let src = "[project]\nname = \"app\"\n\n[deps]\njson = { path = \"../ll-json\" }\n"
+    match parseManifest src with
+    | Error e -> Assert.Fail(sprintf "Expected Ok but got Error: %s" e)
+    | Ok m ->
+        match m.Deps.["json"] with
+        | PathDep p -> Assert.Equal("../ll-json", p)
+        | GitDep _ -> Assert.Fail("Expected PathDep but got GitDep")
+
+// ---- Path dep loading tests -------------------------------------------------
+
+[<Fact>]
+let ``loadProject: path dep files included in sorted results`` () =
+    withTempDir (fun root ->
+        // Set up main project
+        Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
+        File.WriteAllText(Path.Combine(root, "ll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\nmylib = { path = \"../mylib\" }\n")
+        File.WriteAllText(Path.Combine(root, "src", "Main.lll"),
+            "module App.Main\nimport Mylib.Util\n\nmain() Str = \"hello\"\n")
+
+        // Set up dep project in a sibling directory
+        withTempDir (fun libRoot ->
+            Directory.CreateDirectory(Path.Combine(libRoot, "src")) |> ignore
+            File.WriteAllText(Path.Combine(libRoot, "ll.toml"), "[project]\nname = \"mylib\"\n")
+            File.WriteAllText(Path.Combine(libRoot, "src", "Util.lll"),
+                "module Mylib.Util\n\nexport greet() Str = \"hi\"\n")
+
+            // Install as a symlink (simulate lllc install via direct copy for test)
+            let depsDir = Path.Combine(root, ".ll-deps")
+            Directory.CreateDirectory(depsDir) |> ignore
+            // Copy the dep directory contents instead of symlinking (portable test)
+            let depTarget = Path.Combine(depsDir, "mylib")
+            Directory.CreateDirectory(Path.Combine(depTarget, "src")) |> ignore
+            File.WriteAllText(Path.Combine(depTarget, "ll.toml"), "[project]\nname = \"mylib\"\n")
+            File.WriteAllText(Path.Combine(depTarget, "src", "Util.lll"),
+                "module Mylib.Util\n\nexport greet() Str = \"hi\"\n")
+
+            match loadProject root with
+            | Error es -> Assert.Fail(sprintf "loadProject failed: %s" (errMsg es))
+            | Ok proj ->
+                // Should have both Mylib.Util and App.Main
+                Assert.Equal(2, proj.Files.Length)
+                // Mylib.Util (dep) must come before App.Main (depends on it)
+                Assert.Equal<string list>(["Mylib"; "Util"], proj.Files.[0].ModulePath)
+                Assert.Equal<string list>(["App"; "Main"], proj.Files.[1].ModulePath)
+        )
     )

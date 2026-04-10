@@ -1,0 +1,5 @@
+[project]
+name = "demo"
+
+[deps]
+std = { path = "../../../../stdlib" }

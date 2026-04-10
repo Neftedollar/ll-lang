@@ -6,5 +6,8 @@ obj/
 # unrelated sibling MCP project
 my-mcps/
 
+# installed package dependencies
+.ll-deps/
+
 # generated F# from `lllc build` next to .lll sources
 spec/examples/**/*.fs
