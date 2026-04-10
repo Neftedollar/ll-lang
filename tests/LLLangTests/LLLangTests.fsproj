@@ -43,5 +43,6 @@
     <Compile Include="CodegenTSTests.fs" />
     <Compile Include="CodegenPyTests.fs" />
     <Compile Include="CodegenJavaTests.fs" />
+    <Compile Include="StdlibMapTests.fs" />
   </ItemGroup>
 </Project>
