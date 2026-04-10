@@ -138,7 +138,8 @@ fn lookupSubstLists(keys List[Str])(vals List[TypeExpr])(name Str) Maybe[TypeExp
     | k :: ks ->
       match vals with
         | v :: vs ->
-          if k == name then Some v
+          if k == name
+            Some v
           else lookupSubstLists ks vs name
         | _ -> None
     | _ -> None
@@ -169,7 +170,10 @@ fn occursIn(v Str)(t TypeExpr) Bool =
   match t with
     | TyName _ -> false
     | TyVar x -> x == v
-    | TyFn a b -> if occursIn v a then true else occursIn v b
+    | TyFn a b ->
+      if occursIn v a
+        true
+      else occursIn v b
 
 -- ---------- Unify -------------------------------------------------------
 
@@ -210,7 +214,10 @@ fn unify(t1 TypeExpr)(t2 TypeExpr) Outcome[Subst] =
 -- anything else -> E001.
 fn unifyName(a Str)(t2 TypeExpr) Outcome[Subst] =
   match t2 with
-    | TyName b -> if a == b then OkR (emptySubst 0) else ErrR (strConcat (strConcat "E001 TypeMismatch " a) (strConcat " vs " b))
+    | TyName b ->
+      if a == b
+        OkR (emptySubst 0)
+      else ErrR (strConcat (strConcat "E001 TypeMismatch " a) (strConcat " vs " b))
     | TyVar v -> OkR (singletonSubst v (TyName a))
     | _ -> ErrR (strConcat "E001 TypeMismatch TyName " a)
 
@@ -219,9 +226,13 @@ fn unifyName(a Str)(t2 TypeExpr) Outcome[Subst] =
 -- occurs check because `b != a` and a single TyVar can't contain `a`.
 fn unifyVar(a Str)(t2 TypeExpr) Outcome[Subst] =
   match t2 with
-    | TyVar b -> if a == b then OkR (emptySubst 0) else OkR (singletonSubst a t2)
+    | TyVar b ->
+      if a == b
+        OkR (emptySubst 0)
+      else OkR (singletonSubst a t2)
     | _ ->
-      if occursIn a t2 then ErrR (strConcat (strConcat "E008 InfiniteType " a) (strConcat " in " (showType t2)))
+      if occursIn a t2
+        ErrR (strConcat (strConcat "E008 InfiniteType " a) (strConcat " in " (showType t2)))
       else OkR (singletonSubst a t2)
 
 -- `TyFn a1 r1` vs t2: only succeeds against another `TyFn`. Unifies
@@ -304,10 +315,12 @@ fn runTest(label Str)(t1 TypeExpr)(t2 TypeExpr) Str =
   match unify t1 t2 with
     | OkR s ->
       let key = substFirstKey s
-      if strLen key == 0 then strConcat header " ok"
+      if strLen key == 0
+        strConcat header " ok"
       else strConcat (strConcat header " ok bound ") key
     | ErrR m ->
-      if strContains "E008" m then strConcat header " infinite"
+      if strContains "E008" m
+        strConcat header " infinite"
       else strConcat header " mismatch"
 
 -- Join a list of strings with newline separators. Used to fold the five
@@ -315,7 +328,9 @@ fn runTest(label Str)(t1 TypeExpr)(t2 TypeExpr) Str =
 -- `fn main = body` body is a single expression — there's no statement
 -- sequencing.
 fn joinLines(xs List[Str]) Str =
-  listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n") s) "" xs
+  listFold (\acc s. if strLen acc == 0
+    s
+  else strConcat (strConcat acc "\n") s) "" xs
 
 -- ---------- TypeScheme / Env (Phase 7.7b, schemes in 7.7d) --------------
 
@@ -365,7 +380,8 @@ fn envLookupLists(keys List[Str])(vals List[TypeScheme])(name Str) Maybe[TypeSch
     | k :: ks ->
       match vals with
         | v :: vs ->
-          if k == name then Some v
+          if k == name
+            Some v
           else envLookupLists ks vs name
         | _ -> None
     | _ -> None
@@ -405,7 +421,8 @@ fn substRemoveLists(keys List[Str])(vals List[TypeExpr])(name Str) Subst =
     | k :: ks ->
       match vals with
         | v :: vs ->
-          if k == name then MkSubst ks vs
+          if k == name
+            MkSubst ks vs
           else
             match substRemoveLists ks vs name with
               | MkSubst ks2 vs2 -> MkSubst (k :: ks2) (v :: vs2)
@@ -428,14 +445,18 @@ fn applyTypeList(s Subst)(ts List[TypeExpr]) List[TypeExpr] =
 -- `listContains` to keep the file dependency-closed.
 fn listContainsStr(x Str)(xs List[Str]) Bool =
   match xs with
-    | y :: rest -> if x == y then true else listContainsStr x rest
+    | y :: rest ->
+      if x == y
+        true
+      else listContainsStr x rest
     | _ -> false
 
 -- List difference: xs minus ys. Preserves order of xs.
 fn listDiffStr(xs List[Str])(ys List[Str]) List[Str] =
   match xs with
     | x :: rest ->
-      if listContainsStr x ys then listDiffStr rest ys
+      if listContainsStr x ys
+        listDiffStr rest ys
       else x :: listDiffStr rest ys
     | _ -> []
 
@@ -444,7 +465,9 @@ fn listDedupStr(xs List[Str]) List[Str] =
   match xs with
     | x :: rest ->
       let tail = listDedupStr rest
-      if listContainsStr x tail then tail else x :: tail
+      if listContainsStr x tail
+        tail
+      else x :: tail
     | _ -> []
 
 -- Free type variables of a `TypeExpr`. All `TyVar` names are treated as
@@ -998,7 +1021,7 @@ fn main() =
   -- With let-gen: id has scheme `∀ $0. $0 -> $0`. `id 5` instantiates
   -- to `Int -> Int`, so `i : Int`. `id "hi"` instantiates fresh to
   -- `Str -> Str`, so the whole expression types at `Str`. Without
-  -- let-gen, `id 5` pins id to `Int -> Int`, and `id "hi"` then
+  -- let-gen, `id 5` pins id to `Int -> Int`, and `id "hi"`
   -- fails E001 at the second use.
   let letIdUseInt = EApp (EVar "id") (EInt 5)
   let letIdUseStr = EApp (EVar "id") (EStr "hi")

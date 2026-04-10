@@ -44,7 +44,7 @@ type Expr =
 -- Collect a run of digit chars. Returns (digits, leftover) as a tuple.
 fn takeDigits(cs List[Char]) =
   | c :: rest ->
-    if charIsDigit c then
+    if charIsDigit c
       let (ds, leftover) = takeDigits rest
       (c :: ds, leftover)
     else ([], cs)
@@ -64,17 +64,24 @@ fn consTok(t Token)(ts List[Token]) List[Token] = t :: ts
 -- and maps single-char operators / parens to their token constructors.
 fn lexChars(cs List[Char]) List[Token] =
   | c :: rest ->
-    if charIsSpace c then lexChars rest
-    else if charIsDigit c then
+    if charIsSpace c
+      lexChars rest
+    else if charIsDigit c
       let (ds, leftover) = takeDigits cs
       let n = parseIntStr (strFromChars ds)
       consTok (TNum n) (lexChars leftover)
-    else if c == '+' then consTok TPlus (lexChars rest)
-    else if c == '-' then consTok TMinus (lexChars rest)
-    else if c == '*' then consTok TStar (lexChars rest)
-    else if c == '/' then consTok TSlash (lexChars rest)
-    else if c == '(' then consTok TLParen (lexChars rest)
-    else if c == ')' then consTok TRParen (lexChars rest)
+    else if c == '+'
+      consTok TPlus (lexChars rest)
+    else if c == '-'
+      consTok TMinus (lexChars rest)
+    else if c == '*'
+      consTok TStar (lexChars rest)
+    else if c == '/'
+      consTok TSlash (lexChars rest)
+    else if c == '('
+      consTok TLParen (lexChars rest)
+    else if c == ')'
+      consTok TRParen (lexChars rest)
     else lexChars rest
   | _ -> [TEnd]
 

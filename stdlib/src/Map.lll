@@ -72,8 +72,10 @@ fn ins(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) RBMap[K][V] =
     | Leaf -> Node (Red) Leaf k v Leaf
     | Node c left nk nv right ->
       let d = cmp k nk
-      if d < 0 then balance c (ins cmp k v left) nk nv right
-      else if d > 0 then balance c left nk nv (ins cmp k v right)
+      if d < 0
+        balance c (ins cmp k v left) nk nv right
+      else if d > 0
+        balance c left nk nv (ins cmp k v right)
       else Node c left nk v right
 
 -- mapInsert: insert k->v into map, replacing value if key exists
@@ -89,8 +91,10 @@ fn mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) Maybe[V] =
     | Leaf -> None
     | Node _ left nk nv right ->
       let d = cmp k nk
-      if d < 0 then mapLookup cmp k left
-      else if d > 0 then mapLookup cmp k right
+      if d < 0
+        mapLookup cmp k left
+      else if d > 0
+        mapLookup cmp k right
       else Some nv
 
 -- mapContains: check if key k is in map
@@ -119,19 +123,23 @@ fn mapKeys(m RBMap[K][V]) List[K] =
 
 -- Integer comparator
 fn intCmp(a Int)(b Int) Int =
-  if a < b then 0 - 1
-  else if a > b then 1
+  if a < b
+    0 - 1
+  else if a > b
+    1
   else 0
 
 -- String comparator
 fn strCmp(a Str)(b Str) Int =
-  if a < b then 0 - 1
-  else if a > b then 1
+  if a < b
+    0 - 1
+  else if a > b
+    1
   else 0
 
 -- Test helper: print OK or FAIL
 fn check(label Str)(ok Bool) Int =
-  if ok then
+  if ok
     let _ = printfn (strConcat "OK " label)
     0
   else
@@ -200,7 +208,9 @@ fn main() Int =
     | Some v -> v == "second"
     | None -> false
  
-  let _ = check "11 duplicate key insert" (if mapSize md2 == 1 then okDup else false)
+  let _ = check "11 duplicate key insert" (if mapSize md2 == 1
+    okDup
+  else false)
 
   -- Sorted order: insert [5,3,1,4,2], mapKeys returns [1,2,3,4,5]
   let ms1 = mapInsert intCmp 5 0 (mapEmpty)
@@ -218,6 +228,8 @@ fn main() Int =
     | Some v -> v == 5
     | None -> false
  
-  let _ = check "12 sorted order" (if firstOk then lastOk else false)
+  let _ = check "12 sorted order" (if firstOk
+    lastOk
+  else false)
 
   0

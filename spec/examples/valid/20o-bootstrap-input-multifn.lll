@@ -1,7 +1,9 @@
 module Examples.Clean
 fn one(c Int) Int =
-  if c < 65 then 0
-  else if c > 90 then 0
+  if c < 65
+    0
+  else if c > 90
+    0
   else 1
 fn two() Int = 2
 fn three() Int = 3

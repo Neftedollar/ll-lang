@@ -118,7 +118,11 @@ type Env = MkEnv List[Str]
 fn envHas(env Env)(name Str) Bool =
   match env with
     | MkEnv xs ->
-      listFold (\acc x. if acc then true else if x == name then true else false) false xs
+      listFold (\acc x. if acc
+        true
+      else if x == name
+        true
+      else false) false xs
 
 fn envAdd(env Env)(name Str) Env =
   match env with
@@ -159,7 +163,8 @@ fn checkExpr(env Env)(e Expr) List[Str] =
   | EInt _ -> []
   | EStr _ -> []
   | EVar name ->
-    if envHas env name then []
+    if envHas env name
+      []
     else
       let msg = strConcat "E002 UnboundVar " name
       [msg]
@@ -184,7 +189,7 @@ fn checkExpr(env Env)(e Expr) List[Str] =
     listAppend scrutErrs armErrs
 
 -- Walk the two parallel arm lists in lockstep. For each arm, extend
--- the scrutinee env with every binder the pattern introduces, then
+-- the scrutinee env with every binder the pattern introduces,
 -- walk the body expression under the extended env. Pattern binders
 -- are only visible inside their own arm body, not across arms.
 fn checkArms(env Env)(pats List[Pat])(bodies List[Expr]) List[Str] =
@@ -268,7 +273,9 @@ fn collectTypes(decls List[Decl]) List[TypeCtors] =
 fn lookupCtors(types List[TypeCtors])(name Str) List[Str] =
   match types with
     | MkTypeCtors n cs :: rest ->
-      if n == name then cs else lookupCtors rest name
+      if n == name
+        cs
+      else lookupCtors rest name
     | _ -> []
 
 -- ---------- Exhaustiveness check ----------------------------------------
@@ -290,7 +297,9 @@ fn patIsCatchAll(p Pat) Bool =
 -- elaborator short-circuits its exhaustiveness check when any branch
 -- is a catch-all; the ll-lang mirror does the same.
 fn armsHaveCatchAll(pats List[Pat]) Bool =
-  listFold (\acc p. if acc then true else patIsCatchAll p) false pats
+  listFold (\acc p. if acc
+    true
+  else patIsCatchAll p) false pats
 
 -- Collect every named constructor mentioned in `PCon name` arms of
 -- the match. PWild / PVar / PCons / PInt / PNil contribute nothing —
@@ -311,8 +320,13 @@ fn missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) List[Str] =
   match required with
     | c :: rest ->
       let tail = missingCtorErrs ty rest covered
-      let isCovered = listFold (\acc x. if acc then true else if x == c then true else false) false covered
-      if isCovered then tail
+      let isCovered = listFold (\acc x. if acc
+        true
+      else if x == c
+        true
+      else false) false covered
+      if isCovered
+        tail
       else
         let msg = strConcat (strConcat (strConcat "E003 NonExhaustiveMatch " ty) " missing ") c
         listAppend [msg] tail
@@ -330,14 +344,17 @@ fn missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) List[Str] =
 fn exhaustivenessDecl(types List[TypeCtors])(d Decl) List[Str] =
   match d with
     | DFn _ _ lastTy body ->
-      if strLen lastTy == 0 then []
+      if strLen lastTy == 0
+        []
       else
         let required = lookupCtors types lastTy
-        if listIsEmpty required then []
+        if listIsEmpty required
+          []
         else
           match body with
             | EMatch _ pats _ ->
-              if armsHaveCatchAll pats then []
+              if armsHaveCatchAll pats
+                []
               else
                 let covered = coveredCtors pats
                 missingCtorErrs lastTy required covered
@@ -373,8 +390,11 @@ fn elaborate(decls List[Decl]) List[Str] =
 -- single `ok` sentinel so the runtime test can tell a clean elaborate
 -- apart from an elaborate that printed nothing at all.
 fn showErrs(errs List[Str]) Str =
-  if listIsEmpty errs then "ok"
-  else listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n") s) "" errs
+  if listIsEmpty errs
+    "ok"
+  else listFold (\acc s. if strLen acc == 0
+    s
+  else strConcat (strConcat acc "\n") s) "" errs
 
 -- ---------- Hardcoded test module ---------------------------------------
 

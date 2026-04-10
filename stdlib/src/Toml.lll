@@ -21,16 +21,19 @@ type ParseState = MkState Section (Maybe[Str]) Str Str (List[Str]) (List[Str]) (
 -- ---- String helpers ----
 
 fn strStartsWith(prefix Str)(s Str) Bool =
-  if strLen prefix > strLen s then false
+  if strLen prefix > strLen s
+    false
   else strSlice s 0 (strLen prefix) == prefix
 
 fn strDropPrefix(n Int)(s Str) Str =
-  if n >= strLen s then ""
+  if n >= strLen s
+    ""
   else strSlice s n (strLen s - n)
 
 fn strTakeUntil(ch Str)(s Str) Str =
   let idx = strIndexOf ch s
-  if idx < 0 then s
+  if idx < 0
+    s
   else strSlice s 0 idx
 
 -- Strip inline # comment, then trim
@@ -40,18 +43,24 @@ fn stripComment(s Str) Str =
 -- ---- Quoted string parser (char-by-char) ----
 
 fn decodeEscape(e Char) Char =
-  if e == 'n' then '\n'
-  else if e == 't' then '\t'
-  else if e == '"' then '"'
-  else if e == '\\' then '\\'
+  if e == 'n'
+    '\n'
+  else if e == 't'
+    '\t'
+  else if e == '"'
+    '"'
+  else if e == '\\'
+    '\\'
   else e
 
 fn parseQuotedChars(cs List[Char]) =
   match cs with
     | [] -> ([], [])
     | c :: rest ->
-      if c == '"' then ([], rest)
-      else if c == '\\' then parseQuotedEsc rest
+      if c == '"'
+        ([], rest)
+      else if c == '\\'
+        parseQuotedEsc rest
       else
         let (body, leftover) = parseQuotedChars rest
         (c :: body, leftover)
@@ -68,7 +77,7 @@ fn parseQuotedStr(s Str) Maybe[Str] =
   let cs = strChars s
   match cs with
     | c :: rest ->
-      if c == '"' then
+      if c == '"'
         let (body, _) = parseQuotedChars rest
         Some (strFromChars body)
       else None
@@ -78,8 +87,10 @@ fn parseQuotedStr(s Str) Maybe[Str] =
 
 -- Parse ["a", "b", "c"] — simple: split by comma, parse each quoted value
 fn cleanArrayItem(s Str) Str =
-  if strStartsWith "[" s then strTrim (strDropPrefix 1 s)
-  else if strStartsWith "]" s then ""
+  if strStartsWith "[" s
+    strTrim (strDropPrefix 1 s)
+  else if strStartsWith "]" s
+    ""
   else s
 
 fn parseArrayItems(items List[Str]) List[Str] =
@@ -88,7 +99,8 @@ fn parseArrayItems(items List[Str]) List[Str] =
     | item :: rest ->
       let cleaned = cleanArrayItem (strTrim item)
       let final = strTrim (strTakeUntil "]" cleaned)
-      if strLen final == 0 then parseArrayItems rest
+      if strLen final == 0
+        parseArrayItems rest
       else
         match parseQuotedStr final with
           | Some v -> v :: parseArrayItems rest
@@ -103,14 +115,18 @@ fn parseStringArray(s Str) List[Str] =
 
 fn parseSectionHeader(line Str) Section =
   let inner = strTrim (strTakeUntil "]" (strDropPrefix 1 line))
-  if inner == "project" then SecProject
-  else if inner == "deps" then SecDeps
-  else if inner == "platform" then SecPlatform
+  if inner == "project"
+    SecProject
+  else if inner == "deps"
+    SecDeps
+  else if inner == "platform"
+    SecPlatform
   else SecOther
 
 fn parseKeyValue(line Str) =
   let eqIdx = strIndexOf "=" line
-  if eqIdx < 0 then ("", "")
+  if eqIdx < 0
+    ("", "")
   else
     let key = strTrim (strSlice line 0 eqIdx)
     let valRaw = strTrim (strDropPrefix (eqIdx + 1) line)
@@ -122,9 +138,12 @@ fn processProjectLine(key Str)(valRaw Str)(st ParseState) ParseState =
     | Some v ->
       match st with
         | MkState sec name ver entry deps plat err ->
-          if key == "name" then MkState sec (Some v) ver entry deps plat err
-          else if key == "version" then MkState sec name v entry deps plat err
-          else if key == "entry" then MkState sec name ver v deps plat err
+          if key == "name"
+            MkState sec (Some v) ver entry deps plat err
+          else if key == "version"
+            MkState sec name v entry deps plat err
+          else if key == "entry"
+            MkState sec name ver v deps plat err
           else st
 
 fn processDepsLine(key Str)(valRaw Str)(st ParseState) ParseState =
@@ -141,8 +160,8 @@ fn processDepsLine(key Str)(valRaw Str)(st ParseState) ParseState =
           MkState sec name ver entry (listAppend deps [cleanKey v]) plat err
 
 fn processPlatformLine(key Str)(valRaw Str)(st ParseState) ParseState =
-  if key == "use" then
-    if strStartsWith "[" valRaw then
+  if key == "use"
+    if strStartsWith "[" valRaw
       let items = parseStringArray valRaw
       match st with
         | MkState sec name ver entry deps _ err ->
@@ -152,13 +171,14 @@ fn processPlatformLine(key Str)(valRaw Str)(st ParseState) ParseState =
 
 fn processLine(st ParseState)(line Str) ParseState =
   let trimmed = stripComment line
-  if strLen trimmed == 0 then st
-  else if strStartsWith "[" trimmed then
+  if strLen trimmed == 0
+    st
+  else if strStartsWith "[" trimmed
     let sec = parseSectionHeader trimmed
     match st with
       | MkState _ name ver entry deps plat err ->
         MkState sec name ver entry deps plat err
-  else if strContains "=" trimmed then
+  else if strContains "=" trimmed
     let (key, valRaw) = parseKeyValue trimmed
     match st with
       | MkState sec _ _ _ _ _ _ ->
@@ -207,7 +227,7 @@ fn mPlatform(m Manifest) List[Str] =
 -- ---- Tests ----
 
 fn check(label Str)(ok Bool) Int =
-  if ok then
+  if ok
     let _ = printfn (strConcat "OK " label)
     0
   else

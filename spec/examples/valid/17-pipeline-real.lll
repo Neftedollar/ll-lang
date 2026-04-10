@@ -154,7 +154,6 @@ type Token =
   | TKwType
   | TKwFn
   | TKwIf
-  | TKwThen
   | TKwElse
   | TKwLet
   | TKwIn
@@ -279,31 +278,45 @@ type Module = MkModule Str List[Decl]
 -- `&&` so each predicate is two nested `if`s.
 fn isUpperChar(c Char) Bool =
   let n = charToInt c
-  if n < 65 then false
-  else if n > 90 then false
+  if n < 65
+    false
+  else if n > 90
+    false
   else true
 
 fn isLowerChar(c Char) Bool =
   let n = charToInt c
-  if n < 97 then false
-  else if n > 122 then false
+  if n < 97
+    false
+  else if n > 122
+    false
   else true
 
 fn isIdStart(c Char) Bool =
-  if isUpperChar c then true else isLowerChar c
+  if isUpperChar c
+    true
+  else isLowerChar c
 
 fn isIdCont(c Char) Bool =
-  if isIdStart c then true else charIsDigit c
+  if isIdStart c
+    true
+  else charIsDigit c
 
 -- ---------- Lexer --------------------------------------------------------
 
 -- Greedy take/drop while predicate, shared shape with every earlier slice.
 fn takeWhilePred(p)(cs List[Char]) List[Char] =
-  | c :: rest -> if p c then listAppend [c] (takeWhilePred p rest) else []
+  | c :: rest ->
+    if p c
+      listAppend [c] (takeWhilePred p rest)
+    else []
   | _ -> []
 
 fn dropWhilePred(p)(cs List[Char]) List[Char] =
-  | c :: rest -> if p c then dropWhilePred p rest else cs
+  | c :: rest ->
+    if p c
+      dropWhilePred p rest
+    else cs
   | _ -> []
 
 -- Unwrap `strToInt` into a raw Int; the lexer only calls this on strings
@@ -328,7 +341,6 @@ fn classifyIdent(s Str) Token =
     | "type" -> TKwType
     | "fn" -> TKwFn
     | "if" -> TKwIf
-    | "then" -> TKwThen
     | "else" -> TKwElse
     | "let" -> TKwLet
     | "in" -> TKwIn
@@ -340,7 +352,10 @@ fn classifyIdent(s Str) Token =
     | _ ->
       let cs = strChars s
       match cs with
-        | c :: _ -> if isUpperChar c then TUpper s else TLower s
+        | c :: _ ->
+          if isUpperChar c
+            TUpper s
+          else TLower s
         | _ -> TLower s
 
 fn lexId(cs List[Char]) List[Token] =
@@ -359,7 +374,8 @@ fn lexNum(cs List[Char]) List[Token] =
 -- (body-chars, leftover). Lifted from 14-exprparser-real.lll.
 fn takeStrBody(cs List[Char]) =
   | c :: rest ->
-    if c == '"' then ([], rest)
+    if c == '"'
+      ([], rest)
     else
       let (body, leftover) = takeStrBody rest
       (c :: body, leftover)
@@ -374,7 +390,8 @@ fn lexStr(cs List[Char]) List[Token] =
 -- not used anywhere, so it falls through silently.
 fn lexColonOrCons(cs List[Char]) List[Token] =
   | c :: rest ->
-    if c == ':' then listAppend [TColonColon] (lexChars rest)
+    if c == ':'
+      listAppend [TColonColon] (lexChars rest)
     else lexChars cs
   | _ -> [TEnd]
 
@@ -383,7 +400,8 @@ fn lexColonOrCons(cs List[Char]) List[Token] =
 -- TMinus before Phase 7.5a. Lifted from 14-exprparser-real.lll.
 fn lexMinusOrArrow(cs List[Char]) List[Token] =
   | c :: rest ->
-    if c == '>' then listAppend [TArrow] (lexChars rest)
+    if c == '>'
+      listAppend [TArrow] (lexChars rest)
     else listAppend [TMinus] (lexChars cs)
   | _ -> [TMinus]
 
@@ -394,25 +412,44 @@ fn lexMinusOrArrow(cs List[Char]) List[Token] =
 -- adds `\` → TBackslash (lambda-intro) — `.` → TDot was already here.
 fn lexChars(cs List[Char]) List[Token] =
   | c :: rest ->
-    if c == '\n' then listAppend [TNewline] (lexChars rest)
-    else if charIsSpace c then lexChars rest
-    else if isIdStart c then lexId cs
-    else if charIsDigit c then lexNum cs
-    else if c == '"' then lexStr rest
-    else if c == '(' then listAppend [TLParen] (lexChars rest)
-    else if c == ')' then listAppend [TRParen] (lexChars rest)
-    else if c == '[' then listAppend [TLBrack] (lexChars rest)
-    else if c == ']' then listAppend [TRBrack] (lexChars rest)
-    else if c == '=' then listAppend [TEq] (lexChars rest)
-    else if c == '|' then listAppend [TBar] (lexChars rest)
-    else if c == '.' then listAppend [TDot] (lexChars rest)
-    else if c == '\\' then listAppend [TBackslash] (lexChars rest)
-    else if c == '_' then listAppend [TUnder] (lexChars rest)
-    else if c == ':' then lexColonOrCons rest
-    else if c == '+' then listAppend [TPlus] (lexChars rest)
-    else if c == '-' then lexMinusOrArrow rest
-    else if c == '*' then listAppend [TStar] (lexChars rest)
-    else if c == '/' then listAppend [TSlash] (lexChars rest)
+    if c == '\n'
+      listAppend [TNewline] (lexChars rest)
+    else if charIsSpace c
+      lexChars rest
+    else if isIdStart c
+      lexId cs
+    else if charIsDigit c
+      lexNum cs
+    else if c == '"'
+      lexStr rest
+    else if c == '('
+      listAppend [TLParen] (lexChars rest)
+    else if c == ')'
+      listAppend [TRParen] (lexChars rest)
+    else if c == '['
+      listAppend [TLBrack] (lexChars rest)
+    else if c == ']'
+      listAppend [TRBrack] (lexChars rest)
+    else if c == '='
+      listAppend [TEq] (lexChars rest)
+    else if c == '|'
+      listAppend [TBar] (lexChars rest)
+    else if c == '.'
+      listAppend [TDot] (lexChars rest)
+    else if c == '\\'
+      listAppend [TBackslash] (lexChars rest)
+    else if c == '_'
+      listAppend [TUnder] (lexChars rest)
+    else if c == ':'
+      lexColonOrCons rest
+    else if c == '+'
+      listAppend [TPlus] (lexChars rest)
+    else if c == '-'
+      lexMinusOrArrow rest
+    else if c == '*'
+      listAppend [TStar] (lexChars rest)
+    else if c == '/'
+      listAppend [TSlash] (lexChars rest)
     else lexChars rest
   | _ -> [TEnd]
 
@@ -560,7 +597,7 @@ fn parseTypeDecl(toks List[Token]) =
 -- TEq (or anything else non-Upper).
 fn parseTypeParams(toks List[Token]) =
   | TUpper s :: rest ->
-    if strLen s == 1 then
+    if strLen s == 1
       let (ps, rest2) = parseTypeParams rest
       (s :: ps, rest2)
     else ([], toks)
@@ -603,8 +640,10 @@ fn parseTypeArgs(toks List[Token]) =
 fn parseOneTypeArg(toks List[Token]) =
   | TUpper s :: rest ->
     let (brackArgs, rest2) = parseBrackArgs [] rest
-    if listIsEmpty brackArgs then
-      let arg = if strLen s == 1 then TAVar s else TACon s
+    if listIsEmpty brackArgs
+      let arg = if strLen s == 1
+        TAVar s
+      else TACon s
       (arg, rest2)
     else (TAApp s brackArgs, rest2)
   | _ -> (TACon "?", toks)
@@ -708,13 +747,10 @@ fn parseLam(toks List[Token]) =
     (ELam name body, rest2)
   | _ -> (EInt 0, toks)
 
--- `if c then a else b`. Each of the three sub-expressions is parsed via
--- the full parseExpr so nested `if`s work naturally.
+-- `if c a else b`. `then` has been removed; condition must be a single atom.
 fn parseIf(toks List[Token]) =
-  let (c, rest) = parseExpr toks
-  let rest2 = match rest with
-    | TKwThen :: r -> r
-    | _ -> rest
+  let (c, rest) = parseAtom toks
+  let rest2 = rest
  
   let (a, rest3) = parseExpr rest2
   let rest4 = match rest3 with
@@ -774,7 +810,7 @@ fn parseArm(toks List[Token]) =
 fn parseArmBody(toks List[Token]) = parseAddSub toks
 
 -- Primary pattern: int literal, lowercase var binder, wildcard `_`,
--- or empty-list `[]`. The recursive `parsePat` calls this once, then
+-- or empty-list `[]`. The recursive `parsePat` calls this once,
 -- peeks for `TColonColon` to optionally fold the result into a
 -- right-associative `PCons`. Ctor / list-literal / tuple / string
 -- patterns all stay in Phase 7.5+.
@@ -833,7 +869,7 @@ fn parseApp(toks List[Token]) =
 fn parseAppTail(lhs Expr)(toks List[Token]) =
   match toks with
     | t :: _ ->
-      if isAtomStart t then
+      if isAtomStart t
         let (arg, rest) = parseAtom toks
         parseAppTail (EApp lhs arg) rest
       else (lhs, toks)
@@ -887,16 +923,21 @@ fn showBrackArgs(args List[TypeArg]) Str =
 
 -- Render a list of args as `(a1, a2)` or empty string for no args.
 fn showArgs(args List[TypeArg]) Str =
-  if listIsEmpty args then ""
+  if listIsEmpty args
+    ""
   else
-    let inner = listFold (\acc a. if strLen acc == 0 then showTypeArg a else strConcat (strConcat acc ", ") (showTypeArg a)) "" args
+    let inner = listFold (\acc a. if strLen acc == 0
+      showTypeArg a
+    else strConcat (strConcat acc ", ") (showTypeArg a)) "" args
     strConcat (strConcat "(" inner) ")"
 
 fn showCtor(c Ctor) Str =
   | MkCtor name args -> strConcat name (showArgs args)
 
 fn showCtors(cs List[Ctor]) Str =
-  listFold (\acc c. if strLen acc == 0 then showCtor c else strConcat (strConcat acc " | ") (showCtor c)) "" cs
+  listFold (\acc c. if strLen acc == 0
+    showCtor c
+  else strConcat (strConcat acc " | ") (showCtor c)) "" cs
 
 -- Render the type-param list as ` (A) (B)` with a leading space, or empty.
 fn showTypeParams(ps List[Str]) Str =
@@ -915,7 +956,8 @@ fn showParam(p Param) Str =
   | MkParam n t -> strConcat (strConcat (strConcat "(" n) ": ") (strConcat (showTypeRef t) ")")
 
 fn showFnParams(ps List[Param]) Str =
-  if listIsEmpty ps then " ()"
+  if listIsEmpty ps
+    " ()"
   else listFold (\acc p. strConcat (strConcat acc " ") (showParam p)) "" ps
 
 fn showReturn(r Maybe[TypeRef]) Str =
@@ -947,7 +989,8 @@ fn showArms(pats List[Pat])(bodies List[Expr]) Str =
         | b :: bs ->
           let head = showArm p b
           let tail = showArms ps bs
-          if strLen tail == 0 then head
+          if strLen tail == 0
+            head
           else strConcat (strConcat head " ") tail
         | _ -> ""
     | _ -> ""
@@ -971,7 +1014,7 @@ fn showExpr(e Expr) Str =
     strConcat (strConcat p2 (showExpr e2)) ")"
   | EIf c a b ->
     let p1 = strConcat "(if " (showExpr c)
-    let p2 = strConcat (strConcat p1 " then ") (showExpr a)
+    let p2 = strConcat (strConcat p1 " ") (showExpr a)
     strConcat (strConcat (strConcat p2 " else ") (showExpr b)) ")"
   | EMatch scrut pats bodies ->
     let head = strConcat (strConcat "(match " (showExpr scrut)) " with "
@@ -1004,12 +1047,15 @@ fn showDecl(d Decl) Str =
 
 -- Render a list of decls joined by `\n`, matching the input layout.
 fn showDecls(ds List[Decl]) Str =
-  listFold (\acc d. if strLen acc == 0 then showDecl d else strConcat (strConcat acc "\n") (showDecl d)) "" ds
+  listFold (\acc d. if strLen acc == 0
+    showDecl d
+  else strConcat (strConcat acc "\n") (showDecl d)) "" ds
 
 fn showModule(m Module) Str =
   | MkModule name decls ->
     let header = strConcat "module " name
-    if listIsEmpty decls then header
+    if listIsEmpty decls
+      header
     else strConcat (strConcat header "\n") (showDecls decls)
 
 -- ---------- Elaborator (Phase 7.6 integration) --------------------------
@@ -1023,7 +1069,11 @@ type Env = MkEnv List[Str]
 fn envHas(env Env)(name Str) Bool =
   match env with
     | MkEnv xs ->
-      listFold (\acc x. if acc then true else if x == name then true else false) false xs
+      listFold (\acc x. if acc
+        true
+      else if x == name
+        true
+      else false) false xs
 
 fn envAdd(env Env)(name Str) Env =
   match env with
@@ -1063,7 +1113,8 @@ fn checkExpr(env Env)(e Expr) List[Str] =
   | EInt _ -> []
   | EStr _ -> []
   | EVar name ->
-    if envHas env name then []
+    if envHas env name
+      []
     else
       let msg = strConcat "E002 UnboundVar " name
       [msg]
@@ -1092,7 +1143,7 @@ fn checkExpr(env Env)(e Expr) List[Str] =
     listAppend scrutErrs armErrs
 
 -- Walk the two parallel arm lists in lockstep. For each arm, extend
--- the scrutinee env with every binder the pattern introduces, then
+-- the scrutinee env with every binder the pattern introduces,
 -- walk the body expression under the extended env. Pattern binders
 -- are only visible inside their own arm body, not across arms.
 fn checkArms(env Env)(pats List[Pat])(bodies List[Expr]) List[Str] =
@@ -1189,7 +1240,9 @@ fn collectTypes(decls List[Decl]) List[TypeCtors] =
 fn lookupCtors(types List[TypeCtors])(name Str) List[Str] =
   match types with
     | MkTypeCtors n cs :: rest ->
-      if n == name then cs else lookupCtors rest name
+      if n == name
+        cs
+      else lookupCtors rest name
     | _ -> []
 
 -- A pattern counts as "catch-all relative to a sum type" if it's
@@ -1203,7 +1256,9 @@ fn patIsCatchAll(p Pat) Bool =
   | _ -> false
 
 fn armsHaveCatchAll(pats List[Pat]) Bool =
-  listFold (\acc p. if acc then true else patIsCatchAll p) false pats
+  listFold (\acc p. if acc
+    true
+  else patIsCatchAll p) false pats
 
 -- 15's `Pat` has no `PCon` (named constructor patterns), so no arm
 -- pattern can ever identify a sum-type ctor. This means `coveredCtors`
@@ -1220,8 +1275,13 @@ fn missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) List[Str] =
   match required with
     | c :: rest ->
       let tail = missingCtorErrs ty rest covered
-      let isCovered = listFold (\acc x. if acc then true else if x == c then true else false) false covered
-      if isCovered then tail
+      let isCovered = listFold (\acc x. if acc
+        true
+      else if x == c
+        true
+      else false) false covered
+      if isCovered
+        tail
       else
         let msg = strConcat (strConcat (strConcat "E003 NonExhaustiveMatch " ty) " missing ") c
         listAppend [msg] tail
@@ -1247,14 +1307,17 @@ fn lastParamTypeName(ps List[Param]) Str =
 fn exhaustivenessFn(types List[TypeCtors])(fd FnDecl) List[Str] =
   | MkFn _ params _ body ->
     let lastTy = lastParamTypeName params
-    if strLen lastTy == 0 then []
+    if strLen lastTy == 0
+      []
     else
       let required = lookupCtors types lastTy
-      if listIsEmpty required then []
+      if listIsEmpty required
+        []
       else
         match body with
           | EMatch _ pats _ ->
-            if armsHaveCatchAll pats then []
+            if armsHaveCatchAll pats
+              []
             else
               let covered = coveredCtors pats
               missingCtorErrs lastTy required covered
@@ -1288,8 +1351,11 @@ fn elaborate(decls List[Decl]) List[Str] =
 -- single `no errors` sentinel so the runtime can tell a clean
 -- elaborate apart from an elaborate that printed nothing at all.
 fn showErrs(errs List[Str]) Str =
-  if listIsEmpty errs then "no errors"
-  else listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n") s) "" errs
+  if listIsEmpty errs
+    "no errors"
+  else listFold (\acc s. if strLen acc == 0
+    s
+  else strConcat (strConcat acc "\n") s) "" errs
 
 -- ---------- Driver -------------------------------------------------------
 --

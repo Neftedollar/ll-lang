@@ -16,7 +16,7 @@ DEDENT  ::= synthetic token — emitted when indentation decreases
 (* --- Keywords ----------------------------------------------- *)
 KW ::= "fn" | "let" | "type" | "tag" | "unit"
      | "trait" | "impl" | "import" | "export" | "module"
-     | "match" | "if" | "then" | "else" | "true" | "false"
+     | "match" | "if" | "else" | "true" | "false"
 
 (* --- Identifiers -------------------------------------------- *)
 (* value identifiers: lowercase start *)
@@ -98,8 +98,9 @@ let-expr    ::= "let" IDENT "=" expr
 (* lambda *)
 lambda-expr ::= OP_LAMBDA IDENT+ OP_DOT expr
 
-(* conditional *)
-if-expr     ::= "if" expr "then" expr "else" expr
+(* conditional — `then` has been removed; condition is separated from body
+   by a newline. Inline form requires the body on the next (indented) line. *)
+if-expr     ::= "if" expr NEWLINE expr NEWLINE "else" expr
 
 (* pattern match: each branch on own line, indented *)
 match-expr  ::= INDENT (OP_BAR pattern OP_ARROW expr NEWLINE)+ DEDENT

@@ -8,7 +8,7 @@ let private keywords =
         "fn", KwFn; "let", KwLet; "type", KwType
         "tag", KwTag; "unit", KwUnit; "trait", KwTrait; "impl", KwImpl
         "import", KwImport; "export", KwExport; "module", KwModule
-        "if", KwIf; "then", KwThen; "else", KwElse
+        "if", KwIf; "else", KwElse
         "true", KwTrue; "false", KwFalse
         "match", KwMatch; "with", KwWith
     ]

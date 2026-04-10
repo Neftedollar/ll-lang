@@ -1,3 +1,5 @@
 module Examples.Clean
-fn sym(n Int) Int = if '=' == '=' then n else 0
+fn sym(n Int) Int = if '=' == '='
+  n
+else 0
 fn main() Int = sym 5

@@ -18,10 +18,12 @@ fn area(s Shape) Float =
 
 -- Maybe usage
 fn safeDivide(a Float)(b Float) Maybe[Float] =
-  if b == 0.0 then None
+  if b == 0.0
+    None
   else Some (a / b)
 
 -- Result usage
 fn parseAge(s Str) Result[Int][Str] =
-  if s == "" then Err "empty input"
+  if s == ""
+    Err "empty input"
   else Ok 42

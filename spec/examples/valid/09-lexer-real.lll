@@ -11,19 +11,27 @@ module Examples.RealLexer
 -- This is the first step toward Phase 7 self-hosting: prove the language
 -- can express its own lexer in idiomatic ll-lang.
 
-type Token = TIdent Str | TInt Str | TLet | TFn | TIf | TThen | TElse | TPlus | TMinus | TStar | TSlash | TEq | TLt | TGt | TLParen | TRParen | TUnknown Str
+type Token = TIdent Str | TInt Str | TLet | TFn | TIf | TElse | TPlus | TMinus | TStar | TSlash | TEq | TLt | TGt | TLParen | TRParen | TUnknown Str
 
 -- Char predicates
 fn isIdStart(c Char) Bool = charIsAlpha c
-fn isIdCont(c Char) Bool = if charIsAlpha c then true else charIsDigit c
+fn isIdCont(c Char) Bool = if charIsAlpha c
+  true
+else charIsDigit c
 
 -- Greedy take/drop while predicate, written directly on cons cells.
 fn takeWhilePred(p)(cs List[Char]) List[Char] =
-  | c :: rest -> if p c then listAppend [c] (takeWhilePred p rest) else []
+  | c :: rest ->
+    if p c
+      listAppend [c] (takeWhilePred p rest)
+    else []
   | _ -> []
 
 fn dropWhilePred(p)(cs List[Char]) List[Char] =
-  | c :: rest -> if p c then dropWhilePred p rest else cs
+  | c :: rest ->
+    if p c
+      dropWhilePred p rest
+    else cs
   | _ -> []
 
 -- Classify an identifier string as a keyword or generic identifier,
@@ -33,7 +41,6 @@ fn keywordOrIdent(s Str) Token =
     | "let" -> TLet
     | "fn" -> TFn
     | "if" -> TIf
-    | "then" -> TThen
     | "else" -> TElse
     | _ -> TIdent s
 
@@ -73,9 +80,12 @@ fn lexOp(c Char)(rest List[Char]) List[Token] =
 -- input directly; the empty case returns an empty token list.
 fn lexChars(cs List[Char]) List[Token] =
   | c :: rest ->
-    if charIsSpace c then lexChars rest
-    else if isIdStart c then lexId cs
-    else if charIsDigit c then lexNum cs
+    if charIsSpace c
+      lexChars rest
+    else if isIdStart c
+      lexId cs
+    else if charIsDigit c
+      lexNum cs
     else lexOp c rest
   | _ -> []
 
@@ -88,7 +98,6 @@ fn tokenName(t Token) Str =
   | TLet -> "kw:let"
   | TFn -> "kw:fn"
   | TIf -> "kw:if"
-  | TThen -> "kw:then"
   | TElse -> "kw:else"
   | TPlus -> "+"
   | TMinus -> "-"
@@ -102,7 +111,9 @@ fn tokenName(t Token) Str =
   | TUnknown s -> strConcat "?:" s
 
 fn joinNames(ts List[Token]) Str =
-  listFold (\acc t. if strLen acc == 0 then tokenName t else strConcat (strConcat acc " ") (tokenName t)) "" ts
+  listFold (\acc t. if strLen acc == 0
+    tokenName t
+  else strConcat (strConcat acc " ") (tokenName t)) "" ts
 
 fn main() =
   let src = "fn add(a)(b) = a + b"

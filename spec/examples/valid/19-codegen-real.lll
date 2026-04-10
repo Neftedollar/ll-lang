@@ -406,7 +406,9 @@ fn showArmsCons(p Pat)(prest List[Pat])(bs List[TExpr]) Str =
     | b :: brest ->
       let head = strConcat "| " (strConcat (showPat p) (strConcat " -> " (showTExpr b)))
       let rest = showArms prest brest
-      if strLen rest == 0 then head else strConcat head (strConcat " " rest)
+      if strLen rest == 0
+        head
+      else strConcat head (strConcat " " rest)
     | _ -> ""
 
 -- ---------- Parameter-list emission -------------------------------------
@@ -454,9 +456,12 @@ fn showTypeArg(a TypeArg) Str =
 -- defined ADTs emit as their bare F# name). Split from `showTypeArg`
 -- so the outer match stays one level deep.
 fn showTypeArgName(n Str) Str =
-  if n == "Int" then "int64"
-  else if n == "Str" then "string"
-  else if n == "Bool" then "bool"
+  if n == "Int"
+    "int64"
+  else if n == "Str"
+    "string"
+  else if n == "Bool"
+    "bool"
   else n
 
 -- Join a ctor's `List[TypeArg]` into the `of T1 * T2 * ...` arg-tuple
@@ -548,7 +553,8 @@ fn showDecl(d TDecl) Str =
 -- `showMainDecl`; everything else falls through to `showFnDeclPlain`.
 -- Split from `showDecl` so the outer `match d` stays one level deep.
 fn showFnDeclDispatch(name Str)(ps List[Str])(body TExpr) Str =
-  if isMainFn name ps then showMainDecl body
+  if isMainFn name ps
+    showMainDecl body
   else showFnDeclPlain name ps body
 
 -- `True` iff `name` is the string `"main"` **and** `ps` is empty. Used
@@ -558,7 +564,10 @@ fn showFnDeclDispatch(name Str)(ps List[Str])(body TExpr) Str =
 fn isMainFn(name Str)(ps List[Str]) Bool =
   match ps with
     | _ :: _ -> false
-    | _ -> if name == "main" then true else false
+    | _ ->
+      if name == "main"
+        true
+      else false
 
 -- Plain non-recursive function emission — `let <name> <params> = <body>`
 -- for non-empty params, `let <name> = <body>` for the zero-params
@@ -643,7 +652,9 @@ fn showFnGroupCons(first TDecl)(rest List[TDecl]) Str =
   let head = showFnDeclFirstD first
   let tails = listMap showFnDeclContD rest
   let tailStr = joinLines tails
-  if strLen tailStr == 0 then head else strConcat head (strConcat "\n" tailStr)
+  if strLen tailStr == 0
+    head
+  else strConcat head (strConcat "\n" tailStr)
 
 -- Emit a sum-type decl as multi-line F# source. Shape:
 --   `type <name><typeParams> =\n    | <ctor1>\n    | <ctor2> ...`
@@ -665,7 +676,9 @@ fn showTypeDecl(name Str)(tps List[Str])(ctors List[Ctor]) Str =
 -- statement sequencing, so all four emitted decls have to funnel into
 -- a single `printfn` argument.
 fn joinLines(xs List[Str]) Str =
-  listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n") s) "" xs
+  listFold (\acc s. if strLen acc == 0
+    s
+  else strConcat (strConcat acc "\n") s) "" xs
 
 -- Blank-line-joined variant: walks a `List[Str]` of already-emitted
 -- source blocks and glues them with `"\n\n"` separators. Used by
@@ -673,7 +686,9 @@ fn joinLines(xs List[Str]) Str =
 -- all sit on their own F# source "paragraph". Same shape as
 -- `joinLines`, just a different separator.
 fn joinBlocks(xs List[Str]) Str =
-  listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n\n") s) "" xs
+  listFold (\acc s. if strLen acc == 0
+    s
+  else strConcat (strConcat acc "\n\n") s) "" xs
 
 -- ---------- F# stdlib prelude (Phase 7.8d) ------------------------------
 
@@ -793,7 +808,8 @@ fn splitAndShowStep(d TDecl)(rest List[TDecl])(pending List[TDecl])(acc Str) Str
 -- `pending` run. Pre-computes `isMainFn name ps` once and branches
 -- on the result.
 fn splitAndShowStepFn(d TDecl)(name Str)(ps List[Str])(rest List[TDecl])(pending List[TDecl])(acc Str) Str =
-  if isMainFn name ps then splitAndShowStepMain d rest pending acc
+  if isMainFn name ps
+    splitAndShowStepMain d rest pending acc
   else splitAndShowLoop rest (d :: pending) acc
 
 -- Main-boundary branch of `splitAndShowStepFn`: flush any pending
@@ -837,7 +853,9 @@ fn flushPendingFnsNonEmpty(fns List[TDecl])(acc Str) Str =
 -- shape as `joinBlocks`'s fold body, just extracted for the
 -- incremental append pattern `splitAndShowLoop` needs.
 fn appendBlockStr(block Str)(acc Str) Str =
-  if strLen acc == 0 then block else strConcat acc (strConcat "\n\n" block)
+  if strLen acc == 0
+    block
+  else strConcat acc (strConcat "\n\n" block)
 
 -- ---------- main --------------------------------------------------------
 

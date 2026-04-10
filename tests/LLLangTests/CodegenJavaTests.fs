@@ -152,7 +152,7 @@ let ``Java: main fn emits public static void main`` () =
 
 [<Fact>]
 let ``Java: if-then-else emits ternary`` () =
-    let src = "module M\nfn abs(x Int) Int = if x > 0 then x else 0 - x"
+    let src = "module M\nfn abs(x Int) Int =\n  if x > 0\n    x\n  else 0 - x"
     let java = javaSrc src
     Assert.Contains("?", java)
     Assert.Contains(":", java)

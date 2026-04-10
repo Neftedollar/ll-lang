@@ -4,7 +4,9 @@ module Examples.TextProcessing
 -- Counts the number of digit chars in a string.
 
 fn countDigits(s Str) Int =
-  listFold (\acc. \c. if charIsDigit c then acc + 1 else acc) 0 (strChars s)
+  listFold (\acc. \c. if charIsDigit c
+    acc + 1
+  else acc) 0 (strChars s)
 
 fn main() =
   printfn (intToStr (countDigits "abc123def45"))

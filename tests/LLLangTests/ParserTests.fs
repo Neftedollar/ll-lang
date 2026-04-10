@@ -99,12 +99,12 @@ let ``parse lambda: \x. x`` () =
 let ``parse lambda two params: \x y. x`` () =
     Assert.Equal(ELam(["x"; "y"], EVar "x"), parseExprStr "\\x y. x")
 
-// --- If/Then/Else ---
+// --- If/Else ---
 
 [<Fact>]
 let ``parse if expression`` () =
     let expected = EIf(EVar "b", ELit (LInt 1L), ELit (LInt 2L))
-    Assert.Equal(expected, parseExprStr "if b then 1 else 2")
+    Assert.Equal(expected, parseExprStr "if b\n  1\nelse 2")
 
 // --- Let ---
 
@@ -381,12 +381,13 @@ let ``indented let without in: multi-line no 'in' keyword`` () =
 [<Fact>]
 let ``indented let inside else branch`` () =
     // fn f() =
-    //   if true then 1
+    //   if true
+    //     1
     //   else
     //     let x = 2
     //     let y = 3
     //     x + y
-    let src = "module M\nfn f() =\n  if true then 1\n  else\n    let x = 2\n    let y = 3\n    x + y"
+    let src = "module M\nfn f() =\n  if true\n    1\n  else\n    let x = 2\n    let y = 3\n    x + y"
     let m = parseModuleStr src
     match fnBody m with
     | EIf(_, _, ELet("x", ELit(LInt 2L), Some(ELet("y", ELit(LInt 3L), Some _)))) -> ()

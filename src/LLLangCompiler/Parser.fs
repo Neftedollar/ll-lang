@@ -153,7 +153,11 @@ and private parseTagged (c: Ctx) : Result<Expr, string> =
                 Ok atom
         | _ -> Ok atom
 
-and private parseApp (c: Ctx) : Result<Expr, string> =
+/// Application parser. When `crossNewlines` is true (normal use) a
+/// Newline+Indent sequence is treated as a continuation-argument block.
+/// When `crossNewlines` is false (if-condition parsing) the parser
+/// stops at the first Newline so the if-body stays separate.
+and private parseAppWith (crossNewlines: bool) (c: Ctx) : Result<Expr, string> =
     match parseTagged c with
     | Error e -> Error e
     | Ok first ->
@@ -182,7 +186,7 @@ and private parseApp (c: Ctx) : Result<Expr, string> =
                     // which is where `E001 TypeMismatch` wants to point.
                     result <- recordAt c argIdx (EApp(result, arg))
                 | Error _ -> cont <- false
-            | Newline ->
+            | Newline when crossNewlines ->
                 // Peek past any newlines to see if we're at a multi-line
                 // continuation block (Indent + atom). If not, rewind.
                 let saved = c.Pos
@@ -231,8 +235,14 @@ and private parseApp (c: Ctx) : Result<Expr, string> =
             | _ -> cont <- false
         Ok result
 
-and private parseMul (c: Ctx) : Result<Expr, string> =
-    match parseApp c with
+and private parseApp (c: Ctx) : Result<Expr, string> = parseAppWith true c
+
+/// Application parser that stops at newlines — used for if-condition
+/// parsing so that an indented body is not consumed as an argument.
+and private parseAppInline (c: Ctx) : Result<Expr, string> = parseAppWith false c
+
+and private parseMulWith (app: Ctx -> Result<Expr, string>) (c: Ctx) : Result<Expr, string> =
+    match app c with
     | Error e -> Error e
     | Ok left ->
         let mutable result = left
@@ -242,7 +252,7 @@ and private parseMul (c: Ctx) : Result<Expr, string> =
             | Star | Slash as op ->
                 let opIdx = c.Pos
                 advance c
-                match parseApp c with
+                match app c with
                 | Ok right ->
                     let opName = if op = Star then "*" else "/"
                     // Tag both the operator EVar and the outer EApp at the
@@ -255,8 +265,11 @@ and private parseMul (c: Ctx) : Result<Expr, string> =
             | _ -> cont <- false
         Ok result
 
-and private parseAdd (c: Ctx) : Result<Expr, string> =
-    match parseMul c with
+and private parseMul (c: Ctx) : Result<Expr, string> = parseMulWith parseApp c
+and private parseMulInline (c: Ctx) : Result<Expr, string> = parseMulWith parseAppInline c
+
+and private parseAddWith (mul: Ctx -> Result<Expr, string>) (c: Ctx) : Result<Expr, string> =
+    match mul c with
     | Error e -> Error e
     | Ok left ->
         let mutable result = left
@@ -266,7 +279,7 @@ and private parseAdd (c: Ctx) : Result<Expr, string> =
             | Plus | Minus as op ->
                 let opIdx = c.Pos
                 advance c
-                match parseMul c with
+                match mul c with
                 | Ok right ->
                     let opName = if op = Plus then "+" else "-"
                     let opVar = recordAt c opIdx (EVar opName)
@@ -275,6 +288,9 @@ and private parseAdd (c: Ctx) : Result<Expr, string> =
                 | Error _ -> cont <- false
             | _ -> cont <- false
         Ok result
+
+and private parseAdd (c: Ctx) : Result<Expr, string> = parseAddWith parseMul c
+and private parseAddInline (c: Ctx) : Result<Expr, string> = parseAddWith parseMulInline c
 
 and private parseCons (c: Ctx) : Result<Expr, string> =
     // Right-associative cons. `1 :: 2 :: xs` -> ECons(1, ECons(2, xs)).
@@ -291,8 +307,19 @@ and private parseCons (c: Ctx) : Result<Expr, string> =
             | Error e -> Error e
         else Ok left
 
-and private parseCmp (c: Ctx) : Result<Expr, string> =
-    match parseCons c with
+and private parseConsInline (c: Ctx) : Result<Expr, string> =
+    match parseAddInline c with
+    | Error e -> Error e
+    | Ok left ->
+        if curTok c = ColonColon then
+            advance c
+            match parseConsInline c with
+            | Ok right -> Ok (ECons(left, right))
+            | Error e -> Error e
+        else Ok left
+
+and private parseCmpWith (cons: Ctx -> Result<Expr, string>) (c: Ctx) : Result<Expr, string> =
+    match cons c with
     | Error e -> Error e
     | Ok left ->
         let mutable result = left
@@ -302,7 +329,7 @@ and private parseCmp (c: Ctx) : Result<Expr, string> =
             | Lt | Gt | Le | Ge | EqEq | Neq as op ->
                 let opIdx = c.Pos
                 advance c
-                match parseCons c with
+                match cons c with
                 | Ok right ->
                     let opName =
                         match op with
@@ -315,6 +342,9 @@ and private parseCmp (c: Ctx) : Result<Expr, string> =
             | _ -> cont <- false
         Ok result
 
+and private parseCmp (c: Ctx) : Result<Expr, string> = parseCmpWith parseCons c
+and private parseCmpInline (c: Ctx) : Result<Expr, string> = parseCmpWith parseConsInline c
+
 and private parsePipe (c: Ctx) : Result<Expr, string> =
     match parseCmp c with
     | Error e -> Error e
@@ -323,6 +353,21 @@ and private parsePipe (c: Ctx) : Result<Expr, string> =
         while curTok c = Arrow do
             advance c
             match parseCmp c with
+            | Ok right -> result <- EPipe(result, right)
+            | Error _ -> ()
+        Ok result
+
+/// Pipe-precedence expression that does NOT consume Newline+Indent
+/// continuation blocks. Used for parsing if-conditions so the
+/// indented body is not mistaken for application arguments.
+and private parsePipeInline (c: Ctx) : Result<Expr, string> =
+    match parseCmpInline c with
+    | Error e -> Error e
+    | Ok left ->
+        let mutable result = left
+        while curTok c = Arrow do
+            advance c
+            match parseCmpInline c with
             | Ok right -> result <- EPipe(result, right)
             | Error _ -> ()
         Ok result
@@ -371,24 +416,27 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
                     | _ -> Ok (ELetPat(pat, e1, body))
     | KwIf ->
         advance c
-        match parseExprInner c with
+        // Use parsePipeInline for the condition so that a following
+        // Newline+Indent block is NOT consumed as application arguments —
+        // that block is the if-body, not a continuation of the condition.
+        match parsePipeInline c with
         | Error e -> Error e
         | Ok cond ->
             skipNewlines c
-            match skip c KwThen with
+            // `then` has been removed from the language. The condition is
+            // separated from the body by a newline (already consumed by
+            // skipNewlines above). The body begins at the current token.
+            match parseExprInner c with
             | Error e -> Error e
-            | Ok () ->
-                match parseExprInner c with
+            | Ok thenE ->
+                // Allow `else` on the next line (common multi-line form).
+                skipNewlines c
+                match skip c KwElse with
                 | Error e -> Error e
-                | Ok thenE ->
-                    // Allow `else` on the next line (common multi-line form).
-                    skipNewlines c
-                    match skip c KwElse with
+                | Ok () ->
+                    match parseExprInner c with
+                    | Ok elseE -> Ok (EIf(cond, thenE, elseE))
                     | Error e -> Error e
-                    | Ok () ->
-                        match parseExprInner c with
-                        | Ok elseE -> Ok (EIf(cond, thenE, elseE))
-                        | Error e -> Error e
     | Backslash ->
         advance c
         let parms = ResizeArray<Ident>()

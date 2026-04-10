@@ -300,12 +300,12 @@ let ``infer lambda identity`` () =
 
 [<Fact>]
 let ``infer if branches unify`` () =
-    let tm = inferOk "module M\nlet y = if true then 1 else 2"
+    let tm = inferOk "module M\nlet y = if true\n  1\nelse 2"
     Assert.Equal(TyName "Int", (schemeOf tm "y").Body)
 
 [<Fact>]
 let ``if branch mismatch yields E001`` () =
-    let errs = inferErrs "module M\nlet y = if true then 1 else \"x\""
+    let errs = inferErrs "module M\nlet y = if true\n  1\nelse \"x\""
     Assert.Contains(errs, fun e -> e.Code = E001)
 
 [<Fact>]
@@ -674,8 +674,8 @@ let ``tuple pattern match with specific types infers Int`` () =
 let ``mutual recursion: even and odd both Int -> Bool`` () =
     let src =
         "module M\n" +
-        "fn even(n Int) Bool = if n == 0 then true else odd (n - 1)\n" +
-        "fn odd(n Int) Bool = if n == 0 then false else even (n - 1)"
+        "fn even(n Int) Bool =\n  if n == 0\n    true\n  else odd (n - 1)\n" +
+        "fn odd(n Int) Bool =\n  if n == 0\n    false\n  else even (n - 1)"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Int", TyName "Bool"), (schemeOf tm "even").Body)
     Assert.Equal(TyFn(TyName "Int", TyName "Bool"), (schemeOf tm "odd").Body)
@@ -692,13 +692,13 @@ let ``caller-before-callee: fn uses later-declared helper`` () =
 
 [<Fact>]
 let ``single recursion fact still works`` () =
-    let src = "module M\nfn fact(n Int) Int = if n <= 1 then 1 else n * fact (n - 1)"
+    let src = "module M\nfn fact(n Int) Int =\n  if n <= 1\n    1\n  else n * fact (n - 1)"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "fact").Body)
 
 [<Fact>]
 let ``single recursion fib still works`` () =
-    let src = "module M\nfn fib(n Int) Int = if n <= 1 then n else fib (n - 1) + fib (n - 2)"
+    let src = "module M\nfn fib(n Int) Int =\n  if n <= 1\n    n\n  else fib (n - 1) + fib (n - 2)"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "fib").Body)
 

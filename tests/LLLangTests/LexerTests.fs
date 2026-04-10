@@ -20,11 +20,11 @@ let ``keyword let`` () =
 
 [<Fact>]
 let ``all keywords recognized`` () =
-    let kws = "fn let type tag unit trait impl import export module if then else"
+    let kws = "fn let type tag unit trait impl import export module if else"
     let expected = [
         KwFn; KwLet; KwType; KwTag; KwUnit
         KwTrait; KwImpl; KwImport; KwExport; KwModule
-        KwIf; KwThen; KwElse
+        KwIf; KwElse
     ]
     Assert.Equal<Token list>(expected, toks kws)
 

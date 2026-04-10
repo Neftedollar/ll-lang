@@ -28,5 +28,6 @@ tag Raw
 type Email[state] = Str
 
 fn validate(s Str) Result[Str][Str] =
-  if s != "" then Ok s
+  if s != ""
+    Ok s
   else Err "empty"

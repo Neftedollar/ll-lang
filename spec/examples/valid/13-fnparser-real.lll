@@ -61,31 +61,45 @@ type FnDecl = MkFn Str List[Param] Maybe[TypeRef] Expr
 
 fn isUpperChar(c Char) Bool =
   let n = charToInt c
-  if n < 65 then false
-  else if n > 90 then false
+  if n < 65
+    false
+  else if n > 90
+    false
   else true
 
 fn isLowerChar(c Char) Bool =
   let n = charToInt c
-  if n < 97 then false
-  else if n > 122 then false
+  if n < 97
+    false
+  else if n > 122
+    false
   else true
 
 fn isIdStart(c Char) Bool =
-  if isUpperChar c then true else isLowerChar c
+  if isUpperChar c
+    true
+  else isLowerChar c
 
 fn isIdCont(c Char) Bool =
-  if isIdStart c then true else charIsDigit c
+  if isIdStart c
+    true
+  else charIsDigit c
 
 -- ---------- Lexer --------------------------------------------------------
 
 -- Greedy take/drop while predicate, shared shape with earlier milestones.
 fn takeWhilePred(p)(cs List[Char]) List[Char] =
-  | c :: rest -> if p c then listAppend [c] (takeWhilePred p rest) else []
+  | c :: rest ->
+    if p c
+      listAppend [c] (takeWhilePred p rest)
+    else []
   | _ -> []
 
 fn dropWhilePred(p)(cs List[Char]) List[Char] =
-  | c :: rest -> if p c then dropWhilePred p rest else cs
+  | c :: rest ->
+    if p c
+      dropWhilePred p rest
+    else cs
   | _ -> []
 
 -- Unwrap Maybe Int from strToInt; malformed digit runs fall back to 0
@@ -103,7 +117,10 @@ fn classifyIdent(s Str) Token =
     | _ ->
       let cs = strChars s
       match cs with
-        | c :: _ -> if isUpperChar c then TUpper s else TLower s
+        | c :: _ ->
+          if isUpperChar c
+            TUpper s
+          else TLower s
         | _ -> TLower s
 
 fn lexId(cs List[Char]) List[Token] =
@@ -122,17 +139,28 @@ fn lexNum(cs List[Char]) List[Token] =
 
 fn lexChars(cs List[Char]) List[Token] =
   | c :: rest ->
-    if c == '\n' then listAppend [TNewline] (lexChars rest)
-    else if charIsSpace c then lexChars rest
-    else if isIdStart c then lexId cs
-    else if charIsDigit c then lexNum cs
-    else if c == '(' then listAppend [TLParen] (lexChars rest)
-    else if c == ')' then listAppend [TRParen] (lexChars rest)
-    else if c == '=' then listAppend [TEq] (lexChars rest)
-    else if c == '+' then listAppend [TPlus] (lexChars rest)
-    else if c == '-' then listAppend [TMinus] (lexChars rest)
-    else if c == '*' then listAppend [TStar] (lexChars rest)
-    else if c == '/' then listAppend [TSlash] (lexChars rest)
+    if c == '\n'
+      listAppend [TNewline] (lexChars rest)
+    else if charIsSpace c
+      lexChars rest
+    else if isIdStart c
+      lexId cs
+    else if charIsDigit c
+      lexNum cs
+    else if c == '('
+      listAppend [TLParen] (lexChars rest)
+    else if c == ')'
+      listAppend [TRParen] (lexChars rest)
+    else if c == '='
+      listAppend [TEq] (lexChars rest)
+    else if c == '+'
+      listAppend [TPlus] (lexChars rest)
+    else if c == '-'
+      listAppend [TMinus] (lexChars rest)
+    else if c == '*'
+      listAppend [TStar] (lexChars rest)
+    else if c == '/'
+      listAppend [TSlash] (lexChars rest)
     else lexChars rest
   | _ -> [TEnd]
 
@@ -246,7 +274,8 @@ fn showParam(p Param) Str =
 -- space on every group, or ` ()` when there are no params at all. That
 -- matches the `fn answer ()` shape from the driver.
 fn showParams(ps List[Param]) Str =
-  if listIsEmpty ps then " ()"
+  if listIsEmpty ps
+    " ()"
   else listFold (\acc p. strConcat (strConcat acc " ") (showParam p)) "" ps
 
 fn showReturn(r Maybe[TypeRef]) Str =
@@ -261,7 +290,9 @@ fn showDecl(d FnDecl) Str =
     strConcat (strConcat arrowPart " = ") (showExpr body)
 
 fn show(ds List[FnDecl]) Str =
-  listFold (\acc d. if strLen acc == 0 then showDecl d else strConcat (strConcat acc "\n") (showDecl d)) "" ds
+  listFold (\acc d. if strLen acc == 0
+    showDecl d
+  else strConcat (strConcat acc "\n") (showDecl d)) "" ds
 
 -- ---------- Driver -------------------------------------------------------
 

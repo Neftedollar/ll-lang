@@ -76,7 +76,7 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
     //    export fn addOne(x Int) Int = x + 1\n
     //    fn double(x Int) Int = x * 2\n
     //    fn classify(x Int) Int = match x with | 0 -> 0 | _ -> 1\n
-    //    fn pickColor(x Int) Color = if x then Red else Green\n
+    //    fn pickColor(x Int) Color = if (x) Red else Green\n
     //    fn shift(x Int) Int = let y = x + 1 in y * 2\n
     //    fn applyDouble(x Int) Int = (\\y. y * 2) x\n
     //    fn greet() Str = \"hello\"\n
@@ -107,7 +107,7 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
           "export fn addOne (x: Int) -> Int = (x + 1)"
           "fn double (x: Int) -> Int = (x * 2)"
           "fn classify (x: Int) -> Int = (match x with | 0 -> 0 | _ -> 1)"
-          "fn pickColor (x: Int) -> Color = (if x then Red else Green)"
+          "fn pickColor (x: Int) -> Color = (if x Red else Green)"
           "fn shift (x: Int) -> Int = (let y = (x + 1) in (y * 2))"
           "fn applyDouble (x: Int) -> Int = ((fun y -> (y * 2)) x)"
           "fn greet () -> Str = \"hello\""

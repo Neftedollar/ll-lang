@@ -52,7 +52,7 @@ let ``14-exprparser-real.lll runs and pretty-prints all five expression kinds`` 
     proc.WaitForExit()
     // The parser walks five single-line expression inputs:
     //   "let x = 1 in (x + 2)"
-    //   "if x then 1 else 2"
+    //   "if (x) 1 else 2"         -- condition must be parenthesised since `then` removed
     //   "match x with | 0 -> \"zero\" | _ -> \"other\""
     //   "\\y. (y + 1)"
     //   "f x y"
@@ -61,7 +61,7 @@ let ``14-exprparser-real.lll runs and pretty-prints all five expression kinds`` 
     // precedence / associativity are visually obvious).
     let expected =
         [ "(let x = 1 in (x + 2))"
-          "(if x then 1 else 2)"
+          "(if x 1 else 2)"
           "(match x with | 0 -> \"zero\" | _ -> \"other\")"
           "(fun y -> (y + 1))"
           "((f x) y)" ]

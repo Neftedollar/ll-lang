@@ -118,7 +118,7 @@ let ``TELam emits fun syntax`` () =
 
 [<Fact>]
 let ``TEIf emits if-then-else`` () =
-    let fs = codegenSrc "module M\nfn abs(x Int) = if x < 0 then 0 else x"
+    let fs = codegenSrc "module M\nfn abs(x Int) =\n  if x < 0\n    0\n  else x"
     Assert.Contains("then 0L", fs)
     Assert.Contains("else x", fs)
 

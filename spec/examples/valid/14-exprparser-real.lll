@@ -28,7 +28,6 @@ type Token =
   | TKwLet
   | TKwIn
   | TKwIf
-  | TKwThen
   | TKwElse
   | TKwMatch
   | TKwWith
@@ -79,31 +78,45 @@ type Expr =
 
 fn isUpperChar(c Char) Bool =
   let n = charToInt c
-  if n < 65 then false
-  else if n > 90 then false
+  if n < 65
+    false
+  else if n > 90
+    false
   else true
 
 fn isLowerChar(c Char) Bool =
   let n = charToInt c
-  if n < 97 then false
-  else if n > 122 then false
+  if n < 97
+    false
+  else if n > 122
+    false
   else true
 
 fn isIdStart(c Char) Bool =
-  if isUpperChar c then true else isLowerChar c
+  if isUpperChar c
+    true
+  else isLowerChar c
 
 fn isIdCont(c Char) Bool =
-  if isIdStart c then true else charIsDigit c
+  if isIdStart c
+    true
+  else charIsDigit c
 
 -- ---------- Lexer --------------------------------------------------------
 
 -- Greedy take/drop while predicate, shared shape with earlier milestones.
 fn takeWhilePred(p)(cs List[Char]) List[Char] =
-  | c :: rest -> if p c then listAppend [c] (takeWhilePred p rest) else []
+  | c :: rest ->
+    if p c
+      listAppend [c] (takeWhilePred p rest)
+    else []
   | _ -> []
 
 fn dropWhilePred(p)(cs List[Char]) List[Char] =
-  | c :: rest -> if p c then dropWhilePred p rest else cs
+  | c :: rest ->
+    if p c
+      dropWhilePred p rest
+    else cs
   | _ -> []
 
 -- Unwrap Maybe Int from strToInt; the lexer only calls this on all-digit
@@ -121,7 +134,6 @@ fn classifyIdent(s Str) Token =
     | "let" -> TKwLet
     | "in" -> TKwIn
     | "if" -> TKwIf
-    | "then" -> TKwThen
     | "else" -> TKwElse
     | "match" -> TKwMatch
     | "with" -> TKwWith
@@ -142,7 +154,8 @@ fn lexNum(cs List[Char]) List[Token] =
 -- greedily take chars until the closing `"`. Returns (body-chars, leftover).
 fn takeStrBody(cs List[Char]) =
   | c :: rest ->
-    if c == '"' then ([], rest)
+    if c == '"'
+      ([], rest)
     else
       let (body, leftover) = takeStrBody rest
       (c :: body, leftover)
@@ -155,27 +168,43 @@ fn lexStr(cs List[Char]) List[Token] =
 -- Handle `-` or `->`: peek at the next char to decide which token to emit.
 fn lexMinusOrArrow(cs List[Char]) List[Token] =
   | c :: rest ->
-    if c == '>' then listAppend [TArrow] (lexChars rest)
+    if c == '>'
+      listAppend [TArrow] (lexChars rest)
     else listAppend [TMinus] (lexChars cs)
   | _ -> [TMinus]
 
 fn lexChars(cs List[Char]) List[Token] =
   | c :: rest ->
-    if charIsSpace c then lexChars rest
-    else if isIdStart c then lexId cs
-    else if charIsDigit c then lexNum cs
-    else if c == '"' then lexStr rest
-    else if c == '(' then listAppend [TLParen] (lexChars rest)
-    else if c == ')' then listAppend [TRParen] (lexChars rest)
-    else if c == '=' then listAppend [TEq] (lexChars rest)
-    else if c == '\\' then listAppend [TBackslash] (lexChars rest)
-    else if c == '.' then listAppend [TDot] (lexChars rest)
-    else if c == '|' then listAppend [TBar] (lexChars rest)
-    else if c == '_' then listAppend [TUnder] (lexChars rest)
-    else if c == '+' then listAppend [TPlus] (lexChars rest)
-    else if c == '-' then lexMinusOrArrow rest
-    else if c == '*' then listAppend [TStar] (lexChars rest)
-    else if c == '/' then listAppend [TSlash] (lexChars rest)
+    if charIsSpace c
+      lexChars rest
+    else if isIdStart c
+      lexId cs
+    else if charIsDigit c
+      lexNum cs
+    else if c == '"'
+      lexStr rest
+    else if c == '('
+      listAppend [TLParen] (lexChars rest)
+    else if c == ')'
+      listAppend [TRParen] (lexChars rest)
+    else if c == '='
+      listAppend [TEq] (lexChars rest)
+    else if c == '\\'
+      listAppend [TBackslash] (lexChars rest)
+    else if c == '.'
+      listAppend [TDot] (lexChars rest)
+    else if c == '|'
+      listAppend [TBar] (lexChars rest)
+    else if c == '_'
+      listAppend [TUnder] (lexChars rest)
+    else if c == '+'
+      listAppend [TPlus] (lexChars rest)
+    else if c == '-'
+      lexMinusOrArrow rest
+    else if c == '*'
+      listAppend [TStar] (lexChars rest)
+    else if c == '/'
+      listAppend [TSlash] (lexChars rest)
     else lexChars rest
   | _ -> [TEnd]
 
@@ -214,14 +243,12 @@ fn parseLet(toks List[Token]) =
     (ELet name e1 e2, rest4)
   | _ -> (EInt 0, toks)
 
--- `if c then a else b`
+-- `if c a else b` — condition must be a parenthesised/single-atom expression
+-- so the parser can distinguish it from the body. `then` has been removed
+-- from the language; this slice uses parenthesised conditions by convention.
 fn parseIf(toks List[Token]) =
-  let (c, rest) = parseExpr toks
-  let rest2 = match rest with
-    | TKwThen :: r -> r
-    | _ -> rest
- 
-  let (a, rest3) = parseExpr rest2
+  let (c, rest) = parseAtom toks
+  let (a, rest3) = parseExpr rest
   let rest4 = match rest3 with
     | TKwElse :: r -> r
     | _ -> rest3
@@ -329,7 +356,7 @@ fn parseApp(toks List[Token]) =
 fn parseAppTail(lhs Expr)(toks List[Token]) =
   match toks with
     | t :: _ ->
-      if isAtomStart t then
+      if isAtomStart t
         let (arg, rest) = parseAtom toks
         parseAppTail (EApp lhs arg) rest
       else (lhs, toks)
@@ -371,7 +398,8 @@ fn showArms(pats List[Pat])(bodies List[Expr]) Str =
         | b :: bs ->
           let head = showArm p b
           let tail = showArms ps bs
-          if strLen tail == 0 then head
+          if strLen tail == 0
+            head
           else strConcat (strConcat head " ") tail
         | _ -> ""
     | _ -> ""
@@ -394,7 +422,7 @@ fn showExpr(e Expr) Str =
     strConcat (strConcat p2 (showExpr e2)) ")"
   | EIf c a b ->
     let p1 = strConcat "(if " (showExpr c)
-    let p2 = strConcat (strConcat p1 " then ") (showExpr a)
+    let p2 = strConcat (strConcat p1 " ") (showExpr a)
     strConcat (strConcat (strConcat p2 " else ") (showExpr b)) ")"
   | EMatch scrut pats bodies ->
     let head = strConcat (strConcat "(match " (showExpr scrut)) " with "
@@ -410,14 +438,16 @@ fn runOne(src Str) Str =
 
 -- Join lines with newlines, skipping the empty accumulator prefix.
 fn joinLines(xs List[Str]) Str =
-  listFold (\acc s. if strLen acc == 0 then s else strConcat (strConcat acc "\n") s) "" xs
+  listFold (\acc s. if strLen acc == 0
+    s
+  else strConcat (strConcat acc "\n") s) "" xs
 
 fn runAll(inputs List[Str]) Str =
   joinLines (listMap runOne inputs)
 
 fn main() =
   let i1 = "let x = 1 in (x + 2)"
-  let i2 = "if x then 1 else 2"
+  let i2 = "if (x) 1 else 2"
   let i3 = "match x with | 0 -> \"zero\" | _ -> \"other\""
   let i4 = "\\y. (y + 1)"
   let i5 = "f x y"
