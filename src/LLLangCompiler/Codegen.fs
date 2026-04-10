@@ -143,7 +143,7 @@ let rec private emitPattern (p: Pattern) : string =
     // would spit out a bogus `[]` identifier reference.
     | PCon("[]", []) -> "[]"
     | PCon(c, [])  -> safeIdent c
-    | PCon(c, [p]) -> safeIdent c + " " + emitPattern p
+    | PCon(c, [p]) -> safeIdent c + "(" + emitPattern p + ")"
     | PCon(c, ps)  -> safeIdent c + "(" + (ps |> List.map emitPattern |> String.concat ", ") + ")"
     | PTuple ps    -> "(" + (ps |> List.map emitPattern |> String.concat ", ") + ")"
     | PCons(h, t)  -> "(" + emitPattern h + " :: " + emitPattern t + ")"

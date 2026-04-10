@@ -144,18 +144,18 @@ let ``TEMatch emits match with`` () =
 let ``TEMatch emits branch arms`` () =
     let src = "module M\ntype Shape = Circle Float | Empty\nfn area(s Shape) =\n  | Circle r -> r\n  | Empty -> 0.0"
     let fs = codegenSrc src
-    Assert.Contains("| Circle r ->", fs)
+    Assert.Contains("| Circle(r) ->", fs)
     Assert.Contains("| Empty ->", fs)
 
 [<Fact>]
 let ``PWild pattern emits underscore`` () =
     let src = "module M\ntype Color = Red Int | Blue\nfn f(x Color) =\n  | Red _ -> 1\n  | Blue -> 2"
-    Assert.Contains("| Red _ ->", codegenSrc src)
+    Assert.Contains("| Red(_) ->", codegenSrc src)
 
 [<Fact>]
-let ``PCon single-arg pattern emits bare variable`` () =
+let ``PCon single-arg pattern emits parenthesized variable`` () =
     let src = "module M\ntype Maybe A = Some A | None\nfn unwrap(m Maybe[Int]) =\n  | Some x -> x\n  | None -> 0"
-    Assert.Contains("| Some x ->", codegenSrc src)
+    Assert.Contains("| Some(x) ->", codegenSrc src)
 
 [<Fact>]
 let ``PTuple pattern emits F# tuple pattern`` () =
