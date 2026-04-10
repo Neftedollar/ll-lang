@@ -67,6 +67,7 @@ type Token =
     | TComma
     | TNewline
     | TEnd
+    | TError of char
 
 type TypeArg =
     | TAVar of string
@@ -171,14 +172,14 @@ and takeStrBodyEsc cs = (match cs with | (esc :: rest) -> (let (body, leftover) 
 and lexStr cs = (let (body, leftover) = (takeStrBody cs) in ((listAppend ((TStr (strFromChars body)) :: [])) (lexChars leftover)))
 and decodeEscape c = (if (c = 'n') then '\n' else (if (c = 't') then '\t' else (if (c = '\\') then '\\' else (if (c = '\'') then '\'' else (if (c = '"') then '"' else c)))))
 and lexCharEscAfter esc rest cs = (match rest with | (c :: r) -> (if (c = '\'') then ((listAppend ((TChar (decodeEscape esc)) :: [])) (lexChars r)) else (lexChars cs)) | _ -> (lexChars cs))
-and lexCharEsc cs = (match cs with | (esc :: rest) -> (((lexCharEscAfter esc) rest) cs) | _ -> [])
+and lexCharEsc cs = (match cs with | (esc :: rest) -> (((lexCharEscAfter esc) rest) cs) | _ -> (TEnd :: []))
 and lexCharLitAfter ch rest cs = (match rest with | (c :: r) -> (if (c = '\'') then ((listAppend ((TChar ch) :: [])) (lexChars r)) else (lexChars cs)) | _ -> (lexChars cs))
-and lexCharLit cs = (match cs with | (ch :: rest) -> (if (ch = '\\') then (lexCharEsc rest) else (((lexCharLitAfter ch) rest) cs)) | _ -> [])
+and lexCharLit cs = (match cs with | (ch :: rest) -> (if (ch = '\\') then (lexCharEsc rest) else (((lexCharLitAfter ch) rest) cs)) | _ -> (TEnd :: []))
 and lexColonOrCons cs = (match cs with | (c :: rest) -> (if (c = ':') then ((listAppend (TColonColon :: [])) (lexChars rest)) else (lexChars cs)) | _ -> (TEnd :: []))
 and skipLineComment cs = (match cs with | (c :: rest) -> (if (c = '\n') then ((listAppend (TNewline :: [])) (lexChars rest)) else (skipLineComment rest)) | _ -> (TEnd :: []))
 and lexMinusOrArrow cs = (match cs with | (c :: rest) -> (if (c = '>') then ((listAppend (TArrow :: [])) (lexChars rest)) else (if (c = '-') then (skipLineComment rest) else ((listAppend (TMinus :: [])) (lexChars cs)))) | _ -> (TMinus :: []))
 and lexEqOrEqEq cs = (match cs with | (c :: rest) -> (if (c = '=') then ((listAppend (TEqEq :: [])) (lexChars rest)) else ((listAppend (TEq :: [])) (lexChars cs))) | _ -> (TEq :: []))
-and lexChars cs = (match cs with | (c :: rest) -> (if (c = '\n') then ((listAppend (TNewline :: [])) (lexChars rest)) else (if (charIsSpace c) then (lexChars rest) else (if (isIdStart c) then (lexId cs) else (if (charIsDigit c) then (lexNum cs) else (if (c = '"') then (lexStr rest) else (if (c = '\'') then (lexCharLit rest) else (if (c = '(') then ((listAppend (TLParen :: [])) (lexChars rest)) else (if (c = ')') then ((listAppend (TRParen :: [])) (lexChars rest)) else (if (c = '[') then ((listAppend (TLBrack :: [])) (lexChars rest)) else (if (c = ']') then ((listAppend (TRBrack :: [])) (lexChars rest)) else (if (c = '=') then (lexEqOrEqEq rest) else (if (c = '<') then ((listAppend (TLt :: [])) (lexChars rest)) else (if (c = '>') then ((listAppend (TGt :: [])) (lexChars rest)) else (if (c = '|') then ((listAppend (TBar :: [])) (lexChars rest)) else (if (c = '.') then ((listAppend (TDot :: [])) (lexChars rest)) else (if (c = '\\') then ((listAppend (TBackslash :: [])) (lexChars rest)) else (if (c = '_') then ((listAppend (TUnder :: [])) (lexChars rest)) else (if (c = ':') then (lexColonOrCons rest) else (if (c = '+') then ((listAppend (TPlus :: [])) (lexChars rest)) else (if (c = '-') then (lexMinusOrArrow rest) else (if (c = '*') then ((listAppend (TStar :: [])) (lexChars rest)) else (if (c = '/') then ((listAppend (TSlash :: [])) (lexChars rest)) else (if (c = ',') then ((listAppend (TComma :: [])) (lexChars rest)) else (lexChars rest)))))))))))))))))))))))) | _ -> (TEnd :: []))
+and lexChars cs = (match cs with | (c :: rest) -> (if (c = '\n') then ((listAppend (TNewline :: [])) (lexChars rest)) else (if (charIsSpace c) then (lexChars rest) else (if (isIdStart c) then (lexId cs) else (if (charIsDigit c) then (lexNum cs) else (if (c = '"') then (lexStr rest) else (if (c = '\'') then (lexCharLit rest) else (if (c = '(') then ((listAppend (TLParen :: [])) (lexChars rest)) else (if (c = ')') then ((listAppend (TRParen :: [])) (lexChars rest)) else (if (c = '[') then ((listAppend (TLBrack :: [])) (lexChars rest)) else (if (c = ']') then ((listAppend (TRBrack :: [])) (lexChars rest)) else (if (c = '=') then (lexEqOrEqEq rest) else (if (c = '<') then ((listAppend (TLt :: [])) (lexChars rest)) else (if (c = '>') then ((listAppend (TGt :: [])) (lexChars rest)) else (if (c = '|') then ((listAppend (TBar :: [])) (lexChars rest)) else (if (c = '.') then ((listAppend (TDot :: [])) (lexChars rest)) else (if (c = '\\') then ((listAppend (TBackslash :: [])) (lexChars rest)) else (if (c = '_') then ((listAppend (TUnder :: [])) (lexChars rest)) else (if (c = ':') then (lexColonOrCons rest) else (if (c = '+') then ((listAppend (TPlus :: [])) (lexChars rest)) else (if (c = '-') then (lexMinusOrArrow rest) else (if (c = '*') then ((listAppend (TStar :: [])) (lexChars rest)) else (if (c = '/') then ((listAppend (TSlash :: [])) (lexChars rest)) else (if (c = ',') then ((listAppend (TComma :: [])) (lexChars rest)) else ((listAppend ((TError c) :: [])) (lexChars rest))))))))))))))))))))))))) | _ -> (TEnd :: []))
 and tokenize src = (lexChars (strChars src))
 and skipNewlines toks = (match toks with | ((TNewline) :: rest) -> (skipNewlines rest) | _ -> toks)
 and parseModuleNameTail acc toks = (match toks with | ((TDot) :: ((TUpper seg) :: rest)) -> (let acc2 = ((strConcat ((strConcat acc) ".")) seg) in ((parseModuleNameTail acc2) rest)) | _ -> (acc, toks))
@@ -397,5 +398,5 @@ and emitModule m = (match m with | (MkModule (path, decls)) -> ((emitModuleBody 
 
 [<EntryPoint>]
 let main (argv: string[]) =
-    (let src = (readFile "spec/examples/valid/20-bootstrap-compiler.lll") in (let toks = (tokenize src) in (let modul = (parseModule toks) in (match modul with | (MkModule (_, decls)) -> (let errs = (elaborate decls) in (if (listIsEmpty errs) then (printfn (emitModule modul)) else (printfn (showErrs errs))))))))
+    (let src = (readFile "spec/examples/valid/20a-bootstrap-input.lll") in (let toks = (tokenize src) in (let modul = (parseModule toks) in (match modul with | (MkModule (_, decls)) -> (let errs = (elaborate decls) in (if (listIsEmpty errs) then (printfn (emitModule modul)) else (printfn (showErrs errs))))))))
     0
