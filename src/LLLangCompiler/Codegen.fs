@@ -48,6 +48,15 @@ let private safeIdent (s: string) =
 let private isTypeParamName (n: string) =
     n.Length = 1 && System.Char.IsUpper n.[0]
 
+/// Collect all args from a nested TyApp chain.
+/// TyApp(TyApp(Map, K), V) → (Map, [K; V])
+let rec private collectTyApp (t: TypeExpr) : TypeExpr * TypeExpr list =
+    match t with
+    | TyApp(f, a) ->
+        let (head, args) = collectTyApp f
+        (head, args @ [a])
+    | _ -> (t, [])
+
 let rec private emitType (t: TypeExpr) : string =
     match t with
     | TyName "Int"   -> "int64"
@@ -60,7 +69,11 @@ let rec private emitType (t: TypeExpr) : string =
     | TyName x       -> x
     | TyVar v        -> "'" + v
     | TyApp(TyName "List", a) -> emitType a + " list"
-    | TyApp(f, a)    -> emitType a + " " + emitType f
+    | TyApp _ ->
+        let (head, args) = collectTyApp t
+        match args with
+        | [a] -> emitType a + " " + emitType head
+        | _   -> emitType head + "<" + (args |> List.map emitType |> String.concat ", ") + ">"
     | TyFn(a, b)     -> emitType a + " -> " + emitType b
     | TyTagged(t, _) -> emitType t
 

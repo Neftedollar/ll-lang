@@ -1,0 +1,16 @@
+module Examples.MultiParam
+
+type Maybe A = Some A | None
+type Color = Red | Black
+type RBMap K V = Leaf | Node Color (RBMap K V) K V (RBMap K V)
+
+fn rbEmpty() RBMap[K][V] = Leaf
+
+fn rbSize(m RBMap[K][V]) Int =
+  match m with
+    | Leaf -> 0
+    | Node _ left _ _ right -> 1 + rbSize left + rbSize right
+
+fn main() Int =
+  let m = rbEmpty in
+  rbSize m
