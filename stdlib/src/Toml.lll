@@ -20,29 +20,29 @@ type ParseState = MkState Section (Maybe[Str]) Str Str (List[Str]) (List[Str]) (
 
 -- ---- String helpers ----
 
-fn strStartsWith(prefix Str)(s Str) Bool =
+fn strStartsWith(prefix Str)(s Str) =
   if strLen prefix > strLen s
     false
   else strSlice s 0 (strLen prefix) == prefix
 
-fn strDropPrefix(n Int)(s Str) Str =
+fn strDropPrefix(n Int)(s Str) =
   if n >= strLen s
     ""
   else strSlice s n (strLen s - n)
 
-fn strTakeUntil(ch Str)(s Str) Str =
+fn strTakeUntil(ch Str)(s Str) =
   let idx = strIndexOf ch s
   if idx < 0
     s
   else strSlice s 0 idx
 
 -- Strip inline # comment, then trim
-fn stripComment(s Str) Str =
+fn stripComment(s Str) =
   strTrim (strTakeUntil "#" s)
 
 -- ---- Quoted string parser (char-by-char) ----
 
-fn decodeEscape(e Char) Char =
+fn decodeEscape(e Char) =
   if e == 'n'
     '\n'
   else if e == 't'
@@ -54,7 +54,7 @@ fn decodeEscape(e Char) Char =
   else e
 
 fn parseQuotedChars(cs List[Char]) =
-  match cs with
+  match cs
     | [] -> ([], [])
     | c :: rest ->
       if c == '"'
@@ -66,16 +66,16 @@ fn parseQuotedChars(cs List[Char]) =
         (c :: body, leftover)
 
 fn parseQuotedEsc(cs List[Char]) =
-  match cs with
+  match cs
     | [] -> ([], [])
     | e :: rest2 ->
       let (body, leftover) = parseQuotedChars rest2
       (decodeEscape e :: body, leftover)
 
 -- Parse "value" from a string, returns the unquoted content
-fn parseQuotedStr(s Str) Maybe[Str] =
+fn parseQuotedStr(s Str) =
   let cs = strChars s
-  match cs with
+  match cs
     | c :: rest ->
       if c == '"'
         let (body, _) = parseQuotedChars rest
@@ -86,15 +86,15 @@ fn parseQuotedStr(s Str) Maybe[Str] =
 -- ---- Array parser ----
 
 -- Parse ["a", "b", "c"] — simple: split by comma, parse each quoted value
-fn cleanArrayItem(s Str) Str =
+fn cleanArrayItem(s Str) =
   if strStartsWith "[" s
     strTrim (strDropPrefix 1 s)
   else if strStartsWith "]" s
     ""
   else s
 
-fn parseArrayItems(items List[Str]) List[Str] =
-  match items with
+fn parseArrayItems(items List[Str]) =
+  match items
     | [] -> []
     | item :: rest ->
       let cleaned = cleanArrayItem (strTrim item)
@@ -102,18 +102,18 @@ fn parseArrayItems(items List[Str]) List[Str] =
       if strLen final == 0
         parseArrayItems rest
       else
-        match parseQuotedStr final with
+        match parseQuotedStr final
           | Some v -> v :: parseArrayItems rest
           | None -> parseArrayItems rest
 
-fn parseStringArray(s Str) List[Str] =
+fn parseStringArray(s Str) =
   let inner = strTakeUntil "]" (strDropPrefix 1 s)
   let parts = strSplit "," inner
   parseArrayItems parts
 
 -- ---- Line processing ----
 
-fn parseSectionHeader(line Str) Section =
+fn parseSectionHeader(line Str) =
   let inner = strTrim (strTakeUntil "]" (strDropPrefix 1 line))
   if inner == "project"
     SecProject
@@ -132,11 +132,11 @@ fn parseKeyValue(line Str) =
     let valRaw = strTrim (strDropPrefix (eqIdx + 1) line)
     (key, valRaw)
 
-fn processProjectLine(key Str)(valRaw Str)(st ParseState) ParseState =
-  match parseQuotedStr valRaw with
+fn processProjectLine(key Str)(valRaw Str)(st ParseState) =
+  match parseQuotedStr valRaw
     | None -> st
     | Some v ->
-      match st with
+      match st
         | MkState sec name ver entry deps plat err ->
           if key == "name"
             MkState sec (Some v) ver entry deps plat err
@@ -146,43 +146,43 @@ fn processProjectLine(key Str)(valRaw Str)(st ParseState) ParseState =
             MkState sec name ver v deps plat err
           else st
 
-fn processDepsLine(key Str)(valRaw Str)(st ParseState) ParseState =
-  match parseQuotedStr valRaw with
+fn processDepsLine(key Str)(valRaw Str)(st ParseState) =
+  match parseQuotedStr valRaw
     | None -> st
     | Some v ->
       -- strip quotes from key if present
-      let cleanKey = match parseQuotedStr key with
+      let cleanKey = match parseQuotedStr key
         | Some k -> k
         | None -> key
      
-      match st with
+      match st
         | MkState sec name ver entry deps plat err ->
           MkState sec name ver entry (listAppend deps [cleanKey v]) plat err
 
-fn processPlatformLine(key Str)(valRaw Str)(st ParseState) ParseState =
+fn processPlatformLine(key Str)(valRaw Str)(st ParseState) =
   if key == "use"
     if strStartsWith "[" valRaw
       let items = parseStringArray valRaw
-      match st with
+      match st
         | MkState sec name ver entry deps _ err ->
           MkState sec name ver entry deps items err
     else st
   else st
 
-fn processLine(st ParseState)(line Str) ParseState =
+fn processLine(st ParseState)(line Str) =
   let trimmed = stripComment line
   if strLen trimmed == 0
     st
   else if strStartsWith "[" trimmed
     let sec = parseSectionHeader trimmed
-    match st with
+    match st
       | MkState _ name ver entry deps plat err ->
         MkState sec name ver entry deps plat err
   else if strContains "=" trimmed
     let (key, valRaw) = parseKeyValue trimmed
-    match st with
+    match st
       | MkState sec _ _ _ _ _ _ ->
-        match sec with
+        match sec
           | SecProject -> processProjectLine key valRaw st
           | SecDeps -> processDepsLine key valRaw st
           | SecPlatform -> processPlatformLine key valRaw st
@@ -191,42 +191,42 @@ fn processLine(st ParseState)(line Str) ParseState =
 
 -- ---- Main parser ----
 
-fn foldLines(f ParseState -> Str -> ParseState)(acc ParseState)(lines List[Str]) ParseState =
-  match lines with
+fn foldLines(f ParseState -> Str -> ParseState)(acc ParseState)(lines List[Str]) =
+  match lines
     | [] -> acc
     | line :: rest -> foldLines f (f acc line) rest
 
-fn parseManifest(src Str) Maybe[Manifest] =
+fn parseManifest(src Str) =
   let lines = strSplit "\n" src
   let init = MkState SecOther None "0.0.0" "src/Main.lll" [] [] None
   let final = foldLines processLine init lines
-  match final with
+  match final
     | MkState _ name ver entry deps plat _ ->
-      match name with
+      match name
         | Some n -> Some (MkManifest n ver entry deps plat)
         | None -> None
 
 -- ---- Accessors (avoid nested constructor patterns in match) ----
 
-fn mName(m Manifest) Str =
-  match m with
+fn mName(m Manifest) =
+  match m
     | MkManifest n _ _ _ _ -> n
 
-fn mVersion(m Manifest) Str =
-  match m with
+fn mVersion(m Manifest) =
+  match m
     | MkManifest _ v _ _ _ -> v
 
-fn mDeps(m Manifest) List[Str] =
-  match m with
+fn mDeps(m Manifest) =
+  match m
     | MkManifest _ _ _ d _ -> d
 
-fn mPlatform(m Manifest) List[Str] =
-  match m with
+fn mPlatform(m Manifest) =
+  match m
     | MkManifest _ _ _ _ p -> p
 
 -- ---- Tests ----
 
-fn check(label Str)(ok Bool) Int =
+fn check(label Str)(ok Bool) =
   if ok
     let _ = printfn (strConcat "OK " label)
     0
@@ -234,12 +234,12 @@ fn check(label Str)(ok Bool) Int =
     let _ = printfn (strConcat "FAIL " label)
     1
 
-fn checkManifest(r Maybe[Manifest])(f Manifest -> Bool) Bool =
-  match r with
+fn checkManifest(r Maybe[Manifest])(f Manifest -> Bool) =
+  match r
     | Some m -> f m
     | None -> false
 
-fn main() Int =
+fn main() =
   -- Test 1: parse minimal ll.toml
   let src1 = "[project]\nname = \"myapp\""
   let r1 = parseManifest src1
@@ -253,7 +253,7 @@ fn main() Int =
   -- Test 3: missing name returns None
   let src3 = "[project]\nversion = \"1.0\""
   let r3 = parseManifest src3
-  let ok3 = match r3 with
+  let ok3 = match r3
     | Some _ -> false
     | None -> true
  

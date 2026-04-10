@@ -109,13 +109,13 @@ let ``TS: emits header comment`` () =
 
 [<Fact>]
 let ``TS: match on sum type checks _tag`` () =
-    let src = "module M\ntype Color = Red | Green | Blue\nfn toInt(c Color) Int = match c with | Red -> 0 | Green -> 1 | Blue -> 2"
+    let src = "module M\ntype Color = Red | Green | Blue\nfn toInt(c Color) Int = match c | Red -> 0 | Green -> 1 | Blue -> 2"
     let ts = tsSrc src
     Assert.Contains("_tag", ts)
 
 [<Fact>]
 let ``TS: match emits conditional expression`` () =
-    let src = "module M\ntype Color = Red | Green\nfn toInt(c Color) Int = match c with | Red -> 0 | Green -> 1"
+    let src = "module M\ntype Color = Red | Green\nfn toInt(c Color) Int = match c | Red -> 0 | Green -> 1"
     let ts = tsSrc src
     Assert.Contains("Red", ts)
     Assert.Contains("Green", ts)

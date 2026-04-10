@@ -43,7 +43,7 @@ type TypeDecl = MkTypeDecl Str List[Str] List[Ctor]
 -- ---------- Char predicates ---------------------------------------------
 
 -- ASCII uppercase test, written without `&&` (which ll-lang lacks).
-fn isUpperChar(c Char) Bool =
+fn isUpperChar(c Char) =
   let n = charToInt c
   if n < 65
     false
@@ -51,7 +51,7 @@ fn isUpperChar(c Char) Bool =
     false
   else true
 
-fn isLowerChar(c Char) Bool =
+fn isLowerChar(c Char) =
   let n = charToInt c
   if n < 97
     false
@@ -59,12 +59,12 @@ fn isLowerChar(c Char) Bool =
     false
   else true
 
-fn isIdStart(c Char) Bool =
+fn isIdStart(c Char) =
   if isUpperChar c
     true
   else isLowerChar c
 
-fn isIdCont(c Char) Bool =
+fn isIdCont(c Char) =
   if isIdStart c
     true
   else charIsDigit c
@@ -72,14 +72,14 @@ fn isIdCont(c Char) Bool =
 -- ---------- Lexer --------------------------------------------------------
 
 -- Greedy take/drop while predicate, lifted from 09-lexer-real.lll.
-fn takeWhilePred(p)(cs List[Char]) List[Char] =
+fn takeWhilePred(p)(cs List[Char]) =
   | c :: rest ->
     if p c
       listAppend [c] (takeWhilePred p rest)
     else []
   | _ -> []
 
-fn dropWhilePred(p)(cs List[Char]) List[Char] =
+fn dropWhilePred(p)(cs List[Char]) =
   | c :: rest ->
     if p c
       dropWhilePred p rest
@@ -88,25 +88,25 @@ fn dropWhilePred(p)(cs List[Char]) List[Char] =
 
 -- Classify an identifier string. The keyword 'type' becomes TKwType; an
 -- uppercase-starting ident becomes TUpper; everything else is TLower.
-fn classifyIdent(s Str) Token =
-  match s with
+fn classifyIdent(s Str) =
+  match s
     | "type" -> TKwType
     | _ ->
       let cs = strChars s
-      match cs with
+      match cs
         | c :: _ ->
           if isUpperChar c
             TUpper s
           else TLower s
         | _ -> TLower s
 
-fn lexId(cs List[Char]) List[Token] =
+fn lexId(cs List[Char]) =
   let idChars = takeWhilePred isIdCont cs
   let leftover = dropWhilePred isIdCont cs
   let tok = classifyIdent (strFromChars idChars)
   listAppend [tok] (lexChars leftover)
 
-fn lexChars(cs List[Char]) List[Token] =
+fn lexChars(cs List[Char]) =
   | c :: rest ->
     if c == '\n'
       listAppend [TNewline] (lexChars rest)
@@ -121,32 +121,32 @@ fn lexChars(cs List[Char]) List[Token] =
     else lexChars rest
   | _ -> [TEnd]
 
-fn tokenize(src Str) List[Token] = lexChars (strChars src)
+fn tokenize(src Str) = lexChars (strChars src)
 
 -- ---------- Recursive-descent parser ------------------------------------
 
 -- Skip leading newlines: blank lines between decls are not significant.
-fn skipNewlines(toks List[Token]) List[Token] =
+fn skipNewlines(toks List[Token]) =
   | TNewline :: rest -> skipNewlines rest
   | _ -> toks
 
 -- Top-level driver. Walks the token stream, peeling off one type decl at a
 -- time, until it sees TEnd. Uses fn-clause sugar on the cleaned-up token
 -- stream so the empty / TEnd / non-empty cases are syntactically obvious.
-fn parseTypeDecls(toks List[Token]) List[TypeDecl] =
+fn parseTypeDecls(toks List[Token]) =
   parseDeclsClean (skipNewlines toks)
 
 -- Use cons-pattern fast path: only attempt to parse a decl if the head is
 -- TKwType. Anything else (TEnd, blank lines that already got skipped, an
 -- unexpected token) terminates the recursion.
-fn parseDeclsClean(toks List[Token]) List[TypeDecl] =
+fn parseDeclsClean(toks List[Token]) =
   | TKwType :: _ -> consDecl (parseTypeDecl toks)
   | _ -> []
 
 -- Helper: turn a (head, leftover) result into the recursive list. Splits
 -- the multi-line body out of the parseDeclsClean wildcard arm so each
 -- clause body stays single-line.
-fn consDecl(pair) List[TypeDecl] =
+fn consDecl(pair) =
   let (d, rest) = pair
   d :: parseTypeDecls rest
 
@@ -154,7 +154,7 @@ fn consDecl(pair) List[TypeDecl] =
 fn parseTypeDecl(toks List[Token]) =
   | TKwType :: TUpper name :: rest ->
     let (prms, rest2) = parseParams rest
-    let rest3 = match rest2 with
+    let rest3 = match rest2
       | TEq :: r -> r
       | _ -> rest2
    
@@ -205,12 +205,12 @@ fn parseTypeArgs(toks List[Token]) =
 
 -- Render a TypeArg as just its name. Type vars and type cons print the
 -- same way at the leaf level — the wrapping context disambiguates.
-fn showTypeArg(a TypeArg) Str =
+fn showTypeArg(a TypeArg) =
   | TAVar s -> s
   | TACon s -> s
 
 -- Render a list of args as `(a1, a2, a3)` or empty string for no args.
-fn showArgs(args List[TypeArg]) Str =
+fn showArgs(args List[TypeArg]) =
   if listIsEmpty args
     ""
   else
@@ -219,22 +219,22 @@ fn showArgs(args List[TypeArg]) Str =
     else strConcat (strConcat acc ", ") (showTypeArg a)) "" args
     strConcat (strConcat "(" inner) ")"
 
-fn showCtor(c Ctor) Str =
+fn showCtor(c Ctor) =
   | MkCtor name args -> strConcat name (showArgs args)
 
-fn showCtors(cs List[Ctor]) Str =
+fn showCtors(cs List[Ctor]) =
   listFold (\acc c. if strLen acc == 0
     showCtor c
   else strConcat (strConcat acc " | ") (showCtor c)) "" cs
 
 -- Render the type-param list as ` (A) (B)` with a leading space, or empty.
-fn showParams(ps List[Str]) Str =
+fn showParams(ps List[Str]) =
   listFold (\acc p. strConcat (strConcat acc " (") (strConcat p ")")) "" ps
 
-fn showDecl(d TypeDecl) Str =
+fn showDecl(d TypeDecl) =
   | MkTypeDecl name prms ctors -> strConcat (strConcat (strConcat (strConcat "type " name) (showParams prms)) " = ") (showCtors ctors)
 
-fn show(ds List[TypeDecl]) Str =
+fn show(ds List[TypeDecl]) =
   listFold (\acc d. if strLen acc == 0
     showDecl d
   else strConcat (strConcat acc "\n") (showDecl d)) "" ds

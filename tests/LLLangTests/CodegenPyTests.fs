@@ -127,13 +127,13 @@ let ``Py: emits header comment`` () =
 
 [<Fact>]
 let ``Py: match on sum type checks _tag`` () =
-    let src = "module M\ntype Color = Red | Green | Blue\nfn toInt(c Color) Int = match c with | Red -> 0 | Green -> 1 | Blue -> 2"
+    let src = "module M\ntype Color = Red | Green | Blue\nfn toInt(c Color) Int = match c | Red -> 0 | Green -> 1 | Blue -> 2"
     let py = pySrc src
     Assert.Contains("_tag", py)
 
 [<Fact>]
 let ``Py: match emits ternary chain`` () =
-    let src = "module M\ntype Color = Red | Green\nfn toInt(c Color) Int = match c with | Red -> 0 | Green -> 1"
+    let src = "module M\ntype Color = Red | Green\nfn toInt(c Color) Int = match c | Red -> 0 | Green -> 1"
     let py = pySrc src
     Assert.Contains("if", py)
     Assert.Contains("else", py)

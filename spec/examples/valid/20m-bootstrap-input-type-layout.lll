@@ -3,9 +3,9 @@ type Color =
   | Red
   | Green
   | Blue
-fn label(c Color) Int =
-  match c with
+fn label(c Color) =
+  match c
     | Red -> 1
     | Green -> 2
     | Blue -> 3
-fn main() Int = label Red
+fn main() = label Red

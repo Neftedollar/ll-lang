@@ -1,7 +1,7 @@
 module Examples.Clean
-fn kind(s Str) Int =
-  match s with
+fn kind(s Str) =
+  match s
     | "one" -> 1
     | "two" -> 2
     | _ -> 0
-fn main() Int = kind "two"
+fn main() = kind "two"

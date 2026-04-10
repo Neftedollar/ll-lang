@@ -1,4 +1,4 @@
 module Examples.Clean
-fn main() Int = if 1 == 1
+fn main() = if 1 == 1
   0
 else 1

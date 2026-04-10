@@ -11,19 +11,19 @@ type Maybe A = Some A | None
 type Result A E = Ok A | Err E
 
 -- pattern match (exhaustive)
-fn area(s Shape) Float =
+fn area(s Shape) =
   | Circle r -> 3.14159 * r * r
   | Rect w h -> w * h
   | Empty -> 0.0
 
 -- Maybe usage
-fn safeDivide(a Float)(b Float) Maybe[Float] =
+fn safeDivide(a Float)(b Float) =
   if b == 0.0
     None
   else Some (a / b)
 
 -- Result usage
-fn parseAge(s Str) Result[Int][Str] =
+fn parseAge(s Str) =
   if s == ""
     Err "empty input"
   else Ok 42

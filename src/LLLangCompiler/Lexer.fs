@@ -10,7 +10,7 @@ let private keywords =
         "import", KwImport; "export", KwExport; "module", KwModule
         "if", KwIf; "else", KwElse
         "true", KwTrue; "false", KwFalse
-        "match", KwMatch; "with", KwWith
+        "match", KwMatch
     ]
 
 let private isAlphaNum (c: char) = Char.IsLetterOrDigit c || c = '_'

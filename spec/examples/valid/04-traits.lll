@@ -24,4 +24,4 @@ impl Monad Maybe =
     | None -> None
 
 -- constrained function — works for any Functor
-fn transform[F: Functor](xs F[A])(f A->B) F[B] = map f xs
+fn transform[F: Functor](xs F[A])(f A->B) = map f xs

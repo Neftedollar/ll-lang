@@ -3,4 +3,4 @@ module PlatformDemo.Main
 -- Platform.IO will be available via [platform] use = ["Platform.IO"] in ll.toml
 -- (Platform stubs are Phase 8 PR4, this file demonstrates the config format)
 
-fn main() Str = "platform demo"
+fn main() = "platform demo"

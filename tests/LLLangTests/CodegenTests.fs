@@ -190,7 +190,7 @@ let ``match-as-expression emits F# match-with`` () =
     let src =
         "module M\n" +
         "fn label(n Int) Str =\n" +
-        "  match n with | 0 -> \"zero\" | _ -> \"other\""
+        "  match n | 0 -> \"zero\" | _ -> \"other\""
     let fs = codegenSrc src
     Assert.Contains("match n with", fs)
     Assert.Contains("| 0L ->", fs)
@@ -426,7 +426,7 @@ let ``runtime: match-as-expression in let binding`` () =
     let src =
         "module Tmp.MatchExpr\n" +
         "fn main() =\n" +
-        "  let v = match 0 with | 0 -> \"zero\" | _ -> \"other\"\n" +
+        "  let v = match 0 | 0 -> \"zero\" | _ -> \"other\"\n" +
         "  printfn v"
     let stdout = runLLLangSrc src
     Assert.Contains("zero", stdout)

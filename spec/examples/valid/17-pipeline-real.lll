@@ -158,7 +158,6 @@ type Token =
   | TKwLet
   | TKwIn
   | TKwMatch
-  | TKwWith
   | TKwTag
   | TKwImport
   | TKwExport
@@ -276,7 +275,7 @@ type Module = MkModule Str List[Decl]
 
 -- ASCII uppercase / lowercase tests, same shape as 12/13/14. ll-lang lacks
 -- `&&` so each predicate is two nested `if`s.
-fn isUpperChar(c Char) Bool =
+fn isUpperChar(c Char) =
   let n = charToInt c
   if n < 65
     false
@@ -284,7 +283,7 @@ fn isUpperChar(c Char) Bool =
     false
   else true
 
-fn isLowerChar(c Char) Bool =
+fn isLowerChar(c Char) =
   let n = charToInt c
   if n < 97
     false
@@ -292,12 +291,12 @@ fn isLowerChar(c Char) Bool =
     false
   else true
 
-fn isIdStart(c Char) Bool =
+fn isIdStart(c Char) =
   if isUpperChar c
     true
   else isLowerChar c
 
-fn isIdCont(c Char) Bool =
+fn isIdCont(c Char) =
   if isIdStart c
     true
   else charIsDigit c
@@ -305,14 +304,14 @@ fn isIdCont(c Char) Bool =
 -- ---------- Lexer --------------------------------------------------------
 
 -- Greedy take/drop while predicate, shared shape with every earlier slice.
-fn takeWhilePred(p)(cs List[Char]) List[Char] =
+fn takeWhilePred(p)(cs List[Char]) =
   | c :: rest ->
     if p c
       listAppend [c] (takeWhilePred p rest)
     else []
   | _ -> []
 
-fn dropWhilePred(p)(cs List[Char]) List[Char] =
+fn dropWhilePred(p)(cs List[Char]) =
   | c :: rest ->
     if p c
       dropWhilePred p rest
@@ -321,8 +320,8 @@ fn dropWhilePred(p)(cs List[Char]) List[Char] =
 
 -- Unwrap `strToInt` into a raw Int; the lexer only calls this on strings
 -- that are already all-digits, so the `None` branch is defensive.
-fn parseIntStr(s Str) Int =
-  match strToInt s with
+fn parseIntStr(s Str) =
+  match strToInt s
     | Some n -> n
     | None -> 0
 
@@ -335,8 +334,8 @@ fn parseIntStr(s Str) Int =
 -- decl forms (a bare `tag Name` decl, a dotted `import Foo.Bar` decl,
 -- and an `export` modifier prefix that wraps any existing decl in a
 -- `DExport` variant).
-fn classifyIdent(s Str) Token =
-  match s with
+fn classifyIdent(s Str) =
+  match s
     | "module" -> TKwModule
     | "type" -> TKwType
     | "fn" -> TKwFn
@@ -345,26 +344,25 @@ fn classifyIdent(s Str) Token =
     | "let" -> TKwLet
     | "in" -> TKwIn
     | "match" -> TKwMatch
-    | "with" -> TKwWith
     | "tag" -> TKwTag
     | "import" -> TKwImport
     | "export" -> TKwExport
     | _ ->
       let cs = strChars s
-      match cs with
+      match cs
         | c :: _ ->
           if isUpperChar c
             TUpper s
           else TLower s
         | _ -> TLower s
 
-fn lexId(cs List[Char]) List[Token] =
+fn lexId(cs List[Char]) =
   let idChars = takeWhilePred isIdCont cs
   let leftover = dropWhilePred isIdCont cs
   let tok = classifyIdent (strFromChars idChars)
   listAppend [tok] (lexChars leftover)
 
-fn lexNum(cs List[Char]) List[Token] =
+fn lexNum(cs List[Char]) =
   let digits = takeWhilePred charIsDigit cs
   let leftover = dropWhilePred charIsDigit cs
   listAppend [TInt (parseIntStr (strFromChars digits))] (lexChars leftover)
@@ -381,14 +379,14 @@ fn takeStrBody(cs List[Char]) =
       (c :: body, leftover)
   | _ -> ([], [])
 
-fn lexStr(cs List[Char]) List[Token] =
+fn lexStr(cs List[Char]) =
   let (body, leftover) = takeStrBody cs
   listAppend [TStr (strFromChars body)] (lexChars leftover)
 
 -- Handle `:` vs `::`: peek the next char to decide. Only `::` is a
 -- valid token in this grammar (cons pattern separator); a bare `:` is
 -- not used anywhere, so it falls through silently.
-fn lexColonOrCons(cs List[Char]) List[Token] =
+fn lexColonOrCons(cs List[Char]) =
   | c :: rest ->
     if c == ':'
       listAppend [TColonColon] (lexChars rest)
@@ -398,7 +396,7 @@ fn lexColonOrCons(cs List[Char]) List[Token] =
 -- Handle `-` vs `->`: peek the next char to decide between TMinus and
 -- TArrow. `->` is used by match arms (`| pat -> body`); 15 only had
 -- TMinus before Phase 7.5a. Lifted from 14-exprparser-real.lll.
-fn lexMinusOrArrow(cs List[Char]) List[Token] =
+fn lexMinusOrArrow(cs List[Char]) =
   | c :: rest ->
     if c == '>'
       listAppend [TArrow] (lexChars rest)
@@ -410,7 +408,7 @@ fn lexMinusOrArrow(cs List[Char]) List[Token] =
 -- token constructor. Phase 7.5a adds `_` → TUnder (wildcard pattern) and
 -- the two-char `->` arrow via the `lexMinusOrArrow` helper. Phase 7.5b
 -- adds `\` → TBackslash (lambda-intro) — `.` → TDot was already here.
-fn lexChars(cs List[Char]) List[Token] =
+fn lexChars(cs List[Char]) =
   | c :: rest ->
     if c == '\n'
       listAppend [TNewline] (lexChars rest)
@@ -453,12 +451,12 @@ fn lexChars(cs List[Char]) List[Token] =
     else lexChars rest
   | _ -> [TEnd]
 
-fn tokenize(src Str) List[Token] = lexChars (strChars src)
+fn tokenize(src Str) = lexChars (strChars src)
 
 -- ---------- Recursive-descent parser ------------------------------------
 
 -- Skip leading newlines between decls. Blank lines are invisible.
-fn skipNewlines(toks List[Token]) List[Token] =
+fn skipNewlines(toks List[Token]) =
   | TNewline :: rest -> skipNewlines rest
   | _ -> toks
 
@@ -478,7 +476,7 @@ fn parseModuleHeader(toks List[Token]) =
   | _ -> ("?", toks)
 
 -- Top-level driver. Reads the module header, then drives a decl loop.
-fn parseModule(toks List[Token]) Module =
+fn parseModule(toks List[Token]) =
   let (name, rest) = parseModuleHeader toks
   let decls = parseDecls (skipNewlines rest)
   MkModule name decls
@@ -492,7 +490,7 @@ fn parseModule(toks List[Token]) Module =
 -- of the token stream as any regular decl via `parseOneDecl` and wraps
 -- the result in `DExport` — this keeps the modifier composable with
 -- every existing decl form without duplicating the dispatch ladder.
-fn parseDecls(toks List[Token]) List[Decl] =
+fn parseDecls(toks List[Token]) =
   | TKwType :: _ -> consTypeDecl (parseTypeDecl toks)
   | TKwLet :: _ -> consLetDecl (parseLetDecl toks)
   | TKwFn :: _ -> consFnDecl (parseFnDecl toks)
@@ -504,16 +502,16 @@ fn parseDecls(toks List[Token]) List[Decl] =
   | _ -> []
 
 -- Helper: turn a (TypeDecl, leftover) pair into the recursive list.
-fn consTypeDecl(pair) List[Decl] =
+fn consTypeDecl(pair) =
   let (td, rest) = pair
   DType td :: parseDecls (skipNewlines rest)
 
 -- Same shape for let decls (Phase 7.5a).
-fn consLetDecl(pair) List[Decl] =
+fn consLetDecl(pair) =
   let (ld, rest) = pair
   DLet ld :: parseDecls (skipNewlines rest)
 
-fn consFnDecl(pair) List[Decl] =
+fn consFnDecl(pair) =
   let (fd, rest) = pair
   DFn fd :: parseDecls (skipNewlines rest)
 
@@ -521,7 +519,7 @@ fn consFnDecl(pair) List[Decl] =
 -- parsers that already return a fully-constructed `Decl` (tag and
 -- import decls build `DTag` / `DImport` directly, unlike the type /
 -- let / fn paths whose helpers return the inner decl body).
-fn consDecl(pair) List[Decl] =
+fn consDecl(pair) =
   let (d, rest) = pair
   d :: parseDecls (skipNewlines rest)
 
@@ -585,7 +583,7 @@ fn parseLetDecl(toks List[Token]) =
 fn parseTypeDecl(toks List[Token]) =
   | TKwType :: TUpper name :: rest ->
     let (prms, rest2) = parseTypeParams rest
-    let rest3 = match rest2 with
+    let rest3 = match rest2
       | TEq :: r -> r
       | _ -> rest2
    
@@ -655,7 +653,7 @@ fn parseOneTypeArg(toks List[Token]) =
 fn parseBrackArgs(acc List[TypeArg])(toks List[Token]) =
   | TLBrack :: rest ->
     let (inner, rest2) = parseOneTypeArg rest
-    let rest3 = match rest2 with
+    let rest3 = match rest2
       | TRBrack :: r -> r
       | _ -> rest2
    
@@ -669,7 +667,7 @@ fn parseFnDecl(toks List[Token]) =
   | TKwFn :: TLower name :: rest ->
     let (prms, rest2) = parseParamGroups rest
     let (retTy, rest3) = parseReturnType rest2
-    let rest4 = match rest3 with
+    let rest4 = match rest3
       | TEq :: r -> r
       | _ -> rest3
    
@@ -699,7 +697,7 @@ fn parseReturnType(toks List[Token]) =
 -- atom-starters here: TInt, TLower, TUpper, TLParen. Newlines and
 -- keywords fall through to `false` so the application layer stops
 -- cleanly at decl boundaries and before `then`/`else` tokens.
-fn isAtomStart(t Token) Bool =
+fn isAtomStart(t Token) =
   | TInt _ -> true
   | TStr _ -> true
   | TLower _ -> true
@@ -730,7 +728,7 @@ fn parseExpr(toks List[Token]) =
 fn parseLetIn(toks List[Token]) =
   | TLower name :: TEq :: rest ->
     let (e1, rest2) = parseExpr rest
-    let rest3 = match rest2 with
+    let rest3 = match rest2
       | TKwIn :: r -> r
       | _ -> rest2
    
@@ -753,7 +751,7 @@ fn parseIf(toks List[Token]) =
   let rest2 = rest
  
   let (a, rest3) = parseExpr rest2
-  let rest4 = match rest3 with
+  let rest4 = match rest3
     | TKwElse :: r -> r
     | _ -> rest3
  
@@ -767,13 +765,9 @@ fn parseIf(toks List[Token]) =
 -- arm lists out of the rest of the token stream.
 fn parseMatch(toks List[Token]) =
   let (scrut, rest) = parseExpr toks
-  let rest2 = match rest with
-    | TKwWith :: r -> r
-    | _ -> rest
- 
-  let (armLists, rest3) = parseArms rest2
+  let (armLists, rest2) = parseArms rest
   let (pats, bodies) = armLists
-  (EMatch scrut pats bodies, rest3)
+  (EMatch scrut pats bodies, rest2)
 
 -- Collect arms while the next token is `|`. Returns `((pats, bodies),
 -- rest)` — the two arm lists stay in lockstep because each recursive
@@ -793,7 +787,7 @@ fn parseArms(toks List[Token]) =
 fn parseArm(toks List[Token]) =
   | TBar :: rest ->
     let (p, rest2) = parsePat rest
-    let rest3 = match rest2 with
+    let rest3 = match rest2
       | TArrow :: r -> r
       | _ -> rest2
    
@@ -827,7 +821,7 @@ fn parsePrimaryPat(toks List[Token]) =
 -- (PVar "rest"))`. Phase 7.5c added `PNil` and `PCons`.
 fn parsePat(toks List[Token]) =
   let (p, rest) = parsePrimaryPat toks
-  match rest with
+  match rest
     | TColonColon :: rest2 ->
       let (tail, rest3) = parsePat rest2
       (PCons p tail, rest3)
@@ -867,7 +861,7 @@ fn parseApp(toks List[Token]) =
   parseAppTail e rest
 
 fn parseAppTail(lhs Expr)(toks List[Token]) =
-  match toks with
+  match toks
     | t :: _ ->
       if isAtomStart t
         let (arg, rest) = parseAtom toks
@@ -896,7 +890,7 @@ fn parseAtom(toks List[Token]) =
   | TUpper s :: rest -> (EVar s, rest)
   | TLParen :: rest ->
     let (e, rest2) = parseExpr rest
-    match rest2 with
+    match rest2
       | TRParen :: rest3 -> (e, rest3)
       | _ -> (e, rest2)
   | _ -> (EInt 0, toks)
@@ -909,7 +903,7 @@ fn parseAtom(toks List[Token]) =
 -- via the `showBrackArgs` helper, which recursively calls `showTypeArg`
 -- on every inner arg so nested applications `Foo[Bar[Baz]]` print
 -- uniformly.
-fn showTypeArg(a TypeArg) Str =
+fn showTypeArg(a TypeArg) =
   | TAVar s -> s
   | TACon s -> s
   | TAApp head args -> strConcat head (showBrackArgs args)
@@ -918,11 +912,11 @@ fn showTypeArg(a TypeArg) Str =
 -- group per arg, matching the surface input shape `Result[A][E]`. Lives
 -- separately from `showArgs` (which renders comma-joined parens for
 -- ctor-arg lists).
-fn showBrackArgs(args List[TypeArg]) Str =
+fn showBrackArgs(args List[TypeArg]) =
   listFold (\acc a. strConcat (strConcat acc "[") (strConcat (showTypeArg a) "]")) "" args
 
 -- Render a list of args as `(a1, a2)` or empty string for no args.
-fn showArgs(args List[TypeArg]) Str =
+fn showArgs(args List[TypeArg]) =
   if listIsEmpty args
     ""
   else
@@ -931,44 +925,44 @@ fn showArgs(args List[TypeArg]) Str =
     else strConcat (strConcat acc ", ") (showTypeArg a)) "" args
     strConcat (strConcat "(" inner) ")"
 
-fn showCtor(c Ctor) Str =
+fn showCtor(c Ctor) =
   | MkCtor name args -> strConcat name (showArgs args)
 
-fn showCtors(cs List[Ctor]) Str =
+fn showCtors(cs List[Ctor]) =
   listFold (\acc c. if strLen acc == 0
     showCtor c
   else strConcat (strConcat acc " | ") (showCtor c)) "" cs
 
 -- Render the type-param list as ` (A) (B)` with a leading space, or empty.
-fn showTypeParams(ps List[Str]) Str =
+fn showTypeParams(ps List[Str]) =
   listFold (\acc p. strConcat (strConcat acc " (") (strConcat p ")")) "" ps
 
-fn showTypeDecl(d TypeDecl) Str =
+fn showTypeDecl(d TypeDecl) =
   | MkTypeDecl name prms ctors ->
     let head = strConcat (strConcat "type " name) (showTypeParams prms)
     strConcat (strConcat head " = ") (showCtors ctors)
 
 -- Fn-decl pretty printer, matching the shape used by 13-fnparser-real.lll.
-fn showTypeRef(t TypeRef) Str =
+fn showTypeRef(t TypeRef) =
   | TR s -> s
 
-fn showParam(p Param) Str =
+fn showParam(p Param) =
   | MkParam n t -> strConcat (strConcat (strConcat "(" n) ": ") (strConcat (showTypeRef t) ")")
 
-fn showFnParams(ps List[Param]) Str =
+fn showFnParams(ps List[Param]) =
   if listIsEmpty ps
     " ()"
   else listFold (\acc p. strConcat (strConcat acc " ") (showParam p)) "" ps
 
-fn showReturn(r Maybe[TypeRef]) Str =
-  match r with
+fn showReturn(r Maybe[TypeRef]) =
+  match r
     | Some t -> showTypeRef t
     | None -> "?"
 
 -- Pattern pretty-printer for match arms (Phase 7.5a + 7.5c). Phase
 -- 7.5c added `PNil` (rendered as `[]`) and `PCons h t` (rendered as
 -- `(h :: t)`, recursively, so chains nest as `(a :: (b :: rest))`).
-fn showPat(p Pat) Str =
+fn showPat(p Pat) =
   | PInt n -> intToStr n
   | PVar s -> s
   | PWild -> "_"
@@ -976,16 +970,16 @@ fn showPat(p Pat) Str =
   | PCons h t -> strConcat (strConcat (strConcat (strConcat "(" (showPat h)) " :: ") (showPat t)) ")"
 
 -- Render a single `| pat -> body` arm; helper for `showArms`.
-fn showArm(p Pat)(body Expr) Str =
+fn showArm(p Pat)(body Expr) =
   strConcat (strConcat (strConcat "| " (showPat p)) " -> ") (showExpr body)
 
 -- Walk the two parallel lists in lockstep to produce `| pat -> body`
 -- chunks joined by single spaces. The invariant `length pats == length
 -- bodies` is maintained by `parseArms`.
-fn showArms(pats List[Pat])(bodies List[Expr]) Str =
-  match pats with
+fn showArms(pats List[Pat])(bodies List[Expr]) =
+  match pats
     | p :: ps ->
-      match bodies with
+      match bodies
         | b :: bs ->
           let head = showArm p b
           let tail = showArms ps bs
@@ -997,7 +991,7 @@ fn showArms(pats List[Pat])(bodies List[Expr]) Str =
 
 -- Fully-parenthesised expression pretty-printer, matching 13/14's shape
 -- so the runtime test can substring-match each body.
-fn showExpr(e Expr) Str =
+fn showExpr(e Expr) =
   | EInt n -> intToStr n
   | EStr s -> strConcat (strConcat "\"" s) "\""
   | EVar s -> s
@@ -1017,17 +1011,17 @@ fn showExpr(e Expr) Str =
     let p2 = strConcat (strConcat p1 " ") (showExpr a)
     strConcat (strConcat (strConcat p2 " else ") (showExpr b)) ")"
   | EMatch scrut pats bodies ->
-    let head = strConcat (strConcat "(match " (showExpr scrut)) " with "
-    strConcat (strConcat head (showArms pats bodies)) ")"
+    let head = strConcat "(match " (showExpr scrut)
+    strConcat (strConcat (strConcat head " ") (showArms pats bodies)) ")"
 
-fn showFnDecl(d FnDecl) Str =
+fn showFnDecl(d FnDecl) =
   | MkFn name prms ret body ->
     let headPart = strConcat (strConcat "fn " name) (showFnParams prms)
     let arrowPart = strConcat (strConcat headPart " -> ") (showReturn ret)
     strConcat (strConcat arrowPart " = ") (showExpr body)
 
 -- Let-decl pretty printer (Phase 7.5a): `let <name> = <show expr>`.
-fn showLetDecl(d LetDecl) Str =
+fn showLetDecl(d LetDecl) =
   | MkLet name body ->
     strConcat (strConcat (strConcat "let " name) " = ") (showExpr body)
 
@@ -1037,7 +1031,7 @@ fn showLetDecl(d LetDecl) Str =
 -- modifier stacks in front of any shape — `export fn ...`, `export
 -- type ...`, `export let ...`, even `export tag ...` / `export import
 -- ...` if the grammar ever wants it.
-fn showDecl(d Decl) Str =
+fn showDecl(d Decl) =
   | DType td -> showTypeDecl td
   | DLet ld -> showLetDecl ld
   | DFn fd -> showFnDecl fd
@@ -1046,12 +1040,12 @@ fn showDecl(d Decl) Str =
   | DExport inner -> strConcat "export " (showDecl inner)
 
 -- Render a list of decls joined by `\n`, matching the input layout.
-fn showDecls(ds List[Decl]) Str =
+fn showDecls(ds List[Decl]) =
   listFold (\acc d. if strLen acc == 0
     showDecl d
   else strConcat (strConcat acc "\n") (showDecl d)) "" ds
 
-fn showModule(m Module) Str =
+fn showModule(m Module) =
   | MkModule name decls ->
     let header = strConcat "module " name
     if listIsEmpty decls
@@ -1066,8 +1060,8 @@ fn showModule(m Module) Str =
 -- (per-name types, scope depth, etc.) without changing the surface.
 type Env = MkEnv List[Str]
 
-fn envHas(env Env)(name Str) Bool =
-  match env with
+fn envHas(env Env)(name Str) =
+  match env
     | MkEnv xs ->
       listFold (\acc x. if acc
         true
@@ -1075,12 +1069,12 @@ fn envHas(env Env)(name Str) Bool =
         true
       else false) false xs
 
-fn envAdd(env Env)(name Str) Env =
-  match env with
+fn envAdd(env Env)(name Str) =
+  match env
     | MkEnv xs -> MkEnv (listAppend xs [name])
 
 -- Fold a list of names into an env, extending one binder at a time.
-fn envAddAll(env Env)(names List[Str]) Env =
+fn envAddAll(env Env)(names List[Str]) =
   listFold (\acc n. envAdd acc n) env names
 
 -- Collect every `PVar` binder introduced by a pattern. Wildcards, nil,
@@ -1088,7 +1082,7 @@ fn envAddAll(env Env)(names List[Str]) Env =
 -- the head and tail patterns bind, left-to-right. 15's `Pat` has no
 -- `PCon` (named constructor patterns), so this walker only needs the
 -- five variants `PInt` / `PVar` / `PWild` / `PNil` / `PCons`.
-fn patBinders(p Pat) List[Str] =
+fn patBinders(p Pat) =
   | PInt _ -> []
   | PWild -> []
   | PNil -> []
@@ -1097,10 +1091,10 @@ fn patBinders(p Pat) List[Str] =
 
 -- Extract the param name from a `MkParam name (TR ty)`. Used when a
 -- `DFn` extends the local env for its body walk.
-fn paramName(p Param) Str =
+fn paramName(p Param) =
   | MkParam n _ -> n
 
-fn paramNames(ps List[Param]) List[Str] =
+fn paramNames(ps List[Param]) =
   listFold (\acc p. listAppend acc [(paramName p)]) [] ps
 
 -- Walk `e` under `env`, returning the list of `E002 UnboundVar <name>`
@@ -1109,7 +1103,7 @@ fn paramNames(ps List[Param]) List[Str] =
 -- flag are `EVar`; every compound arm recurses and concatenates its
 -- children's error lists. `ELetIn` / `ELam` / `EMatch` extend the
 -- local env for their body sub-expression(s) before recursing.
-fn checkExpr(env Env)(e Expr) List[Str] =
+fn checkExpr(env Env)(e Expr) =
   | EInt _ -> []
   | EStr _ -> []
   | EVar name ->
@@ -1146,10 +1140,10 @@ fn checkExpr(env Env)(e Expr) List[Str] =
 -- the scrutinee env with every binder the pattern introduces,
 -- walk the body expression under the extended env. Pattern binders
 -- are only visible inside their own arm body, not across arms.
-fn checkArms(env Env)(pats List[Pat])(bodies List[Expr]) List[Str] =
-  match pats with
+fn checkArms(env Env)(pats List[Pat])(bodies List[Expr]) =
+  match pats
     | p :: ps ->
-      match bodies with
+      match bodies
         | b :: bs ->
           let armEnv = envAddAll env (patBinders p)
           let armErrs = checkExpr armEnv b
@@ -1164,15 +1158,15 @@ fn checkArms(env Env)(pats List[Pat])(bodies List[Expr]) List[Str] =
 -- skipped it. `DType` / `DTag` / `DImport` have no sub-expressions.
 -- `DExport inner` recurses into the inner decl so an exported fn's
 -- body still gets name-resolved.
-fn checkFnBody(env Env)(fd FnDecl) List[Str] =
+fn checkFnBody(env Env)(fd FnDecl) =
   | MkFn _ params _ body ->
     let bodyEnv = envAddAll env (paramNames params)
     checkExpr bodyEnv body
 
-fn checkLetBody(env Env)(ld LetDecl) List[Str] =
+fn checkLetBody(env Env)(ld LetDecl) =
   | MkLet _ body -> checkExpr env body
 
-fn checkDecl(env Env)(d Decl) List[Str] =
+fn checkDecl(env Env)(d Decl) =
   | DFn fd -> checkFnBody env fd
   | DLet ld -> checkLetBody env ld
   | DType _ -> []
@@ -1180,7 +1174,7 @@ fn checkDecl(env Env)(d Decl) List[Str] =
   | DImport _ -> []
   | DExport inner -> checkDecl env inner
 
-fn checkDecls(env Env)(decls List[Decl]) List[Str] =
+fn checkDecls(env Env)(decls List[Decl]) =
   | d :: rest -> listAppend (checkDecl env d) (checkDecls env rest)
   | _ -> []
 
@@ -1190,22 +1184,22 @@ fn checkDecls(env Env)(decls List[Decl]) List[Str] =
 -- host elaborator). `DImport` contributes nothing in this slice (real
 -- module resolution is a later phase). `DExport inner` recurses into
 -- the inner decl so `export fn foo` still registers `foo`.
-fn ctorName(c Ctor) Str =
+fn ctorName(c Ctor) =
   | MkCtor n _ -> n
 
-fn ctorNames(cs List[Ctor]) List[Str] =
+fn ctorNames(cs List[Ctor]) =
   listFold (\acc c. listAppend acc [(ctorName c)]) [] cs
 
-fn fnName(fd FnDecl) Str =
+fn fnName(fd FnDecl) =
   | MkFn n _ _ _ -> n
 
-fn letName(ld LetDecl) Str =
+fn letName(ld LetDecl) =
   | MkLet n _ -> n
 
-fn typeDeclCtors(td TypeDecl) List[Str] =
+fn typeDeclCtors(td TypeDecl) =
   | MkTypeDecl _ _ ctors -> ctorNames ctors
 
-fn collectDecl(env Env)(d Decl) Env =
+fn collectDecl(env Env)(d Decl) =
   | DFn fd -> envAdd env (fnName fd)
   | DLet ld -> envAdd env (letName ld)
   | DType td -> envAddAll env (typeDeclCtors td)
@@ -1213,7 +1207,7 @@ fn collectDecl(env Env)(d Decl) Env =
   | DImport _ -> env
   | DExport inner -> collectDecl env inner
 
-fn collectDecls(env Env)(decls List[Decl]) Env =
+fn collectDecls(env Env)(decls List[Decl]) =
   | d :: rest -> collectDecls (collectDecl env d) rest
   | _ -> env
 
@@ -1223,22 +1217,22 @@ fn collectDecls(env Env)(decls List[Decl]) Env =
 -- unwrapped one level so exported types still register their ctors.
 type TypeCtors = MkTypeCtors Str List[Str]
 
-fn typeDeclName(td TypeDecl) Str =
+fn typeDeclName(td TypeDecl) =
   | MkTypeDecl n _ _ -> n
 
-fn collectTypesDecl(d Decl) List[TypeCtors] =
+fn collectTypesDecl(d Decl) =
   | DType td -> [(MkTypeCtors (typeDeclName td) (typeDeclCtors td))]
   | DExport inner -> collectTypesDecl inner
   | _ -> []
 
-fn collectTypes(decls List[Decl]) List[TypeCtors] =
+fn collectTypes(decls List[Decl]) =
   | d :: rest -> listAppend (collectTypesDecl d) (collectTypes rest)
   | _ -> []
 
 -- Linear lookup: returns the ctor list for the given type name, or
 -- the empty list if the name isn't a declared sum type.
-fn lookupCtors(types List[TypeCtors])(name Str) List[Str] =
-  match types with
+fn lookupCtors(types List[TypeCtors])(name Str) =
+  match types
     | MkTypeCtors n cs :: rest ->
       if n == name
         cs
@@ -1249,13 +1243,13 @@ fn lookupCtors(types List[TypeCtors])(name Str) List[Str] =
 -- `PWild`, `PVar`, or `PCons` — mirrors the F# host elaborator's
 -- catch-all list. `PInt` / `PNil` are NOT catch-alls — they match
 -- specific literals.
-fn patIsCatchAll(p Pat) Bool =
+fn patIsCatchAll(p Pat) =
   | PWild -> true
   | PVar _ -> true
   | PCons _ _ -> true
   | _ -> false
 
-fn armsHaveCatchAll(pats List[Pat]) Bool =
+fn armsHaveCatchAll(pats List[Pat]) =
   listFold (\acc p. if acc
     true
   else patIsCatchAll p) false pats
@@ -1266,13 +1260,13 @@ fn armsHaveCatchAll(pats List[Pat]) Bool =
 -- catch-all arm reports every constructor as missing. Deliberately
 -- narrow: the integration's goal is proving the pipeline plumbing, not
 -- full coverage analysis.
-fn coveredCtors(pats List[Pat]) List[Str] = []
+fn coveredCtors(pats List[Pat]) = []
 
 -- For a given `required` ctor list and `covered` ctor list, return
 -- one `E003 NonExhaustiveMatch <type> missing <ctor>` message per
 -- required ctor that isn't in `covered`.
-fn missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) List[Str] =
-  match required with
+fn missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) =
+  match required
     | c :: rest ->
       let tail = missingCtorErrs ty rest covered
       let isCovered = listFold (\acc x. if acc
@@ -1289,22 +1283,22 @@ fn missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) List[Str] =
 
 -- Extract the type name out of a param (via `MkParam _ (TR t)`).
 -- `paramTypeName` returns just the string.
-fn typeRefName(tr TypeRef) Str =
+fn typeRefName(tr TypeRef) =
   | TR s -> s
 
-fn paramTypeName(p Param) Str =
+fn paramTypeName(p Param) =
   | MkParam _ tr -> typeRefName tr
 
 -- Extract the last param's type name from a param list. Returns "" if
 -- the list is empty. Folds left so the final non-"" name wins —
 -- mirrors the F# host elaborator's "clause sugar scrutinizes the
 -- LAST curried param" rule.
-fn lastParamTypeName(ps List[Param]) Str =
+fn lastParamTypeName(ps List[Param]) =
   listFold (\acc p. paramTypeName p) "" ps
 
 -- Run the exhaustiveness check on a single `FnDecl` body. Shared
 -- between the plain `DFn fd` arm and the `DExport (DFn fd)` unwrap.
-fn exhaustivenessFn(types List[TypeCtors])(fd FnDecl) List[Str] =
+fn exhaustivenessFn(types List[TypeCtors])(fd FnDecl) =
   | MkFn _ params _ body ->
     let lastTy = lastParamTypeName params
     if strLen lastTy == 0
@@ -1314,7 +1308,7 @@ fn exhaustivenessFn(types List[TypeCtors])(fd FnDecl) List[Str] =
       if listIsEmpty required
         []
       else
-        match body with
+        match body
           | EMatch _ pats _ ->
             if armsHaveCatchAll pats
               []
@@ -1325,12 +1319,12 @@ fn exhaustivenessFn(types List[TypeCtors])(fd FnDecl) List[Str] =
 
 -- Run the exhaustiveness check over a single decl. Non-`DFn` decls
 -- contribute nothing. `DExport (DFn ...)` is unwrapped one level.
-fn exhaustivenessDecl(types List[TypeCtors])(d Decl) List[Str] =
+fn exhaustivenessDecl(types List[TypeCtors])(d Decl) =
   | DFn fd -> exhaustivenessFn types fd
   | DExport inner -> exhaustivenessDecl types inner
   | _ -> []
 
-fn exhaustivenessCheck(types List[TypeCtors])(decls List[Decl]) List[Str] =
+fn exhaustivenessCheck(types List[TypeCtors])(decls List[Decl]) =
   | d :: rest ->
     listAppend (exhaustivenessDecl types d) (exhaustivenessCheck types rest)
   | _ -> []
@@ -1339,7 +1333,7 @@ fn exhaustivenessCheck(types List[TypeCtors])(decls List[Decl]) List[Str] =
 -- fresh env AND a type-to-ctors index, then runs the name-resolution
 -- pass and the exhaustiveness pass under those two indices and
 -- concatenates the error lists.
-fn elaborate(decls List[Decl]) List[Str] =
+fn elaborate(decls List[Decl]) =
   let env0 = MkEnv []
   let env = collectDecls env0 decls
   let types = collectTypes decls
@@ -1350,7 +1344,7 @@ fn elaborate(decls List[Decl]) List[Str] =
 -- Render the error list as one message per line. Empty list prints a
 -- single `no errors` sentinel so the runtime can tell a clean
 -- elaborate apart from an elaborate that printed nothing at all.
-fn showErrs(errs List[Str]) Str =
+fn showErrs(errs List[Str]) =
   if listIsEmpty errs
     "no errors"
   else listFold (\acc s. if strLen acc == 0
@@ -1377,10 +1371,10 @@ fn showErrs(errs List[Str]) Str =
 --     neither a catch-all nor a named-ctor cover, so the exhaustiveness
 --     pass emits one `E003` per Shape ctor (Circle, Rect).
 fn main() =
-  let src = "module M\ntype Shape = Circle | Rect\nfn good(x Int) Int = x + 1\nfn bad(x Int) Int = undefinedName\nfn shapeBad(s Shape) Int = match s with | 0 -> 1"
+  let src = "module M\ntype Shape = Circle | Rect\nfn good(x Int) Int = x + 1\nfn bad(x Int) Int = undefinedName\nfn shapeBad(s Shape) Int = match s | 0 -> 1"
   let toks = tokenize src
   let mod = parseModule toks
-  match mod with
+  match mod
     | MkModule _ decls ->
       let errs = elaborate decls
       printfn (showErrs errs)

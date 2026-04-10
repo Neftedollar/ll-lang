@@ -498,8 +498,8 @@ let ``parse cons precedence: a + 1 :: rest is (a + 1) :: rest`` () =
 // --- Phase 7.1.5: match as expression ---
 
 [<Fact>]
-let ``parse match expression: match x with`` () =
-    match parseExprStr "match x with | 0 -> \"zero\" | _ -> \"other\"" with
+let ``parse match expression: match x`` () =
+    match parseExprStr "match x | 0 -> \"zero\" | _ -> \"other\"" with
     | EMatchOf(EVar "x",
                [(PLit (LInt 0L), ELit (LStr "zero"));
                 (PWild, ELit (LStr "other"))]) -> ()
@@ -507,7 +507,7 @@ let ``parse match expression: match x with`` () =
 
 [<Fact>]
 let ``parse match expression in let binding`` () =
-    let src = "let v = match x with | 0 -> 1 | _ -> 2"
+    let src = "let v = match x | 0 -> 1 | _ -> 2"
     match parseExprStr src with
     | ELet("v",
            EMatchOf(EVar "x",
@@ -518,7 +518,7 @@ let ``parse match expression in let binding`` () =
 
 [<Fact>]
 let ``parse match expression with cons pattern`` () =
-    let src = "match xs with | h :: t -> h | _ -> 0"
+    let src = "match xs | h :: t -> h | _ -> 0"
     match parseExprStr src with
     | EMatchOf(EVar "xs",
                [(PCons(PVar "h", PVar "t"), EVar "h");

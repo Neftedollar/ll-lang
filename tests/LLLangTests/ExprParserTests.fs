@@ -53,7 +53,7 @@ let ``14-exprparser-real.lll runs and pretty-prints all five expression kinds`` 
     // The parser walks five single-line expression inputs:
     //   "let x = 1 in (x + 2)"
     //   "if (x) 1 else 2"         -- condition must be parenthesised since `then` removed
-    //   "match x with | 0 -> \"zero\" | _ -> \"other\""
+    //   "match x | 0 -> \"zero\" | _ -> \"other\""
     //   "\\y. (y + 1)"
     //   "f x y"
     // and pretty-prints each in fully-parenthesised form (binary ops,
@@ -62,7 +62,7 @@ let ``14-exprparser-real.lll runs and pretty-prints all five expression kinds`` 
     let expected =
         [ "(let x = 1 in (x + 2))"
           "(if x 1 else 2)"
-          "(match x with | 0 -> \"zero\" | _ -> \"other\")"
+          "(match x | 0 -> \"zero\" | _ -> \"other\")"
           "(fun y -> (y + 1))"
           "((f x) y)" ]
     for line in expected do

@@ -1,8 +1,8 @@
 module Examples.Clean
-fn nl(n Int) Int = if '\n' == '\n'
+fn nl(n Int) = if '\n' == '\n'
   n
 else 0
-fn bs(n Int) Int = if '\\' == '\\'
+fn bs(n Int) = if '\\' == '\\'
   n
 else 0
-fn main() Int = nl 5
+fn main() = nl 5

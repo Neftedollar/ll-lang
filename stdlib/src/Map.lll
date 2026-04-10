@@ -12,11 +12,11 @@ type RBMap K V = Leaf | Node Color (RBMap K V) K V (RBMap K V)
 type Maybe A = Some A | None
 
 -- Empty map
-fn mapEmpty() RBMap[K][V] = Leaf
+fn mapEmpty() = Leaf
 
 -- Size of map
-fn mapSize(m RBMap[K][V]) Int =
-  match m with
+fn mapSize(m RBMap[K][V]) =
+  match m
     | Leaf -> 0
     | Node _ left _ _ right -> 1 + mapSize left + mapSize right
 
@@ -24,14 +24,14 @@ fn mapSize(m RBMap[K][V]) Int =
 -- Called only when the top node colour is Black.
 
 -- Try to fix left-left violation: Black (Red (Red a x xv b) y yv c) z zv d
-fn balanceLeft(left RBMap[K][V])(k K)(v V)(right RBMap[K][V]) RBMap[K][V] =
-  match left with
+fn balanceLeft(left RBMap[K][V])(k K)(v V)(right RBMap[K][V]) =
+  match left
     | Node (Red) ll lk lv lr ->
-      match ll with
+      match ll
         | Node (Red) a xk xv b ->
           Node (Red) (Node (Black) a xk xv b) lk lv (Node (Black) lr k v right)
         | _ ->
-          match lr with
+          match lr
             | Node (Red) b yk yv c ->
               Node (Red) (Node (Black) ll lk lv b) yk yv (Node (Black) c k v right)
             | _ -> Node (Black) left k v right
@@ -39,14 +39,14 @@ fn balanceLeft(left RBMap[K][V])(k K)(v V)(right RBMap[K][V]) RBMap[K][V] =
 
 -- Try to fix right violations: Black a x xv (Red (Red b y yv c) z zv d)
 --                          or: Black a x xv (Red b y yv (Red c z zv d))
-fn balanceRight(left RBMap[K][V])(k K)(v V)(right RBMap[K][V]) RBMap[K][V] =
-  match right with
+fn balanceRight(left RBMap[K][V])(k K)(v V)(right RBMap[K][V]) =
+  match right
     | Node (Red) rl rk rv rr ->
-      match rl with
+      match rl
         | Node (Red) b yk yv c ->
           Node (Red) (Node (Black) left k v b) yk yv (Node (Black) c rk rv rr)
         | _ ->
-          match rr with
+          match rr
             | Node (Red) c zk zv d ->
               Node (Red) (Node (Black) left k v rl) rk rv (Node (Black) c zk zv d)
             | _ -> Node (Black) left k v right
@@ -54,21 +54,21 @@ fn balanceRight(left RBMap[K][V])(k K)(v V)(right RBMap[K][V]) RBMap[K][V] =
 
 -- balance: Okasaki RB-tree rebalancing (4 cases)
 -- Only needs to act when color is Black
-fn balance(c Color)(left RBMap[K][V])(k K)(v V)(right RBMap[K][V]) RBMap[K][V] =
-  match c with
+fn balance(c Color)(left RBMap[K][V])(k K)(v V)(right RBMap[K][V]) =
+  match c
     | Red -> Node (Red) left k v right
     | Black ->
-      match left with
+      match left
         | Node (Red) _ _ _ _ ->
           let result = balanceLeft left k v right
-          match result with
+          match result
             | Node (Red) _ _ _ _ -> result
             | _ -> balanceRight left k v right
         | _ -> balanceRight left k v right
 
 -- ins: recursive insert helper (preserves RB invariants via balance)
-fn ins(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) RBMap[K][V] =
-  match m with
+fn ins(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) =
+  match m
     | Leaf -> Node (Red) Leaf k v Leaf
     | Node c left nk nv right ->
       let d = cmp k nk
@@ -79,15 +79,15 @@ fn ins(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) RBMap[K][V] =
       else Node c left nk v right
 
 -- mapInsert: insert k->v into map, replacing value if key exists
-fn mapInsert(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) RBMap[K][V] =
+fn mapInsert(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) =
   let t = ins cmp k v m
-  match t with
+  match t
     | Leaf -> Leaf
     | Node _ left nk nv right -> Node (Black) left nk nv right
 
 -- mapLookup: lookup key k
-fn mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) Maybe[V] =
-  match m with
+fn mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) =
+  match m
     | Leaf -> None
     | Node _ left nk nv right ->
       let d = cmp k nk
@@ -98,14 +98,14 @@ fn mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) Maybe[V] =
       else Some nv
 
 -- mapContains: check if key k is in map
-fn mapContains(cmp K -> K -> Int)(k K)(m RBMap[K][V]) Bool =
-  match mapLookup cmp k m with
+fn mapContains(cmp K -> K -> Int)(k K)(m RBMap[K][V]) =
+  match mapLookup cmp k m
     | Some _ -> true
     | None -> false
 
 -- mapFold: in-order fold over key-value pairs
-fn mapFold(f B -> K -> V -> B)(acc B)(m RBMap[K][V]) B =
-  match m with
+fn mapFold(f B -> K -> V -> B)(acc B)(m RBMap[K][V]) =
+  match m
     | Leaf -> acc
     | Node _ left k v right ->
       let acc1 = mapFold f acc left
@@ -113,8 +113,8 @@ fn mapFold(f B -> K -> V -> B)(acc B)(m RBMap[K][V]) B =
       mapFold f acc2 right
 
 -- mapKeys: return list of keys in sorted (in-order) order
-fn mapKeys(m RBMap[K][V]) List[K] =
-  match m with
+fn mapKeys(m RBMap[K][V]) =
+  match m
     | Leaf -> []
     | Node _ left k _ right ->
       let lkeys = mapKeys left
@@ -122,7 +122,7 @@ fn mapKeys(m RBMap[K][V]) List[K] =
       listAppend lkeys (k :: rkeys)
 
 -- Integer comparator
-fn intCmp(a Int)(b Int) Int =
+fn intCmp(a Int)(b Int) =
   if a < b
     0 - 1
   else if a > b
@@ -130,7 +130,7 @@ fn intCmp(a Int)(b Int) Int =
   else 0
 
 -- String comparator
-fn strCmp(a Str)(b Str) Int =
+fn strCmp(a Str)(b Str) =
   if a < b
     0 - 1
   else if a > b
@@ -138,7 +138,7 @@ fn strCmp(a Str)(b Str) Int =
   else 0
 
 -- Test helper: print OK or FAIL
-fn check(label Str)(ok Bool) Int =
+fn check(label Str)(ok Bool) =
   if ok
     let _ = printfn (strConcat "OK " label)
     0
@@ -147,7 +147,7 @@ fn check(label Str)(ok Bool) Int =
     1
 
 -- Main: exercise all API functions
-fn main() Int =
+fn main() =
   -- mapEmpty / mapSize
   let m0 = mapEmpty
   let _ = check "1 mapEmpty size=0" (mapSize m0 == 0)
@@ -162,7 +162,7 @@ fn main() Int =
 
   -- mapLookup: found
   let r1 = mapLookup intCmp 3 m5
-  let ok1 = match r1 with
+  let ok1 = match r1
     | Some v -> v == "three"
     | None -> false
  
@@ -170,7 +170,7 @@ fn main() Int =
 
   -- mapLookup: not found
   let r2 = mapLookup intCmp 99 m5
-  let ok2 = match r2 with
+  let ok2 = match r2
     | Some _ -> false
     | None -> true
  
@@ -191,7 +191,7 @@ fn main() Int =
   -- strCmp
   let ms = mapInsert strCmp "banana" 2 (mapInsert strCmp "apple" 1 (mapEmpty))
   let r3 = mapLookup strCmp "apple" ms
-  let ok3 = match r3 with
+  let ok3 = match r3
     | Some n -> n == 1
     | None -> false
  
@@ -204,7 +204,7 @@ fn main() Int =
   -- Duplicate key insert: size stays same, value updated
   let md1 = mapInsert intCmp 42 "first" (mapEmpty)
   let md2 = mapInsert intCmp 42 "second" md1
-  let okDup = match mapLookup intCmp 42 md2 with
+  let okDup = match mapLookup intCmp 42 md2
     | Some v -> v == "second"
     | None -> false
  
@@ -219,12 +219,12 @@ fn main() Int =
   let ms4 = mapInsert intCmp 4 0 ms3
   let ms5 = mapInsert intCmp 2 0 ms4
   let skeys = mapKeys ms5
-  let firstOk = match skeys with
+  let firstOk = match skeys
     | h :: _ -> h == 1
     | [] -> false
  
   let lastKey = listAt skeys 4
-  let lastOk = match lastKey with
+  let lastOk = match lastKey
     | Some v -> v == 5
     | None -> false
  

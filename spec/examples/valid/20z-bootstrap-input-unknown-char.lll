@@ -2,5 +2,5 @@ module Examples.Clean
 -- Bug #7 regression: @ inside a string literal is fine (handled by lexStr,
 -- not by the main lexChars catch-all). Unknown chars in lexChars now emit
 -- TError c instead of being silently dropped.
-fn tagged() Str = "@symbol"
-fn main() Int = 0
+fn tagged() = "@symbol"
+fn main() = 0

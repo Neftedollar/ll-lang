@@ -1,5 +1,5 @@
 module Examples.Clean
-fn isNum(c Char) Int = if charIsDigit c
+fn isNum(c Char) = if charIsDigit c
   1
 else 0
-fn main() Int = isNum '5'
+fn main() = isNum '5'

@@ -1,6 +1,6 @@
 module Examples.Clean
-fn head(xs List[Int]) Int =
-  match xs with
+fn head(xs List[Int]) =
+  match xs
     | h :: t -> h
     | _ -> 0
-fn main() Int = head [1 2 3]
+fn main() = head [1 2 3]

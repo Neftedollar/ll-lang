@@ -85,8 +85,7 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
     // header on its own line, each import/tag/type/let/fn decl normalised
     // to the form used by 12/13/14 (ctor args in parens; fn params
     // space-separated; body expressions fully parenthesised; let decls as
-    // `let name = expr`; match in expression position as `(match scrut
-    // with | p -> e | ...)`; let-in chains as `(let name = e1 in e2)`;
+    // `let name = expr`; match in expression position as `(match scrut | p -> e | ...)`; let-in chains as `(let name = e1 in e2)`;
     // lambdas as `(fun x -> e)`; string literals rendered with
     // surrounding quotes as `"<s>"`; nil patterns as `[]`; cons patterns
     // as `(h :: t)`; tagged literals as `(<lit>[Tag])`; parametric ctor
@@ -106,12 +105,12 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
           "let uid = (\"user-42\"[UserId])"
           "export fn addOne (x: Int) -> Int = (x + 1)"
           "fn double (x: Int) -> Int = (x * 2)"
-          "fn classify (x: Int) -> Int = (match x with | 0 -> 0 | _ -> 1)"
+          "fn classify (x: Int) -> Int = (match x | 0 -> 0 | _ -> 1)"
           "fn pickColor (x: Int) -> Color = (if x Red else Green)"
           "fn shift (x: Int) -> Int = (let y = (x + 1) in (y * 2))"
           "fn applyDouble (x: Int) -> Int = ((fun y -> (y * 2)) x)"
           "fn greet () -> Str = \"hello\""
-          "fn classifyXs (xs: Int) -> Int = (match xs with | [] -> 0 | (h :: t) -> 1)" ]
+          "fn classifyXs (xs: Int) -> Int = (match xs | [] -> 0 | (h :: t) -> 1)" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),

@@ -1,13 +1,13 @@
 module Examples.MutRecTest
-fn isEven(n Int) Bool = if n == 0
+fn isEven(n Int) = if n == 0
   true
 else isOdd (n + -1)
-fn isOdd(n Int) Bool = if n == 0
+fn isOdd(n Int) = if n == 0
   false
 else isEven (n + -1)
-fn parity(n Int) Str = if isEven n
+fn parity(n Int) = if isEven n
   "even"
 else "odd"
-fn main() Int = if isEven 4
+fn main() = if isEven 4
   0
 else 1

@@ -1,4 +1,4 @@
 module Hello.Main
 import Hello.Greet
 
-fn main() Str = greet "World"
+fn main() = greet "World"

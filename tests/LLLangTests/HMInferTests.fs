@@ -757,7 +757,7 @@ let ``infer cons expression type mismatch yields E001`` () =
 let ``infer match-as-expression in let binding`` () =
     let src =
         "module M\n" +
-        "let v = match 0 with | 0 -> \"zero\" | _ -> \"other\""
+        "let v = match 0 | 0 -> \"zero\" | _ -> \"other\""
     let tm = inferOk src
     Assert.Equal(TyName "Str", (schemeOf tm "v").Body)
 
@@ -765,7 +765,7 @@ let ``infer match-as-expression in let binding`` () =
 let ``infer match-as-expression branch type mismatch yields E001`` () =
     let src =
         "module M\n" +
-        "let v = match 0 with | 0 -> \"zero\" | _ -> 1"
+        "let v = match 0 | 0 -> \"zero\" | _ -> 1"
     let errs = inferErrs src
     Assert.Contains(errs, fun e -> e.Code = E001)
 
@@ -775,7 +775,7 @@ let ``infer cons pattern in match-as-expression`` () =
     let src =
         "module M\n" +
         "fn first(xs Int) Int =\n" +
-        "  match [xs] with | h :: _ -> h | _ -> 0"
+        "  match [xs] | h :: _ -> h | _ -> 0"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "first").Body)
 

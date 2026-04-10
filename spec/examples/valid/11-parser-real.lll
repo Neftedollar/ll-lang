@@ -53,16 +53,16 @@ fn takeDigits(cs List[Char]) =
 -- Unwrap `strToInt` Maybe into a raw Int; a malformed digit run falls back
 -- to 0. The lexer only calls this on strings that are already all-digits,
 -- so the `None` branch is defensive.
-fn parseIntStr(s Str) Int =
-  match strToInt s with
+fn parseIntStr(s Str) =
+  match strToInt s
     | Some n -> n
     | None -> 0
 
-fn consTok(t Token)(ts List[Token]) List[Token] = t :: ts
+fn consTok(t Token)(ts List[Token]) = t :: ts
 
 -- Main tokenizer loop. Skips whitespace, recognises digit runs as TNum,
 -- and maps single-char operators / parens to their token constructors.
-fn lexChars(cs List[Char]) List[Token] =
+fn lexChars(cs List[Char]) =
   | c :: rest ->
     if charIsSpace c
       lexChars rest
@@ -85,7 +85,7 @@ fn lexChars(cs List[Char]) List[Token] =
     else lexChars rest
   | _ -> [TEnd]
 
-fn tokenize(src Str) List[Token] = lexChars (strChars src)
+fn tokenize(src Str) = lexChars (strChars src)
 
 -- ---------- Recursive-descent parser ------------------------------------
 
@@ -124,7 +124,7 @@ fn parseFactor(toks List[Token]) =
   | TNum n :: rest -> (ENum n, rest)
   | TLParen :: rest ->
     let (e, rest2) = parseExpr rest
-    match rest2 with
+    match rest2
       | TRParen :: rest3 -> (e, rest3)
       | _ -> (e, rest2)
   | _ -> (ENum 0, toks)
@@ -135,7 +135,7 @@ fn parseFactor(toks List[Token]) =
 -- string. Each binary node prints as `(L op R)`; leaves as their integer
 -- form. This makes precedence and associativity visually obvious and lets
 -- the runtime test string-match the result.
-fn show(e Expr) Str =
+fn show(e Expr) =
   | ENum n -> intToStr n
   | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (show l)) " + ") (show r)) ")"
   | ESub l r -> strConcat (strConcat (strConcat (strConcat "(" (show l)) " - ") (show r)) ")"

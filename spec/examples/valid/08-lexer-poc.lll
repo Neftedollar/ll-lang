@@ -8,7 +8,7 @@ module Examples.LexerPoC
 
 type Token = TIdent Str | TNum Str | TLParen | TRParen | TPlus | TSpace | TUnknown
 
-fn classify(c Char) Token =
+fn classify(c Char) =
   if charIsDigit c
     TNum (strFromChars [c])
   else if charIsAlpha c
@@ -23,7 +23,7 @@ fn classify(c Char) Token =
     TPlus
   else TUnknown
 
-fn tokenName(t Token) Str =
+fn tokenName(t Token) =
   | TIdent s -> strConcat "id:" s
   | TNum n -> strConcat "n:" n
   | TLParen -> "("
@@ -32,7 +32,7 @@ fn tokenName(t Token) Str =
   | TSpace -> "_"
   | TUnknown -> "?"
 
-fn joinTokens(toks List[Token]) Str =
+fn joinTokens(toks List[Token]) =
   listFold (\acc. \t. if strLen acc == 0
     tokenName t
   else strConcat (strConcat acc ",") (tokenName t)) "" toks

@@ -4,8 +4,8 @@ import Std.List
 import Std.Maybe
 
 -- using imported functions
-fn firstDoubled(xs List[Int]) Maybe[Int] =
+fn firstDoubled(xs List[Int]) =
   xs -> head -> map (\x. x * 2)
 
 -- export
-export fn greet(name Str) Str = "hello " + name
+export fn greet(name Str) = "hello " + name

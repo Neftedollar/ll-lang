@@ -4,5 +4,5 @@ module Examples.Clean
 -- program; the fix is tested indirectly — prior to the fix, lexCharLit
 -- and lexCharEsc returned [] on EOF which could cause the parser to
 -- misinterpret an empty token stream mid-parse.
-fn check(c Char) Bool = c == '\n'
-fn main() Int = 0
+fn check(c Char) = c == '\n'
+fn main() = 0

@@ -8,7 +8,7 @@ type Token =
   | TLParen
   | TRParen
 
-fn show(t Token) Str =
+fn show(t Token) =
   | TIdent s -> strConcat "id:" s
   | TNum s -> strConcat "num:" s
   | TLParen -> "("

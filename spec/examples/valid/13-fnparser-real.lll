@@ -59,7 +59,7 @@ type FnDecl = MkFn Str List[Param] Maybe[TypeRef] Expr
 
 -- ---------- Char predicates ---------------------------------------------
 
-fn isUpperChar(c Char) Bool =
+fn isUpperChar(c Char) =
   let n = charToInt c
   if n < 65
     false
@@ -67,7 +67,7 @@ fn isUpperChar(c Char) Bool =
     false
   else true
 
-fn isLowerChar(c Char) Bool =
+fn isLowerChar(c Char) =
   let n = charToInt c
   if n < 97
     false
@@ -75,12 +75,12 @@ fn isLowerChar(c Char) Bool =
     false
   else true
 
-fn isIdStart(c Char) Bool =
+fn isIdStart(c Char) =
   if isUpperChar c
     true
   else isLowerChar c
 
-fn isIdCont(c Char) Bool =
+fn isIdCont(c Char) =
   if isIdStart c
     true
   else charIsDigit c
@@ -88,14 +88,14 @@ fn isIdCont(c Char) Bool =
 -- ---------- Lexer --------------------------------------------------------
 
 -- Greedy take/drop while predicate, shared shape with earlier milestones.
-fn takeWhilePred(p)(cs List[Char]) List[Char] =
+fn takeWhilePred(p)(cs List[Char]) =
   | c :: rest ->
     if p c
       listAppend [c] (takeWhilePred p rest)
     else []
   | _ -> []
 
-fn dropWhilePred(p)(cs List[Char]) List[Char] =
+fn dropWhilePred(p)(cs List[Char]) =
   | c :: rest ->
     if p c
       dropWhilePred p rest
@@ -104,26 +104,26 @@ fn dropWhilePred(p)(cs List[Char]) List[Char] =
 
 -- Unwrap Maybe Int from strToInt; malformed digit runs fall back to 0
 -- (the lexer only calls this on strings that are already all-digits).
-fn parseIntStr(s Str) Int =
-  match strToInt s with
+fn parseIntStr(s Str) =
+  match strToInt s
     | Some n -> n
     | None -> 0
 
 -- Classify an identifier string. `fn` is the keyword; uppercase-start
 -- becomes TUpper (used for type names); everything else is TLower.
-fn classifyIdent(s Str) Token =
-  match s with
+fn classifyIdent(s Str) =
+  match s
     | "fn" -> TKwFn
     | _ ->
       let cs = strChars s
-      match cs with
+      match cs
         | c :: _ ->
           if isUpperChar c
             TUpper s
           else TLower s
         | _ -> TLower s
 
-fn lexId(cs List[Char]) List[Token] =
+fn lexId(cs List[Char]) =
   let idChars = takeWhilePred isIdCont cs
   let leftover = dropWhilePred isIdCont cs
   let tok = classifyIdent (strFromChars idChars)
@@ -132,12 +132,12 @@ fn lexId(cs List[Char]) List[Token] =
 -- Phase 7.3b-fixes bug 1: `[TNum (...)]` is now a single-element list with
 -- the ctor already applied, so the `let tok = ... in` helper has been
 -- inlined into the final listAppend call.
-fn lexNum(cs List[Char]) List[Token] =
+fn lexNum(cs List[Char]) =
   let digits = takeWhilePred charIsDigit cs
   let leftover = dropWhilePred charIsDigit cs
   listAppend [TNum (parseIntStr (strFromChars digits))] (lexChars leftover)
 
-fn lexChars(cs List[Char]) List[Token] =
+fn lexChars(cs List[Char]) =
   | c :: rest ->
     if c == '\n'
       listAppend [TNewline] (lexChars rest)
@@ -164,24 +164,24 @@ fn lexChars(cs List[Char]) List[Token] =
     else lexChars rest
   | _ -> [TEnd]
 
-fn tokenize(src Str) List[Token] = lexChars (strChars src)
+fn tokenize(src Str) = lexChars (strChars src)
 
 -- ---------- Recursive-descent parser ------------------------------------
 
 -- Skip leading newlines so blank lines between decls are invisible.
-fn skipNewlines(toks List[Token]) List[Token] =
+fn skipNewlines(toks List[Token]) =
   | TNewline :: rest -> skipNewlines rest
   | _ -> toks
 
 -- Top-level driver. Walks the token stream one fn at a time until TEnd.
-fn parseFnDecls(toks List[Token]) List[FnDecl] =
+fn parseFnDecls(toks List[Token]) =
   parseDeclsClean (skipNewlines toks)
 
-fn parseDeclsClean(toks List[Token]) List[FnDecl] =
+fn parseDeclsClean(toks List[Token]) =
   | TKwFn :: _ -> consDecl (parseFnDecl toks)
   | _ -> []
 
-fn consDecl(pair) List[FnDecl] =
+fn consDecl(pair) =
   let (d, rest) = pair
   d :: parseFnDecls rest
 
@@ -190,7 +190,7 @@ fn parseFnDecl(toks List[Token]) =
   | TKwFn :: TLower name :: rest ->
     let (prms, rest2) = parseParamGroups rest
     let (retTy, rest3) = parseReturnType rest2
-    let rest4 = match rest3 with
+    let rest4 = match rest3
       | TEq :: r -> r
       | _ -> rest3
    
@@ -248,7 +248,7 @@ fn parseFactor(toks List[Token]) =
   | TLower s :: rest -> (EVar s, rest)
   | TLParen :: rest ->
     let (e, rest2) = parseExpr rest
-    match rest2 with
+    match rest2
       | TRParen :: rest3 -> (e, rest3)
       | _ -> (e, rest2)
   | _ -> (ENum 0, toks)
@@ -256,7 +256,7 @@ fn parseFactor(toks List[Token]) =
 -- ---------- Pretty printer ----------------------------------------------
 
 -- Body expression: leaves print bare, binary nodes fully parenthesised.
-fn showExpr(e Expr) Str =
+fn showExpr(e Expr) =
   | ENum n -> intToStr n
   | EVar s -> s
   | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " + ") (showExpr r)) ")"
@@ -264,32 +264,32 @@ fn showExpr(e Expr) Str =
   | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " * ") (showExpr r)) ")"
   | EDiv l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " / ") (showExpr r)) ")"
 
-fn showTypeRef(t TypeRef) Str =
+fn showTypeRef(t TypeRef) =
   | TR s -> s
 
-fn showParam(p Param) Str =
+fn showParam(p Param) =
   | MkParam n t -> strConcat (strConcat (strConcat "(" n) ": ") (strConcat (showTypeRef t) ")")
 
 -- Render the curried param list as ` (a: Int) (b: Int)` with a leading
 -- space on every group, or ` ()` when there are no params at all. That
 -- matches the `fn answer ()` shape from the driver.
-fn showParams(ps List[Param]) Str =
+fn showParams(ps List[Param]) =
   if listIsEmpty ps
     " ()"
   else listFold (\acc p. strConcat (strConcat acc " ") (showParam p)) "" ps
 
-fn showReturn(r Maybe[TypeRef]) Str =
-  match r with
+fn showReturn(r Maybe[TypeRef]) =
+  match r
     | Some t -> showTypeRef t
     | None -> "?"
 
-fn showDecl(d FnDecl) Str =
+fn showDecl(d FnDecl) =
   | MkFn name prms ret body ->
     let headPart = strConcat (strConcat "fn " name) (showParams prms)
     let arrowPart = strConcat (strConcat headPart " -> ") (showReturn ret)
     strConcat (strConcat arrowPart " = ") (showExpr body)
 
-fn show(ds List[FnDecl]) Str =
+fn show(ds List[FnDecl]) =
   listFold (\acc d. if strLen acc == 0
     showDecl d
   else strConcat (strConcat acc "\n") (showDecl d)) "" ds

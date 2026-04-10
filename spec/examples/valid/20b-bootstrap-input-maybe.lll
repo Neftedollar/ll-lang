@@ -1,4 +1,4 @@
 module Examples.Clean
 type Maybe A = Some A | None
-fn wrap(v Int) Maybe[Int] = Some v
-fn main() Int = 1
+fn wrap(v Int) = Some v
+fn main() = 1

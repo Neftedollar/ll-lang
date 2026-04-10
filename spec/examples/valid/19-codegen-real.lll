@@ -302,8 +302,8 @@ type Module = MkModule Str List[TDecl]
 -- The arms stay shallow — every non-leaf recursive case is split into
 -- its own helper so `match` nesting never goes two levels deep. Same
 -- trick as `18-hminfer-real.lll`'s `unify` / `inferExpr` spines use.
-fn showTExpr(e TExpr) Str =
-  match e with
+fn showTExpr(e TExpr) =
+  match e
     | TEInt n -> showInt n
     | TEStr s -> showStr s
     | TEVar x -> x
@@ -317,27 +317,27 @@ fn showTExpr(e TExpr) Str =
 -- `TEInt n` -> `"<n>L"` (F# `int64` literal). Uses the stdlib's
 -- `intToStr` builtin and suffixes `L` because ll-lang's `Int` maps to
 -- F# `int64` in the host codegen.
-fn showInt(n Int) Str =
+fn showInt(n Int) =
   strConcat (intToStr n) "L"
 
 -- `TEStr s` -> `"\"<s>\""` (raw, no escape handling). The hardcoded
 -- test strings below (`"hello"`) contain no embedded quotes or
 -- backslashes, so the simplest possible emission works. Slice B adds
 -- real escape handling when user-authored strings start appearing.
-fn showStr(s Str) Str =
+fn showStr(s Str) =
   strConcat "\"" (strConcat s "\"")
 
 -- `TEAdd a b` -> `"(<a> + <b>)"`. Parens are unconditional — mirrors
 -- the host's `emitExpr` `binaryOp` arm which also always parenthesises
 -- to dodge F# operator-precedence ambiguity.
-fn showAdd(a TExpr)(b TExpr) Str =
+fn showAdd(a TExpr)(b TExpr) =
   strConcat "(" (strConcat (showTExpr a) (strConcat " + " (strConcat (showTExpr b) ")")))
 
 -- `TEApp f a` -> `"(<f> <a>)"`. Host's `emitExpr` wraps every
 -- application in parens too, for the same reason — curried apps are
 -- left-associative in F# but left-leaning chains like `f a b c` would
 -- need extra context tracking to drop them safely. Parens are free.
-fn showApp(f TExpr)(a TExpr) Str =
+fn showApp(f TExpr)(a TExpr) =
   strConcat "(" (strConcat (showTExpr f) (strConcat " " (strConcat (showTExpr a) ")")))
 
 -- `TELet n e1 e2` -> `"(let <n> = <e1> in <e2>)"` — the host's
@@ -345,7 +345,7 @@ fn showApp(f TExpr)(a TExpr) Str =
 -- multi-line let-in would need indentation tracking that this slice
 -- doesn't bother with; inline form costs long lines but works in any
 -- expression position.
-fn showLet(n Str)(e1 TExpr)(e2 TExpr) Str =
+fn showLet(n Str)(e1 TExpr)(e2 TExpr) =
   strConcat "(let " (strConcat n (strConcat " = " (strConcat (showTExpr e1) (strConcat " in " (strConcat (showTExpr e2) ")")))))
 
 -- `TELam x body` -> `"(fun <x> -> <body>)"`. Single-param lambda
@@ -353,14 +353,14 @@ fn showLet(n Str)(e1 TExpr)(e2 TExpr) Str =
 -- param and curries via nested lambdas, so this matches. The host's
 -- `TELam` arm in `Codegen.fs` line 158 area joins a param list with
 -- spaces; this slice's single-param form is a strict subset.
-fn showLam(x Str)(body TExpr) Str =
+fn showLam(x Str)(body TExpr) =
   strConcat "(fun " (strConcat x (strConcat " -> " (strConcat (showTExpr body) ")")))
 
 -- `TEIf c t e` -> `"(if <c> then <t> else <e>)"`. Unconditionally
 -- parenthesised, same as the host's `emitExpr` `TEIf` arm in
 -- `Codegen.fs` line 180 area, so the if-expression embeds cleanly in
 -- any parent expression position without offside-rule surprises.
-fn showIf(c TExpr)(t TExpr)(e TExpr) Str =
+fn showIf(c TExpr)(t TExpr)(e TExpr) =
   strConcat "(if " (strConcat (showTExpr c) (strConcat " then " (strConcat (showTExpr t) (strConcat " else " (strConcat (showTExpr e) ")")))))
 
 -- `TEMatch scr ps bs` -> `"(match <scr> with <arms>)"`. Arms are
@@ -371,7 +371,7 @@ fn showIf(c TExpr)(t TExpr)(e TExpr) Str =
 -- cost of long lines. The parallel `ps`/`bs` lists are walked in
 -- lockstep by `showArms`, same trick as `18-hminfer-real.lll`'s
 -- `inferMatchBranches`.
-fn showMatch(scr TExpr)(ps List[Pat])(bs List[TExpr]) Str =
+fn showMatch(scr TExpr)(ps List[Pat])(bs List[TExpr]) =
   strConcat "(match " (strConcat (showTExpr scr) (strConcat " with " (strConcat (showArms ps bs) ")")))
 
 -- ---------- Pattern + arm emission --------------------------------------
@@ -382,8 +382,8 @@ fn showMatch(scr TExpr)(ps List[Pat])(bs List[TExpr]) Str =
 --   PInt n -> "<n>L" (F# int64 literal — reuses `showInt`)
 --   PVar x -> "<x>"
 --   PWild  -> "_"
-fn showPat(p Pat) Str =
-  match p with
+fn showPat(p Pat) =
+  match p
     | PInt n -> showInt n
     | PVar x -> x
     | PWild -> "_"
@@ -393,16 +393,16 @@ fn showPat(p Pat) Str =
 -- same pattern as `18-hminfer-real.lll`'s `inferMatchBranches`. When
 -- either list runs out, emit nothing more (robust against stray tail
 -- mismatches; inference already rules those out at the front-end).
-fn showArms(ps List[Pat])(bs List[TExpr]) Str =
-  match ps with
+fn showArms(ps List[Pat])(bs List[TExpr]) =
+  match ps
     | p :: prest -> showArmsCons p prest bs
     | _ -> ""
 
 -- Tail-helper: consumed one head from `ps`, now peel a matching head
 -- from `bs` and glue in `"| <p> -> <b>"` plus the recursive rest.
 -- Split out of `showArms` so each `match` stays one level deep.
-fn showArmsCons(p Pat)(prest List[Pat])(bs List[TExpr]) Str =
-  match bs with
+fn showArmsCons(p Pat)(prest List[Pat])(bs List[TExpr]) =
+  match bs
     | b :: brest ->
       let head = strConcat "| " (strConcat (showPat p) (strConcat " -> " (showTExpr b)))
       let rest = showArms prest brest
@@ -417,8 +417,8 @@ fn showArmsCons(p Pat)(prest List[Pat])(bs List[TExpr]) Str =
 -- by `showDecl` for the non-empty-param branch. Empty list returns the
 -- empty string; `showDecl`'s own match keeps the empty case out of the
 -- caller path anyway but defending here costs nothing.
-fn showParams(ps List[Str]) Str =
-  match ps with
+fn showParams(ps List[Str]) =
+  match ps
     | p :: rest -> showParamsTail p rest
     | _ -> ""
 
@@ -426,8 +426,8 @@ fn showParams(ps List[Str]) Str =
 -- with single-space separators. Split out of `showParams` so the outer
 -- function's `match` stays one level deep (same trick as the rest of
 -- the file).
-fn showParamsTail(first Str)(rest List[Str]) Str =
-  match rest with
+fn showParamsTail(first Str)(rest List[Str]) =
+  match rest
     | p :: more -> strConcat first (strConcat " " (showParamsTail p more))
     | _ -> first
 
@@ -437,7 +437,7 @@ fn showParamsTail(first Str)(rest List[Str]) Str =
 -- the host's `emitTypeParams` in `Codegen.fs` line 67 area (which
 -- produces `'A` for every `TPBare` param). Only single-letter params
 -- are emitted in this slice.
-fn showTypeParam(p Str) Str =
+fn showTypeParam(p Str) =
   strConcat "'" p
 
 -- Render a single `TypeArg` as its F# type string. `TAName` covers the
@@ -446,8 +446,8 @@ fn showTypeParam(p Str) Str =
 -- `Shape`). `TAVar` prefixes with `'` so `A` becomes `'A`. Mirrors
 -- `emitType` in `Codegen.fs` line 51 area, minus `Float` / `Unit` /
 -- `Char` / `TyApp` / `TyFn` which this slice doesn't exercise.
-fn showTypeArg(a TypeArg) Str =
-  match a with
+fn showTypeArg(a TypeArg) =
+  match a
     | TAName n -> showTypeArgName n
     | TAVar v -> showTypeParam v
 
@@ -455,7 +455,7 @@ fn showTypeArg(a TypeArg) Str =
 -- `Bool` -> `bool`; anything else passes through verbatim (user-
 -- defined ADTs emit as their bare F# name). Split from `showTypeArg`
 -- so the outer match stays one level deep.
-fn showTypeArgName(n Str) Str =
+fn showTypeArgName(n Str) =
   if n == "Int"
     "int64"
   else if n == "Str"
@@ -470,29 +470,29 @@ fn showTypeArgName(n Str) Str =
 -- line 256 area. Empty list returns the empty string — callers that
 -- care about the empty vs non-empty distinction (`showCtor`) branch
 -- before calling this helper.
-fn showCtorArgs(args List[TypeArg]) Str =
-  match args with
+fn showCtorArgs(args List[TypeArg]) =
+  match args
     | a :: rest -> showCtorArgsTail (showTypeArg a) rest
     | _ -> ""
 
 -- Tail-helper: we've already rendered one head, now glue the rest on
 -- with ` * ` separators. Same shape as `showParamsTail`.
-fn showCtorArgsTail(acc Str)(rest List[TypeArg]) Str =
-  match rest with
+fn showCtorArgsTail(acc Str)(rest List[TypeArg]) =
+  match rest
     | a :: more -> showCtorArgsTail (strConcat acc (strConcat " * " (showTypeArg a))) more
     | _ -> acc
 
 -- Render a single `Ctor` as one indented arm line — `"    | Name"` for
 -- zero-arg ctors, `"    | Name of T1 * T2"` otherwise. Mirrors the
 -- host's `TBSum` arm emission in `Codegen.fs` line 252 area.
-fn showCtor(c Ctor) Str =
-  match c with
+fn showCtor(c Ctor) =
+  match c
     | MkCtor name args -> showCtorBody name args
 
 -- Split helper so `showCtor`'s outer match stays one level deep. Zero-
 -- arg ctors skip the `of ...` segment entirely.
-fn showCtorBody(name Str)(args List[TypeArg]) Str =
-  match args with
+fn showCtorBody(name Str)(args List[TypeArg]) =
+  match args
     | _ :: _ ->
       let argStr = showCtorArgs args
       strConcat "    | " (strConcat name (strConcat " of " argStr))
@@ -502,15 +502,15 @@ fn showCtorBody(name Str)(args List[TypeArg]) Str =
 -- Fold a `List[Ctor]` into a single newline-joined string. Each arm
 -- occupies its own indented line — `showCtor` supplies the `    | `
 -- prefix, so the joiner only needs `\n`.
-fn showCtors(cs List[Ctor]) Str =
-  match cs with
+fn showCtors(cs List[Ctor]) =
+  match cs
     | c :: rest -> showCtorsTail (showCtor c) rest
     | _ -> ""
 
 -- Tail-helper: one head already rendered, glue the rest on with `\n`
 -- separators. Mirrors `showCtorArgsTail` / `showParamsTail`.
-fn showCtorsTail(acc Str)(rest List[Ctor]) Str =
-  match rest with
+fn showCtorsTail(acc Str)(rest List[Ctor]) =
+  match rest
     | c :: more -> showCtorsTail (strConcat acc (strConcat "\n" (showCtor c))) more
     | _ -> acc
 
@@ -518,16 +518,16 @@ fn showCtorsTail(acc Str)(rest List[Ctor]) Str =
 -- the empty string (so `Shape` emits `type Shape = ...` with no `<>`);
 -- non-empty lists get the full `<'A, 'B>` form. Mirrors
 -- `emitTypeParams` in `Codegen.fs` line 67 area.
-fn showTypeParams(ps List[Str]) Str =
-  match ps with
+fn showTypeParams(ps List[Str]) =
+  match ps
     | p :: rest -> strConcat "<" (strConcat (showTypeParamsBody p rest) ">")
     | _ -> ""
 
 -- Tail-helper: consumed one head, glue the rest on with `", "`
 -- separators. Split out of `showTypeParams` so each `match` stays one
 -- level deep.
-fn showTypeParamsBody(first Str)(rest List[Str]) Str =
-  match rest with
+fn showTypeParamsBody(first Str)(rest List[Str]) =
+  match rest
     | p :: more -> strConcat (showTypeParam first) (strConcat ", " (showTypeParamsBody p more))
     | _ -> showTypeParam first
 
@@ -544,15 +544,15 @@ fn showTypeParamsBody(first Str)(rest List[Str]) Str =
 -- `showFnGroup` / `showFnDeclFirst` / `showFnDeclCont` instead of this
 -- single-decl entry point; see `splitAndShowDecls` below. Mirrors the
 -- host's `emitDecl` in `src/LLLangCompiler/Codegen.fs` line 244 area.
-fn showDecl(d TDecl) Str =
-  match d with
+fn showDecl(d TDecl) =
+  match d
     | TDFn name ps body -> showFnDeclDispatch name ps body
     | TDType name tps ctors -> showTypeDecl name tps ctors
 
 -- Route a `TDFn` to the right emitter: main with zero params goes to
 -- `showMainDecl`; everything else falls through to `showFnDeclPlain`.
 -- Split from `showDecl` so the outer `match d` stays one level deep.
-fn showFnDeclDispatch(name Str)(ps List[Str])(body TExpr) Str =
+fn showFnDeclDispatch(name Str)(ps List[Str])(body TExpr) =
   if isMainFn name ps
     showMainDecl body
   else showFnDeclPlain name ps body
@@ -561,8 +561,8 @@ fn showFnDeclDispatch(name Str)(ps List[Str])(body TExpr) Str =
 -- by `showFnDeclDispatch` / `splitAndShowDecls` to single out the entry
 -- point. Mirrors the host's `isMainFn` check in `Codegen.fs` line 268
 -- area, minus the `TypedFnSig` wrapping.
-fn isMainFn(name Str)(ps List[Str]) Bool =
-  match ps with
+fn isMainFn(name Str)(ps List[Str]) =
+  match ps
     | _ :: _ -> false
     | _ ->
       if name == "main"
@@ -575,8 +575,8 @@ fn isMainFn(name Str)(ps List[Str]) Bool =
 -- make the Phase 7.8e split with `showFnDeclFirst` / `showFnDeclCont`
 -- explicit. Only called for a **singleton** non-main fn group (a run
 -- of length 1); 2+ runs go through `showFnGroup` instead.
-fn showFnDeclPlain(name Str)(ps List[Str])(body TExpr) Str =
-  match ps with
+fn showFnDeclPlain(name Str)(ps List[Str])(body TExpr) =
+  match ps
     | _ :: _ ->
       let paramStr = showParams ps
       strConcat "let " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
@@ -589,8 +589,8 @@ fn showFnDeclPlain(name Str)(ps List[Str])(body TExpr) Str =
 -- `let rec` even when the fns don't actually reference each other —
 -- it's stricter, not wrong. Host `Codegen.fs` line 360 area builds
 -- the same shape via `"let rec " + first`.
-fn showFnDeclFirst(name Str)(ps List[Str])(body TExpr) Str =
-  match ps with
+fn showFnDeclFirst(name Str)(ps List[Str])(body TExpr) =
+  match ps
     | _ :: _ ->
       let paramStr = showParams ps
       strConcat "let rec " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
@@ -601,8 +601,8 @@ fn showFnDeclFirst(name Str)(ps List[Str])(body TExpr) Str =
 -- non-first fn in a 2+ `let rec` block gets this prefix. Same shape
 -- as `showFnDeclFirst` just with `"and "` instead of `"let rec "`.
 -- Mirrors `Codegen.fs` line 362 area's `"and " + c` mapping.
-fn showFnDeclCont(name Str)(ps List[Str])(body TExpr) Str =
-  match ps with
+fn showFnDeclCont(name Str)(ps List[Str])(body TExpr) =
+  match ps
     | _ :: _ ->
       let paramStr = showParams ps
       strConcat "and " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
@@ -611,15 +611,15 @@ fn showFnDeclCont(name Str)(ps List[Str])(body TExpr) Str =
 
 -- Dispatch a single TDFn to `showFnDeclFirst`. Extracted so
 -- `showFnGroup`'s outer `match` stays one level deep.
-fn showFnDeclFirstD(d TDecl) Str =
-  match d with
+fn showFnDeclFirstD(d TDecl) =
+  match d
     | TDFn name ps body -> showFnDeclFirst name ps body
     | _ -> ""
 
 -- Dispatch a single TDFn to `showFnDeclCont`. Same split reason as
 -- `showFnDeclFirstD`.
-fn showFnDeclContD(d TDecl) Str =
-  match d with
+fn showFnDeclContD(d TDecl) =
+  match d
     | TDFn name ps body -> showFnDeclCont name ps body
     | _ -> ""
 
@@ -628,7 +628,7 @@ fn showFnDeclContD(d TDecl) Str =
 -- user body with a dummy `argv` parameter and a trailing `0` exit
 -- code. Mirrors the host's `Codegen.fs` line 270 area:
 --   `"[<EntryPoint>]\nlet main (argv: string[]) =\n    " + body + "\n    0"`
-fn showMainDecl(body TExpr) Str =
+fn showMainDecl(body TExpr) =
   let header = "[<EntryPoint>]\nlet main (argv: string[]) =\n    "
   let trailer = "\n    0"
   strConcat header (strConcat (showTExpr body) trailer)
@@ -638,8 +638,8 @@ fn showMainDecl(body TExpr) Str =
 -- `showFnDeclPlain` via `showDecl`. Mirrors `emitDeclGroup` in
 -- `Codegen.fs` line 348 area. Uses `showFnDeclFirstD` for the head
 -- and `listMap showFnDeclContD` + `joinLines` for the tail.
-fn showFnGroup(fns List[TDecl]) Str =
-  match fns with
+fn showFnGroup(fns List[TDecl]) =
+  match fns
     | d :: rest -> showFnGroupCons d rest
     | _ -> ""
 
@@ -648,7 +648,7 @@ fn showFnGroup(fns List[TDecl]) Str =
 -- continuation on its own line, no blank-line separator (F# accepts
 -- adjacent `and` lines without vertical spacing, just like the host's
 -- `String.concat "\n"` call in `Codegen.fs` line 362).
-fn showFnGroupCons(first TDecl)(rest List[TDecl]) Str =
+fn showFnGroupCons(first TDecl)(rest List[TDecl]) =
   let head = showFnDeclFirstD first
   let tails = listMap showFnDeclContD rest
   let tailStr = joinLines tails
@@ -663,7 +663,7 @@ fn showFnGroupCons(first TDecl)(rest List[TDecl]) Str =
 -- level — F# has no offside-rule trouble between sibling `| ctor`
 -- lines once they're left-anchored. Phase 7.8d+ adds records and
 -- wrapped types; this slice only handles sum bodies.
-fn showTypeDecl(name Str)(tps List[Str])(ctors List[Ctor]) Str =
+fn showTypeDecl(name Str)(tps List[Str])(ctors List[Ctor]) =
   let paramStr = showTypeParams tps
   let arms = showCtors ctors
   strConcat "type " (strConcat name (strConcat paramStr (strConcat " =\n" arms)))
@@ -675,7 +675,7 @@ fn showTypeDecl(name Str)(tps List[Str])(ctors List[Ctor]) Str =
 -- because `fn main` has a single-expression body and ll-lang has no
 -- statement sequencing, so all four emitted decls have to funnel into
 -- a single `printfn` argument.
-fn joinLines(xs List[Str]) Str =
+fn joinLines(xs List[Str]) =
   listFold (\acc s. if strLen acc == 0
     s
   else strConcat (strConcat acc "\n") s) "" xs
@@ -685,7 +685,7 @@ fn joinLines(xs List[Str]) Str =
 -- `showModule` so the header, prelude block, and per-decl renderings
 -- all sit on their own F# source "paragraph". Same shape as
 -- `joinLines`, just a different separator.
-fn joinBlocks(xs List[Str]) Str =
+fn joinBlocks(xs List[Str]) =
   listFold (\acc s. if strLen acc == 0
     s
   else strConcat (strConcat acc "\n\n") s) "" xs
@@ -714,7 +714,7 @@ fn joinBlocks(xs List[Str]) Str =
 -- of a zero-param `()` fn) because the module parser doesn't yet
 -- accept `fnName ()` as an expression — callers pass `0` and the
 -- body discards it.
-fn fsharpPrelude(_ignored Int) Str =
+fn fsharpPrelude(_ignored Int) =
   let l1 = "// --- ll-lang stdlib prelude (auto-generated) ---"
   let l2 = "let listMap f xs = List.map f xs"
   let l3 = "let listLen (xs: 'a list) : int64 = int64 (List.length xs)"
@@ -739,8 +739,8 @@ fn fsharpPrelude(_ignored Int) Str =
 -- Phase 7.8e adds mutual-recursion grouping (`let rec ... and ...` for
 -- 2+ consecutive non-main TDFns) and `[<EntryPoint>]` on the zero-
 -- param `main` fn — both routed through `splitAndShowDecls`.
-fn showModule(m Module) Str =
-  match m with
+fn showModule(m Module) =
+  match m
     | MkModule path decls -> showModuleBody path decls
 
 -- Split helper so `showModule`'s outer match stays one level deep.
@@ -748,7 +748,7 @@ fn showModule(m Module) Str =
 -- rendered via `splitAndShowDecls` (which handles the Phase 7.8e
 -- `let rec` grouping + `[<EntryPoint>]` main slicing), all glued with
 -- blank-line separators.
-fn showModuleBody(path Str)(decls List[TDecl]) Str =
+fn showModuleBody(path Str)(decls List[TDecl]) =
   let header = strConcat "module " path
   let prelude = fsharpPrelude 0
   let declBlock = splitAndShowDecls decls
@@ -779,14 +779,14 @@ fn showModuleBody(path Str)(decls List[TDecl]) Str =
 -- non-fn boundary (TDType or main) we flush `pending` as either a
 -- singleton `showDecl` or a `showFnGroup` rec block, then emit the
 -- boundary decl and continue. End-of-list also flushes `pending`.
-fn splitAndShowDecls(decls List[TDecl]) Str =
+fn splitAndShowDecls(decls List[TDecl]) =
   splitAndShowLoop decls [] ""
 
 -- Main loop of the grouping walker. `decls` is the remaining input;
 -- `pending` is the reversed list of non-main TDFns waiting to be
 -- flushed; `acc` is the output string built so far.
-fn splitAndShowLoop(decls List[TDecl])(pending List[TDecl])(acc Str) Str =
-  match decls with
+fn splitAndShowLoop(decls List[TDecl])(pending List[TDecl])(acc Str) =
+  match decls
     | d :: rest -> splitAndShowStep d rest pending acc
     | _ -> flushPendingFns pending acc
 
@@ -794,8 +794,8 @@ fn splitAndShowLoop(decls List[TDecl])(pending List[TDecl])(acc Str) Str =
 -- push it onto `pending` (non-main fn) or flush and emit it as its
 -- own block (TDType or main fn). Split from `splitAndShowLoop` so
 -- the outer `match decls` stays one level deep.
-fn splitAndShowStep(d TDecl)(rest List[TDecl])(pending List[TDecl])(acc Str) Str =
-  match d with
+fn splitAndShowStep(d TDecl)(rest List[TDecl])(pending List[TDecl])(acc Str) =
+  match d
     | TDFn name ps body -> splitAndShowStepFn d name ps rest pending acc
     | TDType _ _ _ ->
       let acc2 = flushPendingFns pending acc
@@ -807,7 +807,7 @@ fn splitAndShowStep(d TDecl)(rest List[TDecl])(pending List[TDecl])(acc Str) Str
 -- path (its own block, then keep walking); non-main goes onto the
 -- `pending` run. Pre-computes `isMainFn name ps` once and branches
 -- on the result.
-fn splitAndShowStepFn(d TDecl)(name Str)(ps List[Str])(rest List[TDecl])(pending List[TDecl])(acc Str) Str =
+fn splitAndShowStepFn(d TDecl)(name Str)(ps List[Str])(rest List[TDecl])(pending List[TDecl])(acc Str) =
   if isMainFn name ps
     splitAndShowStepMain d rest pending acc
   else splitAndShowLoop rest (d :: pending) acc
@@ -817,7 +817,7 @@ fn splitAndShowStepFn(d TDecl)(name Str)(ps List[Str])(rest List[TDecl])(pending
 -- walking. Split out so `splitAndShowStepFn`'s body stays one line
 -- per branch (the parser needs `if ... then EXPR else EXPR` to live
 -- on a single logical line).
-fn splitAndShowStepMain(d TDecl)(rest List[TDecl])(pending List[TDecl])(acc Str) Str =
+fn splitAndShowStepMain(d TDecl)(rest List[TDecl])(pending List[TDecl])(acc Str) =
   let acc2 = flushPendingFns pending acc
   let mainBlock = showDecl d
   let acc3 = appendBlockStr mainBlock acc2
@@ -828,8 +828,8 @@ fn splitAndShowStepMain(d TDecl)(rest List[TDecl])(pending List[TDecl])(acc Str)
 -- `listReverse` to restore source order, then dispatch: empty →
 -- no-op, singleton → plain `showDecl` block, 2+ → `showFnGroup`
 -- (let rec ... and ...).
-fn flushPendingFns(pending List[TDecl])(acc Str) Str =
-  match pending with
+fn flushPendingFns(pending List[TDecl])(acc Str) =
+  match pending
     | _ :: _ -> flushPendingFnsNonEmpty (listReverse pending) acc
     | _ -> acc
 
@@ -837,11 +837,11 @@ fn flushPendingFns(pending List[TDecl])(acc Str) Str =
 -- (source-order) fn list and dispatches on its length-shape:
 -- singleton goes through `showDecl` (plain `let`), 2+ goes through
 -- `showFnGroup` (let rec ... and ...).
-fn flushPendingFnsNonEmpty(fns List[TDecl])(acc Str) Str =
-  match fns with
+fn flushPendingFnsNonEmpty(fns List[TDecl])(acc Str) =
+  match fns
     | d :: rest ->
       let block =
-        match rest with
+        match rest
           | _ :: _ -> showFnGroup fns
           | _ -> showDecl d
      
@@ -852,7 +852,7 @@ fn flushPendingFnsNonEmpty(fns List[TDecl])(acc Str) Str =
 -- separator if `acc` is non-empty, else just return `block`. Same
 -- shape as `joinBlocks`'s fold body, just extracted for the
 -- incremental append pattern `splitAndShowLoop` needs.
-fn appendBlockStr(block Str)(acc Str) Str =
+fn appendBlockStr(block Str)(acc Str) =
   if strLen acc == 0
     block
   else strConcat acc (strConcat "\n\n" block)

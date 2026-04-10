@@ -452,7 +452,7 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
             | Ok body -> Ok (ELam(List.ofSeq parms, body))
             | Error e -> Error e
     | KwMatch ->
-        // match <scrut> with | pat -> body | pat -> body ...
+        // match <scrut> | pat -> body | pat -> body ...
         // Arms can appear inline OR on subsequent indented lines.
         let matchIdx = c.Pos
         advance c
@@ -460,52 +460,48 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
         | Error e -> Error e
         | Ok scrut ->
             skipNewlines c
-            match skip c KwWith with
-            | Error e -> Error e
-            | Ok () ->
-                skipNewlines c
-                // Optional INDENT for indented arm block.
-                let hadIndent = curTok c = Indent
-                if hadIndent then advance c
-                skipNewlines c
-                // Phase 7.3a bugfix (bug 1): arm bodies use parseBlockExpr
-                // so multi-line `let .. in` chains inside a match arm fold
-                // their continuations at the arm's indent level and keep
-                // their bindings in scope. parseExprInner alone would hand
-                // off only the first let to the arm, leaving subsequent
-                // ones to float out to the surrounding module and produce
-                // E002 UnboundVar on the names they were meant to bind.
-                //
-                // Phase 7.3a bugfix (bug 2): propagate the first arm-level
-                // parse error via `armErr` instead of silently dropping
-                // every arm after a bad pattern. With the old behaviour a
-                // single `| [] -> ...` arm would truncate the whole match
-                // and leave only the arms that happened to come before it
-                // in the AST, producing a runtime MatchFailure.
-                let branches = ResizeArray<Pattern * Expr>()
-                let mutable cont = true
-                let mutable armErr : string option = None
-                while cont && curTok c = Bar do
-                    advance c  // consume |
-                    match parsePattern c with
+            // Optional INDENT for indented arm block.
+            let hadIndent = curTok c = Indent
+            if hadIndent then advance c
+            skipNewlines c
+            // Phase 7.3a bugfix (bug 1): arm bodies use parseBlockExpr
+            // so multi-line `let .. in` chains inside a match arm fold
+            // their continuations at the arm's indent level and keep
+            // their bindings in scope. parseExprInner alone would hand
+            // off only the first let to the arm, leaving subsequent
+            // ones to float out to the surrounding module and produce
+            // E002 UnboundVar on the names they were meant to bind.
+            //
+            // Phase 7.3a bugfix (bug 2): propagate the first arm-level
+            // parse error via `armErr` instead of silently dropping
+            // every arm after a bad pattern. With the old behaviour a
+            // single `| [] -> ...` arm would truncate the whole match
+            // and leave only the arms that happened to come before it
+            // in the AST, producing a runtime MatchFailure.
+            let branches = ResizeArray<Pattern * Expr>()
+            let mutable cont = true
+            let mutable armErr : string option = None
+            while cont && curTok c = Bar do
+                advance c  // consume |
+                match parsePattern c with
+                | Error e -> armErr <- Some e; cont <- false
+                | Ok pat ->
+                    match skip c Arrow with
                     | Error e -> armErr <- Some e; cont <- false
-                    | Ok pat ->
-                        match skip c Arrow with
+                    | Ok () ->
+                        match parseBlockExpr c with
                         | Error e -> armErr <- Some e; cont <- false
-                        | Ok () ->
-                            match parseBlockExpr c with
-                            | Error e -> armErr <- Some e; cont <- false
-                            | Ok body ->
-                                branches.Add((pat, body))
-                                skipNewlines c
-                if hadIndent then skip c Dedent |> ignore
-                match armErr with
-                | Some e -> Error e
-                | None ->
-                    // Tag at the `match` keyword so E003 non-exhaustive points
-                    // at the match expression rather than 0:0.
-                    if branches.Count > 0 then Ok (recordAt c matchIdx (EMatchOf(scrut, List.ofSeq branches)))
-                    else Error "Expected match branches after 'with'"
+                        | Ok body ->
+                            branches.Add((pat, body))
+                            skipNewlines c
+            if hadIndent then skip c Dedent |> ignore
+            match armErr with
+            | Some e -> Error e
+            | None ->
+                // Tag at the `match` keyword so E003 non-exhaustive points
+                // at the match expression rather than 0:0.
+                if branches.Count > 0 then Ok (recordAt c matchIdx (EMatchOf(scrut, List.ofSeq branches)))
+                else Error "Expected match branches (| pat -> expr)"
     | _ -> parsePipe c
 
 /// Parse an expression inside an indented block. If the parsed expression

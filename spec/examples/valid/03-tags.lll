@@ -14,7 +14,7 @@ tag kg
 let uid = "user-42"[UserId]
 
 -- functions with tagged params
-fn getUser(id Str[UserId]) Maybe[Str] = Some "alice"
+fn getUser(id Str[UserId]) = Some "alice"
 fn sendEmail(to Str[Email]) = to
 
 -- unit algebra — return type inferred
@@ -27,7 +27,7 @@ tag Raw
 
 type Email[state] = Str
 
-fn validate(s Str) Result[Str][Str] =
+fn validate(s Str) =
   if s != ""
     Ok s
   else Err "empty"
