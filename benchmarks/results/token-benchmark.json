@@ -1,0 +1,296 @@
+{
+  "generated": "2026-04-10",
+  "tokenizer": "cl100k_base",
+  "tier1": [
+    {
+      "label": "01-basics",
+      "lll_tokens": 116,
+      "fs_tokens_no_prelude": 118,
+      "fs_tokens_with_prelude": 714,
+      "ts_tokens": 142,
+      "ratio_fs_lll": 1.02
+    },
+    {
+      "label": "Map (RBTree)",
+      "lll_tokens": 1897,
+      "fs_tokens_no_prelude": 2073,
+      "fs_tokens_with_prelude": 2849,
+      "ts_tokens": null,
+      "ratio_fs_lll": 1.09
+    },
+    {
+      "label": "Toml parser",
+      "lll_tokens": 2170,
+      "fs_tokens_no_prelude": 2359,
+      "fs_tokens_with_prelude": 3135,
+      "ts_tokens": null,
+      "ratio_fs_lll": 1.09
+    },
+    {
+      "label": "Bootstrap",
+      "lll_tokens": 17822,
+      "fs_tokens_no_prelude": 18372,
+      "fs_tokens_with_prelude": 19148,
+      "ts_tokens": null,
+      "ratio_fs_lll": 1.03
+    }
+  ],
+  "tier2": [
+    {
+      "label": "TOML parser",
+      "lll_tokens": 2170,
+      "fs_handwritten_tokens": 1439,
+      "ratio": 0.66
+    }
+  ],
+  "tier3": [
+    {
+      "label": "sum_type_3_ctor",
+      "variants": {
+        "lll": {
+          "tokens_raw": 11,
+          "tokens_code": 11,
+          "bytes": 52
+        },
+        "fs": {
+          "tokens_raw": 14,
+          "tokens_code": 14,
+          "bytes": 60,
+          "ratio_vs_lll": 1.27
+        },
+        "ts": {
+          "tokens_raw": 36,
+          "tokens_code": 36,
+          "bytes": 104,
+          "ratio_vs_lll": 3.27
+        },
+        "py": {
+          "tokens_raw": 49,
+          "tokens_code": 49,
+          "bytes": 180,
+          "ratio_vs_lll": 4.45
+        },
+        "java": {
+          "tokens_raw": 35,
+          "tokens_code": 35,
+          "bytes": 188,
+          "ratio_vs_lll": 3.18
+        }
+      }
+    },
+    {
+      "label": "pattern_match",
+      "variants": {
+        "lll": {
+          "tokens_raw": 39,
+          "tokens_code": 39,
+          "bytes": 92
+        },
+        "fs": {
+          "tokens_raw": 43,
+          "tokens_code": 43,
+          "bytes": 105,
+          "ratio_vs_lll": 1.1
+        },
+        "ts": {
+          "tokens_raw": 58,
+          "tokens_code": 58,
+          "bytes": 175,
+          "ratio_vs_lll": 1.49
+        },
+        "py": {
+          "tokens_raw": 52,
+          "tokens_code": 52,
+          "bytes": 192,
+          "ratio_vs_lll": 1.33
+        },
+        "java": {
+          "tokens_raw": 58,
+          "tokens_code": 58,
+          "bytes": 177,
+          "ratio_vs_lll": 1.49
+        }
+      }
+    },
+    {
+      "label": "curried_fn",
+      "variants": {
+        "lll": {
+          "tokens_raw": 13,
+          "tokens_code": 13,
+          "bytes": 32
+        },
+        "fs": {
+          "tokens_raw": 21,
+          "tokens_code": 21,
+          "bytes": 45,
+          "ratio_vs_lll": 1.62
+        },
+        "ts": {
+          "tokens_raw": 20,
+          "tokens_code": 20,
+          "bytes": 56,
+          "ratio_vs_lll": 1.54
+        },
+        "py": {
+          "tokens_raw": 18,
+          "tokens_code": 18,
+          "bytes": 48,
+          "ratio_vs_lll": 1.38
+        },
+        "java": {
+          "tokens_raw": 16,
+          "tokens_code": 16,
+          "bytes": 49,
+          "ratio_vs_lll": 1.23
+        }
+      }
+    },
+    {
+      "label": "parametric_adt",
+      "variants": {
+        "lll": {
+          "tokens_raw": 8,
+          "tokens_code": 8,
+          "bytes": 28
+        },
+        "fs": {
+          "tokens_raw": 12,
+          "tokens_code": 12,
+          "bytes": 34,
+          "ratio_vs_lll": 1.5
+        },
+        "ts": {
+          "tokens_raw": 23,
+          "tokens_code": 23,
+          "bytes": 60,
+          "ratio_vs_lll": 2.88
+        },
+        "py": {
+          "tokens_raw": 47,
+          "tokens_code": 47,
+          "bytes": 172,
+          "ratio_vs_lll": 5.88
+        },
+        "java": {
+          "tokens_raw": 31,
+          "tokens_code": 31,
+          "bytes": 140,
+          "ratio_vs_lll": 3.88
+        }
+      }
+    }
+  ],
+  "per_file_details": [
+    {
+      "path": "/Users/roman/Documents/dev/tens/code/ll-lang/spec/examples/valid/01-basics.lll",
+      "lang": "lll",
+      "lines": 26,
+      "code_lines": 14,
+      "tokens_raw": 142,
+      "tokens_code": 116,
+      "bytes": 408,
+      "functions": 5
+    },
+    {
+      "path": "/Users/roman/Documents/dev/tens/code/ll-lang/spec/examples/valid/01-basics.fs",
+      "lang": "fs",
+      "lines": 60,
+      "code_lines": 49,
+      "tokens_raw": 734,
+      "tokens_code": 714,
+      "bytes": 2343,
+      "functions": 43,
+      "tokens_no_prelude": 118,
+      "prelude_tokens": 615
+    },
+    {
+      "path": "/Users/roman/Documents/dev/tens/code/ll-lang/spec/examples/valid/01-basics.ts",
+      "lang": "ts",
+      "lines": 20,
+      "code_lines": 8,
+      "tokens_raw": 166,
+      "tokens_code": 142,
+      "bytes": 499,
+      "functions": 6
+    },
+    {
+      "path": "/Users/roman/Documents/dev/tens/code/ll-lang/stdlib/src/Map.lll",
+      "lang": "lll",
+      "lines": 223,
+      "code_lines": 152,
+      "tokens_raw": 2320,
+      "tokens_code": 1897,
+      "bytes": 6874,
+      "functions": 15
+    },
+    {
+      "path": "/Users/roman/Documents/dev/tens/code/ll-lang/stdlib/src/Map.fs",
+      "lang": "fs",
+      "lines": 109,
+      "code_lines": 88,
+      "tokens_raw": 2871,
+      "tokens_code": 2849,
+      "bytes": 8049,
+      "functions": 44,
+      "tokens_no_prelude": 2073,
+      "prelude_tokens": 795
+    },
+    {
+      "path": "/Users/roman/Documents/dev/tens/code/ll-lang/stdlib/src/Toml.lll",
+      "lang": "lll",
+      "lines": 272,
+      "code_lines": 194,
+      "tokens_raw": 2519,
+      "tokens_code": 2170,
+      "bytes": 8594,
+      "functions": 26
+    },
+    {
+      "path": "/Users/roman/Documents/dev/tens/code/ll-lang/stdlib/src/Toml.fs",
+      "lang": "fs",
+      "lines": 131,
+      "code_lines": 103,
+      "tokens_raw": 3160,
+      "tokens_code": 3135,
+      "bytes": 9841,
+      "functions": 44,
+      "tokens_no_prelude": 2359,
+      "prelude_tokens": 795
+    },
+    {
+      "path": "/Users/roman/Documents/dev/tens/code/ll-lang/spec/examples/valid/20-bootstrap-compiler.lll",
+      "lang": "lll",
+      "lines": 2869,
+      "code_lines": 1468,
+      "tokens_raw": 36960,
+      "tokens_code": 17822,
+      "bytes": 123621,
+      "functions": 242
+    },
+    {
+      "path": "/Users/roman/Documents/dev/tens/code/ll-lang/spec/examples/valid/20-bootstrap-compiler.fs",
+      "lang": "fs",
+      "lines": 1223,
+      "code_lines": 960,
+      "tokens_raw": 19739,
+      "tokens_code": 19148,
+      "bytes": 59258,
+      "functions": 44,
+      "tokens_no_prelude": 18372,
+      "prelude_tokens": 795
+    },
+    {
+      "path": "/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangCompiler/Manifest.fs",
+      "lang": "fs",
+      "lines": 182,
+      "code_lines": 154,
+      "tokens_raw": 1729,
+      "tokens_code": 1439,
+      "bytes": 7816,
+      "functions": 5,
+      "tokens_no_prelude": 1439,
+      "prelude_tokens": 0
+    }
+  ]
+}
