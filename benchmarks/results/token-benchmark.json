@@ -4,15 +4,15 @@
   "tier1": [
     {
       "label": "01-basics",
-      "lll_tokens": 116,
+      "lll_tokens": 118,
       "fs_tokens_no_prelude": 118,
       "fs_tokens_with_prelude": 714,
       "ts_tokens": 142,
-      "ratio_fs_lll": 1.02
+      "ratio_fs_lll": 1.0
     },
     {
       "label": "Map (RBTree)",
-      "lll_tokens": 1897,
+      "lll_tokens": 1910,
       "fs_tokens_no_prelude": 2073,
       "fs_tokens_with_prelude": 2849,
       "ts_tokens": null,
@@ -20,15 +20,15 @@
     },
     {
       "label": "Toml parser",
-      "lll_tokens": 2170,
+      "lll_tokens": 2175,
       "fs_tokens_no_prelude": 2359,
       "fs_tokens_with_prelude": 3135,
       "ts_tokens": null,
-      "ratio_fs_lll": 1.09
+      "ratio_fs_lll": 1.08
     },
     {
       "label": "Bootstrap",
-      "lll_tokens": 17822,
+      "lll_tokens": 17918,
       "fs_tokens_no_prelude": 18372,
       "fs_tokens_with_prelude": 19148,
       "ts_tokens": null,
@@ -38,7 +38,7 @@
   "tier2": [
     {
       "label": "TOML parser",
-      "lll_tokens": 2170,
+      "lll_tokens": 2175,
       "fs_handwritten_tokens": 1439,
       "ratio": 0.66
     }
@@ -185,11 +185,11 @@
     {
       "path": "/Users/roman/Documents/dev/tens/code/ll-lang/spec/examples/valid/01-basics.lll",
       "lang": "lll",
-      "lines": 26,
-      "code_lines": 14,
-      "tokens_raw": 142,
-      "tokens_code": 116,
-      "bytes": 408,
+      "lines": 28,
+      "code_lines": 16,
+      "tokens_raw": 144,
+      "tokens_code": 118,
+      "bytes": 406,
       "functions": 5
     },
     {
@@ -217,11 +217,11 @@
     {
       "path": "/Users/roman/Documents/dev/tens/code/ll-lang/stdlib/src/Map.lll",
       "lang": "lll",
-      "lines": 223,
-      "code_lines": 152,
-      "tokens_raw": 2320,
-      "tokens_code": 1897,
-      "bytes": 6874,
+      "lines": 235,
+      "code_lines": 164,
+      "tokens_raw": 2333,
+      "tokens_code": 1910,
+      "bytes": 6879,
       "functions": 15
     },
     {
@@ -239,11 +239,11 @@
     {
       "path": "/Users/roman/Documents/dev/tens/code/ll-lang/stdlib/src/Toml.lll",
       "lang": "lll",
-      "lines": 272,
-      "code_lines": 194,
-      "tokens_raw": 2519,
-      "tokens_code": 2170,
-      "bytes": 8594,
+      "lines": 292,
+      "code_lines": 214,
+      "tokens_raw": 2524,
+      "tokens_code": 2175,
+      "bytes": 8580,
       "functions": 26
     },
     {
@@ -261,11 +261,11 @@
     {
       "path": "/Users/roman/Documents/dev/tens/code/ll-lang/spec/examples/valid/20-bootstrap-compiler.lll",
       "lang": "lll",
-      "lines": 2869,
-      "code_lines": 1468,
-      "tokens_raw": 36960,
-      "tokens_code": 17822,
-      "bytes": 123621,
+      "lines": 2997,
+      "code_lines": 1596,
+      "tokens_raw": 37054,
+      "tokens_code": 17918,
+      "bytes": 123685,
       "functions": 242
     },
     {
