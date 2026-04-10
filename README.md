@@ -19,7 +19,7 @@ Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting 
 
 ## Status
 
-Working end-to-end compiler with a **518-test** suite, written in F# / .NET 10. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins) → module system → MCP server → TypeScript + Python + Java codegen.
+Working end-to-end compiler with a **527-test** suite, written in F# / .NET 10. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib (~50 builtins) → module system → MCP server → TypeScript + Python + Java codegen.
 
 **Bootstrap: COMPLETE (Phase 7.10).** `compiler₁.fs == compiler₂.fs` — ll-lang compiles itself.
 

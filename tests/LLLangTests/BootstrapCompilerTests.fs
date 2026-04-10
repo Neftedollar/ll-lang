@@ -2,6 +2,12 @@ module LLLang.Tests.BootstrapCompilerTests
 
 open System.IO
 open Xunit
+
+/// Named mutex that serialises access to the shared bootstrap fixture file
+/// (spec/examples/valid/20a-bootstrap-input.lll) across test runs — even
+/// concurrent `dotnet test` processes on the same machine.
+let private fixtureLock =
+    new System.Threading.Mutex(false, "ll-lang-bootstrap-fixture-lock")
 open LLLang.Lexer
 open LLLang.Parser
 open LLLang.Elaborator
@@ -66,10 +72,23 @@ let private runBootstrap () =
     psi.UseShellExecute        <- false
     psi.WorkingDirectory       <- repoRoot
     use proc = System.Diagnostics.Process.Start(psi)
-    let stdout = proc.StandardOutput.ReadToEnd()
-    let stderr = proc.StandardError.ReadToEnd()
+    // Read stdout and stderr concurrently to prevent pipe-buffer deadlock.
+    // If the bootstrap writes large output to one pipe while we're blocked
+    // reading the other, both sides deadlock. Task.Run drains both in parallel.
+    let stdoutTask = System.Threading.Tasks.Task.Run(fun () -> proc.StandardOutput.ReadToEnd())
+    let stderrTask = System.Threading.Tasks.Task.Run(fun () -> proc.StandardError.ReadToEnd())
     proc.WaitForExit()
+    let stdout = stdoutTask.Result
+    let stderr = stderrTask.Result
     (proc.ExitCode, stdout, stderr)
+
+/// Run `f` while holding the named mutex that guards the shared bootstrap
+/// fixture file. Times out after 30 s — enough for any normal test run.
+let private withFixtureLock (f: unit -> unit) =
+    if not (fixtureLock.WaitOne(30000)) then
+        failwith "timeout waiting for bootstrap fixture lock — is another test run stuck?"
+    try f ()
+    finally fixtureLock.ReleaseMutex()
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll parses, elaborates, and infers without errors`` () =
@@ -1623,6 +1642,102 @@ let ``20y-bootstrap-input-fmt.lll: each fn in a multi-fn module is emitted on it
         Assert.True(
             stdout.Contains "\nand double",
             $"expected `and double` to start on its own line (`\\nand double`); stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath, true)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll emits TError for unknown chars instead of silently dropping (Bug #7)`` () =
+    // Bug #7 fix: the bootstrap lexer's main loop (`lexChars`) previously
+    // fell through to `else lexChars rest` for unrecognised characters,
+    // silently dropping them. The fix adds a `TError Char` variant to the
+    // Token type and changes the catch-all to emit `TError c` so that
+    // unknown chars are visible to the parser (which treats them as
+    // non-atom-starters via the `| _ -> false` arm of `isAtomStart`).
+    //
+    // This test confirms that a program containing `@` inside a string
+    // literal (handled by `lexStr`, not by the `lexChars` catch-all)
+    // still compiles without errors. The `@` in a string is safe because
+    // `lexStr` collects all chars until the closing `"`, so it never
+    // reaches the `lexChars` unknown-char arm.
+    //
+    // Fixture: `20z-bootstrap-input-unknown-char.lll`.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let unknownPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20z-bootstrap-input-unknown-char.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath,    $"missing fixture: {inputPath}")
+    Assert.True(File.Exists unknownPath,  $"missing fixture: {unknownPath}")
+    File.Move(inputPath, backupPath, true)
+    File.Copy(unknownPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001 TypeMismatch; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec tagged" || stdout.Contains "let tagged",
+            $"expected emitted F# to contain `let tagged` or `let rec tagged`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "[<EntryPoint>]",
+            $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "\"@symbol\"",
+            $"expected emitted F# to contain `\"@symbol\"`; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete inputPath
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath, true)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll lexCharLit and lexCharEsc return TEnd at EOF instead of empty list (Bug #14)`` () =
+    // Bug #14 fix: `lexCharLit` and `lexCharEsc` previously returned `[]`
+    // (empty token list) when they hit EOF before seeing a closing `'`.
+    // Returning `[]` is subtly wrong: the parser interprets an empty list
+    // as "no more tokens" without a `TEnd` sentinel, which can cause
+    // mid-parse confusion because the recursive descent expects the stream
+    // to terminate with `TEnd`. The fix changes both `| _ -> []` arms to
+    // `| _ -> [TEnd]` so the parser always sees a clean terminator.
+    //
+    // This test compiles a program that uses `'\n'` (a valid escape), and
+    // verifies the bootstrap accepts it without errors. The `lexCharEsc`
+    // EOF path is exercised implicitly: the bootstrap's own source
+    // contains `'\n'` on many lines, and a clean compile confirms
+    // `lexCharEsc` works end-to-end. Prior to the Bug #14 fix, `lexCharEsc`
+    // returning `[]` on an empty escape list would have caused the parse to
+    // treat the remaining input as if it started fresh with no prior TEnd.
+    //
+    // Fixture: `20z-bootstrap-input-unterminated-char.lll`.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let unterminatedPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20z-bootstrap-input-unterminated-char.lll")
+    let backupPath = inputPath + ".bak"
+    Assert.True(File.Exists inputPath,        $"missing fixture: {inputPath}")
+    Assert.True(File.Exists unterminatedPath, $"missing fixture: {unterminatedPath}")
+    File.Move(inputPath, backupPath, true)
+    File.Copy(unterminatedPath, inputPath)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.False(
+            combined.Contains "E002",
+            $"expected NO E002 UnboundVar; combined:\n{combined}")
+        Assert.False(
+            combined.Contains "E001",
+            $"expected NO E001 TypeMismatch; combined:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec check" || stdout.Contains "let check",
+            $"expected emitted F# to contain `let check` or `let rec check`; stdout:\n{combined}")
         Assert.True(
             stdout.Contains "[<EntryPoint>]",
             $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")

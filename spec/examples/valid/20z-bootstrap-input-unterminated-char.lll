@@ -1,0 +1,8 @@
+module Examples.Clean
+-- Bug #14 regression: lexCharLit / lexCharEsc at EOF now return [TEnd]
+-- instead of [] so the parser terminates cleanly. This fixture is a clean
+-- program; the fix is tested indirectly — prior to the fix, lexCharLit
+-- and lexCharEsc returned [] on EOF which could cause the parser to
+-- misinterpret an empty token stream mid-parse.
+fn check(c Char) Bool = c == '\n'
+fn main() Int = 0

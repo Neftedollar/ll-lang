@@ -18,7 +18,7 @@ type LLError = {
 
 let private e001 line col got expected = {
     Code = E001; Line = line; Col = col
-    Message = sprintf "E001 %d:%d TypeMismatch %A %A" line col got expected }
+    Message = sprintf "E001 %d:%d TypeMismatch %s %s" line col (typeExprToStr got) (typeExprToStr expected) }
 
 let private e002 line col name = {
     Code = E002; Line = line; Col = col
@@ -30,11 +30,11 @@ let private e003 line col typeName missing = {
 
 let private e004 line col got expected = {
     Code = E004; Line = line; Col = col
-    Message = sprintf "E004 %d:%d UnitMismatch %A %A" line col got expected }
+    Message = sprintf "E004 %d:%d UnitMismatch %s %s" line col (typeExprToStr got) (typeExprToStr expected) }
 
 let private e005 line col paramType argType = {
     Code = E005; Line = line; Col = col
-    Message = sprintf "E005 %d:%d TagViolation %A %A" line col paramType argType }
+    Message = sprintf "E005 %d:%d TagViolation %s %s" line col (typeExprToStr paramType) (typeExprToStr argType) }
 
 /// Arithmetic and comparison operators pre-populated as TyVar wildcards.
 /// These are parsed as EApp(EApp(EVar "+", ...), ...) and must not trigger E002

@@ -62,6 +62,25 @@ type TypeExpr =
     | TyFn of TypeExpr * TypeExpr             // A -> B
     | TyTagged of TypeExpr * UnitExpr         // Float[m/s]
 
+/// Render a TypeExpr in source-syntax form for user-facing error messages.
+/// Produces `Int`, `Maybe[Int]`, `A -> B`, `Float[m/s]`, `'$0` — never F# DU syntax.
+let rec typeExprToStr (t: TypeExpr) : string =
+    match t with
+    | TyName n  -> n
+    | TyVar v when v.Length > 0 && v.[0] = '$' -> $"'%s{v[1..]}"   // flex: '$0' → ''0'
+    | TyVar v   -> $"'{v}"                                            // rigid: 'A
+    | TyApp(TyName f, arg) -> $"%s{f}[%s{typeExprToStr arg}]"
+    | TyApp(a, b) -> $"(%s{typeExprToStr a})[%s{typeExprToStr b}]"
+    | TyFn(a, b)  -> $"%s{typeExprToStr a} -> %s{typeExprToStr b}"
+    | TyTagged(a, u) -> $"%s{typeExprToStr a}[%s{unitExprToStr u}]"
+
+and private unitExprToStr (u: UnitExpr) : string =
+    match u with
+    | UName n      -> n
+    | UMul(a, b)   -> $"%s{unitExprToStr a}*%s{unitExprToStr b}"
+    | UDiv(a, b)   -> $"%s{unitExprToStr a}/%s{unitExprToStr b}"
+    | UPow(a, n)   -> $"%s{unitExprToStr a}^%d{n}"
+
 // ---- Literals -------------------------------------------------------
 
 type Literal =

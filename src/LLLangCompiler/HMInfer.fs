@@ -14,11 +14,11 @@ let private mkErr code line col msg : LLError =
 /// Position-less error emitters. Unification returns errors without a
 /// source position (it doesn't see the source AST); callers that DO know
 /// the source expression later reposition the error via `repos`.
-let private e001 t1 t2 = mkErr E001 0 0 $"TypeMismatch {t1} vs {t2}"
+let private e001 t1 t2 = mkErr E001 0 0 $"TypeMismatch {typeExprToStr t1} vs {typeExprToStr t2}"
 let private e002 name  = mkErr E002 0 0 $"UnboundVar {name}"
-let private e004 t1 t2 = mkErr E004 0 0 $"UnitMismatch {t1} vs {t2}"
-let private e005 t1 t2 = mkErr E005 0 0 $"TaggedUntaggedMismatch {t1} vs {t2}"
-let private e008 v  t  = mkErr E008 0 0 $"OccursCheck {v} in {t}"
+let private e004 t1 t2 = mkErr E004 0 0 $"UnitMismatch {typeExprToStr t1} vs {typeExprToStr t2}"
+let private e005 t1 t2 = mkErr E005 0 0 $"TaggedUntaggedMismatch {typeExprToStr t1} vs {typeExprToStr t2}"
+let private e008 v  t  = mkErr E008 0 0 $"OccursCheck {v} in {typeExprToStr t}"
 
 /// Look up a node's source position in the PosMap side-table.
 /// Accepts `obj | null` so callers can pass the result of `box` directly
@@ -499,8 +499,7 @@ and private patternType (st: InferState) (env: Env) (pat: Pattern) : TypeExpr * 
             let nExpected = List.length expectedArgTys
             let nActual   = List.length argPats
             if nActual > nExpected then
-                st.Errors <- st.Errors @ [e001 (sprintf "constructor %s (arity %d)" name nExpected)
-                                                (sprintf "applied to %d argument(s)" nActual)]
+                st.Errors <- st.Errors @ [mkErr E001 0 0 (sprintf "TypeMismatch constructor %s (arity %d) applied to %d argument(s)" name nExpected nActual)]
             // Only zip the patterns that have a corresponding expected type;
             // extra patterns (over-application) are skipped — the error above
             // already records the problem.
