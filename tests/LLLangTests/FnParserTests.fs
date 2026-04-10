@@ -59,10 +59,10 @@ let ``13-fnparser-real.lll runs and pretty-prints all four fn decls`` () =
     // `()`; missing return types print as `?`; binary body ops are fully
     // parenthesised; leaves print bare.
     let expected =
-        [ "fn add (a: Int) (b: Int) -> Int = (a + b)"
-          "fn double (x: Int) -> ? = (x * 2)"
-          "fn const (a: Int) (b: Int) -> Int = a"
-          "fn answer () -> Int = 42" ]
+        [ "add (a: Int) (b: Int) -> Int = (a + b)"
+          "double (x: Int) -> ? = (x * 2)"
+          "const (a: Int) (b: Int) -> Int = a"
+          "answer () -> Int = 42" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),

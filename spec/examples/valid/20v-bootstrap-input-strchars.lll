@@ -1,7 +1,7 @@
 module Examples.Clean
-fn chars(s Str) = strChars s
-fn rebuilt(s Str) = strFromChars (strChars s)
-fn rev(xs List[Char]) = listReverse xs
-fn showInt(n Int) = intToStr n
-fn isWs(c Char) = charIsSpace c
-fn main() = rebuilt "hi"
+chars(s Str) = strChars s
+rebuilt(s Str) = strFromChars (strChars s)
+rev(xs List[Char]) = listReverse xs
+showInt(n Int) = intToStr n
+isWs(c Char) = charIsSpace c
+main() = rebuilt "hi"

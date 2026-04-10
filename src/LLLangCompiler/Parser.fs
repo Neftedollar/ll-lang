@@ -374,6 +374,36 @@ and private parsePipeInline (c: Ctx) : Result<Expr, string> =
 
 and private parseExprInner (c: Ctx) : Result<Expr, string> =
     skipNewlines c
+    // Change C: keyword-free let-binding. `name = expr` or `_ = expr`
+    // (where `=` is the *immediate* next token) is a let-binding without
+    // requiring the `let` keyword. Destructuring `let (pat) = expr` still
+    // uses the `let` keyword to avoid tuple-vs-binding ambiguity.
+    let inline nextTok () =
+        if c.Pos + 1 < c.Tokens.Length then c.Tokens[c.Pos + 1].Token else Eof
+    let isKeywordFreeLet =
+        match curTok c with
+        | (Ident _ | Underscore) -> nextTok () = Eq
+        | _ -> false
+    if isKeywordFreeLet then
+        let saved = c.Pos
+        match parsePattern c with
+        | Error _ ->
+            c.Pos <- saved
+            parsePipe c
+        | Ok pat ->
+            if curTok c <> Eq then
+                c.Pos <- saved
+                parsePipe c
+            else
+                advance c  // consume =
+                match parseExprInner c with
+                | Error e -> Error e
+                | Ok e1 ->
+                    let body = None
+                    match pat with
+                    | PVar name -> Ok (ELet(name, e1, body))
+                    | _ -> Ok (ELetPat(pat, e1, body))
+    else
     match curTok c with
     | Indent ->
         // Expression position opens an indented block (e.g. body of `else`
@@ -1039,8 +1069,9 @@ let private parseDecl (c: Ctx) : Result<Decl, string> =
     skipNewlines c
     let declIdx = c.Pos
     match curTok c with
-    | KwFn ->
-        advance c
+    | Ident _ ->
+        // Function declaration: `name constraint* param* retType? = body`
+        // Lowercase name followed by params/constraints; no keyword prefix.
         match parseFnSig c with
         | Error e -> Error e
         | Ok sig' ->
@@ -1072,36 +1103,34 @@ let private parseDecl (c: Ctx) : Result<Decl, string> =
                     match pat with
                     | PVar name -> Ok (recordAt c declIdx (DLet(name, expr)))
                     | _ -> Ok (recordAt c declIdx (DLetPat(pat, expr)))
-    | KwType ->
+    | TypeId name ->
+        // Type declaration: `Name TypeParams* = TypeBody`
+        // No keyword prefix needed — uppercase start distinguishes type decls.
         advance c
-        match curTok c with
-        | TypeId name ->
-            advance c
-            let parms = ResizeArray<TypeParam>()
-            let mutable cont = true
-            while cont do
+        let parms = ResizeArray<TypeParam>()
+        let mutable cont = true
+        while cont do
+            match curTok c with
+            | Ident p | TypeId p -> parms.Add(TPBare p); advance c
+            | LBrack ->
+                let saved = c.Pos
+                advance c
                 match curTok c with
-                | Ident p | TypeId p -> parms.Add(TPBare p); advance c
-                | LBrack ->
-                    let saved = c.Pos
+                | Ident p | TypeId p ->
                     advance c
-                    match curTok c with
-                    | Ident p | TypeId p ->
+                    if curTok c = RBrack then
                         advance c
-                        if curTok c = RBrack then
-                            advance c
-                            parms.Add(TPPhantom p)
-                        else
-                            c.Pos <- saved; cont <- false
-                    | _ -> c.Pos <- saved; cont <- false
-                | _ -> cont <- false
-            match skip c Eq with
+                        parms.Add(TPPhantom p)
+                    else
+                        c.Pos <- saved; cont <- false
+                | _ -> c.Pos <- saved; cont <- false
+            | _ -> cont <- false
+        match skip c Eq with
+        | Error e -> Error e
+        | Ok () ->
+            match parseTypeBody c with
+            | Ok body -> Ok (DType(name, List.ofSeq parms, body))
             | Error e -> Error e
-            | Ok () ->
-                match parseTypeBody c with
-                | Ok body -> Ok (DType(name, List.ofSeq parms, body))
-                | Error e -> Error e
-        | t -> Error $"Expected type name, got {t}"
     | KwTag ->
         advance c
         match curTok c with
@@ -1138,12 +1167,10 @@ let private parseDecl (c: Ctx) : Result<Decl, string> =
                         skipNewlines c
                         if curTok c = Dedent || curTok c = Eof then ()
                         else
-                            match skip c KwFn with
-                            | Error _ -> ()
-                            | Ok () ->
-                                match parseFnSig c with
-                                | Ok s -> sigs.Add(s)
-                                | Error _ -> ()
+                            // fn-sig: `name constraint* param* retType` (no `fn` keyword)
+                            match parseFnSig c with
+                            | Ok s -> sigs.Add(s)
+                            | Error _ -> advance c  // skip bad token
                         skipNewlines c
                     skip c Dedent |> ignore
                     Ok (DTrait(name, List.ofSeq tvars, List.ofSeq sigs))
@@ -1169,18 +1196,16 @@ let private parseDecl (c: Ctx) : Result<Decl, string> =
                             skipNewlines c
                             if curTok c = Dedent || curTok c = Eof then ()
                             else
-                                match skip c KwFn with
+                                // impl fn: `name param* = body` (no `fn` keyword)
+                                match parseFnSig c with
                                 | Error _ -> advance c  // skip bad token
-                                | Ok () ->
-                                    match parseFnSig c with
+                                | Ok sig' ->
+                                    match skip c Eq with
                                     | Error _ -> ()
-                                    | Ok sig' ->
-                                        match skip c Eq with
+                                    | Ok () ->
+                                        match parseFnBody c with
+                                        | Ok expr -> impls.Add((sig', expr))
                                         | Error _ -> ()
-                                        | Ok () ->
-                                            match parseFnBody c with
-                                            | Ok expr -> impls.Add((sig', expr))
-                                            | Error _ -> ()
                             skipNewlines c
                         skip c Dedent |> ignore
                         Ok (recordAt c declIdx (DImpl(traitName, typeName, List.ofSeq impls)))

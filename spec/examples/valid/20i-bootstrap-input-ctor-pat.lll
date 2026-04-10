@@ -1,4 +1,4 @@
 module Examples.Clean
-type Maybe A = Some A | None
-fn unwrap(m Maybe[Int]) = match m | Some n -> n | None -> 0
-fn main() = unwrap (Some 5)
+Maybe A = Some A | None
+unwrap(m Maybe[Int]) = match m | Some n -> n | None -> 0
+main() = unwrap (Some 5)

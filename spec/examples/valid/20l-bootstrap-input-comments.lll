@@ -1,5 +1,5 @@
 module Examples.Clean
 -- this is a line comment
-fn greet() = "hi"  -- trailing comment
+greet() = "hi"  -- trailing comment
 -- another full-line comment
-fn main() = 0
+main() = 0

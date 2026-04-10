@@ -1,5 +1,5 @@
 module Examples.Clean
-fn first(xs List[Int]) =
+first(xs List[Int]) =
   | x :: _ -> x
   | _ -> 0
-fn main() = first [1 2 3]
+main() = first [1 2 3]

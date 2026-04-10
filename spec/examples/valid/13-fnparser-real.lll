@@ -26,10 +26,9 @@ module Examples.FnParser
 -- parenthesised, leaves print as int literals or bare names. The runtime
 -- test string-matches each of the four decls in the driver input.
 
-type Maybe A = Some A | None
+Maybe A = Some A | None
 
-type Token =
-  | TKwFn
+Token =
   | TLower Str
   | TUpper Str
   | TNum Int
@@ -43,11 +42,11 @@ type Token =
   | TNewline
   | TEnd
 
-type TypeRef = TR Str
+TypeRef = TR Str
 
-type Param = MkParam Str TypeRef
+Param = MkParam Str TypeRef
 
-type Expr =
+Expr =
   | ENum Int
   | EVar Str
   | EAdd Expr Expr
@@ -55,32 +54,32 @@ type Expr =
   | EMul Expr Expr
   | EDiv Expr Expr
 
-type FnDecl = MkFn Str List[Param] Maybe[TypeRef] Expr
+FnDecl = MkFn Str List[Param] Maybe[TypeRef] Expr
 
 -- ---------- Char predicates ---------------------------------------------
 
-fn isUpperChar(c Char) =
-  let n = charToInt c
+isUpperChar(c Char) =
+  n = charToInt c
   if n < 65
     false
   else if n > 90
     false
   else true
 
-fn isLowerChar(c Char) =
-  let n = charToInt c
+isLowerChar(c Char) =
+  n = charToInt c
   if n < 97
     false
   else if n > 122
     false
   else true
 
-fn isIdStart(c Char) =
+isIdStart(c Char) =
   if isUpperChar c
     true
   else isLowerChar c
 
-fn isIdCont(c Char) =
+isIdCont(c Char) =
   if isIdStart c
     true
   else charIsDigit c
@@ -88,14 +87,14 @@ fn isIdCont(c Char) =
 -- ---------- Lexer --------------------------------------------------------
 
 -- Greedy take/drop while predicate, shared shape with earlier milestones.
-fn takeWhilePred(p)(cs List[Char]) =
+takeWhilePred(p)(cs List[Char]) =
   | c :: rest ->
     if p c
       listAppend [c] (takeWhilePred p rest)
     else []
   | _ -> []
 
-fn dropWhilePred(p)(cs List[Char]) =
+dropWhilePred(p)(cs List[Char]) =
   | c :: rest ->
     if p c
       dropWhilePred p rest
@@ -104,18 +103,17 @@ fn dropWhilePred(p)(cs List[Char]) =
 
 -- Unwrap Maybe Int from strToInt; malformed digit runs fall back to 0
 -- (the lexer only calls this on strings that are already all-digits).
-fn parseIntStr(s Str) =
+parseIntStr(s Str) =
   match strToInt s
     | Some n -> n
     | None -> 0
 
 -- Classify an identifier string. `fn` is the keyword; uppercase-start
 -- becomes TUpper (used for type names); everything else is TLower.
-fn classifyIdent(s Str) =
+classifyIdent(s Str) =
   match s
-    | "fn" -> TKwFn
     | _ ->
-      let cs = strChars s
+      cs = strChars s
       match cs
         | c :: _ ->
           if isUpperChar c
@@ -123,21 +121,21 @@ fn classifyIdent(s Str) =
           else TLower s
         | _ -> TLower s
 
-fn lexId(cs List[Char]) =
-  let idChars = takeWhilePred isIdCont cs
-  let leftover = dropWhilePred isIdCont cs
-  let tok = classifyIdent (strFromChars idChars)
+lexId(cs List[Char]) =
+  idChars = takeWhilePred isIdCont cs
+  leftover = dropWhilePred isIdCont cs
+  tok = classifyIdent (strFromChars idChars)
   listAppend [tok] (lexChars leftover)
 
 -- Phase 7.3b-fixes bug 1: `[TNum (...)]` is now a single-element list with
 -- the ctor already applied, so the `let tok = ... in` helper has been
 -- inlined into the final listAppend call.
-fn lexNum(cs List[Char]) =
-  let digits = takeWhilePred charIsDigit cs
-  let leftover = dropWhilePred charIsDigit cs
+lexNum(cs List[Char]) =
+  digits = takeWhilePred charIsDigit cs
+  leftover = dropWhilePred charIsDigit cs
   listAppend [TNum (parseIntStr (strFromChars digits))] (lexChars leftover)
 
-fn lexChars(cs List[Char]) =
+lexChars(cs List[Char]) =
   | c :: rest ->
     if c == '\n'
       listAppend [TNewline] (lexChars rest)
@@ -164,33 +162,33 @@ fn lexChars(cs List[Char]) =
     else lexChars rest
   | _ -> [TEnd]
 
-fn tokenize(src Str) = lexChars (strChars src)
+tokenize(src Str) = lexChars (strChars src)
 
 -- ---------- Recursive-descent parser ------------------------------------
 
 -- Skip leading newlines so blank lines between decls are invisible.
-fn skipNewlines(toks List[Token]) =
+skipNewlines(toks List[Token]) =
   | TNewline :: rest -> skipNewlines rest
   | _ -> toks
 
 -- Top-level driver. Walks the token stream one fn at a time until TEnd.
-fn parseFnDecls(toks List[Token]) =
+parseFnDecls(toks List[Token]) =
   parseDeclsClean (skipNewlines toks)
 
-fn parseDeclsClean(toks List[Token]) =
-  | TKwFn :: _ -> consDecl (parseFnDecl toks)
+parseDeclsClean(toks List[Token]) =
+  | TLower _ :: _ -> consDecl (parseFnDecl toks)
   | _ -> []
 
-fn consDecl(pair) =
+consDecl(pair) =
   let (d, rest) = pair
   d :: parseFnDecls rest
 
 -- Single fn decl: 'fn' lower param* typeName? '=' expr
-fn parseFnDecl(toks List[Token]) =
-  | TKwFn :: TLower name :: rest ->
+parseFnDecl(toks List[Token]) =
+  | TLower name :: rest ->
     let (prms, rest2) = parseParamGroups rest
     let (retTy, rest3) = parseReturnType rest2
-    let rest4 = match rest3
+    rest4 = match rest3
       | TEq :: r -> r
       | _ -> rest3
    
@@ -200,7 +198,7 @@ fn parseFnDecl(toks List[Token]) =
 
 -- Zero or more param groups. `()` means "no params" and produces [];
 -- `(name Type)` contributes a single MkParam to the running list.
-fn parseParamGroups(toks List[Token]) =
+parseParamGroups(toks List[Token]) =
   | TLParen :: TRParen :: rest -> ([], rest)
   | TLParen :: TLower pname :: TUpper tname :: TRParen :: rest ->
     let (ps, rest2) = parseParamGroups rest
@@ -209,7 +207,7 @@ fn parseParamGroups(toks List[Token]) =
 
 -- Optional return type: a TUpper just before `=` becomes Some (TR name),
 -- anything else (most commonly the `=` token itself) becomes None.
-fn parseReturnType(toks List[Token]) =
+parseReturnType(toks List[Token]) =
   | TUpper tname :: rest -> (Some (TR tname), rest)
   | _ -> (None, toks)
 
@@ -217,11 +215,11 @@ fn parseReturnType(toks List[Token]) =
 
 -- Five-way mutual recursion. Same shape as the arithmetic parser, but
 -- parseFactor also accepts TLower as a variable reference.
-fn parseExpr(toks List[Token]) =
+parseExpr(toks List[Token]) =
   let (e, rest) = parseTerm toks
   parseExprTail e rest
 
-fn parseExprTail(lhs Expr)(toks List[Token]) =
+parseExprTail(lhs Expr)(toks List[Token]) =
   | TPlus :: rest ->
     let (r, rest2) = parseTerm rest
     parseExprTail (EAdd lhs r) rest2
@@ -230,11 +228,11 @@ fn parseExprTail(lhs Expr)(toks List[Token]) =
     parseExprTail (ESub lhs r) rest2
   | _ -> (lhs, toks)
 
-fn parseTerm(toks List[Token]) =
+parseTerm(toks List[Token]) =
   let (e, rest) = parseFactor toks
   parseTermTail e rest
 
-fn parseTermTail(lhs Expr)(toks List[Token]) =
+parseTermTail(lhs Expr)(toks List[Token]) =
   | TStar :: rest ->
     let (r, rest2) = parseFactor rest
     parseTermTail (EMul lhs r) rest2
@@ -243,7 +241,7 @@ fn parseTermTail(lhs Expr)(toks List[Token]) =
     parseTermTail (EDiv lhs r) rest2
   | _ -> (lhs, toks)
 
-fn parseFactor(toks List[Token]) =
+parseFactor(toks List[Token]) =
   | TNum n :: rest -> (ENum n, rest)
   | TLower s :: rest -> (EVar s, rest)
   | TLParen :: rest ->
@@ -256,7 +254,7 @@ fn parseFactor(toks List[Token]) =
 -- ---------- Pretty printer ----------------------------------------------
 
 -- Body expression: leaves print bare, binary nodes fully parenthesised.
-fn showExpr(e Expr) =
+showExpr(e Expr) =
   | ENum n -> intToStr n
   | EVar s -> s
   | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " + ") (showExpr r)) ")"
@@ -264,40 +262,40 @@ fn showExpr(e Expr) =
   | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " * ") (showExpr r)) ")"
   | EDiv l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " / ") (showExpr r)) ")"
 
-fn showTypeRef(t TypeRef) =
+showTypeRef(t TypeRef) =
   | TR s -> s
 
-fn showParam(p Param) =
+showParam(p Param) =
   | MkParam n t -> strConcat (strConcat (strConcat "(" n) ": ") (strConcat (showTypeRef t) ")")
 
 -- Render the curried param list as ` (a: Int) (b: Int)` with a leading
 -- space on every group, or ` ()` when there are no params at all. That
 -- matches the `fn answer ()` shape from the driver.
-fn showParams(ps List[Param]) =
+showParams(ps List[Param]) =
   if listIsEmpty ps
     " ()"
   else listFold (\acc p. strConcat (strConcat acc " ") (showParam p)) "" ps
 
-fn showReturn(r Maybe[TypeRef]) =
+showReturn(r Maybe[TypeRef]) =
   match r
     | Some t -> showTypeRef t
     | None -> "?"
 
-fn showDecl(d FnDecl) =
+showDecl(d FnDecl) =
   | MkFn name prms ret body ->
-    let headPart = strConcat (strConcat "fn " name) (showParams prms)
-    let arrowPart = strConcat (strConcat headPart " -> ") (showReturn ret)
+    headPart = strConcat name (showParams prms)
+    arrowPart = strConcat (strConcat headPart " -> ") (showReturn ret)
     strConcat (strConcat arrowPart " = ") (showExpr body)
 
-fn show(ds List[FnDecl]) =
+show(ds List[FnDecl]) =
   listFold (\acc d. if strLen acc == 0
     showDecl d
   else strConcat (strConcat acc "\n") (showDecl d)) "" ds
 
 -- ---------- Driver -------------------------------------------------------
 
-fn main() =
-  let src = "fn add(a Int)(b Int) Int = a + b\nfn double(x Int) = x * 2\nfn const(a Int)(b Int) Int = a\nfn answer() Int = 42"
-  let toks = tokenize src
-  let decls = parseFnDecls toks
+main() =
+  src = "add(a Int)(b Int) Int = a + b\ndouble(x Int) = x * 2\nconst(a Int)(b Int) Int = a\nanswer() Int = 42"
+  toks = tokenize src
+  decls = parseFnDecls toks
   printfn (show decls)

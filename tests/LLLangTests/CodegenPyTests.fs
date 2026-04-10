@@ -14,7 +14,7 @@ let private pySrc (src: string) : string =
 
 [<Fact>]
 let ``Py: sum type emits dataclass per constructor`` () =
-    let src = "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    let src = "module M\nShape = Circle Float | Rect Float Float | Empty"
     let py = pySrc src
     Assert.Contains("@dataclass", py)
     Assert.Contains("class Circle", py)
@@ -23,43 +23,43 @@ let ``Py: sum type emits dataclass per constructor`` () =
 
 [<Fact>]
 let ``Py: sum type emits _tag field`` () =
-    let src = "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    let src = "module M\nShape = Circle Float | Rect Float Float | Empty"
     let py = pySrc src
     Assert.Contains("_tag: str", py)
 
 [<Fact>]
 let ``Py: sum type emits Union type alias`` () =
-    let src = "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    let src = "module M\nShape = Circle Float | Rect Float Float | Empty"
     let py = pySrc src
     Assert.Contains("Shape = Union[", py)
 
 [<Fact>]
 let ``Py: Int maps to int`` () =
-    let src = "module M\nfn id(x Int) Int = x"
+    let src = "module M\nid(x Int) Int = x"
     let py = pySrc src
     Assert.Contains(": int", py)
 
 [<Fact>]
 let ``Py: Str maps to str`` () =
-    let src = "module M\nfn greet(s Str) Str = s"
+    let src = "module M\ngreet(s Str) Str = s"
     let py = pySrc src
     Assert.Contains(": str", py)
 
 [<Fact>]
 let ``Py: Bool maps to bool`` () =
-    let src = "module M\nfn neg(b Bool) Bool = !b"
+    let src = "module M\nneg(b Bool) Bool = !b"
     let py = pySrc src
     Assert.Contains(": bool", py)
 
 [<Fact>]
 let ``Py: Float maps to float`` () =
-    let src = "module M\nfn sq(x Float) Float = x * x"
+    let src = "module M\nsq(x Float) Float = x * x"
     let py = pySrc src
     Assert.Contains(": float", py)
 
 [<Fact>]
 let ``Py: Maybe A maps to Optional`` () =
-    let src = "module M\ntype Maybe A = Some A | None\nfn wrap(x Int) Maybe[Int] = Some x"
+    let src = "module M\nMaybe A = Some A | None\nwrap(x Int) Maybe[Int] = Some x"
     let py = pySrc src
     Assert.Contains("Optional", py)
 
@@ -67,14 +67,14 @@ let ``Py: Maybe A maps to Optional`` () =
 
 [<Fact>]
 let ``Py: single-param fn emits def`` () =
-    let src = "module M\nfn double(x Int) Int = x * 2"
+    let src = "module M\ndouble(x Int) Int = x * 2"
     let py = pySrc src
     Assert.Contains("def double(", py)
     Assert.Contains("return", py)
 
 [<Fact>]
 let ``Py: curried fn emits nested defs`` () =
-    let src = "module M\nfn add(a Int)(b Int) Int = a + b"
+    let src = "module M\nadd(a Int)(b Int) Int = a + b"
     let py = pySrc src
     // Two def keywords - outer and inner
     let defCount = py.Split([|"\ndef "; "\n    def "|], System.StringSplitOptions.None).Length - 1
@@ -88,14 +88,14 @@ let ``Py: let binding emits assignment`` () =
 
 [<Fact>]
 let ``Py: if-then-else emits ternary`` () =
-    let src = "module M\nfn abs(x Int) Int =\n  if x > 0\n    x\n  else 0 - x"
+    let src = "module M\nabs(x Int) Int =\n  if x > 0\n    x\n  else 0 - x"
     let py = pySrc src
     Assert.Contains("if", py)
     Assert.Contains("else", py)
 
 [<Fact>]
 let ``Py: strConcat emits plus`` () =
-    let src = "module M\nfn greet(name Str) Str = strConcat \"Hello \" name"
+    let src = "module M\ngreet(name Str) Str = strConcat \"Hello \" name"
     let py = pySrc src
     Assert.Contains("+", py)
 
@@ -127,13 +127,13 @@ let ``Py: emits header comment`` () =
 
 [<Fact>]
 let ``Py: match on sum type checks _tag`` () =
-    let src = "module M\ntype Color = Red | Green | Blue\nfn toInt(c Color) Int = match c | Red -> 0 | Green -> 1 | Blue -> 2"
+    let src = "module M\nColor = Red | Green | Blue\ntoInt(c Color) Int = match c | Red -> 0 | Green -> 1 | Blue -> 2"
     let py = pySrc src
     Assert.Contains("_tag", py)
 
 [<Fact>]
 let ``Py: match emits ternary chain`` () =
-    let src = "module M\ntype Color = Red | Green\nfn toInt(c Color) Int = match c | Red -> 0 | Green -> 1"
+    let src = "module M\nColor = Red | Green\ntoInt(c Color) Int = match c | Red -> 0 | Green -> 1"
     let py = pySrc src
     Assert.Contains("if", py)
     Assert.Contains("else", py)
@@ -142,14 +142,14 @@ let ``Py: match emits ternary chain`` () =
 
 [<Fact>]
 let ``compileTarget Python produces same as compileToPy`` () =
-    let src = "module M\nfn id(x Int) Int = x"
+    let src = "module M\nid(x Int) Int = x"
     let a = compileToPy src
     let b = compileTarget Python src
     Assert.Equal(a, b)
 
 [<Fact>]
 let ``compileTarget Python does not emit F# let keyword`` () =
-    let src = "module M\nfn id(x Int) Int = x"
+    let src = "module M\nid(x Int) Int = x"
     match compileTarget Python src with
     | Ok py ->
         // Python output should not have F# let bindings

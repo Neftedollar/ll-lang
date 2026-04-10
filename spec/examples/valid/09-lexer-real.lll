@@ -11,23 +11,23 @@ module Examples.RealLexer
 -- This is the first step toward Phase 7 self-hosting: prove the language
 -- can express its own lexer in idiomatic ll-lang.
 
-type Token = TIdent Str | TInt Str | TLet | TFn | TIf | TElse | TPlus | TMinus | TStar | TSlash | TEq | TLt | TGt | TLParen | TRParen | TUnknown Str
+Token = TIdent Str | TInt Str | TLet | TFn | TIf | TElse | TPlus | TMinus | TStar | TSlash | TEq | TLt | TGt | TLParen | TRParen | TUnknown Str
 
 -- Char predicates
-fn isIdStart(c Char) = charIsAlpha c
-fn isIdCont(c Char) = if charIsAlpha c
+isIdStart(c Char) = charIsAlpha c
+isIdCont(c Char) = if charIsAlpha c
   true
 else charIsDigit c
 
 -- Greedy take/drop while predicate, written directly on cons cells.
-fn takeWhilePred(p)(cs List[Char]) =
+takeWhilePred(p)(cs List[Char]) =
   | c :: rest ->
     if p c
       listAppend [c] (takeWhilePred p rest)
     else []
   | _ -> []
 
-fn dropWhilePred(p)(cs List[Char]) =
+dropWhilePred(p)(cs List[Char]) =
   | c :: rest ->
     if p c
       dropWhilePred p rest
@@ -36,7 +36,7 @@ fn dropWhilePred(p)(cs List[Char]) =
 
 -- Classify an identifier string as a keyword or generic identifier,
 -- using a match-as-expression on the string.
-fn keywordOrIdent(s Str) =
+keywordOrIdent(s Str) =
   match s
     | "let" -> TLet
     | "fn" -> TFn
@@ -46,24 +46,24 @@ fn keywordOrIdent(s Str) =
 
 -- Lex an identifier (already verified the head char is alpha): collect the
 -- identifier prefix, classify it as a keyword or `TIdent`, and continue.
-fn lexId(cs List[Char]) =
-  let idChars = takeWhilePred isIdCont cs
-  let leftover = dropWhilePred isIdCont cs
-  let tok = keywordOrIdent (strFromChars idChars)
+lexId(cs List[Char]) =
+  idChars = takeWhilePred isIdCont cs
+  leftover = dropWhilePred isIdCont cs
+  tok = keywordOrIdent (strFromChars idChars)
   listAppend [tok] (lexChars leftover)
 
 -- Lex a multi-digit integer (already verified the head char is a digit).
 -- Phase 7.3b-fixes bug 1: `[TInt (...)]` is now a single-element list with
 -- the ctor already applied, so the `let tok = ... in` helper has been
 -- inlined into the final listAppend call.
-fn lexNum(cs List[Char]) =
-  let digits = takeWhilePred charIsDigit cs
-  let leftover = dropWhilePred charIsDigit cs
+lexNum(cs List[Char]) =
+  digits = takeWhilePred charIsDigit cs
+  leftover = dropWhilePred charIsDigit cs
   listAppend [TInt (strFromChars digits)] (lexChars leftover)
 
 -- Lex a single-char operator / punctuation token via inline match.
-fn lexOp(c Char)(rest List[Char]) =
-  let tok = match c
+lexOp(c Char)(rest List[Char]) =
+  tok = match c
     | '+' -> TPlus
     | '-' -> TMinus
     | '*' -> TStar
@@ -78,7 +78,7 @@ fn lexOp(c Char)(rest List[Char]) =
 
 -- Main lexer loop on a list of chars. Cons-pattern destructures the
 -- input directly; the empty case returns an empty token list.
-fn lexChars(cs List[Char]) =
+lexChars(cs List[Char]) =
   | c :: rest ->
     if charIsSpace c
       lexChars rest
@@ -89,10 +89,10 @@ fn lexChars(cs List[Char]) =
     else lexOp c rest
   | _ -> []
 
-fn tokenize(src Str) = lexChars (strChars src)
+tokenize(src Str) = lexChars (strChars src)
 
 -- Render a token as a short tag for the demo output.
-fn tokenName(t Token) =
+tokenName(t Token) =
   | TIdent s -> strConcat "id:" s
   | TInt s -> strConcat "int:" s
   | TLet -> "kw:let"
@@ -110,12 +110,12 @@ fn tokenName(t Token) =
   | TRParen -> ")"
   | TUnknown s -> strConcat "?:" s
 
-fn joinNames(ts List[Token]) =
+joinNames(ts List[Token]) =
   listFold (\acc t. if strLen acc == 0
     tokenName t
   else strConcat (strConcat acc " ") (tokenName t)) "" ts
 
-fn main() =
-  let src = "fn add(a)(b) = a + b"
-  let toks = tokenize src
+main() =
+  src = "fn add(a)(b) = a + b"
+  toks = tokenize src
   printfn (joinNames toks)

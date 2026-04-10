@@ -97,20 +97,20 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
           "import Std.Maybe"
           "tag UserId"
           "tag Email"
-          "type Maybe (A) = Some(A) | None"
-          "type Color = Red | Green | Blue"
-          "type Container = MkBox(Maybe[Int])"
+          "Maybe (A) = Some(A) | None"
+          "Color = Red | Green | Blue"
+          "Container = MkBox(Maybe[Int])"
           "let answer = 42"
           "let zero = 0"
           "let uid = (\"user-42\"[UserId])"
-          "export fn addOne (x: Int) -> Int = (x + 1)"
-          "fn double (x: Int) -> Int = (x * 2)"
-          "fn classify (x: Int) -> Int = (match x | 0 -> 0 | _ -> 1)"
-          "fn pickColor (x: Int) -> Color = (if x Red else Green)"
-          "fn shift (x: Int) -> Int = (let y = (x + 1) in (y * 2))"
-          "fn applyDouble (x: Int) -> Int = ((fun y -> (y * 2)) x)"
-          "fn greet () -> Str = \"hello\""
-          "fn classifyXs (xs: Int) -> Int = (match xs | [] -> 0 | (h :: t) -> 1)" ]
+          "export addOne (x: Int) -> Int = (x + 1)"
+          "double (x: Int) -> Int = (x * 2)"
+          "classify (x: Int) -> Int = (match x | 0 -> 0 | _ -> 1)"
+          "pickColor (x: Int) -> Color = (if x Red else Green)"
+          "shift (x: Int) -> Int = (let y = (x + 1) in (y * 2))"
+          "applyDouble (x: Int) -> Int = ((fun y -> (y * 2)) x)"
+          "greet () -> Str = \"hello\""
+          "classifyXs (xs: Int) -> Int = (match xs | [] -> 0 | (h :: t) -> 1)" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),

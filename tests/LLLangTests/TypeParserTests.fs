@@ -58,10 +58,10 @@ let ``12-typeparser-real.lll runs and pretty-prints all four type decls`` () =
     // in their own parens; ctor args wrap in `(a, b)`; nullary ctors print
     // bare.
     let expected =
-        [ "type Maybe (A) = Some(A) | None"
-          "type Result (A) (E) = Ok(A) | Err(E)"
-          "type Shape = Circle | Rect | Empty"
-          "type Wrapped = MkWrapped(Int)" ]
+        [ "Maybe (A) = Some(A) | None"
+          "Result (A) (E) = Ok(A) | Err(E)"
+          "Shape = Circle | Rect | Empty"
+          "Wrapped = MkWrapped(Int)" ]
     for line in expected do
         Assert.True(
             stdout.Contains(line),

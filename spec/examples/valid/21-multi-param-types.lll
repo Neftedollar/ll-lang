@@ -1,16 +1,16 @@
 module Examples.MultiParam
 
-type Maybe A = Some A | None
-type Color = Red | Black
-type RBMap K V = Leaf | Node Color (RBMap K V) K V (RBMap K V)
+Maybe A = Some A | None
+Color = Red | Black
+RBMap K V = Leaf | Node Color (RBMap K V) K V (RBMap K V)
 
-fn rbEmpty() = Leaf
+rbEmpty() = Leaf
 
-fn rbSize(m RBMap[K][V]) =
+rbSize(m RBMap[K][V]) =
   match m
     | Leaf -> 0
     | Node _ left _ _ right -> 1 + rbSize left + rbSize right
 
-fn main() =
-  let m = rbEmpty
+main() =
+  m = rbEmpty
   rbSize m

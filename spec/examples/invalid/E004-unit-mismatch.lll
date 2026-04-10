@@ -4,10 +4,10 @@ module Invalid.E004
 unit m
 unit kg
 
-fn mkM(x Float) Float[m] = x
-fn mkKg(x Float) Float[kg] = x
+mkM(x Float) Float[m] = x
+mkKg(x Float) Float[kg] = x
 
-fn speed(d Float[m])(t Float[kg]) = d / t
+speed(d Float[m])(t Float[kg]) = d / t
 
 -- passing Float[kg] where Float[m] expected → E004
 let bad = speed (mkKg 5.0) (mkM 2.0)

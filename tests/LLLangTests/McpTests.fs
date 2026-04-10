@@ -10,20 +10,20 @@ open LLLang.Elaborator
 let private validSrc =
     """module Test.Valid
 
-fn add(a Int)(b Int) Int = a + b
-fn main() Int = add 1 2
+add(a Int)(b Int) Int = a + b
+main() Int = add 1 2
 """
 
 let private invalidSrc =
     """module Test.Invalid
 
-fn main() Int = undefinedFunc 42
+main() Int = undefinedFunc 42
 """
 
 let private typeMismatchSrc =
     """module Test.TypeMismatch
 
-fn f(x Str) Int = x
+f(x Str) Int = x
 """
 
 // ─── check function ───────────────────────────────────────────────────────────
@@ -109,7 +109,7 @@ let ``compile produces module header in output`` () =
 let ``listMap is in scope without import`` () =
     let src = """module Test.Stdlib
 
-fn double(xs List[Int]) List[Int] = listMap (\x. x * 2) xs
+double(xs List[Int]) List[Int] = listMap (\x. x * 2) xs
 """
     Assert.Equal(Ok (), check src)
 
@@ -117,7 +117,7 @@ fn double(xs List[Int]) List[Int] = listMap (\x. x * 2) xs
 let ``listFold is in scope without import`` () =
     let src = """module Test.Stdlib2
 
-fn sum(xs List[Int]) Int = listFold (\acc. \x. acc + x) 0 xs
+sum(xs List[Int]) Int = listFold (\acc. \x. acc + x) 0 xs
 """
     Assert.Equal(Ok (), check src)
 
@@ -125,7 +125,7 @@ fn sum(xs List[Int]) Int = listFold (\acc. \x. acc + x) 0 xs
 let ``strLen is in scope without import`` () =
     let src = """module Test.Stdlib3
 
-fn f(s Str) Int = strLen s
+f(s Str) Int = strLen s
 """
     Assert.Equal(Ok (), check src)
 
@@ -133,7 +133,7 @@ fn f(s Str) Int = strLen s
 let ``maybeMap is in scope without import`` () =
     let src = """module Test.Stdlib4
 
-fn f(m Maybe[Int]) Maybe[Int] = maybeMap (\x. x + 1) m
+f(m Maybe[Int]) Maybe[Int] = maybeMap (\x. x + 1) m
 """
     Assert.Equal(Ok (), check src)
 
@@ -174,7 +174,7 @@ let ``spec/examples/invalid contains E001 example`` () =
 let ``compile on type mismatch produces E001 error`` () =
     let src = """module Test.E001
 
-fn f(x Int) Str = x
+f(x Int) Str = x
 """
     match compile src with
     | Error es ->

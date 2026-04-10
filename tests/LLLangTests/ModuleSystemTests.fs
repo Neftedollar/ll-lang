@@ -74,9 +74,9 @@ let ``loadProject: two-file project sorts in dependency order`` () =
         Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
         File.WriteAllText(Path.Combine(root, "ll.toml"), "[project]\nname = \"hello\"\n")
         File.WriteAllText(Path.Combine(root, "src", "Lib.lll"),
-            "module Hello.Lib\n\nexport fn greet() Str = \"hi\"\n")
+            "module Hello.Lib\n\nexport greet() Str = \"hi\"\n")
         File.WriteAllText(Path.Combine(root, "src", "Main.lll"),
-            "module Hello.Main\nimport Hello.Lib\n\nfn main() Str = \"main\"\n")
+            "module Hello.Main\nimport Hello.Lib\n\nmain() Str = \"main\"\n")
         match loadProject root with
         | Error es -> Assert.Fail(sprintf "loadProject failed: %s" (errMsg es))
         | Ok proj ->
@@ -92,9 +92,9 @@ let ``loadProject: cycle detection returns E024`` () =
         Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
         File.WriteAllText(Path.Combine(root, "ll.toml"), "[project]\nname = \"cycle\"\n")
         File.WriteAllText(Path.Combine(root, "src", "A.lll"),
-            "module Cycle.A\nimport Cycle.B\n\nfn fa() Str = \"a\"\n")
+            "module Cycle.A\nimport Cycle.B\n\nfa() Str = \"a\"\n")
         File.WriteAllText(Path.Combine(root, "src", "B.lll"),
-            "module Cycle.B\nimport Cycle.A\n\nfn fb() Str = \"b\"\n")
+            "module Cycle.B\nimport Cycle.A\n\nfb() Str = \"b\"\n")
         match loadProject root with
         | Ok _ -> Assert.Fail("Expected E024 cycle error but got Ok")
         | Error es ->
@@ -108,7 +108,7 @@ let ``loadProject: module path mismatch returns E020`` () =
         Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
         File.WriteAllText(Path.Combine(root, "ll.toml"), "[project]\nname = \"proj\"\n")
         File.WriteAllText(Path.Combine(root, "src", "Foo.lll"),
-            "module Wrong.Name\n\nfn f() Str = \"x\"\n")
+            "module Wrong.Name\n\nf() Str = \"x\"\n")
         match loadProject root with
         | Ok _ -> Assert.Fail("Expected E020 path mismatch error but got Ok")
         | Error es ->
@@ -122,9 +122,9 @@ let ``compileProject: two-file project emits concatenated F# with both modules``
         Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
         File.WriteAllText(Path.Combine(root, "ll.toml"), "[project]\nname = \"greet\"\n")
         File.WriteAllText(Path.Combine(root, "src", "Lib.lll"),
-            "module Greet.Lib\n\nexport fn greet() Str = \"hello\"\n")
+            "module Greet.Lib\n\nexport greet() Str = \"hello\"\n")
         File.WriteAllText(Path.Combine(root, "src", "Main.lll"),
-            "module Greet.Main\nimport Greet.Lib\n\nfn main() Str = \"main\"\n")
+            "module Greet.Main\nimport Greet.Lib\n\nmain() Str = \"main\"\n")
         match loadProject root with
         | Error es -> Assert.Fail(sprintf "loadProject failed: %s" (errMsg es))
         | Ok proj ->
@@ -142,7 +142,7 @@ let ``loadProject: single-file project loads correctly`` () =
         Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
         File.WriteAllText(Path.Combine(root, "ll.toml"), "[project]\nname = \"single\"\n")
         File.WriteAllText(Path.Combine(root, "src", "Main.lll"),
-            "module Single.Main\n\nfn main() Str = \"hello\"\n")
+            "module Single.Main\n\nmain() Str = \"hello\"\n")
         match loadProject root with
         | Error es -> Assert.Fail(sprintf "loadProject failed: %s" (errMsg es))
         | Ok proj ->

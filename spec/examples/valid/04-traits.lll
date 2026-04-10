@@ -2,26 +2,26 @@ module Examples.Traits
 
 -- trait definition (HKT)
 trait Functor F =
-  fn map(f A->B)(fa F[A]) F[B]
+  map(f A->B)(fa F[A]) F[B]
 
 trait Monad F =
-  fn pure(a A) F[A]
-  fn bind(fa F[A])(f A->F[B]) F[B]
+  pure(a A) F[A]
+  bind(fa F[A])(f A->F[B]) F[B]
 
 -- sum type for impl
-type Maybe A = Some A | None
+Maybe A = Some A | None
 
 -- impl
 impl Functor Maybe =
-  fn map(f A->B)(fa Maybe[A]) Maybe[B] =
+  map(f A->B)(fa Maybe[A]) Maybe[B] =
     | Some a -> Some (f a)
     | None -> None
 
 impl Monad Maybe =
-  fn pure(a A) Maybe[A] = Some a
-  fn bind(fa Maybe[A])(f A->Maybe[B]) Maybe[B] =
+  pure(a A) Maybe[A] = Some a
+  bind(fa Maybe[A])(f A->Maybe[B]) Maybe[B] =
     | Some a -> f a
     | None -> None
 
 -- constrained function — works for any Functor
-fn transform[F: Functor](xs F[A])(f A->B) = map f xs
+transform[F: Functor](xs F[A])(f A->B) = map f xs

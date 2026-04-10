@@ -1,5 +1,5 @@
 module Examples.Clean
-fn useIt(s Str) =
-  let x = strToInt s
+useIt(s Str) =
+  x = strToInt s
   0
-fn main() = useIt "42"
+main() = useIt "42"

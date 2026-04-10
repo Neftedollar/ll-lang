@@ -6,43 +6,43 @@ module Std.Toml
 -- Parses: [table] headers, key = "value", key = ["a", "b"]
 -- Ignores: unknown keys/tables (forward compatibility)
 
-type Maybe A = Some A | None
+Maybe A = Some A | None
 
 -- Manifest: name, version, entry, deps (list of key-value pairs), platform
-type Manifest = MkManifest Str Str Str (List[Str]) (List[Str])
+Manifest = MkManifest Str Str Str (List[Str]) (List[Str])
 -- deps stored as flat list: [key1, val1, key2, val2, ...]
 -- (avoiding Map dependency for standalone compilation)
 
 -- Parser state threaded through line processing
-type Section = SecProject | SecDeps | SecPlatform | SecOther
-type ParseState = MkState Section (Maybe[Str]) Str Str (List[Str]) (List[Str]) (Maybe[Str])
+Section = SecProject | SecDeps | SecPlatform | SecOther
+ParseState = MkState Section (Maybe[Str]) Str Str (List[Str]) (List[Str]) (Maybe[Str])
 -- MkState section name version entry deps platform error
 
 -- ---- String helpers ----
 
-fn strStartsWith(prefix Str)(s Str) =
+strStartsWith(prefix Str)(s Str) =
   if strLen prefix > strLen s
     false
   else strSlice s 0 (strLen prefix) == prefix
 
-fn strDropPrefix(n Int)(s Str) =
+strDropPrefix(n Int)(s Str) =
   if n >= strLen s
     ""
   else strSlice s n (strLen s - n)
 
-fn strTakeUntil(ch Str)(s Str) =
-  let idx = strIndexOf ch s
+strTakeUntil(ch Str)(s Str) =
+  idx = strIndexOf ch s
   if idx < 0
     s
   else strSlice s 0 idx
 
 -- Strip inline # comment, then trim
-fn stripComment(s Str) =
+stripComment(s Str) =
   strTrim (strTakeUntil "#" s)
 
 -- ---- Quoted string parser (char-by-char) ----
 
-fn decodeEscape(e Char) =
+decodeEscape(e Char) =
   if e == 'n'
     '\n'
   else if e == 't'
@@ -53,7 +53,7 @@ fn decodeEscape(e Char) =
     '\\'
   else e
 
-fn parseQuotedChars(cs List[Char]) =
+parseQuotedChars(cs List[Char]) =
   match cs
     | [] -> ([], [])
     | c :: rest ->
@@ -65,7 +65,7 @@ fn parseQuotedChars(cs List[Char]) =
         let (body, leftover) = parseQuotedChars rest
         (c :: body, leftover)
 
-fn parseQuotedEsc(cs List[Char]) =
+parseQuotedEsc(cs List[Char]) =
   match cs
     | [] -> ([], [])
     | e :: rest2 ->
@@ -73,8 +73,8 @@ fn parseQuotedEsc(cs List[Char]) =
       (decodeEscape e :: body, leftover)
 
 -- Parse "value" from a string, returns the unquoted content
-fn parseQuotedStr(s Str) =
-  let cs = strChars s
+parseQuotedStr(s Str) =
+  cs = strChars s
   match cs
     | c :: rest ->
       if c == '"'
@@ -86,19 +86,19 @@ fn parseQuotedStr(s Str) =
 -- ---- Array parser ----
 
 -- Parse ["a", "b", "c"] — simple: split by comma, parse each quoted value
-fn cleanArrayItem(s Str) =
+cleanArrayItem(s Str) =
   if strStartsWith "[" s
     strTrim (strDropPrefix 1 s)
   else if strStartsWith "]" s
     ""
   else s
 
-fn parseArrayItems(items List[Str]) =
+parseArrayItems(items List[Str]) =
   match items
     | [] -> []
     | item :: rest ->
-      let cleaned = cleanArrayItem (strTrim item)
-      let final = strTrim (strTakeUntil "]" cleaned)
+      cleaned = cleanArrayItem (strTrim item)
+      final = strTrim (strTakeUntil "]" cleaned)
       if strLen final == 0
         parseArrayItems rest
       else
@@ -106,15 +106,15 @@ fn parseArrayItems(items List[Str]) =
           | Some v -> v :: parseArrayItems rest
           | None -> parseArrayItems rest
 
-fn parseStringArray(s Str) =
-  let inner = strTakeUntil "]" (strDropPrefix 1 s)
-  let parts = strSplit "," inner
+parseStringArray(s Str) =
+  inner = strTakeUntil "]" (strDropPrefix 1 s)
+  parts = strSplit "," inner
   parseArrayItems parts
 
 -- ---- Line processing ----
 
-fn parseSectionHeader(line Str) =
-  let inner = strTrim (strTakeUntil "]" (strDropPrefix 1 line))
+parseSectionHeader(line Str) =
+  inner = strTrim (strTakeUntil "]" (strDropPrefix 1 line))
   if inner == "project"
     SecProject
   else if inner == "deps"
@@ -123,16 +123,16 @@ fn parseSectionHeader(line Str) =
     SecPlatform
   else SecOther
 
-fn parseKeyValue(line Str) =
-  let eqIdx = strIndexOf "=" line
+parseKeyValue(line Str) =
+  eqIdx = strIndexOf "=" line
   if eqIdx < 0
     ("", "")
   else
-    let key = strTrim (strSlice line 0 eqIdx)
-    let valRaw = strTrim (strDropPrefix (eqIdx + 1) line)
+    key = strTrim (strSlice line 0 eqIdx)
+    valRaw = strTrim (strDropPrefix (eqIdx + 1) line)
     (key, valRaw)
 
-fn processProjectLine(key Str)(valRaw Str)(st ParseState) =
+processProjectLine(key Str)(valRaw Str)(st ParseState) =
   match parseQuotedStr valRaw
     | None -> st
     | Some v ->
@@ -146,12 +146,12 @@ fn processProjectLine(key Str)(valRaw Str)(st ParseState) =
             MkState sec name ver v deps plat err
           else st
 
-fn processDepsLine(key Str)(valRaw Str)(st ParseState) =
+processDepsLine(key Str)(valRaw Str)(st ParseState) =
   match parseQuotedStr valRaw
     | None -> st
     | Some v ->
       -- strip quotes from key if present
-      let cleanKey = match parseQuotedStr key
+      cleanKey = match parseQuotedStr key
         | Some k -> k
         | None -> key
      
@@ -159,22 +159,22 @@ fn processDepsLine(key Str)(valRaw Str)(st ParseState) =
         | MkState sec name ver entry deps plat err ->
           MkState sec name ver entry (listAppend deps [cleanKey v]) plat err
 
-fn processPlatformLine(key Str)(valRaw Str)(st ParseState) =
+processPlatformLine(key Str)(valRaw Str)(st ParseState) =
   if key == "use"
     if strStartsWith "[" valRaw
-      let items = parseStringArray valRaw
+      items = parseStringArray valRaw
       match st
         | MkState sec name ver entry deps _ err ->
           MkState sec name ver entry deps items err
     else st
   else st
 
-fn processLine(st ParseState)(line Str) =
-  let trimmed = stripComment line
+processLine(st ParseState)(line Str) =
+  trimmed = stripComment line
   if strLen trimmed == 0
     st
   else if strStartsWith "[" trimmed
-    let sec = parseSectionHeader trimmed
+    sec = parseSectionHeader trimmed
     match st
       | MkState _ name ver entry deps plat err ->
         MkState sec name ver entry deps plat err
@@ -191,15 +191,15 @@ fn processLine(st ParseState)(line Str) =
 
 -- ---- Main parser ----
 
-fn foldLines(f ParseState -> Str -> ParseState)(acc ParseState)(lines List[Str]) =
+foldLines(f ParseState -> Str -> ParseState)(acc ParseState)(lines List[Str]) =
   match lines
     | [] -> acc
     | line :: rest -> foldLines f (f acc line) rest
 
-fn parseManifest(src Str) =
-  let lines = strSplit "\n" src
-  let init = MkState SecOther None "0.0.0" "src/Main.lll" [] [] None
-  let final = foldLines processLine init lines
+parseManifest(src Str) =
+  lines = strSplit "\n" src
+  init = MkState SecOther None "0.0.0" "src/Main.lll" [] [] None
+  final = foldLines processLine init lines
   match final
     | MkState _ name ver entry deps plat _ ->
       match name
@@ -208,85 +208,85 @@ fn parseManifest(src Str) =
 
 -- ---- Accessors (avoid nested constructor patterns in match) ----
 
-fn mName(m Manifest) =
+mName(m Manifest) =
   match m
     | MkManifest n _ _ _ _ -> n
 
-fn mVersion(m Manifest) =
+mVersion(m Manifest) =
   match m
     | MkManifest _ v _ _ _ -> v
 
-fn mDeps(m Manifest) =
+mDeps(m Manifest) =
   match m
     | MkManifest _ _ _ d _ -> d
 
-fn mPlatform(m Manifest) =
+mPlatform(m Manifest) =
   match m
     | MkManifest _ _ _ _ p -> p
 
 -- ---- Tests ----
 
-fn check(label Str)(ok Bool) =
+check(label Str)(ok Bool) =
   if ok
-    let _ = printfn (strConcat "OK " label)
+    _ = printfn (strConcat "OK " label)
     0
   else
-    let _ = printfn (strConcat "FAIL " label)
+    _ = printfn (strConcat "FAIL " label)
     1
 
-fn checkManifest(r Maybe[Manifest])(f Manifest -> Bool) =
+checkManifest(r Maybe[Manifest])(f Manifest -> Bool) =
   match r
     | Some m -> f m
     | None -> false
 
-fn main() =
+main() =
   -- Test 1: parse minimal ll.toml
-  let src1 = "[project]\nname = \"myapp\""
-  let r1 = parseManifest src1
-  let _ = check "1 parse name" (checkManifest r1 (\m. mName m == "myapp"))
+  src1 = "[project]\nname = \"myapp\""
+  r1 = parseManifest src1
+  _ = check "1 parse name" (checkManifest r1 (\m. mName m == "myapp"))
 
   -- Test 2: parse version
-  let src2 = "[project]\nname = \"test\"\nversion = \"1.2.3\"\nentry = \"src/App.lll\""
-  let r2 = parseManifest src2
-  let _ = check "2 parse version" (checkManifest r2 (\m. mVersion m == "1.2.3"))
+  src2 = "[project]\nname = \"test\"\nversion = \"1.2.3\"\nentry = \"src/App.lll\""
+  r2 = parseManifest src2
+  _ = check "2 parse version" (checkManifest r2 (\m. mVersion m == "1.2.3"))
 
   -- Test 3: missing name returns None
-  let src3 = "[project]\nversion = \"1.0\""
-  let r3 = parseManifest src3
-  let ok3 = match r3
+  src3 = "[project]\nversion = \"1.0\""
+  r3 = parseManifest src3
+  ok3 = match r3
     | Some _ -> false
     | None -> true
  
-  let _ = check "3 missing name" ok3
+  _ = check "3 missing name" ok3
 
   -- Test 4: comments and blank lines
-  let src4 = "# comment\n\n[project]\n# another comment\nname = \"app\""
-  let r4 = parseManifest src4
-  let _ = check "4 comments" (checkManifest r4 (\m. mName m == "app"))
+  src4 = "# comment\n\n[project]\n# another comment\nname = \"app\""
+  r4 = parseManifest src4
+  _ = check "4 comments" (checkManifest r4 (\m. mName m == "app"))
 
   -- Test 5: platform array
-  let src5 = "[project]\nname = \"p\"\n[platform]\nuse = [\"fsharp\", \"node\"]"
-  let r5 = parseManifest src5
-  let _ = check "5 platform array" (checkManifest r5 (\m. listLen (mPlatform m) == 2))
+  src5 = "[project]\nname = \"p\"\n[platform]\nuse = [\"fsharp\", \"node\"]"
+  r5 = parseManifest src5
+  _ = check "5 platform array" (checkManifest r5 (\m. listLen (mPlatform m) == 2))
 
   -- Test 6: deps section
-  let src6 = "[project]\nname = \"d\"\n[deps]\ncore = \"1.0\"\nutils = \"2.0\""
-  let r6 = parseManifest src6
-  let _ = check "6 deps" (checkManifest r6 (\m. listLen (mDeps m) == 4))
+  src6 = "[project]\nname = \"d\"\n[deps]\ncore = \"1.0\"\nutils = \"2.0\""
+  r6 = parseManifest src6
+  _ = check "6 deps" (checkManifest r6 (\m. listLen (mDeps m) == 4))
 
   -- Test 7: parse the actual stdlib/ll.toml
-  let realSrc = readFile "stdlib/ll.toml"
-  let r7 = parseManifest realSrc
-  let _ = check "7 real ll.toml" (checkManifest r7 (\m. mName m == "std"))
+  realSrc = readFile "stdlib/ll.toml"
+  r7 = parseManifest realSrc
+  _ = check "7 real ll.toml" (checkManifest r7 (\m. mName m == "std"))
 
   -- Test 8: quoted string with escape
-  let src8 = "[project]\nname = \"hello\\nworld\""
-  let r8 = parseManifest src8
-  let _ = check "8 escaped string" (checkManifest r8 (\m. strLen (mName m) == 11))
+  src8 = "[project]\nname = \"hello\\nworld\""
+  r8 = parseManifest src8
+  _ = check "8 escaped string" (checkManifest r8 (\m. strLen (mName m) == 11))
 
   -- Test 9: inline comment after value
-  let src9 = "[project]\nname = \"val\" # inline comment"
-  let r9 = parseManifest src9
-  let _ = check "9 inline comment" (checkManifest r9 (\m. mName m == "val"))
+  src9 = "[project]\nname = \"val\" # inline comment"
+  r9 = parseManifest src9
+  _ = check "9 inline comment" (checkManifest r9 (\m. mName m == "val"))
 
   0

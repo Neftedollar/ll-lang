@@ -14,10 +14,10 @@ INDENT  ::= synthetic token — emitted when indentation increases
 DEDENT  ::= synthetic token — emitted when indentation decreases
 
 (* --- Keywords ----------------------------------------------- *)
-KW ::= "fn" | "let" | "type" | "tag" | "unit"
+KW ::= "fn" | "let" | "tag" | "unit"
      | "trait" | "impl" | "import" | "export" | "module"
      | "match" | "if" | "else" | "true" | "false"
-     (* "with" is no longer a keyword — removed in favour of bare match-expr *)
+     (* "with" removed; "type" removed — type decls start with TYPEID directly *)
 
 (* --- Identifiers -------------------------------------------- *)
 (* value identifiers: lowercase start *)
@@ -152,7 +152,7 @@ constraint ::= OP_LBRACK IDENT ":" TYPEID OP_RBRACK   (* [F: Functor] *)
 
 (* --- type -------------------------------------------------- *)
 (* type vars: either bare (type Maybe A) or bracketed phantom (type Email[state]) *)
-type-decl ::= "type" TYPEID type-param* "=" type-body
+type-decl ::= TYPEID type-param* "=" type-body
 type-param ::= IDENT                                  (* bare type variable: A, E *)
              | OP_LBRACK IDENT OP_RBRACK              (* phantom bracket param: [state] *)
 type-var  ::= IDENT

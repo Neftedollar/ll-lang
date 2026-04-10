@@ -63,7 +63,7 @@ module Examples.ElaboratorReal
 -- `EMatch` stores match arms as two parallel lists (same trick as
 -- `15-moduleparser-real.lll`) to sidestep the codegen limitation that
 -- prevents mutually-recursive user type decls.
-type Pat =
+Pat =
   | PInt Int
   | PVar Str
   | PWild
@@ -71,7 +71,7 @@ type Pat =
   | PCons Pat Pat
   | PCon Str
 
-type Expr =
+Expr =
   | EInt Int
   | EStr Str
   | EVar Str
@@ -97,7 +97,7 @@ type Expr =
 -- in a later tick). `DType name ctors` introduces every constructor
 -- name into the env; the type name itself doesn't become a value
 -- binder, matching the F# host elaborator's behaviour.
-type Decl =
+Decl =
   | DFn Str List[Str] Str Expr
   | DLet Str Expr
   | DType Str List[Str]
@@ -107,7 +107,7 @@ type Decl =
 -- no source positions — this slice cares only about "is this name
 -- defined?". Wrapped in `MkEnv` so future slices can carry richer data
 -- (per-name types, scope depth, etc.) without changing the surface.
-type Env = MkEnv List[Str]
+Env = MkEnv List[Str]
 
 -- ---------- Env helpers -------------------------------------------------
 
@@ -115,7 +115,7 @@ type Env = MkEnv List[Str]
 -- `listFold` accumulator carrying the running `found?` flag. `==` on
 -- `Str` is the polymorphic equality the builtin env injects as
 -- `a -> a -> Bool`; on strings it's the same as F#'s `=` on strings.
-fn envHas(env Env)(name Str) =
+envHas(env Env)(name Str) =
   match env
     | MkEnv xs ->
       listFold (\acc x. if acc
@@ -124,14 +124,14 @@ fn envHas(env Env)(name Str) =
         true
       else false) false xs
 
-fn envAdd(env Env)(name Str) =
+envAdd(env Env)(name Str) =
   match env
     | MkEnv xs -> MkEnv (listAppend xs [name])
 
 -- Fold a list of names into an env, extending one binder at a time.
 -- Used for fn params, for collected top-level decl names, and for
 -- pattern binders introduced inside match arms.
-fn envAddAll(env Env)(names List[Str]) =
+envAddAll(env Env)(names List[Str]) =
   listFold (\acc n. envAdd acc n) env names
 
 -- ---------- Pattern binders ---------------------------------------------
@@ -143,7 +143,7 @@ fn envAddAll(env Env)(names List[Str]) =
 -- `PCon name` in this slice is a 0-arity ctor tag — argument patterns
 -- are not modelled yet (the F# host `PCon(name, argPats)` carries an
 -- arg-pat list that binders would recurse into).
-fn patBinders(p Pat) =
+patBinders(p Pat) =
   | PInt _ -> []
   | PWild -> []
   | PNil -> []
@@ -159,47 +159,47 @@ fn patBinders(p Pat) =
 -- flag are `EVar`; every compound arm recurses and concatenates its
 -- children's error lists. `ELet` / `ELam` / `EMatch` extend the local
 -- env for their body sub-expression(s) before recursing.
-fn checkExpr(env Env)(e Expr) =
+checkExpr(env Env)(e Expr) =
   | EInt _ -> []
   | EStr _ -> []
   | EVar name ->
     if envHas env name
       []
     else
-      let msg = strConcat "E002 UnboundVar " name
+      msg = strConcat "E002 UnboundVar " name
       [msg]
   | EAdd l r -> listAppend (checkExpr env l) (checkExpr env r)
   | EApp f x -> listAppend (checkExpr env f) (checkExpr env x)
   | ELet name rhs body ->
-    let rhsErrs = checkExpr env rhs
-    let env2 = envAdd env name
-    let bodyErrs = checkExpr env2 body
+    rhsErrs = checkExpr env rhs
+    env2 = envAdd env name
+    bodyErrs = checkExpr env2 body
     listAppend rhsErrs bodyErrs
   | ELam param body ->
-    let env2 = envAdd env param
+    env2 = envAdd env param
     checkExpr env2 body
   | EIf cnd thn els ->
-    let ce = checkExpr env cnd
-    let te = checkExpr env thn
-    let ee = checkExpr env els
+    ce = checkExpr env cnd
+    te = checkExpr env thn
+    ee = checkExpr env els
     listAppend (listAppend ce te) ee
   | EMatch scrut pats bodies ->
-    let scrutErrs = checkExpr env scrut
-    let armErrs = checkArms env pats bodies
+    scrutErrs = checkExpr env scrut
+    armErrs = checkArms env pats bodies
     listAppend scrutErrs armErrs
 
 -- Walk the two parallel arm lists in lockstep. For each arm, extend
 -- the scrutinee env with every binder the pattern introduces,
 -- walk the body expression under the extended env. Pattern binders
 -- are only visible inside their own arm body, not across arms.
-fn checkArms(env Env)(pats List[Pat])(bodies List[Expr]) =
+checkArms(env Env)(pats List[Pat])(bodies List[Expr]) =
   match pats
     | p :: ps ->
       match bodies
         | b :: bs ->
-          let armEnv = envAddAll env (patBinders p)
-          let armErrs = checkExpr armEnv b
-          let restErrs = checkArms env ps bs
+          armEnv = envAddAll env (patBinders p)
+          armErrs = checkExpr armEnv b
+          restErrs = checkArms env ps bs
           listAppend armErrs restErrs
         | _ -> []
     | _ -> []
@@ -215,9 +215,9 @@ fn checkArms(env Env)(pats List[Pat])(bodies List[Expr]) =
 -- literals, int / str / tagged literals etc., skipping them here is
 -- safe — any free var there would surface in whichever `fn body` ends
 -- up using the `let`-bound name.)
-fn checkDecl(env Env)(d Decl) =
+checkDecl(env Env)(d Decl) =
   | DFn _ params _ body ->
-    let bodyEnv = envAddAll env params
+    bodyEnv = envAddAll env params
     checkExpr bodyEnv body
   | DLet _ _ -> []
   | DType _ _ -> []
@@ -227,7 +227,7 @@ fn checkDecl(env Env)(d Decl) =
 -- checked under the **same** top-level env — fn params don't leak
 -- out, because `checkDecl` extends a local env for the duration of
 -- one decl only.
-fn checkDecls(env Env)(decls List[Decl]) =
+checkDecls(env Env)(decls List[Decl]) =
   | d :: rest -> listAppend (checkDecl env d) (checkDecls env rest)
   | _ -> []
 
@@ -239,13 +239,13 @@ fn checkDecls(env Env)(decls List[Decl]) =
 -- F# host elaborator). The same ctor-as-value rule means a match arm
 -- body like `| _ -> Some x` looks up `Some` in the env and finds it
 -- via the `DType` collect pass.
-fn collectDecl(env Env)(d Decl) =
+collectDecl(env Env)(d Decl) =
   | DFn name _ _ _ -> envAdd env name
   | DLet name _ -> envAdd env name
   | DType _ ctors -> envAddAll env ctors
   | DTag name -> envAdd env name
 
-fn collectDecls(env Env)(decls List[Decl]) =
+collectDecls(env Env)(decls List[Decl]) =
   | d :: rest -> collectDecls (collectDecl env d) rest
   | _ -> env
 
@@ -256,9 +256,9 @@ fn collectDecls(env Env)(decls List[Decl]) =
 -- have?". Only `DType` decls contribute; every other decl leaves the
 -- index untouched. Mirrors the F# host elaborator's `typeToCtors`
 -- local at `Elaborator.fs` line 505 area, minus the real `Map`.
-type TypeCtors = MkTypeCtors Str List[Str]
+TypeCtors = MkTypeCtors Str List[Str]
 
-fn collectTypes(decls List[Decl]) =
+collectTypes(decls List[Decl]) =
   | d :: rest ->
     match d
       | DType name ctors ->
@@ -270,7 +270,7 @@ fn collectTypes(decls List[Decl]) =
 -- the empty list if the name isn't a declared sum type. The empty-
 -- list sentinel is safe for exhaustiveness because a fn whose last
 -- param type isn't in the index is one the check should skip anyway.
-fn lookupCtors(types List[TypeCtors])(name Str) =
+lookupCtors(types List[TypeCtors])(name Str) =
   match types
     | MkTypeCtors n cs :: rest ->
       if n == name
@@ -286,7 +286,7 @@ fn lookupCtors(types List[TypeCtors])(name Str) =
 -- slice's AST doesn't have yet). `PInt` / `PNil` / `PCon` are NOT
 -- catch-alls — `PInt` and `PNil` match specific literals, `PCon`
 -- identifies one named constructor.
-fn patIsCatchAll(p Pat) =
+patIsCatchAll(p Pat) =
   | PWild -> true
   | PVar _ -> true
   | PCons _ _ -> true
@@ -296,7 +296,7 @@ fn patIsCatchAll(p Pat) =
 -- unconditionally match a residual scrutinee value. The F# host
 -- elaborator short-circuits its exhaustiveness check when any branch
 -- is a catch-all; the ll-lang mirror does the same.
-fn armsHaveCatchAll(pats List[Pat]) =
+armsHaveCatchAll(pats List[Pat]) =
   listFold (\acc p. if acc
     true
   else patIsCatchAll p) false pats
@@ -305,7 +305,7 @@ fn armsHaveCatchAll(pats List[Pat]) =
 -- the match. PWild / PVar / PCons / PInt / PNil contribute nothing —
 -- they're either catch-alls (handled separately) or literal patterns
 -- irrelevant to sum-type coverage.
-fn coveredCtors(pats List[Pat]) =
+coveredCtors(pats List[Pat]) =
   | PCon name :: rest -> listAppend [name] (coveredCtors rest)
   | _ :: rest -> coveredCtors rest
   | _ -> []
@@ -316,11 +316,11 @@ fn coveredCtors(pats List[Pat]) =
 -- elaborator's `for c in requiredCtors do if not (List.contains c
 -- coveredCtors) then yield e003 ...` loop at `Elaborator.fs` line
 -- 544 area.
-fn missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) =
+missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) =
   match required
     | c :: rest ->
-      let tail = missingCtorErrs ty rest covered
-      let isCovered = listFold (\acc x. if acc
+      tail = missingCtorErrs ty rest covered
+      isCovered = listFold (\acc x. if acc
         true
       else if x == c
         true
@@ -328,7 +328,7 @@ fn missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) =
       if isCovered
         tail
       else
-        let msg = strConcat (strConcat (strConcat "E003 NonExhaustiveMatch " ty) " missing ") c
+        msg = strConcat (strConcat (strConcat "E003 NonExhaustiveMatch " ty) " missing ") c
         listAppend [msg] tail
     | _ -> []
 
@@ -341,13 +341,13 @@ fn missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) =
 -- fns whose last param isn't a named sum type all produce zero
 -- errors — the check is deliberately narrow to mirror the F# host
 -- elaborator's scope limitation.
-fn exhaustivenessDecl(types List[TypeCtors])(d Decl) =
+exhaustivenessDecl(types List[TypeCtors])(d Decl) =
   match d
     | DFn _ _ lastTy body ->
       if strLen lastTy == 0
         []
       else
-        let required = lookupCtors types lastTy
+        required = lookupCtors types lastTy
         if listIsEmpty required
           []
         else
@@ -356,13 +356,13 @@ fn exhaustivenessDecl(types List[TypeCtors])(d Decl) =
               if armsHaveCatchAll pats
                 []
               else
-                let covered = coveredCtors pats
+                covered = coveredCtors pats
                 missingCtorErrs lastTy required covered
             | _ -> []
     | _ -> []
 
 -- Walk every decl and concatenate all exhaustiveness errors.
-fn exhaustivenessCheck(types List[TypeCtors])(decls List[Decl]) =
+exhaustivenessCheck(types List[TypeCtors])(decls List[Decl]) =
   | d :: rest ->
     listAppend (exhaustivenessDecl types d) (exhaustivenessCheck types rest)
   | _ -> []
@@ -376,12 +376,12 @@ fn exhaustivenessCheck(types List[TypeCtors])(decls List[Decl]) =
 -- error lists. Mirrors the F# host elaborator's multi-pass
 -- `collectDecls` -> `checkDecls` -> `exhaustivenessCheck` shape in
 -- `src/LLLangCompiler/Elaborator.fs`.
-fn elaborate(decls List[Decl]) =
-  let env0 = MkEnv []
-  let env = collectDecls env0 decls
-  let types = collectTypes decls
-  let nameErrs = checkDecls env decls
-  let exhErrs = exhaustivenessCheck types decls
+elaborate(decls List[Decl]) =
+  env0 = MkEnv []
+  env = collectDecls env0 decls
+  types = collectTypes decls
+  nameErrs = checkDecls env decls
+  exhErrs = exhaustivenessCheck types decls
   listAppend nameErrs exhErrs
 
 -- ---------- Pretty printer for error list -------------------------------
@@ -389,7 +389,7 @@ fn elaborate(decls List[Decl]) =
 -- Render the error list as one message per line. Empty list prints a
 -- single `ok` sentinel so the runtime test can tell a clean elaborate
 -- apart from an elaborate that printed nothing at all.
-fn showErrs(errs List[Str]) =
+showErrs(errs List[Str]) =
   if listIsEmpty errs
     "ok"
   else listFold (\acc s. if strLen acc == 0
@@ -445,17 +445,17 @@ fn showErrs(errs List[Str]) =
 -- zero-arg fn invocation at call-site in ll-lang is surface-awkward
 -- — easier to accept one ignored `Int` and call it as `testModule 0`
 -- from `main`.
-fn testModule(u Int) =
+testModule(u Int) =
   -- `add(a b) = a + b` — two untyped params, both referenced in the body.
-  let addParams = ["a" "b"]
-  let addBody = EAdd (EVar "a") (EVar "b")
-  let addFn = DFn "add" addParams "" addBody
+  addParams = ["a" "b"]
+  addBody = EAdd (EVar "a") (EVar "b")
+  addFn = DFn "add" addParams "" addBody
   -- `bad(x) = undefinedName + otherMissing` — two free vars, both flagged.
-  let badParams = ["x"]
-  let badLhs = EVar "undefinedName"
-  let badRhs = EVar "otherMissing"
-  let badBody = EAdd badLhs badRhs
-  let badFn = DFn "bad" badParams "" badBody
+  badParams = ["x"]
+  badLhs = EVar "undefinedName"
+  badRhs = EVar "otherMissing"
+  badBody = EAdd badLhs badRhs
+  badFn = DFn "bad" badParams "" badBody
   -- `useCtor(y) = match y with | 0 -> Some | _ -> None` — the ctor
   -- refs `Some` / `None` are resolved via the collected type decl.
   -- Pattern + body elements are each let-bound individually because
@@ -463,62 +463,62 @@ fn testModule(u Int) =
   -- curried ctor application (TypeId-starting list elements invoke
   -- `parseApp` which greedily consumes subsequent atoms, see Parser.fs
   -- line 112-116). Last-param type is empty so exhaustiveness skips.
-  let useCtorParams = ["y"]
-  let useCtorPat0 = PInt 0
-  let useCtorPat1 = PWild
-  let useCtorPats = [useCtorPat0 useCtorPat1]
-  let useCtorBody0 = EVar "Some"
-  let useCtorBody1 = EVar "None"
-  let useCtorBodies = [useCtorBody0 useCtorBody1]
-  let useCtorScrut = EVar "y"
-  let useCtorBody = EMatch useCtorScrut useCtorPats useCtorBodies
-  let useCtorFn = DFn "useCtor" useCtorParams "" useCtorBody
+  useCtorParams = ["y"]
+  useCtorPat0 = PInt 0
+  useCtorPat1 = PWild
+  useCtorPats = [useCtorPat0 useCtorPat1]
+  useCtorBody0 = EVar "Some"
+  useCtorBody1 = EVar "None"
+  useCtorBodies = [useCtorBody0 useCtorBody1]
+  useCtorScrut = EVar "y"
+  useCtorBody = EMatch useCtorScrut useCtorPats useCtorBodies
+  useCtorFn = DFn "useCtor" useCtorParams "" useCtorBody
   -- `shapeGood(s Shape) = | Circle -> 1 | Rect -> 2 | Empty -> 3` —
   -- covers every Shape ctor, so no E003. Each pattern is `PCon
   -- <ctorName>` (zero-arity); the body is `EInt n` for each arm.
   -- Scrutinee `EVar "s"` is the clause-sugar implicit last-param ref.
-  let shapeParams = ["s"]
-  let shapeGoodPat0 = PCon "Circle"
-  let shapeGoodPat1 = PCon "Rect"
-  let shapeGoodPat2 = PCon "Empty"
-  let shapeGoodPats = [shapeGoodPat0 shapeGoodPat1 shapeGoodPat2]
-  let shapeGoodBody0 = EInt 1
-  let shapeGoodBody1 = EInt 2
-  let shapeGoodBody2 = EInt 3
-  let shapeGoodBodies = [shapeGoodBody0 shapeGoodBody1 shapeGoodBody2]
-  let shapeScrut = EVar "s"
-  let shapeGoodBody = EMatch shapeScrut shapeGoodPats shapeGoodBodies
-  let shapeGoodFn = DFn "shapeGood" shapeParams "Shape" shapeGoodBody
+  shapeParams = ["s"]
+  shapeGoodPat0 = PCon "Circle"
+  shapeGoodPat1 = PCon "Rect"
+  shapeGoodPat2 = PCon "Empty"
+  shapeGoodPats = [shapeGoodPat0 shapeGoodPat1 shapeGoodPat2]
+  shapeGoodBody0 = EInt 1
+  shapeGoodBody1 = EInt 2
+  shapeGoodBody2 = EInt 3
+  shapeGoodBodies = [shapeGoodBody0 shapeGoodBody1 shapeGoodBody2]
+  shapeScrut = EVar "s"
+  shapeGoodBody = EMatch shapeScrut shapeGoodPats shapeGoodBodies
+  shapeGoodFn = DFn "shapeGood" shapeParams "Shape" shapeGoodBody
   -- `shapeBad(s Shape) = | Circle -> 1 | Rect -> 2` — missing Empty,
   -- triggers one E003 for `missing Empty`. Same scrutinee, same
   -- last-param type.
-  let shapeBadPat0 = PCon "Circle"
-  let shapeBadPat1 = PCon "Rect"
-  let shapeBadPats = [shapeBadPat0 shapeBadPat1]
-  let shapeBadBody0 = EInt 1
-  let shapeBadBody1 = EInt 2
-  let shapeBadBodies = [shapeBadBody0 shapeBadBody1]
-  let shapeBadBody = EMatch shapeScrut shapeBadPats shapeBadBodies
-  let shapeBadFn = DFn "shapeBad" shapeParams "Shape" shapeBadBody
+  shapeBadPat0 = PCon "Circle"
+  shapeBadPat1 = PCon "Rect"
+  shapeBadPats = [shapeBadPat0 shapeBadPat1]
+  shapeBadBody0 = EInt 1
+  shapeBadBody1 = EInt 2
+  shapeBadBodies = [shapeBadBody0 shapeBadBody1]
+  shapeBadBody = EMatch shapeScrut shapeBadPats shapeBadBodies
+  shapeBadFn = DFn "shapeBad" shapeParams "Shape" shapeBadBody
   -- `shapeWild(s Shape) = | Circle -> 1 | _ -> 0` — catch-all PWild,
   -- so exhaustiveness skips the whole fn even though `Rect` / `Empty`
   -- aren't named. Mirrors the F# host elaborator's catch-all bailout.
-  let shapeWildPat0 = PCon "Circle"
-  let shapeWildPat1 = PWild
-  let shapeWildPats = [shapeWildPat0 shapeWildPat1]
-  let shapeWildBody0 = EInt 1
-  let shapeWildBody1 = EInt 0
-  let shapeWildBodies = [shapeWildBody0 shapeWildBody1]
-  let shapeWildBody = EMatch shapeScrut shapeWildPats shapeWildBodies
-  let shapeWildFn = DFn "shapeWild" shapeParams "Shape" shapeWildBody
+  shapeWildPat0 = PCon "Circle"
+  shapeWildPat1 = PWild
+  shapeWildPats = [shapeWildPat0 shapeWildPat1]
+  shapeWildBody0 = EInt 1
+  shapeWildBody1 = EInt 0
+  shapeWildBodies = [shapeWildBody0 shapeWildBody1]
+  shapeWildBody = EMatch shapeScrut shapeWildPats shapeWildBodies
+  shapeWildFn = DFn "shapeWild" shapeParams "Shape" shapeWildBody
   -- Non-fn decls: a tag, two types with ctors, a let. None contain
   -- sub-expressions that need walking in this slice.
-  let tagDecl = DTag "UserId"
-  let maybeCtors = ["Some" "None"]
-  let maybeDecl = DType "Maybe" maybeCtors
-  let shapeCtors = ["Circle" "Rect" "Empty"]
-  let shapeDecl = DType "Shape" shapeCtors
-  let letDecl = DLet "answer" (EInt 42)
+  tagDecl = DTag "UserId"
+  maybeCtors = ["Some" "None"]
+  maybeDecl = DType "Maybe" maybeCtors
+  shapeCtors = ["Circle" "Rect" "Empty"]
+  shapeDecl = DType "Shape" shapeCtors
+  letDecl = DLet "answer" (EInt 42)
   -- Assemble the final decl list. All elements are lowercase idents
   -- (`tagDecl`, `addFn`, ...) so `parseTagged` is used per element
   -- and each one is a single atom, not a curried application.
@@ -526,7 +526,7 @@ fn testModule(u Int) =
 
 -- ---------- Driver -------------------------------------------------------
 
-fn main() =
-  let decls = testModule 0
-  let errs = elaborate decls
+main() =
+  decls = testModule 0
+  errs = elaborate decls
   printfn (showErrs errs)

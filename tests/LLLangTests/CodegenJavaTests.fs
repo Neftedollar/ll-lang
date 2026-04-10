@@ -42,25 +42,25 @@ let ``Java: class wrapper present`` () =
 
 [<Fact>]
 let ``Java: Int maps to long`` () =
-    let src = "module M\nfn id(x Int) Int = x"
+    let src = "module M\nid(x Int) Int = x"
     let java = javaSrc src
     Assert.Contains("long", java)
 
 [<Fact>]
 let ``Java: Str maps to String`` () =
-    let src = "module M\nfn greet(s Str) Str = s"
+    let src = "module M\ngreet(s Str) Str = s"
     let java = javaSrc src
     Assert.Contains("String", java)
 
 [<Fact>]
 let ``Java: Bool maps to boolean`` () =
-    let src = "module M\nfn neg(b Bool) Bool = !b"
+    let src = "module M\nneg(b Bool) Bool = !b"
     let java = javaSrc src
     Assert.Contains("boolean", java)
 
 [<Fact>]
 let ``Java: Float maps to double`` () =
-    let src = "module M\nfn sq(x Float) Float = x * x"
+    let src = "module M\nsq(x Float) Float = x * x"
     let java = javaSrc src
     Assert.Contains("double", java)
 
@@ -68,13 +68,13 @@ let ``Java: Float maps to double`` () =
 
 [<Fact>]
 let ``Java: sum type emits sealed interface`` () =
-    let src = "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    let src = "module M\nShape = Circle Float | Rect Float Float | Empty"
     let java = javaSrc src
     Assert.Contains("sealed interface Shape", java)
 
 [<Fact>]
 let ``Java: sum type constructors emit as records`` () =
-    let src = "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    let src = "module M\nShape = Circle Float | Rect Float Float | Empty"
     let java = javaSrc src
     Assert.Contains("record Circle", java)
     Assert.Contains("record Rect", java)
@@ -82,20 +82,20 @@ let ``Java: sum type constructors emit as records`` () =
 
 [<Fact>]
 let ``Java: constructor fields have correct Java types`` () =
-    let src = "module M\ntype Shape = Circle Float | Point Int Int"
+    let src = "module M\nShape = Circle Float | Point Int Int"
     let java = javaSrc src
     Assert.Contains("Double _0", java)
     Assert.Contains("Long _0", java)
 
 [<Fact>]
 let ``Java: sum type permits clause lists constructors`` () =
-    let src = "module M\ntype Color = Red | Green | Blue"
+    let src = "module M\nColor = Red | Green | Blue"
     let java = javaSrc src
     Assert.Contains("permits", java)
 
 [<Fact>]
 let ``Java: parametric type emits generics`` () =
-    let src = "module M\ntype Maybe A = Some A | None"
+    let src = "module M\nMaybe A = Some A | None"
     let java = javaSrc src
     Assert.Contains("<A>", java)
 
@@ -103,20 +103,20 @@ let ``Java: parametric type emits generics`` () =
 
 [<Fact>]
 let ``Java: simple fn emits public static`` () =
-    let src = "module M\nfn double(x Int) Int = x * 2"
+    let src = "module M\ndouble(x Int) Int = x * 2"
     let java = javaSrc src
     Assert.Contains("public static", java)
     Assert.Contains("double_", java)  // 'double' is a Java keyword, becomes 'double_'
 
 [<Fact>]
 let ``Java: single-param fn includes return`` () =
-    let src = "module M\nfn id(x Int) Int = x"
+    let src = "module M\nid(x Int) Int = x"
     let java = javaSrc src
     Assert.Contains("return", java)
 
 [<Fact>]
 let ``Java: curried fn emits Function return type`` () =
-    let src = "module M\nfn add(a Int)(b Int) Int = a + b"
+    let src = "module M\nadd(a Int)(b Int) Int = a + b"
     let java = javaSrc src
     Assert.Contains("Function", java)
 
@@ -144,7 +144,7 @@ let ``Java: let binding has correct name`` () =
 
 [<Fact>]
 let ``Java: main fn emits public static void main`` () =
-    let src = "module M\nfn main() Unit = printfn \"hello\""
+    let src = "module M\nmain() Unit = printfn \"hello\""
     let java = javaSrc src
     Assert.Contains("public static void main(String[] args)", java)
 
@@ -152,7 +152,7 @@ let ``Java: main fn emits public static void main`` () =
 
 [<Fact>]
 let ``Java: if-then-else emits ternary`` () =
-    let src = "module M\nfn abs(x Int) Int =\n  if x > 0\n    x\n  else 0 - x"
+    let src = "module M\nabs(x Int) Int =\n  if x > 0\n    x\n  else 0 - x"
     let java = javaSrc src
     Assert.Contains("?", java)
     Assert.Contains(":", java)
@@ -161,7 +161,7 @@ let ``Java: if-then-else emits ternary`` () =
 
 [<Fact>]
 let ``Java: arithmetic uses standard operators`` () =
-    let src = "module M\nfn add(a Int)(b Int) Int = a + b"
+    let src = "module M\nadd(a Int)(b Int) Int = a + b"
     let java = javaSrc src
     Assert.Contains("+", java)
 
@@ -169,14 +169,14 @@ let ``Java: arithmetic uses standard operators`` () =
 
 [<Fact>]
 let ``compileTarget Java produces same as compileToJava`` () =
-    let src = "module M\nfn id(x Int) Int = x"
+    let src = "module M\nid(x Int) Int = x"
     let a = compileToJava src
     let b = compileTarget Java src
     Assert.Equal(a, b)
 
 [<Fact>]
 let ``compileTarget Java does not emit F# let keyword`` () =
-    let src = "module M\nfn id(x Int) Int = x"
+    let src = "module M\nid(x Int) Int = x"
     match compileTarget Java src with
     | Ok java ->
         Assert.DoesNotContain("\nlet id", java)
@@ -184,7 +184,7 @@ let ``compileTarget Java does not emit F# let keyword`` () =
 
 [<Fact>]
 let ``compileTarget Java does not emit TypeScript syntax`` () =
-    let src = "module M\nfn id(x Int) Int = x"
+    let src = "module M\nid(x Int) Int = x"
     match compileTarget Java src with
     | Ok java ->
         Assert.DoesNotContain("const ", java)

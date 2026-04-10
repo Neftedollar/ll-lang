@@ -1,8 +1,8 @@
 module Examples.Clean
-fn neg(n Int) = if n < 0
+neg(n Int) = if n < 0
   0 - n
 else n
-fn pos(n Int) = if n > 0
+pos(n Int) = if n > 0
   n
 else 0 - n
-fn main() = neg 1
+main() = neg 1

@@ -14,7 +14,7 @@ let private tsSrc (src: string) : string =
 
 [<Fact>]
 let ``TS: sum type emits discriminated union interface`` () =
-    let src = "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    let src = "module M\nShape = Circle Float | Rect Float Float | Empty"
     let ts = tsSrc src
     Assert.Contains("_tag:", ts)
     Assert.Contains("Circle", ts)
@@ -23,37 +23,37 @@ let ``TS: sum type emits discriminated union interface`` () =
 
 [<Fact>]
 let ``TS: sum type emits union type alias`` () =
-    let src = "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    let src = "module M\nShape = Circle Float | Rect Float Float | Empty"
     Assert.Contains("type Shape =", tsSrc src)
 
 [<Fact>]
 let ``TS: zero-arg constructor emits const`` () =
-    let src = "module M\ntype Shape = Circle Float | Empty"
+    let src = "module M\nShape = Circle Float | Empty"
     let ts = tsSrc src
     Assert.Contains("const Empty", ts)
     Assert.Contains("as const", ts)
 
 [<Fact>]
 let ``TS: parametric type emits generic syntax`` () =
-    let src = "module M\ntype Maybe A = Some A | None"
+    let src = "module M\nMaybe A = Some A | None"
     let ts = tsSrc src
     Assert.Contains("<A>", ts)
 
 [<Fact>]
 let ``TS: Int maps to number`` () =
-    let src = "module M\nfn id(x Int) Int = x"
+    let src = "module M\nid(x Int) Int = x"
     let ts = tsSrc src
     Assert.Contains("number", ts)
 
 [<Fact>]
 let ``TS: Str maps to string`` () =
-    let src = "module M\nfn greet(s Str) Str = s"
+    let src = "module M\ngreet(s Str) Str = s"
     let ts = tsSrc src
     Assert.Contains("string", ts)
 
 [<Fact>]
 let ``TS: Bool maps to boolean`` () =
-    let src = "module M\nfn neg(b Bool) Bool = !b"
+    let src = "module M\nneg(b Bool) Bool = !b"
     let ts = tsSrc src
     Assert.Contains("boolean", ts)
 
@@ -61,14 +61,14 @@ let ``TS: Bool maps to boolean`` () =
 
 [<Fact>]
 let ``TS: simple fn emits arrow function`` () =
-    let src = "module M\nfn add(a Int)(b Int) Int = a + b"
+    let src = "module M\nadd(a Int)(b Int) Int = a + b"
     let ts = tsSrc src
     Assert.Contains("const add", ts)
     Assert.Contains("=>", ts)
 
 [<Fact>]
 let ``TS: curried fn nests arrow functions`` () =
-    let src = "module M\nfn add(a Int)(b Int) Int = a + b"
+    let src = "module M\nadd(a Int)(b Int) Int = a + b"
     let ts = tsSrc src
     // Two levels of currying
     let arrowCount = ts.Split([|"=>"|], System.StringSplitOptions.None).Length - 1
@@ -83,19 +83,19 @@ let ``TS: let binding emits const`` () =
 
 [<Fact>]
 let ``TS: if-then-else emits ternary`` () =
-    let src = "module M\nfn abs(x Int) Int =\n  if x > 0\n    x\n  else 0 - x"
+    let src = "module M\nabs(x Int) Int =\n  if x > 0\n    x\n  else 0 - x"
     let ts = tsSrc src
     Assert.Contains("?", ts)
 
 [<Fact>]
 let ``TS: strConcat emits plus`` () =
-    let src = "module M\nfn greet(name Str) Str = strConcat \"Hello \" name"
+    let src = "module M\ngreet(name Str) Str = strConcat \"Hello \" name"
     let ts = tsSrc src
     Assert.Contains("+", ts)
 
 [<Fact>]
 let ``TS: list type emits array syntax`` () =
-    let src = "module M\nfn len(xs List[Int]) Int = listLen xs"
+    let src = "module M\nlen(xs List[Int]) Int = listLen xs"
     let ts = tsSrc src
     Assert.Contains("number[]", ts)
 
@@ -109,13 +109,13 @@ let ``TS: emits header comment`` () =
 
 [<Fact>]
 let ``TS: match on sum type checks _tag`` () =
-    let src = "module M\ntype Color = Red | Green | Blue\nfn toInt(c Color) Int = match c | Red -> 0 | Green -> 1 | Blue -> 2"
+    let src = "module M\nColor = Red | Green | Blue\ntoInt(c Color) Int = match c | Red -> 0 | Green -> 1 | Blue -> 2"
     let ts = tsSrc src
     Assert.Contains("_tag", ts)
 
 [<Fact>]
 let ``TS: match emits conditional expression`` () =
-    let src = "module M\ntype Color = Red | Green\nfn toInt(c Color) Int = match c | Red -> 0 | Green -> 1"
+    let src = "module M\nColor = Red | Green\ntoInt(c Color) Int = match c | Red -> 0 | Green -> 1"
     let ts = tsSrc src
     Assert.Contains("Red", ts)
     Assert.Contains("Green", ts)
@@ -124,14 +124,14 @@ let ``TS: match emits conditional expression`` () =
 
 [<Fact>]
 let ``compileTarget TypeScript produces same as compileToTS`` () =
-    let src = "module M\nfn id(x Int) Int = x"
+    let src = "module M\nid(x Int) Int = x"
     let a = compileToTS src
     let b = compileTarget TypeScript src
     Assert.Equal(a, b)
 
 [<Fact>]
 let ``compileTarget FSharp produces F# not TS`` () =
-    let src = "module M\nfn id(x Int) Int = x"
+    let src = "module M\nid(x Int) Int = x"
     match compileTarget FSharp src with
     | Ok fs ->
         Assert.Contains("let", fs)

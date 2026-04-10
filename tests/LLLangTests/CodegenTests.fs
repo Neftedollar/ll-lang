@@ -26,34 +26,34 @@ let ``emit produces non-empty string for trivial module`` () =
 
 [<Fact>]
 let ``TDType sum type emits DU header`` () =
-    let src = "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    let src = "module M\nShape = Circle Float | Rect Float Float | Empty"
     Assert.Contains("type Shape =", codegenSrc src)
 
 [<Fact>]
 let ``TDType sum type emits Circle branch with float`` () =
-    let src = "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    let src = "module M\nShape = Circle Float | Rect Float Float | Empty"
     Assert.Contains("| Circle of float", codegenSrc src)
 
 [<Fact>]
 let ``TDType sum type emits multi-arg branch`` () =
-    let src = "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    let src = "module M\nShape = Circle Float | Rect Float Float | Empty"
     Assert.Contains("| Rect of float * float", codegenSrc src)
 
 [<Fact>]
 let ``TDType sum type emits zero-arg branch without of`` () =
-    let src = "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    let src = "module M\nShape = Circle Float | Rect Float Float | Empty"
     let fs = codegenSrc src
     Assert.Contains("| Empty", fs)
     Assert.DoesNotContain("| Empty of", fs)
 
 [<Fact>]
 let ``TDType parametric sum type emits type param`` () =
-    let src = "module M\ntype Maybe A = Some A | None"
+    let src = "module M\nMaybe A = Some A | None"
     Assert.Contains("type Maybe<'A>", codegenSrc src)
 
 [<Fact>]
 let ``TDType record type emits record syntax`` () =
-    let src = "module M\ntype Point = x Float, y Float"
+    let src = "module M\nPoint = x Float, y Float"
     let fs = codegenSrc src
     Assert.Contains("type Point = {", fs)
     Assert.Contains("x: float", fs)
@@ -100,17 +100,17 @@ let ``TELit char single quote escape`` () =
 
 [<Fact>]
 let ``TEApp binary add emits infix`` () =
-    let fs = codegenSrc "module M\nfn add(a Int)(b Int) Int = a + b"
+    let fs = codegenSrc "module M\nadd(a Int)(b Int) Int = a + b"
     Assert.Contains("let add a b =", fs)
     Assert.Contains("(a + b)", fs)
 
 [<Fact>]
 let ``TEApp binary equality emits F# = operator`` () =
-    Assert.Contains("(a = b)", codegenSrc "module M\nfn eq(a Int)(b Int) Bool = a == b")
+    Assert.Contains("(a = b)", codegenSrc "module M\neq(a Int)(b Int) Bool = a == b")
 
 [<Fact>]
 let ``TEApp binary inequality emits F# <> operator`` () =
-    Assert.Contains("(a <> b)", codegenSrc "module M\nfn neq(a Int)(b Int) Bool = a != b")
+    Assert.Contains("(a <> b)", codegenSrc "module M\nneq(a Int)(b Int) Bool = a != b")
 
 [<Fact>]
 let ``TELam emits fun syntax`` () =
@@ -118,13 +118,13 @@ let ``TELam emits fun syntax`` () =
 
 [<Fact>]
 let ``TEIf emits if-then-else`` () =
-    let fs = codegenSrc "module M\nfn abs(x Int) =\n  if x < 0\n    0\n  else x"
+    let fs = codegenSrc "module M\nabs(x Int) =\n  if x < 0\n    0\n  else x"
     Assert.Contains("then 0L", fs)
     Assert.Contains("else x", fs)
 
 [<Fact>]
 let ``TDFn with no params emits let without parens`` () =
-    Assert.Contains("let greeting =", codegenSrc "module M\nfn greeting = \"hello\"")
+    Assert.Contains("let greeting =", codegenSrc "module M\ngreeting = \"hello\"")
 
 [<Fact>]
 let ``TDLet emits let binding`` () =
@@ -136,38 +136,38 @@ let ``TDLet emits let binding`` () =
 
 [<Fact>]
 let ``TEMatch emits match with`` () =
-    let src = "module M\ntype Shape = Circle Float | Empty\nfn area(s Shape) =\n  | Circle r -> r\n  | Empty -> 0.0"
+    let src = "module M\nShape = Circle Float | Empty\narea(s Shape) =\n  | Circle r -> r\n  | Empty -> 0.0"
     let fs = codegenSrc src
     Assert.Contains("match s with", fs)
 
 [<Fact>]
 let ``TEMatch emits branch arms`` () =
-    let src = "module M\ntype Shape = Circle Float | Empty\nfn area(s Shape) =\n  | Circle r -> r\n  | Empty -> 0.0"
+    let src = "module M\nShape = Circle Float | Empty\narea(s Shape) =\n  | Circle r -> r\n  | Empty -> 0.0"
     let fs = codegenSrc src
     Assert.Contains("| Circle(r) ->", fs)
     Assert.Contains("| Empty ->", fs)
 
 [<Fact>]
 let ``PWild pattern emits underscore`` () =
-    let src = "module M\ntype Color = Red Int | Blue\nfn f(x Color) =\n  | Red _ -> 1\n  | Blue -> 2"
+    let src = "module M\nColor = Red Int | Blue\nf(x Color) =\n  | Red _ -> 1\n  | Blue -> 2"
     Assert.Contains("| Red(_) ->", codegenSrc src)
 
 [<Fact>]
 let ``PCon single-arg pattern emits parenthesized variable`` () =
-    let src = "module M\ntype Maybe A = Some A | None\nfn unwrap(m Maybe[Int]) =\n  | Some x -> x\n  | None -> 0"
+    let src = "module M\nMaybe A = Some A | None\nunwrap(m Maybe[Int]) =\n  | Some x -> x\n  | None -> 0"
     Assert.Contains("| Some(x) ->", codegenSrc src)
 
 [<Fact>]
 let ``PTuple pattern emits F# tuple pattern`` () =
     // Requires untyped-param support for `fn fst(p)` so inference can
     // discover the tuple shape from the match pattern.
-    let src = "module M\nfn fst(p) =\n  | (a, b) -> a"
+    let src = "module M\nfst(p) =\n  | (a, b) -> a"
     let fs = codegenSrc src
     Assert.Contains("| (a, b) ->", fs)
 
 [<Fact>]
 let ``PTuple pattern with wildcard emits (a, _)`` () =
-    let src = "module M\nfn fst(p) =\n  | (a, _) -> a"
+    let src = "module M\nfst(p) =\n  | (a, _) -> a"
     let fs = codegenSrc src
     Assert.Contains("| (a, _) ->", fs)
 
@@ -175,7 +175,7 @@ let ``PTuple pattern with wildcard emits (a, _)`` () =
 
 [<Fact>]
 let ``PCons pattern emits F# (h :: t)`` () =
-    let src = "module M\nfn first(xs) =\n  | h :: t -> h"
+    let src = "module M\nfirst(xs) =\n  | h :: t -> h"
     let fs = codegenSrc src
     Assert.Contains("(h :: t)", fs)
 
@@ -189,7 +189,7 @@ let ``ECons expression emits F# (h :: t)`` () =
 let ``match-as-expression emits F# match-with`` () =
     let src =
         "module M\n" +
-        "fn label(n Int) Str =\n" +
+        "label(n Int) Str =\n" +
         "  match n | 0 -> \"zero\" | _ -> \"other\""
     let fs = codegenSrc src
     Assert.Contains("match n with", fs)
@@ -213,14 +213,14 @@ let ``multiple declarations emitted in order`` () =
 
 [<Fact>]
 let ``fn main gets EntryPoint attribute`` () =
-    let src = "module M\nfn main() = 0"
+    let src = "module M\nmain() = 0"
     let fs = codegenSrc src
     Assert.Contains("[<EntryPoint>]", fs)
     Assert.Contains("let main (argv: string[]) =", fs)
 
 [<Fact>]
 let ``non-main fn does not get EntryPoint`` () =
-    Assert.DoesNotContain("[<EntryPoint>]", codegenSrc "module M\nfn add(a Int)(b Int) Int = a + b")
+    Assert.DoesNotContain("[<EntryPoint>]", codegenSrc "module M\nadd(a Int)(b Int) Int = a + b")
 
 // ---------- Task 6: compiler pipeline ----------
 
@@ -404,10 +404,10 @@ let private runLLLangSrc (src: string) : string =
 let ``runtime: cons pattern in fn match returns head`` () =
     let src =
         "module Tmp.ConsHead\n" +
-        "fn first(xs List[Int]) Int =\n" +
+        "first(xs List[Int]) Int =\n" +
         "  | h :: _ -> h\n" +
         "  | _ -> 0\n" +
-        "fn main() = printfn (intToStr (first [1 2 3]))"
+        "main() = printfn (intToStr (first [1 2 3]))"
     let stdout = runLLLangSrc src
     Assert.Contains("1", stdout)
 
@@ -415,7 +415,7 @@ let ``runtime: cons pattern in fn match returns head`` () =
 let ``runtime: cons expression builds list matched by literal`` () =
     let src =
         "module Tmp.ConsBuild\n" +
-        "fn main() =\n" +
+        "main() =\n" +
         "  let xs = 1 :: 2 :: 3 :: [4 5]\n" +
         "  printfn (intToStr (listLen xs))"
     let stdout = runLLLangSrc src
@@ -425,7 +425,7 @@ let ``runtime: cons expression builds list matched by literal`` () =
 let ``runtime: match-as-expression in let binding`` () =
     let src =
         "module Tmp.MatchExpr\n" +
-        "fn main() =\n" +
+        "main() =\n" +
         "  let v = match 0 | 0 -> \"zero\" | _ -> \"other\"\n" +
         "  printfn v"
     let stdout = runLLLangSrc src
@@ -438,7 +438,7 @@ let ``codegen: nested let-tuple in fn body emits let (a, b) =`` () =
     // Tuple values enter via fn params; emitted body should use a tuple-pat let.
     let src =
         "module M\n" +
-        "fn addPair(p) Int =\n" +
+        "addPair(p) Int =\n" +
         "  let (a, b) = p\n" +
         "  a + b"
     let fs = codegenSrc src
@@ -448,7 +448,7 @@ let ``codegen: nested let-tuple in fn body emits let (a, b) =`` () =
 let ``codegen: let wildcard emits let _ =`` () =
     let src =
         "module M\n" +
-        "fn f() Int =\n" +
+        "f() Int =\n" +
         "  let _ = 99\n" +
         "  1"
     let fs = codegenSrc src
@@ -463,10 +463,10 @@ let ``runtime: let wildcard destructuring discards rhs`` () =
     // TELetPat all line up.
     let src =
         "module Tmp.LetWild\n" +
-        "fn run() Int =\n" +
+        "run() Int =\n" +
         "  let _ = 99\n" +
         "  7\n" +
-        "fn main() = printfn (intToStr run)"
+        "main() = printfn (intToStr run)"
     let stdout = runLLLangSrc src
     Assert.Contains("7", stdout)
 
@@ -488,7 +488,7 @@ let ``codegen: tuple literal three elements emits comma-separated`` () =
 let ``codegen: tuple literal + destructure in fn body`` () =
     let src =
         "module M\n" +
-        "fn run() Int =\n" +
+        "run() Int =\n" +
         "  let p = (1, 2)\n" +
         "  let (a, b) = p\n" +
         "  a"
@@ -500,11 +500,11 @@ let ``codegen: tuple literal + destructure in fn body`` () =
 let ``runtime: tuple literal + destructure end-to-end prints first elem`` () =
     let src =
         "module Tmp.TupLit\n" +
-        "fn pair(a Int)(b Int) = (a, b)\n" +
-        "fn fst(p) Int =\n" +
+        "pair(a Int)(b Int) = (a, b)\n" +
+        "fst(p) Int =\n" +
         "  let (a, b) = p\n" +
         "  a\n" +
-        "fn main() =\n" +
+        "main() =\n" +
         "  let p = pair 1 2\n" +
         "  printfn (intToStr (fst p))"
     let stdout = runLLLangSrc src
@@ -522,9 +522,9 @@ let ``runtime: tuple literal + destructure end-to-end prints first elem`` () =
 let ``runtime: cons CON [LIT] passes a single-element list as a fresh arg`` () =
     let src =
         "module Tmp.TagAmbig\n" +
-        "type Token = TPlus | TMinus\n" +
-        "fn cons2(t Token)(ts List[Token]) List[Token] = t :: ts\n" +
-        "fn main() =\n" +
+        "Token = TPlus | TMinus\n" +
+        "cons2(t Token)(ts List[Token]) List[Token] = t :: ts\n" +
+        "main() =\n" +
         "  let xs = cons2 TPlus [TMinus]\n" +
         "  printfn (intToStr (listLen xs))"
     let stdout = runLLLangSrc src
@@ -564,14 +564,14 @@ let ``Bug1 runtime: clause-sugar wildcard arm with multi-line let-in returns 30`
     // arm body and the program runs and prints 30.
     let src =
         "module Tmp.Bug1Scope\n" +
-        "type Tag = A | B\n" +
-        "fn f(t Tag) Int =\n" +
+        "Tag = A | B\n" +
+        "f(t Tag) Int =\n" +
         "  | A -> 1\n" +
         "  | _ ->\n" +
         "    let p = (10, 20)\n" +
         "    let (x, y) = p\n" +
         "    x + y\n" +
-        "fn main() = printfn (intToStr (f B))"
+        "main() = printfn (intToStr (f B))"
     let stdout = runLLLangSrc src
     Assert.Contains("30", stdout)
 
@@ -587,12 +587,12 @@ let ``Bug2 runtime: mixed cons / empty-list / wildcard arms all reached`` () =
     // and the total of 1 + 2 + 3 = 6 confirms all three arms run.
     let src =
         "module Tmp.Bug2Arms\n" +
-        "type Token = TEnd | TMore\n" +
-        "fn f(toks List[Token]) Int =\n" +
+        "Token = TEnd | TMore\n" +
+        "f(toks List[Token]) Int =\n" +
         "  | TEnd :: _ -> 1\n" +
         "  | [] -> 2\n" +
         "  | _ -> 3\n" +
-        "fn main() =\n" +
+        "main() =\n" +
         "  let a = f [TEnd]\n" +
         "  let b = f []\n" +
         "  let c = f [TMore]\n" +

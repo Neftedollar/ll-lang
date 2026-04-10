@@ -1,5 +1,5 @@
 module Examples.Clean
-fn sym(n Int) = if '=' == '='
+sym(n Int) = if '=' == '='
   n
 else 0
-fn main() = sym 5
+main() = sym 5

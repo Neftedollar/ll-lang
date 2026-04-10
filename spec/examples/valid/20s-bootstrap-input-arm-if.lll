@@ -1,9 +1,9 @@
 module Examples.Clean
-fn describe(n Int) =
+describe(n Int) =
   match n
     | 0 ->
       if 1 == 1
         10
       else 20
     | _ -> 30
-fn main() = describe 0
+main() = describe 0

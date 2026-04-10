@@ -1,8 +1,8 @@
 module Examples.Clean
-fn choose(n Int) = if n > 0
+choose(n Int) = if n > 0
   1
 else 0
-fn flag() = if true == false
+flag() = if true == false
   1
 else 0
-fn main() = choose 5
+main() = choose 5

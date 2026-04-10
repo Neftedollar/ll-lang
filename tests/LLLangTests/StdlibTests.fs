@@ -67,7 +67,7 @@ let ``listLen is List A -> Int`` () =
 let ``listMap typed (A -> B) -> List A -> List B`` () =
     let src =
         "module M\n" +
-        "fn double(x Int) Int = x * 2\n" +
+        "double(x Int) Int = x * 2\n" +
         "let xs = listMap double [1 2 3]"
     let tm = inferOk src
     Assert.Equal(TyApp(TyName "List", TyName "Int"), (Map.find "xs" tm.Env).Body)
@@ -76,7 +76,7 @@ let ``listMap typed (A -> B) -> List A -> List B`` () =
 let ``listFilter typed (A -> Bool) -> List A -> List A`` () =
     let src =
         "module M\n" +
-        "fn isPos(x Int) Bool = x > 0\n" +
+        "isPos(x Int) Bool = x > 0\n" +
         "let xs = listFilter isPos [1 2 3]"
     let tm = inferOk src
     Assert.Equal(TyApp(TyName "List", TyName "Int"), (Map.find "xs" tm.Env).Body)
@@ -105,7 +105,7 @@ let ``listAppend typed List A -> List A -> List A`` () =
 let ``listHead returns Maybe A`` () =
     let src =
         "module M\n" +
-        "type Maybe A = Some A | None\n" +
+        "Maybe A = Some A | None\n" +
         "let h = listHead [1 2 3]"
     let tm = inferOk src
     Assert.Equal(TyApp(TyName "Maybe", TyName "Int"), (Map.find "h" tm.Env).Body)
@@ -114,7 +114,7 @@ let ``listHead returns Maybe A`` () =
 let ``listTail returns Maybe (List A)`` () =
     let src =
         "module M\n" +
-        "type Maybe A = Some A | None\n" +
+        "Maybe A = Some A | None\n" +
         "let t = listTail [1 2 3]"
     let tm = inferOk src
     Assert.Equal(TyApp(TyName "Maybe", TyApp(TyName "List", TyName "Int")), (Map.find "t" tm.Env).Body)
@@ -123,7 +123,7 @@ let ``listTail returns Maybe (List A)`` () =
 let ``maybeWithDefault unwraps Maybe`` () =
     let src =
         "module M\n" +
-        "type Maybe A = Some A | None\n" +
+        "Maybe A = Some A | None\n" +
         "let h = listHead [1 2 3]\n" +
         "let v = maybeWithDefault 0 h"
     let tm = inferOk src
@@ -155,7 +155,7 @@ let ``strContains is Str -> Str -> Bool`` () =
 let ``strToInt returns Maybe Int`` () =
     let src =
         "module M\n" +
-        "type Maybe A = Some A | None\n" +
+        "Maybe A = Some A | None\n" +
         "let n = strToInt \"42\""
     let tm = inferOk src
     Assert.Equal(TyApp(TyName "Maybe", TyName "Int"), (Map.find "n" tm.Env).Body)
@@ -164,7 +164,7 @@ let ``strToInt returns Maybe Int`` () =
 
 [<Fact>]
 let ``print is Str -> Unit`` () =
-    let tm = inferOk "module M\nfn greet() = print \"hi\""
+    let tm = inferOk "module M\ngreet() = print \"hi\""
     let body = (Map.find "greet" tm.Env).Body
     match body with
     | TyFn(TyName "Unit", TyName "Unit")
@@ -184,7 +184,7 @@ let ``emitted F# contains the prelude block`` () =
 let ``Maybe-dependent prelude only emitted when user declares Maybe`` () =
     let withoutMaybe = codegenSrc "module M\nlet x = 1"
     Assert.DoesNotContain("let listHead", withoutMaybe)
-    let withMaybe = codegenSrc "module M\ntype Maybe A = Some A | None\nlet x = 1"
+    let withMaybe = codegenSrc "module M\nMaybe A = Some A | None\nlet x = 1"
     Assert.Contains("let listHead", withMaybe)
 
 // ---- Phase 6.5: Char / Str extensions ----
@@ -266,7 +266,7 @@ let ``readFile returns Str`` () =
 
 [<Fact>]
 let ``writeFile returns Unit`` () =
-    let tm = inferOk "module M\nfn run() = writeFile \"/tmp/x\" \"data\""
+    let tm = inferOk "module M\nrun() = writeFile \"/tmp/x\" \"data\""
     // Just confirm presence in env
     Assert.True(Map.containsKey "run" tm.Env)
 
@@ -279,7 +279,7 @@ let ``fileExists returns Bool`` () =
 
 [<Fact>]
 let ``exit is Int -> Unit (function present)`` () =
-    let tm = inferOk "module M\nfn quit() = exit 0"
+    let tm = inferOk "module M\nquit() = exit 0"
     Assert.True(Map.containsKey "quit" tm.Env)
 
 // ---- Phase 6.5: List extras ----
@@ -298,7 +298,7 @@ let ``listIsEmpty returns Bool`` () =
 let ``listAt returns Maybe A`` () =
     let src =
         "module M\n" +
-        "type Maybe A = Some A | None\n" +
+        "Maybe A = Some A | None\n" +
         "let m = listAt [1 2 3] 0"
     let tm = inferOk src
     Assert.Equal(TyApp(TyName "Maybe", TyName "Int"), (Map.find "m" tm.Env).Body)
@@ -317,7 +317,7 @@ let ``emitted F# contains new core prelude bindings`` () =
 let ``listAt only emitted when user declares Maybe`` () =
     let withoutMaybe = codegenSrc "module M\nlet x = 1"
     Assert.DoesNotContain("let listAt", withoutMaybe)
-    let withMaybe = codegenSrc "module M\ntype Maybe A = Some A | None\nlet x = 1"
+    let withMaybe = codegenSrc "module M\nMaybe A = Some A | None\nlet x = 1"
     Assert.Contains("let listAt", withMaybe)
 
 // ---- Phase 6.5: end-to-end runtime tests ----

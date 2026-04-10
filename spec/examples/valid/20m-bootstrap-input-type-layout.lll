@@ -1,11 +1,11 @@
 module Examples.Clean
-type Color =
+Color =
   | Red
   | Green
   | Blue
-fn label(c Color) =
+label(c Color) =
   match c
     | Red -> 1
     | Green -> 2
     | Blue -> 3
-fn main() = label Red
+main() = label Red

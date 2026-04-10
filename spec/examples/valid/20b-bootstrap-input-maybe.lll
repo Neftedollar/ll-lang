@@ -1,4 +1,4 @@
 module Examples.Clean
-type Maybe A = Some A | None
-fn wrap(v Int) = Some v
-fn main() = 1
+Maybe A = Some A | None
+wrap(v Int) = Some v
+main() = 1

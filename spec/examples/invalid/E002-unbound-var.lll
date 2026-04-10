@@ -1,4 +1,4 @@
 -- expect: E002
 module Invalid.E002
 
-fn broken = undefinedFunction 42
+broken = undefinedFunction 42

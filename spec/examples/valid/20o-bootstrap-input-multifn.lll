@@ -1,12 +1,12 @@
 module Examples.Clean
-fn one(c Int) =
+one(c Int) =
   if c < 65
     0
   else if c > 90
     0
   else 1
-fn two() = 2
-fn three() = 3
-fn four() = 4
-fn five() = 5
-fn main() = one 0
+two() = 2
+three() = 3
+four() = 4
+five() = 5
+main() = one 0

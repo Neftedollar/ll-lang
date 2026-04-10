@@ -1,14 +1,14 @@
 module Examples.Stdlib
 
-type Maybe A = Some A | None
+Maybe A = Some A | None
 
-fn double(x Int) = x * 2
+double(x Int) = x * 2
 
-fn sumList(xs List[Int]) = listFold (\acc. \x. acc + x) 0 xs
+sumList(xs List[Int]) = listFold (\acc. \x. acc + x) 0 xs
 
-fn doubleAll(xs List[Int]) = listMap double xs
+doubleAll(xs List[Int]) = listMap double xs
 
-fn nameLen(name Str) = strLen name
+nameLen(name Str) = strLen name
 
-fn main() =
+main() =
   printfn "stdlib example"

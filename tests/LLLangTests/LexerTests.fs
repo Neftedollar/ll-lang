@@ -12,7 +12,8 @@ let toks src =
 
 [<Fact>]
 let ``keyword fn`` () =
-    Assert.Equal<Token list>([KwFn], toks "fn")
+    // `fn` is no longer a keyword — it tokenizes as a lowercase Ident
+    Assert.Equal<Token list>([Ident "fn"], toks "fn")
 
 [<Fact>]
 let ``keyword let`` () =
@@ -20,9 +21,9 @@ let ``keyword let`` () =
 
 [<Fact>]
 let ``all keywords recognized`` () =
-    let kws = "fn let type tag unit trait impl import export module if else"
+    let kws = "let tag unit trait impl import export module if else"
     let expected = [
-        KwFn; KwLet; KwType; KwTag; KwUnit
+        KwLet; KwTag; KwUnit
         KwTrait; KwImpl; KwImport; KwExport; KwModule
         KwIf; KwElse
     ]
@@ -120,7 +121,7 @@ let ``backslash and underscore`` () =
 
 [<Fact>]
 let ``comment stripped`` () =
-    Assert.Equal<Token list>([KwFn; Ident "f"; Eq; IntLit 1L], toks "fn f = 1 -- comment")
+    Assert.Equal<Token list>([Ident "f"; Eq; IntLit 1L], toks "f = 1 -- comment")
 
 [<Fact>]
 let ``comment-only line is empty`` () =
@@ -128,9 +129,10 @@ let ``comment-only line is empty`` () =
 
 [<Fact>]
 let ``function declaration tokenized`` () =
-    let src = "fn add(a Int)(b Int) Int = a + b"
+    // `fn` is no longer a keyword — it tokenizes as Ident "fn"
+    let src = "add(a Int)(b Int) Int = a + b"
     let expected = [
-        KwFn; Ident "add"
+        Ident "add"
         LParen; Ident "a"; TypeId "Int"; RParen
         LParen; Ident "b"; TypeId "Int"; RParen
         TypeId "Int"; Eq
@@ -148,14 +150,14 @@ let allToks src =
 
 [<Fact>]
 let ``indented block: INDENT after = newline`` () =
-    let src = "fn f =\n  42"
+    let src = "f =\n  42"
     let ts = allToks src
     Assert.Contains(Indent, ts)
     Assert.Contains(Dedent, ts)
 
 [<Fact>]
 let ``INDENT appears before first indented token`` () =
-    let src = "fn f =\n  42"
+    let src = "f =\n  42"
     let ts = allToks src
     let indentIdx = ts |> List.findIndex ((=) Indent)
     let intIdx = ts |> List.findIndex ((=) (IntLit 42L))
@@ -163,13 +165,13 @@ let ``INDENT appears before first indented token`` () =
 
 [<Fact>]
 let ``DEDENT appears after indented block ends`` () =
-    let src = "fn f =\n  42\nfn g = 1"
+    let src = "f =\n  42\ng = 1"
     let ts = allToks src
     Assert.Contains(Dedent, ts)
 
 [<Fact>]
 let ``nested indent: two levels`` () =
-    let src = "fn f =\n  fn g =\n    42"
+    let src = "f =\n  fn g =\n    42"
     let ts = allToks src
     let indentCount = ts |> List.filter ((=) Indent) |> List.length
     let dedentCount = ts |> List.filter ((=) Dedent) |> List.length
@@ -178,20 +180,20 @@ let ``nested indent: two levels`` () =
 
 [<Fact>]
 let ``blank lines do not affect indentation`` () =
-    let src = "fn f =\n\n  42"
+    let src = "f =\n\n  42"
     let ts = allToks src
     Assert.Contains(Indent, ts)
 
 [<Fact>]
 let ``comment-only line does not affect indentation`` () =
-    let src = "fn f =\n  -- comment\n  42"
+    let src = "f =\n  -- comment\n  42"
     let ts = allToks src
     let indentCount = ts |> List.filter ((=) Indent) |> List.length
     Assert.Equal(1, indentCount)
 
 [<Fact>]
 let ``match branches generate INDENT and DEDENT`` () =
-    let src = "fn area s =\n  | Circle r -> r\n  | Empty -> 0"
+    let src = "area s =\n  | Circle r -> r\n  | Empty -> 0"
     let ts = allToks src
     Assert.Contains(Indent, ts)
     Assert.Contains(Dedent, ts)

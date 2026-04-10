@@ -171,7 +171,7 @@ let ``parse addition`` () =
 
 [<Fact>]
 let ``parse simple fn declaration`` () =
-    let src = "module M\nfn double(x Int) = x"
+    let src = "module M\ndouble(x Int) = x"
     let m = parseModuleStr src
     Assert.Equal(1, m.Decls.Length)
     match fst m.Decls[0] with
@@ -180,7 +180,7 @@ let ``parse simple fn declaration`` () =
 
 [<Fact>]
 let ``parse fn with two params`` () =
-    let src = "module M\nfn add(a Int)(b Int) = a"
+    let src = "module M\nadd(a Int)(b Int) = a"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DFn(sig', _) -> Assert.Equal(2, sig'.Params.Length)
@@ -196,7 +196,7 @@ let ``parse top-level let`` () =
 
 [<Fact>]
 let ``parse sum type`` () =
-    let src = "module M\ntype Shape = Circle Float | Empty"
+    let src = "module M\nShape = Circle Float | Empty"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DType("Shape", [], TBSum ctors) -> Assert.Equal(2, ctors.Length)
@@ -208,7 +208,7 @@ let ``parse sum type`` () =
 let ``parse multi-line sum type with three indented arms`` () =
     let src =
         "module M\n" +
-        "type Token =\n" +
+        "Token =\n" +
         "  | TIdent Str\n" +
         "  | TNum Str\n" +
         "  | TLParen\n"
@@ -227,7 +227,7 @@ let ``parse multi-line sum type with three indented arms`` () =
 let ``parse multi-line sum type with type parameter`` () =
     let src =
         "module M\n" +
-        "type Maybe A =\n" +
+        "Maybe A =\n" +
         "  | Some A\n" +
         "  | None\n"
     let m = parseModuleStr src
@@ -238,7 +238,7 @@ let ``parse multi-line sum type with type parameter`` () =
 
 [<Fact>]
 let ``single-line sum type still works (regression)`` () =
-    let src = "module M\ntype Shape = Circle Float | Empty"
+    let src = "module M\nShape = Circle Float | Empty"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DType("Shape", [], TBSum ctors) -> Assert.Equal(2, ctors.Length)
@@ -372,7 +372,7 @@ let ``indented let without in: multi-line no 'in' keyword`` () =
     //   let x = 1
     //   let y = 2
     //   x + y
-    let src = "module M\nfn f() =\n  let x = 1\n  let y = 2\n  x + y"
+    let src = "module M\nf() =\n  x = 1\n  y = 2\n  x + y"
     let m = parseModuleStr src
     match fnBody m with
     | ELet("x", ELit(LInt 1L), Some(ELet("y", ELit(LInt 2L), Some(_)))) -> ()
@@ -387,7 +387,7 @@ let ``indented let inside else branch`` () =
     //     let x = 2
     //     let y = 3
     //     x + y
-    let src = "module M\nfn f() =\n  if true\n    1\n  else\n    let x = 2\n    let y = 3\n    x + y"
+    let src = "module M\nf() =\n  if true\n    1\n  else\n    x = 2\n    y = 3\n    x + y"
     let m = parseModuleStr src
     match fnBody m with
     | EIf(_, _, ELet("x", ELit(LInt 2L), Some(ELet("y", ELit(LInt 3L), Some _)))) -> ()
@@ -411,7 +411,7 @@ let ``module-level multiple lets still parse as siblings`` () =
 [<Fact>]
 let ``parse tuple pattern: (a, b)`` () =
     // match p with | (a, b) -> a
-    let src = "module M\nfn fst(p) =\n  | (a, b) -> a"
+    let src = "module M\nfst(p) =\n  | (a, b) -> a"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DFn(_, EMatch [(PTuple [PVar "a"; PVar "b"], EVar "a")]) -> ()
@@ -419,7 +419,7 @@ let ``parse tuple pattern: (a, b)`` () =
 
 [<Fact>]
 let ``parse tuple pattern: (a, _)`` () =
-    let src = "module M\nfn fst(p) =\n  | (a, _) -> a"
+    let src = "module M\nfst(p) =\n  | (a, _) -> a"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DFn(_, EMatch [(PTuple [PVar "a"; PWild], EVar "a")]) -> ()
@@ -427,7 +427,7 @@ let ``parse tuple pattern: (a, _)`` () =
 
 [<Fact>]
 let ``parse tuple pattern: (a, b, c) three elements`` () =
-    let src = "module M\nfn f(p) =\n  | (a, b, c) -> a"
+    let src = "module M\nf(p) =\n  | (a, b, c) -> a"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DFn(_, EMatch [(PTuple [PVar "a"; PVar "b"; PVar "c"], EVar "a")]) -> ()
@@ -436,7 +436,7 @@ let ``parse tuple pattern: (a, b, c) three elements`` () =
 [<Fact>]
 let ``parse single-parenthesised pattern stays as pattern (no PTuple)`` () =
     // (a) is NOT a tuple, it's just a in parens
-    let src = "module M\nfn id2(p) =\n  | (a) -> a"
+    let src = "module M\nid2(p) =\n  | (a) -> a"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DFn(_, EMatch [(PVar "a", EVar "a")]) -> ()
@@ -446,7 +446,7 @@ let ``parse single-parenthesised pattern stays as pattern (no PTuple)`` () =
 
 [<Fact>]
 let ``parse cons pattern: h :: t`` () =
-    let src = "module M\nfn first(xs) =\n  | h :: t -> h"
+    let src = "module M\nfirst(xs) =\n  | h :: t -> h"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DFn(_, EMatch [(PCons(PVar "h", PVar "t"), EVar "h")]) -> ()
@@ -454,7 +454,7 @@ let ``parse cons pattern: h :: t`` () =
 
 [<Fact>]
 let ``parse cons pattern: a :: b :: rest is right-associative`` () =
-    let src = "module M\nfn f(xs) =\n  | a :: b :: rest -> a"
+    let src = "module M\nf(xs) =\n  | a :: b :: rest -> a"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DFn(_, EMatch [(PCons(PVar "a", PCons(PVar "b", PVar "rest")), EVar "a")]) -> ()
@@ -462,7 +462,7 @@ let ``parse cons pattern: a :: b :: rest is right-associative`` () =
 
 [<Fact>]
 let ``parse cons pattern with wildcard tail`` () =
-    let src = "module M\nfn first(xs) =\n  | x :: _ -> x"
+    let src = "module M\nfirst(xs) =\n  | x :: _ -> x"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DFn(_, EMatch [(PCons(PVar "x", PWild), EVar "x")]) -> ()
@@ -617,7 +617,7 @@ let ``parse trailing comma in tuple literal is rejected`` () =
 [<Fact>]
 let ``parse empty parens () still works for fn main`` () =
     // Regression: () remains valid for fn main() decl form.
-    let src = "module M\nfn main() = 0"
+    let src = "module M\nmain() = 0"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DFn(s, ELit (LInt 0L)) when s.Name = "main" && List.isEmpty s.Params -> ()
@@ -692,7 +692,7 @@ let ``list literal: cons of ctor-app as head element`` () =
 let ``multi-line strConcat chain parses as nested EApp`` () =
     let src =
         "module M\n" +
-        "fn show(x Str)(y Str)(z Str) Str =\n" +
+        "show(x Str)(y Str)(z Str) Str =\n" +
         "  strConcat\n" +
         "    (strConcat x y)\n" +
         "    z\n"
@@ -708,7 +708,7 @@ let ``multi-line strConcat chain parses as nested EApp`` () =
 
 [<Fact>]
 let ``single-line strConcat chain still works (regression)`` () =
-    let src = "module M\nfn f(a Str)(b Str)(c Str) Str = strConcat a (strConcat b c)"
+    let src = "module M\nf(a Str)(b Str)(c Str) Str = strConcat a (strConcat b c)"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DFn(_, EApp(EApp(EVar "strConcat", EVar "a"),
@@ -719,7 +719,7 @@ let ``single-line strConcat chain still works (regression)`` () =
 let ``multi-line three-arg call with bare atoms`` () =
     let src =
         "module M\n" +
-        "fn g(a Int)(b Int)(c Int) Int =\n" +
+        "g(a Int)(b Int)(c Int) Int =\n" +
         "  plus3\n" +
         "    a\n" +
         "    b\n" +
@@ -738,7 +738,7 @@ let ``multi-line three-arg call with bare atoms`` () =
 
 [<Fact>]
 let ``type body: MkFn (Maybe TypeRef) parses as TyApp`` () =
-    let src = "module M\ntype FnDecl = MkFn (Maybe TypeRef)"
+    let src = "module M\nFnDecl = MkFn (Maybe TypeRef)"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DType("FnDecl", [],
@@ -747,7 +747,7 @@ let ``type body: MkFn (Maybe TypeRef) parses as TyApp`` () =
 
 [<Fact>]
 let ``type body: MkFn Maybe[TypeRef] still parses as same TyApp (regression)`` () =
-    let src = "module M\ntype FnDecl = MkFn Maybe[TypeRef]"
+    let src = "module M\nFnDecl = MkFn Maybe[TypeRef]"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DType("FnDecl", [],
@@ -756,8 +756,8 @@ let ``type body: MkFn Maybe[TypeRef] still parses as same TyApp (regression)`` (
 
 [<Fact>]
 let ``type body: both forms produce identical AST`` () =
-    let srcParen  = "module M\ntype T = Mk (Maybe Int)"
-    let srcBrack  = "module M\ntype T = Mk Maybe[Int]"
+    let srcParen  = "module M\nT = Mk (Maybe Int)"
+    let srcBrack  = "module M\nT = Mk Maybe[Int]"
     let mp = parseModuleStr srcParen
     let mb = parseModuleStr srcBrack
     Assert.Equal(fst mp.Decls[0], fst mb.Decls[0])
@@ -766,7 +766,7 @@ let ``type body: both forms produce identical AST`` () =
 let ``type body: nested juxtaposition in parens (Result Int Str)`` () =
     // `(Result Int Str)` → TyApp(TyApp(Result, Int), Str), like
     // Result[Int][Str] bracket-chain.
-    let src = "module M\ntype Foo = MkFoo (Result Int Str)"
+    let src = "module M\nFoo = MkFoo (Result Int Str)"
     let m = parseModuleStr src
     match fst m.Decls[0] with
     | DType("Foo", [],
@@ -795,11 +795,11 @@ let ``bug1: clause-form arm with keyword binder 'tag' surfaces as parse error no
     // token's position, so callers see the real problem.
     let src =
         "module M\n" +
-        "type Expr = EInt Int | ETagged Expr Str\n" +
-        "fn showExpr(e Expr) Str =\n" +
+        "Expr = EInt Int | ETagged Expr Str\n" +
+        "showExpr(e Expr) Str =\n" +
         "  | EInt n -> \"int\"\n" +
         "  | ETagged inner tag -> tag\n" +
-        "fn main() = printfn (showExpr (EInt 1))"
+        "main() = printfn (showExpr (EInt 1))"
     let toks =
         match tokenize src with
         | Ok ts -> ts
@@ -826,8 +826,8 @@ let ``bug2: curried multi-arg fn with keyword param name surfaces as parse error
     // offender.
     let src =
         "module M\n" +
-        "fn helper(tag Int)(x Int) Int = tag + x\n" +
-        "fn main() =\n" +
+        "helper(tag Int)(x Int) Int = tag + x\n" +
+        "main() =\n" +
         "  let r = helper 1 2\n" +
         "  printfn (intToStr r)"
     let toks =

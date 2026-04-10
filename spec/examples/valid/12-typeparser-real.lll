@@ -23,8 +23,7 @@ module Examples.TypeParser
 -- parens, comma-separated. Type prms print one-per-paren so the boundary
 -- between prms and the `=` is visually obvious.
 
-type Token =
-  | TKwType
+Token =
   | TUpper Str
   | TLower Str
   | TEq
@@ -32,39 +31,39 @@ type Token =
   | TNewline
   | TEnd
 
-type TypeArg =
+TypeArg =
   | TAVar Str
   | TACon Str
 
-type Ctor = MkCtor Str List[TypeArg]
+Ctor = MkCtor Str List[TypeArg]
 
-type TypeDecl = MkTypeDecl Str List[Str] List[Ctor]
+TypeDecl = MkTypeDecl Str List[Str] List[Ctor]
 
 -- ---------- Char predicates ---------------------------------------------
 
 -- ASCII uppercase test, written without `&&` (which ll-lang lacks).
-fn isUpperChar(c Char) =
-  let n = charToInt c
+isUpperChar(c Char) =
+  n = charToInt c
   if n < 65
     false
   else if n > 90
     false
   else true
 
-fn isLowerChar(c Char) =
-  let n = charToInt c
+isLowerChar(c Char) =
+  n = charToInt c
   if n < 97
     false
   else if n > 122
     false
   else true
 
-fn isIdStart(c Char) =
+isIdStart(c Char) =
   if isUpperChar c
     true
   else isLowerChar c
 
-fn isIdCont(c Char) =
+isIdCont(c Char) =
   if isIdStart c
     true
   else charIsDigit c
@@ -72,14 +71,14 @@ fn isIdCont(c Char) =
 -- ---------- Lexer --------------------------------------------------------
 
 -- Greedy take/drop while predicate, lifted from 09-lexer-real.lll.
-fn takeWhilePred(p)(cs List[Char]) =
+takeWhilePred(p)(cs List[Char]) =
   | c :: rest ->
     if p c
       listAppend [c] (takeWhilePred p rest)
     else []
   | _ -> []
 
-fn dropWhilePred(p)(cs List[Char]) =
+dropWhilePred(p)(cs List[Char]) =
   | c :: rest ->
     if p c
       dropWhilePred p rest
@@ -88,11 +87,10 @@ fn dropWhilePred(p)(cs List[Char]) =
 
 -- Classify an identifier string. The keyword 'type' becomes TKwType; an
 -- uppercase-starting ident becomes TUpper; everything else is TLower.
-fn classifyIdent(s Str) =
+classifyIdent(s Str) =
   match s
-    | "type" -> TKwType
     | _ ->
-      let cs = strChars s
+      cs = strChars s
       match cs
         | c :: _ ->
           if isUpperChar c
@@ -100,13 +98,13 @@ fn classifyIdent(s Str) =
           else TLower s
         | _ -> TLower s
 
-fn lexId(cs List[Char]) =
-  let idChars = takeWhilePred isIdCont cs
-  let leftover = dropWhilePred isIdCont cs
-  let tok = classifyIdent (strFromChars idChars)
+lexId(cs List[Char]) =
+  idChars = takeWhilePred isIdCont cs
+  leftover = dropWhilePred isIdCont cs
+  tok = classifyIdent (strFromChars idChars)
   listAppend [tok] (lexChars leftover)
 
-fn lexChars(cs List[Char]) =
+lexChars(cs List[Char]) =
   | c :: rest ->
     if c == '\n'
       listAppend [TNewline] (lexChars rest)
@@ -121,40 +119,40 @@ fn lexChars(cs List[Char]) =
     else lexChars rest
   | _ -> [TEnd]
 
-fn tokenize(src Str) = lexChars (strChars src)
+tokenize(src Str) = lexChars (strChars src)
 
 -- ---------- Recursive-descent parser ------------------------------------
 
 -- Skip leading newlines: blank lines between decls are not significant.
-fn skipNewlines(toks List[Token]) =
+skipNewlines(toks List[Token]) =
   | TNewline :: rest -> skipNewlines rest
   | _ -> toks
 
 -- Top-level driver. Walks the token stream, peeling off one type decl at a
 -- time, until it sees TEnd. Uses fn-clause sugar on the cleaned-up token
 -- stream so the empty / TEnd / non-empty cases are syntactically obvious.
-fn parseTypeDecls(toks List[Token]) =
+parseTypeDecls(toks List[Token]) =
   parseDeclsClean (skipNewlines toks)
 
 -- Use cons-pattern fast path: only attempt to parse a decl if the head is
 -- TKwType. Anything else (TEnd, blank lines that already got skipped, an
 -- unexpected token) terminates the recursion.
-fn parseDeclsClean(toks List[Token]) =
-  | TKwType :: _ -> consDecl (parseTypeDecl toks)
+parseDeclsClean(toks List[Token]) =
+  | TUpper _ :: _ -> consDecl (parseTypeDecl toks)
   | _ -> []
 
 -- Helper: turn a (head, leftover) result into the recursive list. Splits
 -- the multi-line body out of the parseDeclsClean wildcard arm so each
 -- clause body stays single-line.
-fn consDecl(pair) =
+consDecl(pair) =
   let (d, rest) = pair
   d :: parseTypeDecls rest
 
 -- Single decl: 'type' Upper param* '=' ctor ('|' ctor)*
-fn parseTypeDecl(toks List[Token]) =
-  | TKwType :: TUpper name :: rest ->
+parseTypeDecl(toks List[Token]) =
+  | TUpper name :: rest ->
     let (prms, rest2) = parseParams rest
-    let rest3 = match rest2
+    rest3 = match rest2
       | TEq :: r -> r
       | _ -> rest2
    
@@ -163,7 +161,7 @@ fn parseTypeDecl(toks List[Token]) =
   | _ -> (MkTypeDecl "?" [] [], toks)
 
 -- Collect zero or more single-letter uppercase prms, stopping at TEq.
-fn parseParams(toks List[Token]) =
+parseParams(toks List[Token]) =
   | TUpper s :: rest ->
     if strLen s == 1
       let (ps, rest2) = parseParams rest
@@ -173,18 +171,18 @@ fn parseParams(toks List[Token]) =
 
 -- Collect ctors separated by '|'. The first ctor is mandatory; each
 -- subsequent ctor is preceded by a TBar.
-fn parseCtors(toks List[Token]) =
+parseCtors(toks List[Token]) =
   let (c, rest) = parseCtor toks
   parseCtorsTail [c] rest
 
-fn parseCtorsTail(acc List[Ctor])(toks List[Token]) =
+parseCtorsTail(acc List[Ctor])(toks List[Token]) =
   | TBar :: rest ->
     let (c, rest2) = parseCtor rest
     parseCtorsTail (listAppend acc [c]) rest2
   | _ -> (acc, toks)
 
 -- Single ctor: Upper typeArg*
-fn parseCtor(toks List[Token]) =
+parseCtor(toks List[Token]) =
   | TUpper name :: rest ->
     let (args, rest2) = parseTypeArgs rest
     (MkCtor name args, rest2)
@@ -192,9 +190,9 @@ fn parseCtor(toks List[Token]) =
 
 -- Collect zero or more type args, stopping on TBar / TNewline / TEnd /
 -- anything else that ends a ctor body.
-fn parseTypeArgs(toks List[Token]) =
+parseTypeArgs(toks List[Token]) =
   | TUpper s :: rest ->
-    let arg = if strLen s == 1
+    arg = if strLen s == 1
       TAVar s
     else TACon s
     let (args, rest2) = parseTypeArgs rest
@@ -205,44 +203,44 @@ fn parseTypeArgs(toks List[Token]) =
 
 -- Render a TypeArg as just its name. Type vars and type cons print the
 -- same way at the leaf level — the wrapping context disambiguates.
-fn showTypeArg(a TypeArg) =
+showTypeArg(a TypeArg) =
   | TAVar s -> s
   | TACon s -> s
 
 -- Render a list of args as `(a1, a2, a3)` or empty string for no args.
-fn showArgs(args List[TypeArg]) =
+showArgs(args List[TypeArg]) =
   if listIsEmpty args
     ""
   else
-    let inner = listFold (\acc a. if strLen acc == 0
+    inner = listFold (\acc a. if strLen acc == 0
       showTypeArg a
     else strConcat (strConcat acc ", ") (showTypeArg a)) "" args
     strConcat (strConcat "(" inner) ")"
 
-fn showCtor(c Ctor) =
+showCtor(c Ctor) =
   | MkCtor name args -> strConcat name (showArgs args)
 
-fn showCtors(cs List[Ctor]) =
+showCtors(cs List[Ctor]) =
   listFold (\acc c. if strLen acc == 0
     showCtor c
   else strConcat (strConcat acc " | ") (showCtor c)) "" cs
 
 -- Render the type-param list as ` (A) (B)` with a leading space, or empty.
-fn showParams(ps List[Str]) =
+showParams(ps List[Str]) =
   listFold (\acc p. strConcat (strConcat acc " (") (strConcat p ")")) "" ps
 
-fn showDecl(d TypeDecl) =
-  | MkTypeDecl name prms ctors -> strConcat (strConcat (strConcat (strConcat "type " name) (showParams prms)) " = ") (showCtors ctors)
+showDecl(d TypeDecl) =
+  | MkTypeDecl name prms ctors -> strConcat (strConcat (strConcat name (showParams prms)) " = ") (showCtors ctors)
 
-fn show(ds List[TypeDecl]) =
+show(ds List[TypeDecl]) =
   listFold (\acc d. if strLen acc == 0
     showDecl d
   else strConcat (strConcat acc "\n") (showDecl d)) "" ds
 
 -- ---------- Driver -------------------------------------------------------
 
-fn main() =
-  let src = "type Maybe A = Some A | None\ntype Result A E = Ok A | Err E\ntype Shape = Circle | Rect | Empty\ntype Wrapped = MkWrapped Int"
-  let toks = tokenize src
-  let decls = parseTypeDecls toks
+main() =
+  src = "Maybe A = Some A | None\nResult A E = Ok A | Err E\nShape = Circle | Rect | Empty\nWrapped = MkWrapped Int"
+  toks = tokenize src
+  decls = parseTypeDecls toks
   printfn (show decls)

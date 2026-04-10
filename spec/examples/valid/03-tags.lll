@@ -1,7 +1,7 @@
 module Examples.Tags
 
-type Maybe A = Some A | None
-type Result A E = Ok A | Err E
+Maybe A = Some A | None
+Result A E = Ok A | Err E
 
 -- declare tags
 tag UserId
@@ -14,20 +14,20 @@ tag kg
 let uid = "user-42"[UserId]
 
 -- functions with tagged params
-fn getUser(id Str[UserId]) = Some "alice"
-fn sendEmail(to Str[Email]) = to
+getUser(id Str[UserId]) = Some "alice"
+sendEmail(to Str[Email]) = to
 
 -- unit algebra — return type inferred
-fn speed(d Float[m])(t Float[s]) = d / t
+speed(d Float[m])(t Float[s]) = d / t
 -- compiler infers: Float[m/s]
 
 -- phantom types
 tag Validated
 tag Raw
 
-type Email[state] = Str
+Email[state] = Str
 
-fn validate(s Str) =
+validate(s Str) =
   if s != ""
     Ok s
   else Err "empty"

@@ -6,9 +6,9 @@ module Examples.LexerPoC
 -- string. Multi-character grouping (real lexing) is a Phase 7 task — see
 -- the language gaps surfaced in the report.
 
-type Token = TIdent Str | TNum Str | TLParen | TRParen | TPlus | TSpace | TUnknown
+Token = TIdent Str | TNum Str | TLParen | TRParen | TPlus | TSpace | TUnknown
 
-fn classify(c Char) =
+classify(c Char) =
   if charIsDigit c
     TNum (strFromChars [c])
   else if charIsAlpha c
@@ -23,7 +23,7 @@ fn classify(c Char) =
     TPlus
   else TUnknown
 
-fn tokenName(t Token) =
+tokenName(t Token) =
   | TIdent s -> strConcat "id:" s
   | TNum n -> strConcat "n:" n
   | TLParen -> "("
@@ -32,11 +32,11 @@ fn tokenName(t Token) =
   | TSpace -> "_"
   | TUnknown -> "?"
 
-fn joinTokens(toks List[Token]) =
+joinTokens(toks List[Token]) =
   listFold (\acc. \t. if strLen acc == 0
     tokenName t
   else strConcat (strConcat acc ",") (tokenName t)) "" toks
 
-fn main() =
-  let toks = listMap classify (strChars "ab 12 (x+y)")
+main() =
+  toks = listMap classify (strChars "ab 12 (x+y)")
   printfn (joinTokens toks)

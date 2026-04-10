@@ -5,14 +5,14 @@ let pi = 3.14159
 let greeting = "hello"
 
 -- simple functions
-fn add(a Int)(b Int) = a + b
-fn double(x Int) = x * 2
+add(a Int)(b Int) = a + b
+double(x Int) = x * 2
 
 -- inferred return type
-fn square(x Int) = x * x
+square(x Int) = x * x
 
 -- multi-branch if
-fn clamp(x Int)(lo Int)(hi Int) =
+clamp(x Int)(lo Int)(hi Int) =
   if x < lo
     lo
   else if x > hi
@@ -23,6 +23,6 @@ fn clamp(x Int)(lo Int)(hi Int) =
 let triple = \x. x * 3
 
 -- let binding
-fn example =
-  let y = double 5
+example =
+  y = double 5
   y + 1

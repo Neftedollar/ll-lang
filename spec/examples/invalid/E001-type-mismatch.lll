@@ -1,6 +1,6 @@
 -- expect: E001
 module Invalid.E001
 
-fn greet(name Str) Str = name
+greet(name Str) Str = name
 
 let bad = greet 42

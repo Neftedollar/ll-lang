@@ -20,9 +20,9 @@ module Examples.RealParser
 --   3. Maybe unwrap for `strToInt` via match-as-expression inside a `let`.
 --   4. Recursive AST walks (show) alongside recursive input walks (parse).
 
-type Maybe A = Some A | None
+Maybe A = Some A | None
 
-type Token =
+Token =
   | TNum Int
   | TPlus
   | TMinus
@@ -32,7 +32,7 @@ type Token =
   | TRParen
   | TEnd
 
-type Expr =
+Expr =
   | ENum Int
   | EAdd Expr Expr
   | ESub Expr Expr
@@ -42,7 +42,7 @@ type Expr =
 -- ---------- Mini-lexer ---------------------------------------------------
 
 -- Collect a run of digit chars. Returns (digits, leftover) as a tuple.
-fn takeDigits(cs List[Char]) =
+takeDigits(cs List[Char]) =
   | c :: rest ->
     if charIsDigit c
       let (ds, leftover) = takeDigits rest
@@ -53,22 +53,22 @@ fn takeDigits(cs List[Char]) =
 -- Unwrap `strToInt` Maybe into a raw Int; a malformed digit run falls back
 -- to 0. The lexer only calls this on strings that are already all-digits,
 -- so the `None` branch is defensive.
-fn parseIntStr(s Str) =
+parseIntStr(s Str) =
   match strToInt s
     | Some n -> n
     | None -> 0
 
-fn consTok(t Token)(ts List[Token]) = t :: ts
+consTok(t Token)(ts List[Token]) = t :: ts
 
 -- Main tokenizer loop. Skips whitespace, recognises digit runs as TNum,
 -- and maps single-char operators / parens to their token constructors.
-fn lexChars(cs List[Char]) =
+lexChars(cs List[Char]) =
   | c :: rest ->
     if charIsSpace c
       lexChars rest
     else if charIsDigit c
       let (ds, leftover) = takeDigits cs
-      let n = parseIntStr (strFromChars ds)
+      n = parseIntStr (strFromChars ds)
       consTok (TNum n) (lexChars leftover)
     else if c == '+'
       consTok TPlus (lexChars rest)
@@ -85,7 +85,7 @@ fn lexChars(cs List[Char]) =
     else lexChars rest
   | _ -> [TEnd]
 
-fn tokenize(src Str) = lexChars (strChars src)
+tokenize(src Str) = lexChars (strChars src)
 
 -- ---------- Recursive-descent parser ------------------------------------
 
@@ -94,11 +94,11 @@ fn tokenize(src Str) = lexChars (strChars src)
 -- binary operators are expressed via tail helpers that take the
 -- already-parsed left-hand side as their first curried argument.
 
-fn parseExpr(toks List[Token]) =
+parseExpr(toks List[Token]) =
   let (e, rest) = parseTerm toks
   parseExprTail e rest
 
-fn parseExprTail(lhs Expr)(toks List[Token]) =
+parseExprTail(lhs Expr)(toks List[Token]) =
   | TPlus :: rest ->
     let (r, rest2) = parseTerm rest
     parseExprTail (EAdd lhs r) rest2
@@ -107,11 +107,11 @@ fn parseExprTail(lhs Expr)(toks List[Token]) =
     parseExprTail (ESub lhs r) rest2
   | _ -> (lhs, toks)
 
-fn parseTerm(toks List[Token]) =
+parseTerm(toks List[Token]) =
   let (e, rest) = parseFactor toks
   parseTermTail e rest
 
-fn parseTermTail(lhs Expr)(toks List[Token]) =
+parseTermTail(lhs Expr)(toks List[Token]) =
   | TStar :: rest ->
     let (r, rest2) = parseFactor rest
     parseTermTail (EMul lhs r) rest2
@@ -120,7 +120,7 @@ fn parseTermTail(lhs Expr)(toks List[Token]) =
     parseTermTail (EDiv lhs r) rest2
   | _ -> (lhs, toks)
 
-fn parseFactor(toks List[Token]) =
+parseFactor(toks List[Token]) =
   | TNum n :: rest -> (ENum n, rest)
   | TLParen :: rest ->
     let (e, rest2) = parseExpr rest
@@ -135,7 +135,7 @@ fn parseFactor(toks List[Token]) =
 -- string. Each binary node prints as `(L op R)`; leaves as their integer
 -- form. This makes precedence and associativity visually obvious and lets
 -- the runtime test string-match the result.
-fn show(e Expr) =
+show(e Expr) =
   | ENum n -> intToStr n
   | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (show l)) " + ") (show r)) ")"
   | ESub l r -> strConcat (strConcat (strConcat (strConcat "(" (show l)) " - ") (show r)) ")"
@@ -144,7 +144,7 @@ fn show(e Expr) =
 
 -- ---------- Driver -------------------------------------------------------
 
-fn main() =
-  let toks = tokenize "1 + 2 * 3"
+main() =
+  toks = tokenize "1 + 2 * 3"
   let (e, _) = parseExpr toks
   printfn (show e)

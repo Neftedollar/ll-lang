@@ -1,5 +1,5 @@
 module Examples.FmtTest
-fn inc(n Int) = n + 1
-fn dec(n Int) = n + -1
-fn double(n Int) = n + n
-fn main() = inc 1
+inc(n Int) = n + 1
+dec(n Int) = n + -1
+double(n Int) = n + n
+main() = inc 1

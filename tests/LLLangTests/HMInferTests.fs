@@ -240,7 +240,7 @@ let ``infer char literal`` () =
 
 [<Fact>]
 let ``infer indented let without in: multi-line fn body`` () =
-    let src = "module M\nfn f() =\n  let x = 1\n  let y = 2\n  x + y"
+    let src = "module M\nf() =\n  x = 1\n  y = 2\n  x + y"
     let tm = inferOk src
     // Body should infer as Int
     let sch = schemeOf tm "f"
@@ -250,21 +250,21 @@ let ``infer indented let without in: multi-line fn body`` () =
 
 [<Fact>]
 let ``infer indented let: single vs multi-line give same type`` () =
-    let singleLine = "module M\nfn g() =\n  let x = 1\n  let y = 2\n  x + y"
-    let multiLine  = "module M\nfn g() =\n  let x = 1\n  let y = 2\n  x + y"
+    let singleLine = "module M\ng() =\n  x = 1\n  y = 2\n  x + y"
+    let multiLine  = "module M\ng() =\n  x = 1\n  y = 2\n  x + y"
     let t1 = (schemeOf (inferOk singleLine) "g").Body
     let t2 = (schemeOf (inferOk multiLine)  "g").Body
     Assert.Equal(t1, t2)
 
 [<Fact>]
 let ``infer fn with declared params and elided return`` () =
-    let tm = inferOk "module M\nfn inc(x Int) = x + 1"
+    let tm = inferOk "module M\ninc(x Int) = x + 1"
     let sch = schemeOf tm "inc"
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), sch.Body)
 
 [<Fact>]
 let ``infer polymorphic id fn`` () =
-    let tm = inferOk "module M\nfn id(x A) A = x"
+    let tm = inferOk "module M\nid(x A) A = x"
     let sch = schemeOf tm "id"
     Assert.Equal(1, List.length sch.Vars)
     match sch.Body with
@@ -273,19 +273,19 @@ let ``infer polymorphic id fn`` () =
 
 [<Fact>]
 let ``infer id applied to Int produces Int`` () =
-    let src = "module M\nfn id(x A) A = x\nlet n = id 42"
+    let src = "module M\nid(x A) A = x\nlet n = id 42"
     let tm = inferOk src
     Assert.Equal(TyName "Int", (schemeOf tm "n").Body)
 
 [<Fact>]
 let ``infer id applied to Str produces Str`` () =
-    let src = "module M\nfn id(x A) A = x\nlet s = id \"hi\""
+    let src = "module M\nid(x A) A = x\nlet s = id \"hi\""
     let tm = inferOk src
     Assert.Equal(TyName "Str", (schemeOf tm "s").Body)
 
 [<Fact>]
 let ``infer const fn has two quantifiers`` () =
-    let tm = inferOk "module M\nfn const_(x A)(y B) A = x"
+    let tm = inferOk "module M\nconst_(x A)(y B) A = x"
     let sch = schemeOf tm "const_"
     Assert.Equal(2, List.length sch.Vars)
 
@@ -355,7 +355,7 @@ let ``instantiation is fresh per use`` () =
 let ``nested let captures outer variable`` () =
     let src =
         "module M\n" +
-        "fn outer(x) = \\y. x"
+        "outer(x) = \\y. x"
     let tm = inferOk src
     let sch = schemeOf tm "outer"
     Assert.InRange(List.length sch.Vars, 1, 2)
@@ -364,8 +364,8 @@ let ``nested let captures outer variable`` () =
 let ``match on Maybe with Some and None branches unify`` () =
     let src =
         "module M\n" +
-        "type Maybe A = Some A | None\n" +
-        "fn unwrap(m Maybe[Int]) Int =\n" +
+        "Maybe A = Some A | None\n" +
+        "unwrap(m Maybe[Int]) Int =\n" +
         "  | Some n -> n\n" +
         "  | None -> 0"
     let tm = inferOk src
@@ -376,8 +376,8 @@ let ``match on Maybe with Some and None branches unify`` () =
 let ``match branch type mismatch yields E001`` () =
     let src =
         "module M\n" +
-        "type Maybe A = Some A | None\n" +
-        "fn unwrap(m Maybe[Int]) Int =\n" +
+        "Maybe A = Some A | None\n" +
+        "unwrap(m Maybe[Int]) Int =\n" +
         "  | Some n -> n\n" +
         "  | None -> \"oops\""
     let errs = inferErrs src
@@ -413,24 +413,24 @@ let ``unit tag preserved through polymorphic lambda`` () =
 
 [<Fact>]
 let ``DFn elided return type gets concrete inferred type`` () =
-    let tm = inferOk "module M\nfn inc(x Int) = x + 1"
+    let tm = inferOk "module M\ninc(x Int) = x + 1"
     let sch = schemeOf tm "inc"
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), sch.Body)
     Assert.Empty(sch.Vars)
 
 [<Fact>]
 let ``DFn declared return type is honoured`` () =
-    let tm = inferOk "module M\nfn inc(x Int) Int = x + 1"
+    let tm = inferOk "module M\ninc(x Int) Int = x + 1"
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "inc").Body)
 
 [<Fact>]
 let ``DFn declared return type mismatch yields E001`` () =
-    let errs = inferErrs "module M\nfn wrong(x Int) Str = x + 1"
+    let errs = inferErrs "module M\nwrong(x Int) Str = x + 1"
     Assert.Contains(errs, fun e -> e.Code = E001)
 
 [<Fact>]
 let ``DFn polymorphic id generalizes to one var`` () =
-    let tm = inferOk "module M\nfn id(x A) A = x"
+    let tm = inferOk "module M\nid(x A) A = x"
     let sch = schemeOf tm "id"
     Assert.Equal(1, List.length sch.Vars)
 
@@ -444,11 +444,11 @@ let ``DLet top-level polymorphic`` () =
 let ``DImpl fn name is mangled and inferred`` () =
     let src =
         "module M\n" +
-        "type Maybe A = Some A | None\n" +
+        "Maybe A = Some A | None\n" +
         "trait Functor F =\n" +
-        "  fn map(f A->B)(x F[A]) F[B]\n" +
+        "  map(f A->B)(x F[A]) F[B]\n" +
         "impl Functor Maybe =\n" +
-        "  fn map(f A->B)(x Maybe[A]) Maybe[B] =\n" +
+        "  map(f A->B)(x Maybe[A]) Maybe[B] =\n" +
         "    | Some a -> Some (f a)\n" +
         "    | None -> None"
     let tm = inferOk src
@@ -560,7 +560,7 @@ let ``speed param types are TyTagged Float m and TyTagged Float s`` () =
         "module M\n" +
         "tag m\n" +
         "tag s\n" +
-        "fn speed(d Float[m])(t Float[s]) = d\n"
+        "speed(d Float[m])(t Float[s]) = d\n"
     let tm = inferOk src
     let sch = schemeOf tm "speed"
     // Expect fn body: TyFn(TyTagged(Float, m), TyFn(TyTagged(Float, s), _))
@@ -623,11 +623,11 @@ let private tryInferSrc (src: string) : Result<TypedModule, LLError list> =
 
 let private functorMaybeModule =
     "module M\n" +
-    "type Maybe A = Some A | None\n" +
+    "Maybe A = Some A | None\n" +
     "trait Functor F =\n" +
-    "  fn map(f A->B)(x F[A]) F[B]\n" +
+    "  map(f A->B)(x F[A]) F[B]\n" +
     "impl Functor Maybe =\n" +
-    "  fn map(f A->B)(x Maybe[A]) Maybe[B] =\n" +
+    "  map(f A->B)(x Maybe[A]) Maybe[B] =\n" +
     "    | Some a -> Some (f a)\n" +
     "    | None -> None\n"
 
@@ -644,7 +644,7 @@ let ``fn with PTuple pattern infers polymorphic (A, B) -> A`` () =
     // polymorphic scheme of shape `(A, B) -> A` — encoded as
     // `TyFn(TyApp(TyApp(Tuple, $x), $y), $x)` after the two-pass + "?" slot
     // replacement machinery runs.
-    let src = "module M\nfn fst(p) =\n  | (a, _) -> a"
+    let src = "module M\nfst(p) =\n  | (a, _) -> a"
     let tm = inferOk src
     let sch = schemeOf tm "fst"
     match sch.Body with
@@ -661,7 +661,7 @@ let ``fn with PTuple pattern infers polymorphic (A, B) -> A`` () =
 let ``tuple pattern match with specific types infers Int`` () =
     // `fn f(p) = match p with | (a, b) -> a + 1` has `a + 1` pinning `a`
     // to Int, so the scheme's return type must be Int.
-    let src = "module M\nfn f(p) =\n  | (a, b) -> a + 1"
+    let src = "module M\nf(p) =\n  | (a, b) -> a + 1"
     let tm = inferOk src
     let sch = schemeOf tm "f"
     match sch.Body with
@@ -674,8 +674,8 @@ let ``tuple pattern match with specific types infers Int`` () =
 let ``mutual recursion: even and odd both Int -> Bool`` () =
     let src =
         "module M\n" +
-        "fn even(n Int) Bool =\n  if n == 0\n    true\n  else odd (n - 1)\n" +
-        "fn odd(n Int) Bool =\n  if n == 0\n    false\n  else even (n - 1)"
+        "even(n Int) Bool =\n  if n == 0\n    true\n  else odd (n - 1)\n" +
+        "odd(n Int) Bool =\n  if n == 0\n    false\n  else even (n - 1)"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Int", TyName "Bool"), (schemeOf tm "even").Body)
     Assert.Equal(TyFn(TyName "Int", TyName "Bool"), (schemeOf tm "odd").Body)
@@ -684,21 +684,21 @@ let ``mutual recursion: even and odd both Int -> Bool`` () =
 let ``caller-before-callee: fn uses later-declared helper`` () =
     let src =
         "module M\n" +
-        "fn caller(n Int) Int = helper n\n" +
-        "fn helper(n Int) Int = n + 1"
+        "caller(n Int) Int = helper n\n" +
+        "helper(n Int) Int = n + 1"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "caller").Body)
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "helper").Body)
 
 [<Fact>]
 let ``single recursion fact still works`` () =
-    let src = "module M\nfn fact(n Int) Int =\n  if n <= 1\n    1\n  else n * fact (n - 1)"
+    let src = "module M\nfact(n Int) Int =\n  if n <= 1\n    1\n  else n * fact (n - 1)"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "fact").Body)
 
 [<Fact>]
 let ``single recursion fib still works`` () =
-    let src = "module M\nfn fib(n Int) Int =\n  if n <= 1\n    n\n  else fib (n - 1) + fib (n - 2)"
+    let src = "module M\nfib(n Int) Int =\n  if n <= 1\n    n\n  else fib (n - 1) + fib (n - 2)"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "fib").Body)
 
@@ -723,7 +723,7 @@ let ``infer fn with cons pattern: List A -> A`` () =
     // `fn first(xs) = | x :: _ -> x` should be (List A) -> A.
     // (Uses the implicit fn-body match form since match-as-expression
     // is shipped in the next commit.)
-    let src = "module M\nfn first(xs) =\n  | x :: _ -> x"
+    let src = "module M\nfirst(xs) =\n  | x :: _ -> x"
     let tm = inferOk src
     let sch = schemeOf tm "first"
     match sch.Body with
@@ -774,7 +774,7 @@ let ``infer cons pattern in match-as-expression`` () =
     // first uses an explicit `match` so the body is in expression position.
     let src =
         "module M\n" +
-        "fn first(xs Int) Int =\n" +
+        "first(xs Int) Int =\n" +
         "  match [xs] | h :: _ -> h | _ -> 0"
     let tm = inferOk src
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), (schemeOf tm "first").Body)
@@ -788,7 +788,7 @@ let ``infer let-tuple destructuring binds components at correct types`` () =
     // bind a and b to the tuple's element types.
     let src =
         "module M\n" +
-        "fn addPair(p) Int =\n" +
+        "addPair(p) Int =\n" +
         "  let (a, b) = p\n" +
         "  a + b"
     let tm = inferOk src
@@ -804,7 +804,7 @@ let ``infer let wildcard destructuring`` () =
     // `let _ = e in body` — body type is body, e's type is irrelevant
     let src =
         "module M\n" +
-        "fn f() Int =\n" +
+        "f() Int =\n" +
         "  let _ = 99\n" +
         "  1"
     let tm = inferOk src
@@ -817,7 +817,7 @@ let ``infer top-level let-tuple destructuring exposes a and b in env`` () =
     // literal at top level, so we project from a fn-param tuple.
     let src =
         "module M\n" +
-        "fn pairFst(p) Int =\n" +
+        "pairFst(p) Int =\n" +
         "  let (a, _) = p\n" +
         "  a"
     let tm = inferOk src
@@ -846,7 +846,7 @@ let ``infer let pair = (1, "x") in let (a, b) = pair in a + 1`` () =
     // a must unify to Int via the `+ 1`. End-to-end round trip with PTuple.
     let src =
         "module M\n" +
-        "fn run() Int =\n" +
+        "run() Int =\n" +
         "  let pair = (1, \"x\")\n" +
         "  let (a, b) = pair\n" +
         "  a + 1"
@@ -862,7 +862,7 @@ let ``infer literal tuple matches PTuple encoding round-trip`` () =
     // If the encodings disagree, this errors out.
     let src =
         "module M\n" +
-        "fn fst3(unused Int) Int =\n" +
+        "fst3(unused Int) Int =\n" +
         "  let t = (10, 20, 30)\n" +
         "  let (a, _, _) = t\n" +
         "  a"
@@ -881,8 +881,8 @@ let ``Bug1: clause-sugar wildcard arm with multi-line let-in scopes bindings`` (
     // to Tag -> Int.
     let src =
         "module M\n" +
-        "type Tag = A | B\n" +
-        "fn f(t Tag) Int =\n" +
+        "Tag = A | B\n" +
+        "f(t Tag) Int =\n" +
         "  | A -> 1\n" +
         "  | _ ->\n" +
         "    let p = (10, 20)\n" +
@@ -903,8 +903,8 @@ let ``Bug2: empty-list pattern in clause-sugar arm typechecks`` () =
     // survive — the fn's inferred type reflects the full List -> Int.
     let src =
         "module M\n" +
-        "type Token = TEnd | TMore\n" +
-        "fn f(toks List[Token]) Int =\n" +
+        "Token = TEnd | TMore\n" +
+        "f(toks List[Token]) Int =\n" +
         "  | TEnd :: _ -> 1\n" +
         "  | [] -> 2\n" +
         "  | _ -> 3"
@@ -918,7 +918,7 @@ let ``Bug2: list-literal pattern [x] binds head and matches single-elem list`` (
     // the element type.
     let src =
         "module M\n" +
-        "fn head1(xs List[Int]) Int =\n" +
+        "head1(xs List[Int]) Int =\n" +
         "  | [x] -> x\n" +
         "  | _ -> 0"
     let tm = inferOk src
@@ -932,8 +932,8 @@ let ``Issue23: Some applied to two args is an error`` () =
     // must produce an E001 TypeMismatch, not silently succeed.
     let src =
         "module M\n" +
-        "type Option[A] = None | Some A\n" +
-        "fn bad(o Option[Int]) Int =\n" +
+        "Option[A] = None | Some A\n" +
+        "bad(o Option[Int]) Int =\n" +
         "  | Some x y -> x\n" +
         "  | None -> 0"
     let errs = inferErrs src
@@ -947,8 +947,8 @@ let ``Issue23: None applied to one arg is an error`` () =
     // produce an E001 TypeMismatch.
     let src =
         "module M\n" +
-        "type Option[A] = None | Some A\n" +
-        "fn bad(o Option[Int]) Int =\n" +
+        "Option[A] = None | Some A\n" +
+        "bad(o Option[Int]) Int =\n" +
         "  | None x -> 0\n" +
         "  | Some v -> v"
     let errs = inferErrs src
@@ -962,8 +962,8 @@ let ``Issue23: valid Option patterns still typecheck correctly`` () =
     // valid constructor patterns with exactly the right number of args.
     let src =
         "module M\n" +
-        "type Option[A] = None | Some A\n" +
-        "fn extract(o Option[Int]) Int =\n" +
+        "Option[A] = None | Some A\n" +
+        "extract(o Option[Int]) Int =\n" +
         "  | Some x -> x\n" +
         "  | None -> 0"
     let tm = inferOk src
