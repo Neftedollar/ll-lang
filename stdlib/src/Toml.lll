@@ -1,0 +1,272 @@
+module Std.Toml
+
+-- Minimal TOML parser for ll.toml project manifests.
+-- Rewrites Manifest.fs (F#) in ll-lang — pure functional, no mutable state.
+--
+-- Parses: [table] headers, key = "value", key = ["a", "b"]
+-- Ignores: unknown keys/tables (forward compatibility)
+
+type Maybe A = Some A | None
+
+-- Manifest: name, version, entry, deps (list of key-value pairs), platform
+type Manifest = MkManifest Str Str Str (List[Str]) (List[Str])
+-- deps stored as flat list: [key1, val1, key2, val2, ...]
+-- (avoiding Map dependency for standalone compilation)
+
+-- Parser state threaded through line processing
+type Section = SecProject | SecDeps | SecPlatform | SecOther
+type ParseState = MkState Section (Maybe[Str]) Str Str (List[Str]) (List[Str]) (Maybe[Str])
+-- MkState section name version entry deps platform error
+
+-- ---- String helpers ----
+
+fn strStartsWith(prefix Str)(s Str) Bool =
+  if strLen prefix > strLen s then false
+  else strSlice s 0 (strLen prefix) == prefix
+
+fn strDropPrefix(n Int)(s Str) Str =
+  if n >= strLen s then ""
+  else strSlice s n (strLen s - n)
+
+fn strTakeUntil(ch Str)(s Str) Str =
+  let idx = strIndexOf ch s in
+  if idx < 0 then s
+  else strSlice s 0 idx
+
+-- Strip inline # comment, then trim
+fn stripComment(s Str) Str =
+  strTrim (strTakeUntil "#" s)
+
+-- ---- Quoted string parser (char-by-char) ----
+
+fn decodeEscape(e Char) Char =
+  if e == 'n' then '\n'
+  else if e == 't' then '\t'
+  else if e == '"' then '"'
+  else if e == '\\' then '\\'
+  else e
+
+fn parseQuotedChars(cs List[Char]) =
+  match cs with
+    | [] -> ([], [])
+    | c :: rest ->
+      if c == '"' then ([], rest)
+      else if c == '\\' then parseQuotedEsc rest
+      else
+        let (body, leftover) = parseQuotedChars rest in
+        (c :: body, leftover)
+
+fn parseQuotedEsc(cs List[Char]) =
+  match cs with
+    | [] -> ([], [])
+    | e :: rest2 ->
+      let (body, leftover) = parseQuotedChars rest2 in
+      (decodeEscape e :: body, leftover)
+
+-- Parse "value" from a string, returns the unquoted content
+fn parseQuotedStr(s Str) Maybe[Str] =
+  let cs = strChars s in
+  match cs with
+    | c :: rest ->
+      if c == '"' then
+        let (body, _) = parseQuotedChars rest in
+        Some (strFromChars body)
+      else None
+    | [] -> None
+
+-- ---- Array parser ----
+
+-- Parse ["a", "b", "c"] — simple: split by comma, parse each quoted value
+fn cleanArrayItem(s Str) Str =
+  if strStartsWith "[" s then strTrim (strDropPrefix 1 s)
+  else if strStartsWith "]" s then ""
+  else s
+
+fn parseArrayItems(items List[Str]) List[Str] =
+  match items with
+    | [] -> []
+    | item :: rest ->
+      let cleaned = cleanArrayItem (strTrim item) in
+      let final = strTrim (strTakeUntil "]" cleaned) in
+      if strLen final == 0 then parseArrayItems rest
+      else
+        match parseQuotedStr final with
+          | Some v -> v :: parseArrayItems rest
+          | None -> parseArrayItems rest
+
+fn parseStringArray(s Str) List[Str] =
+  let inner = strTakeUntil "]" (strDropPrefix 1 s) in
+  let parts = strSplit "," inner in
+  parseArrayItems parts
+
+-- ---- Line processing ----
+
+fn parseSectionHeader(line Str) Section =
+  let inner = strTrim (strTakeUntil "]" (strDropPrefix 1 line)) in
+  if inner == "project" then SecProject
+  else if inner == "deps" then SecDeps
+  else if inner == "platform" then SecPlatform
+  else SecOther
+
+fn parseKeyValue(line Str) =
+  let eqIdx = strIndexOf "=" line in
+  if eqIdx < 0 then ("", "")
+  else
+    let key = strTrim (strSlice line 0 eqIdx) in
+    let valRaw = strTrim (strDropPrefix (eqIdx + 1) line) in
+    (key, valRaw)
+
+fn processProjectLine(key Str)(valRaw Str)(st ParseState) ParseState =
+  match parseQuotedStr valRaw with
+    | None -> st
+    | Some v ->
+      match st with
+        | MkState sec name ver entry deps plat err ->
+          if key == "name" then MkState sec (Some v) ver entry deps plat err
+          else if key == "version" then MkState sec name v entry deps plat err
+          else if key == "entry" then MkState sec name ver v deps plat err
+          else st
+
+fn processDepsLine(key Str)(valRaw Str)(st ParseState) ParseState =
+  match parseQuotedStr valRaw with
+    | None -> st
+    | Some v ->
+      -- strip quotes from key if present
+      let cleanKey = match parseQuotedStr key with
+        | Some k -> k
+        | None -> key
+      in
+      match st with
+        | MkState sec name ver entry deps plat err ->
+          MkState sec name ver entry (listAppend deps [cleanKey v]) plat err
+
+fn processPlatformLine(key Str)(valRaw Str)(st ParseState) ParseState =
+  if key == "use" then
+    if strStartsWith "[" valRaw then
+      let items = parseStringArray valRaw in
+      match st with
+        | MkState sec name ver entry deps _ err ->
+          MkState sec name ver entry deps items err
+    else st
+  else st
+
+fn processLine(st ParseState)(line Str) ParseState =
+  let trimmed = stripComment line in
+  if strLen trimmed == 0 then st
+  else if strStartsWith "[" trimmed then
+    let sec = parseSectionHeader trimmed in
+    match st with
+      | MkState _ name ver entry deps plat err ->
+        MkState sec name ver entry deps plat err
+  else if strContains "=" trimmed then
+    let (key, valRaw) = parseKeyValue trimmed in
+    match st with
+      | MkState sec _ _ _ _ _ _ ->
+        match sec with
+          | SecProject -> processProjectLine key valRaw st
+          | SecDeps -> processDepsLine key valRaw st
+          | SecPlatform -> processPlatformLine key valRaw st
+          | SecOther -> st
+  else st
+
+-- ---- Main parser ----
+
+fn foldLines(f ParseState -> Str -> ParseState)(acc ParseState)(lines List[Str]) ParseState =
+  match lines with
+    | [] -> acc
+    | line :: rest -> foldLines f (f acc line) rest
+
+fn parseManifest(src Str) Maybe[Manifest] =
+  let lines = strSplit "\n" src in
+  let init = MkState SecOther None "0.0.0" "src/Main.lll" [] [] None in
+  let final = foldLines processLine init lines in
+  match final with
+    | MkState _ name ver entry deps plat _ ->
+      match name with
+        | Some n -> Some (MkManifest n ver entry deps plat)
+        | None -> None
+
+-- ---- Accessors (avoid nested constructor patterns in match) ----
+
+fn mName(m Manifest) Str =
+  match m with
+    | MkManifest n _ _ _ _ -> n
+
+fn mVersion(m Manifest) Str =
+  match m with
+    | MkManifest _ v _ _ _ -> v
+
+fn mDeps(m Manifest) List[Str] =
+  match m with
+    | MkManifest _ _ _ d _ -> d
+
+fn mPlatform(m Manifest) List[Str] =
+  match m with
+    | MkManifest _ _ _ _ p -> p
+
+-- ---- Tests ----
+
+fn check(label Str)(ok Bool) Int =
+  if ok then
+    let _ = printfn (strConcat "OK " label) in
+    0
+  else
+    let _ = printfn (strConcat "FAIL " label) in
+    1
+
+fn checkManifest(r Maybe[Manifest])(f Manifest -> Bool) Bool =
+  match r with
+    | Some m -> f m
+    | None -> false
+
+fn main() Int =
+  -- Test 1: parse minimal ll.toml
+  let src1 = "[project]\nname = \"myapp\"" in
+  let r1 = parseManifest src1 in
+  let _ = check "1 parse name" (checkManifest r1 (\m. mName m == "myapp")) in
+
+  -- Test 2: parse version
+  let src2 = "[project]\nname = \"test\"\nversion = \"1.2.3\"\nentry = \"src/App.lll\"" in
+  let r2 = parseManifest src2 in
+  let _ = check "2 parse version" (checkManifest r2 (\m. mVersion m == "1.2.3")) in
+
+  -- Test 3: missing name returns None
+  let src3 = "[project]\nversion = \"1.0\"" in
+  let r3 = parseManifest src3 in
+  let ok3 = match r3 with
+    | Some _ -> false
+    | None -> true
+  in
+  let _ = check "3 missing name" ok3 in
+
+  -- Test 4: comments and blank lines
+  let src4 = "# comment\n\n[project]\n# another comment\nname = \"app\"" in
+  let r4 = parseManifest src4 in
+  let _ = check "4 comments" (checkManifest r4 (\m. mName m == "app")) in
+
+  -- Test 5: platform array
+  let src5 = "[project]\nname = \"p\"\n[platform]\nuse = [\"fsharp\", \"node\"]" in
+  let r5 = parseManifest src5 in
+  let _ = check "5 platform array" (checkManifest r5 (\m. listLen (mPlatform m) == 2)) in
+
+  -- Test 6: deps section
+  let src6 = "[project]\nname = \"d\"\n[deps]\ncore = \"1.0\"\nutils = \"2.0\"" in
+  let r6 = parseManifest src6 in
+  let _ = check "6 deps" (checkManifest r6 (\m. listLen (mDeps m) == 4)) in
+
+  -- Test 7: parse the actual stdlib/ll.toml
+  let realSrc = readFile "stdlib/ll.toml" in
+  let r7 = parseManifest realSrc in
+  let _ = check "7 real ll.toml" (checkManifest r7 (\m. mName m == "std")) in
+
+  -- Test 8: quoted string with escape
+  let src8 = "[project]\nname = \"hello\\nworld\"" in
+  let r8 = parseManifest src8 in
+  let _ = check "8 escaped string" (checkManifest r8 (\m. strLen (mName m) == 11)) in
+
+  -- Test 9: inline comment after value
+  let src9 = "[project]\nname = \"val\" # inline comment" in
+  let r9 = parseManifest src9 in
+  let _ = check "9 inline comment" (checkManifest r9 (\m. mName m == "val")) in
+
+  0
