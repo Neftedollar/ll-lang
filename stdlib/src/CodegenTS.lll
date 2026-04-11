@@ -1,54 +1,8 @@
 module Std.CodegenTS
 
--- TypeScript code emitter in ll-lang. AST types mirrored from Parser.lll.
+import Std.Parser
 
-Maybe A = Some A | None
-
-Pattern =
-  | PVar Str
-  | PWild
-  | PCon Str (List[Pattern])
-  | PLitInt Int
-  | PLitStr Str
-  | PCons Pattern Pattern
-  | PNil
-
-Expr =
-  | EInt Int
-  | EStr Str
-  | EBool Bool
-  | EChar Char
-  | EFloat Str
-  | EVar Str
-  | ECon Str
-  | EApp Expr Expr
-  | EIf Expr Expr Expr
-  | EMatch Expr (List[Pattern]) (List[Expr])
-  | ELam Str Expr
-  | ELet Str Expr Expr
-  | EList (List[Expr])
-  | EBinOp Str Expr Expr
-  | ETuple Expr Expr
-  | ENil
-  | ECons Expr Expr
-
-TypeExpr =
-  | TyName Str
-  | TyApp TypeExpr TypeExpr
-  | TyFn TypeExpr TypeExpr
-
-Param = MkParam Str TypeExpr
-
-Constructor = MkCon Str (List[TypeExpr])
-
-Decl =
-  | DFn Str (List[Param]) (Maybe[TypeExpr]) Expr
-  | DType Str (List[Str]) (List[Constructor])
-  | DImport (List[Str])
-  | DExport Decl
-  | DLet Str Expr
-
-Module = MkModule (List[Str]) (List[Decl])
+-- TypeScript code emitter in ll-lang.
 
 joinWith(sep Str)(items List[Str]) =
   match items
@@ -425,7 +379,7 @@ emitModule(m Module) =
       body = emitDecls decls
       strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
 
-check(label Str)(got Str)(expected Str) =
+codegenTSCheck(label Str)(got Str)(expected Str) =
   if got == expected
     printfn (strConcat "OK " label)
   else
@@ -438,11 +392,11 @@ checkContains(label Str)(got Str)(needle Str) =
     printfn (strConcat "FAIL " (strConcat label (strConcat "\n  missing: " (strConcat needle (strConcat "\n  in: " got)))))
 
 main =
-  _ = check "1 EInt 42" (emitExpr (EInt 42)) "42"
-  _ = check "2 EStr hello" (emitExpr (EStr "hello")) "`hello`"
-  _ = check "3 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1 + 2)"
-  _ = check "4 TyName Int" (emitType (TyName "Int")) "number"
-  _ = check "5 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "number[]"
+  _ = codegenTSCheck "1 EInt 42" (emitExpr (EInt 42)) "42"
+  _ = codegenTSCheck "2 EStr hello" (emitExpr (EStr "hello")) "`hello`"
+  _ = codegenTSCheck "3 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1 + 2)"
+  _ = codegenTSCheck "4 TyName Int" (emitType (TyName "Int")) "number"
+  _ = codegenTSCheck "5 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "number[]"
   colorCtors = MkCon "Red" [] :: MkCon "Blue" [] :: MkCon "Green" (TyName "Int" :: []) :: []
   colorOut = emitDecl (DType "Color" [] colorCtors)
   _ = checkContains "6 DType has type" colorOut "type Color"

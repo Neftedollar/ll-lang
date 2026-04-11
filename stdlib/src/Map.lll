@@ -1,5 +1,7 @@
 module Std.Map
 
+import Std.Maybe
+
 -- Map implemented as an Okasaki red-black tree.
 -- Keys are compared via an explicit comparator: cmp a b
 --   returns negative if a < b, zero if a == b, positive if a > b
@@ -8,8 +10,6 @@ Color = Red | Black
 
 -- RBMap K V = Leaf | Node Color (RBMap K V) K V (RBMap K V)
 RBMap K V = Leaf | Node Color (RBMap K V) K V (RBMap K V)
-
-Maybe A = Some A | None
 
 -- Empty map
 mapEmpty() = Leaf
@@ -138,7 +138,7 @@ strCmp(a Str)(b Str) =
   else 0
 
 -- Test helper: print OK or FAIL
-check(label Str)(ok Bool) =
+mapCheck(label Str)(ok Bool) =
   if ok
     _ = printfn (strConcat "OK " label)
     0
@@ -150,7 +150,7 @@ check(label Str)(ok Bool) =
 main() =
   -- mapEmpty / mapSize
   m0 = mapEmpty
-  _ = check "1 mapEmpty size=0" (mapSize m0 == 0)
+  _ = mapCheck "1 mapEmpty size=0" (mapSize m0 == 0)
 
   -- mapInsert + mapSize
   m1 = mapInsert intCmp 3 "three" m0
@@ -158,7 +158,7 @@ main() =
   m3 = mapInsert intCmp 5 "five" m2
   m4 = mapInsert intCmp 2 "two" m3
   m5 = mapInsert intCmp 4 "four" m4
-  _ = check "2 mapInsert size=5" (mapSize m5 == 5)
+  _ = mapCheck "2 mapInsert size=5" (mapSize m5 == 5)
 
   -- mapLookup: found
   r1 = mapLookup intCmp 3 m5
@@ -166,7 +166,7 @@ main() =
     | Some v -> v == "three"
     | None -> false
  
-  _ = check "3 mapLookup found" ok1
+  _ = mapCheck "3 mapLookup found" ok1
 
   -- mapLookup: not found
   r2 = mapLookup intCmp 99 m5
@@ -174,19 +174,19 @@ main() =
     | Some _ -> false
     | None -> true
  
-  _ = check "4 mapLookup missing" ok2
+  _ = mapCheck "4 mapLookup missing" ok2
 
   -- mapContains
-  _ = check "5 mapContains present" (mapContains intCmp 2 m5)
-  _ = check "6 mapContains absent" (mapContains intCmp 99 m5 == false)
+  _ = mapCheck "5 mapContains present" (mapContains intCmp 2 m5)
+  _ = mapCheck "6 mapContains absent" (mapContains intCmp 99 m5 == false)
 
   -- mapFold: sum all keys
   keySum = mapFold (\acc k v. acc + k) 0 m5
-  _ = check "7 mapFold sum keys" (keySum == 15)
+  _ = mapCheck "7 mapFold sum keys" (keySum == 15)
 
   -- mapKeys: in-order keys
   keys = mapKeys m5
-  _ = check "8 mapKeys length" (listLen keys == 5)
+  _ = mapCheck "8 mapKeys length" (listLen keys == 5)
 
   -- strCmp
   ms = mapInsert strCmp "banana" 2 (mapInsert strCmp "apple" 1 (mapEmpty))
@@ -195,11 +195,11 @@ main() =
     | Some n -> n == 1
     | None -> false
  
-  _ = check "9 strCmp lookup" ok3
+  _ = mapCheck "9 strCmp lookup" ok3
 
   -- mapEmpty() usage
   me = mapEmpty
-  _ = check "10 mapEmpty size=0" (mapSize me == 0)
+  _ = mapCheck "10 mapEmpty size=0" (mapSize me == 0)
 
   -- Duplicate key insert: size stays same, value updated
   md1 = mapInsert intCmp 42 "first" (mapEmpty)
@@ -208,7 +208,7 @@ main() =
     | Some v -> v == "second"
     | None -> false
  
-  _ = check "11 duplicate key insert" (if mapSize md2 == 1
+  _ = mapCheck "11 duplicate key insert" (if mapSize md2 == 1
     okDup
   else false)
 
@@ -228,7 +228,7 @@ main() =
     | Some v -> v == 5
     | None -> false
  
-  _ = check "12 sorted order" (if firstOk
+  _ = mapCheck "12 sorted order" (if firstOk
     lastOk
   else false)
 

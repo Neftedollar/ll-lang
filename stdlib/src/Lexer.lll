@@ -1,5 +1,7 @@
 module Std.Lexer
 
+import Std.Maybe
+
 -- Standalone ll-lang lexer written in ll-lang itself.
 -- Tokenizes ll-lang source code to a flat token stream.
 -- INDENT/DEDENT layout tokens are NOT emitted in this v1 (flat tokenizer).
@@ -30,8 +32,6 @@ Token =
   | Newline | Indent | Dedent
   -- Special
   | Eof | TError Char
-
-Maybe A = Some A | None
 
 -- ---- Character helpers -------------------------------------------------
 

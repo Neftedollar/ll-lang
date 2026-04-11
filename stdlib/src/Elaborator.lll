@@ -1,60 +1,11 @@
 module Std.Elaborator
 
+import Std.Parser
+
 -- Simplified type checker / elaborator for ll-lang.
 -- Performs name resolution: detects unbound variables, unbound constructors,
 -- and duplicate top-level declarations.
 -- Full Hindley-Milner inference is deferred to HMInfer.
--- AST types are redefined here (single-file mode; no cross-module imports yet).
-
--- ---- AST types (mirrored from Parser.lll) ----------------------------------
-
-Maybe A = Some A | None
-
-Pattern =
-  | PVar Str
-  | PWild
-  | PCon Str (List[Pattern])
-  | PLitInt Int
-  | PLitStr Str
-  | PCons Pattern Pattern
-  | PNil
-
-Expr =
-  | EInt Int
-  | EStr Str
-  | EBool Bool
-  | EChar Char
-  | EFloat Str
-  | EVar Str
-  | ECon Str
-  | EApp Expr Expr
-  | EIf Expr Expr Expr
-  | EMatch Expr (List[Pattern]) (List[Expr])
-  | ELam Str Expr
-  | ELet Str Expr Expr
-  | EList (List[Expr])
-  | EBinOp Str Expr Expr
-  | ETuple Expr Expr
-  | ENil
-  | ECons Expr Expr
-
-TypeExpr =
-  | TyName Str
-  | TyApp TypeExpr TypeExpr
-  | TyFn TypeExpr TypeExpr
-
-Param = MkParam Str TypeExpr
-
-Constructor = MkCon Str (List[TypeExpr])
-
-Decl =
-  | DFn Str (List[Param]) (Maybe[TypeExpr]) Expr
-  | DType Str (List[Str]) (List[Constructor])
-  | DImport (List[Str])
-  | DExport Decl
-  | DLet Str Expr
-
-Module = MkModule (List[Str]) (List[Decl])
 
 -- ---- Error type ------------------------------------------------------------
 

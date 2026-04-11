@@ -1,58 +1,9 @@
 module Std.CodegenJava
 
+import Std.Parser
+
 -- Java code emitter written in ll-lang.
 -- Takes the AST produced by Std.Parser and emits Java 21 source code.
--- AST types are redefined here (single-file mode; no cross-module imports yet).
-
--- ---- AST types (mirrored from Parser.lll) ---------------------------------
-
-Maybe A = Some A | None
-
-Pattern =
-  | PVar Str
-  | PWild
-  | PCon Str (List[Pattern])
-  | PLitInt Int
-  | PLitStr Str
-  | PCons Pattern Pattern
-  | PNil
-
-Expr =
-  | EInt Int
-  | EStr Str
-  | EBool Bool
-  | EChar Char
-  | EFloat Str
-  | EVar Str
-  | ECon Str
-  | EApp Expr Expr
-  | EIf Expr Expr Expr
-  | EMatch Expr (List[Pattern]) (List[Expr])
-  | ELam Str Expr
-  | ELet Str Expr Expr
-  | EList (List[Expr])
-  | EBinOp Str Expr Expr
-  | ETuple Expr Expr
-  | ENil
-  | ECons Expr Expr
-
-TypeExpr =
-  | TyName Str
-  | TyApp TypeExpr TypeExpr
-  | TyFn TypeExpr TypeExpr
-
-Param = MkParam Str TypeExpr
-
-Constructor = MkCon Str (List[TypeExpr])
-
-Decl =
-  | DFn Str (List[Param]) (Maybe[TypeExpr]) Expr
-  | DType Str (List[Str]) (List[Constructor])
-  | DImport (List[Str])
-  | DExport Decl
-  | DLet Str Expr
-
-Module = MkModule (List[Str]) (List[Decl])
 
 -- ---- String helpers --------------------------------------------------------
 
@@ -482,7 +433,7 @@ emitModule(m Module) =
 
 -- ---- Tests -----------------------------------------------------------------
 
-check(label Str)(got Str)(expected Str) =
+codegenJavaCheck(label Str)(got Str)(expected Str) =
   if got == expected
     printfn (strConcat "OK " label)
   else
@@ -496,52 +447,52 @@ checkContains(label Str)(got Str)(needle Str) =
 
 main =
   -- 1. EInt → long literal
-  _ = check "1 EInt 42" (emitExpr (EInt 42)) "42L"
+  _ = codegenJavaCheck "1 EInt 42" (emitExpr (EInt 42)) "42L"
 
   -- 2. EStr → double-quoted string
-  _ = check "2 EStr hello" (emitExpr (EStr "hello")) "\"hello\""
+  _ = codegenJavaCheck "2 EStr hello" (emitExpr (EStr "hello")) "\"hello\""
 
   -- 3. EBool true
-  _ = check "3 EBool true" (emitExpr (EBool true)) "true"
+  _ = codegenJavaCheck "3 EBool true" (emitExpr (EBool true)) "true"
 
   -- 4. EBool false
-  _ = check "4 EBool false" (emitExpr (EBool false)) "false"
+  _ = codegenJavaCheck "4 EBool false" (emitExpr (EBool false)) "false"
 
   -- 5. EBinOp +
-  _ = check "5 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1L + 2L)"
+  _ = codegenJavaCheck "5 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1L + 2L)"
 
   -- 6. EIf → ternary
-  _ = check "6 EIf ternary" (emitExpr (EIf (EBool true) (EInt 1) (EInt 0))) "(true ? 1L : 0L)"
+  _ = codegenJavaCheck "6 EIf ternary" (emitExpr (EIf (EBool true) (EInt 1) (EInt 0))) "(true ? 1L : 0L)"
 
   -- 7. EList → List.of(...)
-  _ = check "7 EList" (emitExpr (EList (EInt 1 :: EInt 2 :: []))) "java.util.List.of(1L, 2L)"
+  _ = codegenJavaCheck "7 EList" (emitExpr (EList (EInt 1 :: EInt 2 :: []))) "java.util.List.of(1L, 2L)"
 
   -- 8. ENil → empty list
-  _ = check "8 ENil" (emitExpr ENil) "java.util.List.of()"
+  _ = codegenJavaCheck "8 ENil" (emitExpr ENil) "java.util.List.of()"
 
   -- 9. TyName Int → long
-  _ = check "9 TyName Int" (emitType (TyName "Int")) "long"
+  _ = codegenJavaCheck "9 TyName Int" (emitType (TyName "Int")) "long"
 
   -- 10. TyName Float → double
-  _ = check "10 TyName Float" (emitType (TyName "Float")) "double"
+  _ = codegenJavaCheck "10 TyName Float" (emitType (TyName "Float")) "double"
 
   -- 11. TyName Str → String
-  _ = check "11 TyName Str" (emitType (TyName "Str")) "String"
+  _ = codegenJavaCheck "11 TyName Str" (emitType (TyName "Str")) "String"
 
   -- 12. TyName Bool → boolean
-  _ = check "12 TyName Bool" (emitType (TyName "Bool")) "boolean"
+  _ = codegenJavaCheck "12 TyName Bool" (emitType (TyName "Bool")) "boolean"
 
   -- 13. TyApp List Int → java.util.List<Long>
-  _ = check "13 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "java.util.List<Long>"
+  _ = codegenJavaCheck "13 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "java.util.List<Long>"
 
   -- 14. TyFn Int Bool → Function<Long, Boolean>
-  _ = check "14 TyFn" (emitType (TyFn (TyName "Int") (TyName "Bool"))) "java.util.function.Function<Long, Boolean>"
+  _ = codegenJavaCheck "14 TyFn" (emitType (TyFn (TyName "Int") (TyName "Bool"))) "java.util.function.Function<Long, Boolean>"
 
   -- 15. safeIdent: Java keyword 'class' gets suffix
-  _ = check "15 safeIdent class" (safeIdent "class") "class_"
+  _ = codegenJavaCheck "15 safeIdent class" (safeIdent "class") "class_"
 
   -- 16. safeIdent: non-keyword unchanged
-  _ = check "16 safeIdent foo" (safeIdent "foo") "foo"
+  _ = codegenJavaCheck "16 safeIdent foo" (safeIdent "foo") "foo"
 
   -- 17. DType Color → sealed interface + records
   colorCtors = MkCon "Red" [] :: MkCon "Green" (TyName "Int" :: []) :: []
@@ -568,6 +519,6 @@ main =
   _ = checkContains "19 module fn id" out "id("
 
   -- 20. EFloat
-  _ = check "20 EFloat" (emitExpr (EFloat "3.14")) "3.14"
+  _ = codegenJavaCheck "20 EFloat" (emitExpr (EFloat "3.14")) "3.14"
 
   0

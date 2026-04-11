@@ -1,54 +1,8 @@
 module Std.CodegenPy
 
--- Python code emitter in ll-lang. AST types mirrored from Parser.lll.
+import Std.Parser
 
-Maybe A = Some A | None
-
-Pattern =
-  | PVar Str
-  | PWild
-  | PCon Str (List[Pattern])
-  | PLitInt Int
-  | PLitStr Str
-  | PCons Pattern Pattern
-  | PNil
-
-Expr =
-  | EInt Int
-  | EStr Str
-  | EBool Bool
-  | EChar Char
-  | EFloat Str
-  | EVar Str
-  | ECon Str
-  | EApp Expr Expr
-  | EIf Expr Expr Expr
-  | EMatch Expr (List[Pattern]) (List[Expr])
-  | ELam Str Expr
-  | ELet Str Expr Expr
-  | EList (List[Expr])
-  | EBinOp Str Expr Expr
-  | ETuple Expr Expr
-  | ENil
-  | ECons Expr Expr
-
-TypeExpr =
-  | TyName Str
-  | TyApp TypeExpr TypeExpr
-  | TyFn TypeExpr TypeExpr
-
-Param = MkParam Str TypeExpr
-
-Constructor = MkCon Str (List[TypeExpr])
-
-Decl =
-  | DFn Str (List[Param]) (Maybe[TypeExpr]) Expr
-  | DType Str (List[Str]) (List[Constructor])
-  | DImport (List[Str])
-  | DExport Decl
-  | DLet Str Expr
-
-Module = MkModule (List[Str]) (List[Decl])
+-- Python code emitter in ll-lang.
 
 joinWith(sep Str)(items List[Str]) =
   match items
@@ -370,7 +324,7 @@ emitModule(m Module) =
       body = emitDecls decls
       strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
 
-check(label Str)(got Str)(expected Str) =
+codegenPyCheck(label Str)(got Str)(expected Str) =
   if got == expected
     printfn (strConcat "OK " label)
   else
@@ -384,47 +338,47 @@ checkContains(label Str)(got Str)(needle Str) =
 
 main =
   -- 1. EInt
-  _ = check "1 EInt 42" (emitExpr (EInt 42)) "42"
+  _ = codegenPyCheck "1 EInt 42" (emitExpr (EInt 42)) "42"
 
   -- 2. EStr
-  _ = check "2 EStr hello" (emitExpr (EStr "hello")) "\"hello\""
+  _ = codegenPyCheck "2 EStr hello" (emitExpr (EStr "hello")) "\"hello\""
 
   -- 3. EBool true
-  _ = check "3 EBool true" (emitExpr (EBool true)) "True"
+  _ = codegenPyCheck "3 EBool true" (emitExpr (EBool true)) "True"
 
   -- 4. EBool false
-  _ = check "4 EBool false" (emitExpr (EBool false)) "False"
+  _ = codegenPyCheck "4 EBool false" (emitExpr (EBool false)) "False"
 
   -- 5. EBinOp +
-  _ = check "5 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1 + 2)"
+  _ = codegenPyCheck "5 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1 + 2)"
 
   -- 6. EIf ternary
-  _ = check "6 EIf" (emitExpr (EIf (EBool true) (EInt 1) (EInt 0))) "(1 if True else 0)"
+  _ = codegenPyCheck "6 EIf" (emitExpr (EIf (EBool true) (EInt 1) (EInt 0))) "(1 if True else 0)"
 
   -- 7. ELet
-  _ = check "7 ELet" (emitExpr (ELet "x" (EInt 5) (EVar "x"))) "(lambda x: x)(5)"
+  _ = codegenPyCheck "7 ELet" (emitExpr (ELet "x" (EInt 5) (EVar "x"))) "(lambda x: x)(5)"
 
   -- 8. ELam
-  _ = check "8 ELam" (emitExpr (ELam "x" (EVar "x"))) "(lambda x: x)"
+  _ = codegenPyCheck "8 ELam" (emitExpr (ELam "x" (EVar "x"))) "(lambda x: x)"
 
   -- 9. EList
   twoItems = EInt 1 :: EInt 2 :: []
-  _ = check "9 EList" (emitExpr (EList twoItems)) "[1, 2]"
+  _ = codegenPyCheck "9 EList" (emitExpr (EList twoItems)) "[1, 2]"
 
   -- 10. TyName Int
-  _ = check "10 TyName Int" (emitType (TyName "Int")) "int"
+  _ = codegenPyCheck "10 TyName Int" (emitType (TyName "Int")) "int"
 
   -- 11. TyName Str
-  _ = check "11 TyName Str" (emitType (TyName "Str")) "str"
+  _ = codegenPyCheck "11 TyName Str" (emitType (TyName "Str")) "str"
 
   -- 12. TyApp List Int
-  _ = check "12 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "list[int]"
+  _ = codegenPyCheck "12 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "list[int]"
 
   -- 13. TyApp Maybe Bool
-  _ = check "13 TyApp Maybe Bool" (emitType (TyApp (TyName "Maybe") (TyName "Bool"))) "Optional[bool]"
+  _ = codegenPyCheck "13 TyApp Maybe Bool" (emitType (TyApp (TyName "Maybe") (TyName "Bool"))) "Optional[bool]"
 
   -- 14. TyFn Int Bool
-  _ = check "14 TyFn" (emitType (TyFn (TyName "Int") (TyName "Bool"))) "Callable[[int], bool]"
+  _ = codegenPyCheck "14 TyFn" (emitType (TyFn (TyName "Int") (TyName "Bool"))) "Callable[[int], bool]"
 
   -- 15. DType with dataclasses
   colorCtors = MkCon "Red" [] :: MkCon "Green" (TyName "Int" :: []) :: []
@@ -440,14 +394,14 @@ main =
   _ = checkContains "16 DFn return" addOut "return"
 
   -- 17. safeIdent keyword
-  _ = check "17 safeIdent lambda" (safeIdent "lambda") "_ll_lambda"
-  _ = check "17 safeIdent foo" (safeIdent "foo") "foo"
+  _ = codegenPyCheck "17 safeIdent lambda" (safeIdent "lambda") "_ll_lambda"
+  _ = codegenPyCheck "17 safeIdent foo" (safeIdent "foo") "foo"
 
   -- 18. EFloat
-  _ = check "18 EFloat" (emitExpr (EFloat "3.14")) "3.14"
+  _ = codegenPyCheck "18 EFloat" (emitExpr (EFloat "3.14")) "3.14"
 
   -- 19. ETuple
-  _ = check "19 ETuple" (emitExpr (ETuple (EVar "a") (EVar "b"))) "(a, b)"
+  _ = codegenPyCheck "19 ETuple" (emitExpr (ETuple (EVar "a") (EVar "b"))) "(a, b)"
 
   -- 20. Full module
   idParams = MkParam "x" (TyName "Int") :: []

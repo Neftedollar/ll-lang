@@ -1,12 +1,12 @@
 module Std.Toml
 
+import Std.Maybe
+
 -- Minimal TOML parser for ll.toml project manifests.
 -- Rewrites Manifest.fs (F#) in ll-lang — pure functional, no mutable state.
 --
 -- Parses: [table] headers, key = "value", key = ["a", "b"]
 -- Ignores: unknown keys/tables (forward compatibility)
-
-Maybe A = Some A | None
 
 -- Manifest: name, version, entry, deps (list of key-value pairs), platform
 Manifest = MkManifest Str Str Str (List[Str]) (List[Str])
@@ -226,7 +226,7 @@ mPlatform(m Manifest) =
 
 -- ---- Tests ----
 
-check(label Str)(ok Bool) =
+tomlCheck(label Str)(ok Bool) =
   if ok
     _ = printfn (strConcat "OK " label)
     0
@@ -243,12 +243,12 @@ main() =
   -- Test 1: parse minimal ll.toml
   src1 = "[project]\nname = \"myapp\""
   r1 = parseManifest src1
-  _ = check "1 parse name" (checkManifest r1 (\m. mName m == "myapp"))
+  _ = tomlCheck "1 parse name" (checkManifest r1 (\m. mName m == "myapp"))
 
   -- Test 2: parse version
   src2 = "[project]\nname = \"test\"\nversion = \"1.2.3\"\nentry = \"src/App.lll\""
   r2 = parseManifest src2
-  _ = check "2 parse version" (checkManifest r2 (\m. mVersion m == "1.2.3"))
+  _ = tomlCheck "2 parse version" (checkManifest r2 (\m. mVersion m == "1.2.3"))
 
   -- Test 3: missing name returns None
   src3 = "[project]\nversion = \"1.0\""
@@ -257,36 +257,36 @@ main() =
     | Some _ -> false
     | None -> true
  
-  _ = check "3 missing name" ok3
+  _ = tomlCheck "3 missing name" ok3
 
   -- Test 4: comments and blank lines
   src4 = "# comment\n\n[project]\n# another comment\nname = \"app\""
   r4 = parseManifest src4
-  _ = check "4 comments" (checkManifest r4 (\m. mName m == "app"))
+  _ = tomlCheck "4 comments" (checkManifest r4 (\m. mName m == "app"))
 
   -- Test 5: platform array
   src5 = "[project]\nname = \"p\"\n[platform]\nuse = [\"fsharp\", \"node\"]"
   r5 = parseManifest src5
-  _ = check "5 platform array" (checkManifest r5 (\m. listLen (mPlatform m) == 2))
+  _ = tomlCheck "5 platform array" (checkManifest r5 (\m. listLen (mPlatform m) == 2))
 
   -- Test 6: deps section
   src6 = "[project]\nname = \"d\"\n[deps]\ncore = \"1.0\"\nutils = \"2.0\""
   r6 = parseManifest src6
-  _ = check "6 deps" (checkManifest r6 (\m. listLen (mDeps m) == 4))
+  _ = tomlCheck "6 deps" (checkManifest r6 (\m. listLen (mDeps m) == 4))
 
   -- Test 7: parse the actual stdlib/ll.toml
   realSrc = readFile "stdlib/ll.toml"
   r7 = parseManifest realSrc
-  _ = check "7 real ll.toml" (checkManifest r7 (\m. mName m == "std"))
+  _ = tomlCheck "7 real ll.toml" (checkManifest r7 (\m. mName m == "std"))
 
   -- Test 8: quoted string with escape
   src8 = "[project]\nname = \"hello\\nworld\""
   r8 = parseManifest src8
-  _ = check "8 escaped string" (checkManifest r8 (\m. strLen (mName m) == 11))
+  _ = tomlCheck "8 escaped string" (checkManifest r8 (\m. strLen (mName m) == 11))
 
   -- Test 9: inline comment after value
   src9 = "[project]\nname = \"val\" # inline comment"
   r9 = parseManifest src9
-  _ = check "9 inline comment" (checkManifest r9 (\m. mName m == "val"))
+  _ = tomlCheck "9 inline comment" (checkManifest r9 (\m. mName m == "val"))
 
   0

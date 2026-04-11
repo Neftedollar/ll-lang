@@ -1,36 +1,12 @@
 module Std.Parser
 
+import Std.Lexer
+
 -- Standalone recursive-descent parser for ll-lang.
 -- Consumes a List[Token] produced by Std.Lexer and returns an AST.
 --
 -- Return convention: every parse function returns (result, remainingTokens).
 -- Based on the bootstrap parser in spec/examples/valid/20-bootstrap-compiler.lll.
-
--- ---- Re-export the Token type (mirrors Lexer.lll) ----------------------
-
-Token =
-  -- Keywords
-  | KwLet | KwTag | KwUnit
-  | KwTrait | KwImpl | KwImport | KwExport | KwModule
-  | KwIf | KwElse | KwTrue | KwFalse
-  | KwMatch
-  -- Identifiers
-  | Ident Str | TypeId Str
-  -- Literals
-  | IntLit Int | FloatLit Str | StrLit Str | CharLit Char
-  -- Operators
-  | Arrow | Backslash | Dot | Comma | Colon | ColonColon
-  | Eq | Bar
-  | LBrack | RBrack | LParen | RParen
-  | Plus | Minus | Star | Slash | Caret
-  | Lt | Gt | Le | Ge | EqEq | Neq
-  | Underscore
-  -- Layout
-  | Newline | Indent | Dedent
-  -- Special
-  | Eof | TError Char
-
-Maybe A = Some A | None
 
 -- ---- AST types ---------------------------------------------------------
 
@@ -678,7 +654,7 @@ showDecl(d Decl) =
 
 -- ---- Test helpers ------------------------------------------------------
 
-checkExpr(label Str)(toks List[Token])(expected Str) =
+parserCheckExpr(label Str)(toks List[Token])(expected Str) =
   let (e, _rest) = parseExpr (skipNewlines toks)
   got = showExpr e
   if got == expected
@@ -691,7 +667,7 @@ checkExpr(label Str)(toks List[Token])(expected Str) =
     p5 = strConcat p4 got
     printfn p5
 
-checkDecl(label Str)(toks List[Token])(expected Str) =
+parserCheckDecl(label Str)(toks List[Token])(expected Str) =
   let (d, _rest) = parseOneDecl (skipNewlines toks)
   got = showDecl d
   if got == expected
@@ -704,7 +680,7 @@ checkDecl(label Str)(toks List[Token])(expected Str) =
     p5 = strConcat p4 got
     printfn p5
 
-checkModule(label Str)(toks List[Token])(expectedDeclCount Int) =
+parserCheckModule(label Str)(toks List[Token])(expectedDeclCount Int) =
   m = parseModule toks
   match m
     | MkModule path decls ->
@@ -726,77 +702,77 @@ main() =
   -- Each test uses a named token list to keep calls on one line.
   -- 1. integer literal
   t1 = IntLit 42 :: Eof :: []
-  _ = checkExpr "1 int literal" t1 "EInt 42"
+  _ = parserCheckExpr "1 int literal" t1 "EInt 42"
   -- 2. variable
   t2 = Ident "x" :: Eof :: []
-  _ = checkExpr "2 variable" t2 "EVar x"
+  _ = parserCheckExpr "2 variable" t2 "EVar x"
   -- 3. function application: f x
   t3 = Ident "f" :: Ident "x" :: Eof :: []
-  _ = checkExpr "3 application" t3 "EApp(EVar f EVar x)"
+  _ = parserCheckExpr "3 application" t3 "EApp(EVar f EVar x)"
   -- 4. string literal
   t4 = StrLit "hello" :: Eof :: []
-  _ = checkExpr "4 string literal" t4 "EStr hello"
+  _ = parserCheckExpr "4 string literal" t4 "EStr hello"
   -- 5. bool true
   t5 = KwTrue :: Eof :: []
-  _ = checkExpr "5 bool true" t5 "EBool true"
+  _ = parserCheckExpr "5 bool true" t5 "EBool true"
   -- 6. bool false
   t6 = KwFalse :: Eof :: []
-  _ = checkExpr "6 bool false" t6 "EBool false"
+  _ = parserCheckExpr "6 bool false" t6 "EBool false"
   -- 7. addition: 1 + 2
   t7 = IntLit 1 :: Plus :: IntLit 2 :: Eof :: []
-  _ = checkExpr "7 addition" t7 "EBinOp(+ EInt 1 EInt 2)"
+  _ = parserCheckExpr "7 addition" t7 "EBinOp(+ EInt 1 EInt 2)"
   -- 8. comparison: x == 42
   t8 = Ident "x" :: EqEq :: IntLit 42 :: Eof :: []
-  _ = checkExpr "8 comparison" t8 "EBinOp(== EVar x EInt 42)"
+  _ = parserCheckExpr "8 comparison" t8 "EBinOp(== EVar x EInt 42)"
   -- 9. if-else: if true 1 else 2
   t9 = KwIf :: KwTrue :: Newline :: IntLit 1 :: Newline :: KwElse :: IntLit 2 :: Eof :: []
-  _ = checkExpr "9 if-else" t9 "EIf(EBool true EInt 1 EInt 2)"
+  _ = parserCheckExpr "9 if-else" t9 "EIf(EBool true EInt 1 EInt 2)"
   -- 10. let binding: x = 42; x
   t10 = Ident "x" :: Eq :: IntLit 42 :: Newline :: Ident "x" :: Eof :: []
-  _ = checkExpr "10 let" t10 "ELet x=(EInt 42) in (EVar x)"
+  _ = parserCheckExpr "10 let" t10 "ELet x=(EInt 42) in (EVar x)"
   -- 11. lambda: \x. x
   t11 = Backslash :: Ident "x" :: Dot :: Ident "x" :: Eof :: []
-  _ = checkExpr "11 lambda" t11 "ELam x.EVar x"
+  _ = parserCheckExpr "11 lambda" t11 "ELam x.EVar x"
   -- 12. constructor application: Some 42
   t12 = TypeId "Some" :: IntLit 42 :: Eof :: []
-  _ = checkExpr "12 constructor app" t12 "EApp(ECon Some EInt 42)"
+  _ = parserCheckExpr "12 constructor app" t12 "EApp(ECon Some EInt 42)"
   -- 13. empty list
   t13 = LBrack :: RBrack :: Eof :: []
-  _ = checkExpr "13 empty list" t13 "ENil"
+  _ = parserCheckExpr "13 empty list" t13 "ENil"
   -- 14. cons: x :: xs
   t14 = Ident "x" :: ColonColon :: Ident "xs" :: Eof :: []
-  _ = checkExpr "14 cons" t14 "ECons(EVar x EVar xs)"
+  _ = parserCheckExpr "14 cons" t14 "ECons(EVar x EVar xs)"
   -- 15. match: match x | Some v -> v | None -> 0
   t15 = KwMatch :: Ident "x" :: Newline :: Bar :: TypeId "Some" :: Ident "v" :: Arrow :: Ident "v" :: Newline :: Bar :: TypeId "None" :: Arrow :: IntLit 0 :: Eof :: []
-  _ = checkExpr "15 match" t15 "EMatch(EVar x...)"
+  _ = parserCheckExpr "15 match" t15 "EMatch(EVar x...)"
   -- 16. function declaration: add(a Int)(b Int) = a + b
   t16 = Ident "add" :: LParen :: Ident "a" :: TypeId "Int" :: RParen :: LParen :: Ident "b" :: TypeId "Int" :: RParen :: Eq :: Ident "a" :: Plus :: Ident "b" :: Eof :: []
-  _ = checkDecl "16 fn decl" t16 "DFn add body=(EBinOp(+ EVar a EVar b))"
+  _ = parserCheckDecl "16 fn decl" t16 "DFn add body=(EBinOp(+ EVar a EVar b))"
   -- 17. type declaration: Maybe A = Some A | None
   t17 = TypeId "Maybe" :: TypeId "A" :: Eq :: TypeId "Some" :: TypeId "A" :: Bar :: TypeId "None" :: Eof :: []
-  _ = checkDecl "17 type decl" t17 "DType Maybe"
+  _ = parserCheckDecl "17 type decl" t17 "DType Maybe"
   -- 18. import: import Std.Lexer
   t18 = KwImport :: TypeId "Std" :: Dot :: TypeId "Lexer" :: Eof :: []
-  _ = checkDecl "18 import" t18 "DImport Std.Lexer"
+  _ = parserCheckDecl "18 import" t18 "DImport Std.Lexer"
   -- 19. module-level let: let x = 99
   t19 = KwLet :: Ident "x" :: Eq :: IntLit 99 :: Eof :: []
-  _ = checkDecl "19 let decl" t19 "DLet x=(EInt 99)"
+  _ = parserCheckDecl "19 let decl" t19 "DLet x=(EInt 99)"
   -- 20. module with 2 decls
   t20 = KwModule :: TypeId "Test" :: Newline :: TypeId "Foo" :: Eq :: TypeId "Bar" :: Newline :: Ident "f" :: LParen :: Ident "x" :: TypeId "Int" :: RParen :: Eq :: Ident "x" :: Eof :: []
-  _ = checkModule "20 module" t20 2
+  _ = parserCheckModule "20 module" t20 2
   -- 21. nested application: f x y
   t21 = Ident "f" :: Ident "x" :: Ident "y" :: Eof :: []
-  _ = checkExpr "21 nested app" t21 "EApp(EApp(EVar f EVar x) EVar y)"
+  _ = parserCheckExpr "21 nested app" t21 "EApp(EApp(EVar f EVar x) EVar y)"
   -- 22. multiplication: 2 * 3
   t22 = IntLit 2 :: Star :: IntLit 3 :: Eof :: []
-  _ = checkExpr "22 multiply" t22 "EBinOp(* EInt 2 EInt 3)"
+  _ = parserCheckExpr "22 multiply" t22 "EBinOp(* EInt 2 EInt 3)"
   -- 23. precedence: 1 + 2 * 3 => 1 + (2*3)
   t23 = IntLit 1 :: Plus :: IntLit 2 :: Star :: IntLit 3 :: Eof :: []
-  _ = checkExpr "23 precedence" t23 "EBinOp(+ EInt 1 EBinOp(* EInt 2 EInt 3))"
+  _ = parserCheckExpr "23 precedence" t23 "EBinOp(+ EInt 1 EBinOp(* EInt 2 EInt 3))"
   -- 24. paren grouping: (x)
   t24 = LParen :: Ident "x" :: RParen :: Eof :: []
-  _ = checkExpr "24 paren grouping" t24 "EVar x"
+  _ = parserCheckExpr "24 paren grouping" t24 "EVar x"
   -- 25. tuple: (a, b)
   t25 = LParen :: Ident "a" :: Comma :: Ident "b" :: RParen :: Eof :: []
-  _ = checkExpr "25 tuple" t25 "ETuple(EVar a EVar b)"
+  _ = parserCheckExpr "25 tuple" t25 "ETuple(EVar a EVar b)"
   0

@@ -1,58 +1,9 @@
 module Std.Codegen
 
+import Std.Parser
+
 -- F# code emitter written in ll-lang.
 -- Takes the AST produced by Std.Parser and emits F# source code.
--- AST types are redefined here (single-file mode; no cross-module imports yet).
-
--- ---- AST types (mirrored from Parser.lll) ---------------------------------
-
-Maybe A = Some A | None
-
-Pattern =
-  | PVar Str
-  | PWild
-  | PCon Str (List[Pattern])
-  | PLitInt Int
-  | PLitStr Str
-  | PCons Pattern Pattern
-  | PNil
-
-Expr =
-  | EInt Int
-  | EStr Str
-  | EBool Bool
-  | EChar Char
-  | EFloat Str
-  | EVar Str
-  | ECon Str
-  | EApp Expr Expr
-  | EIf Expr Expr Expr
-  | EMatch Expr (List[Pattern]) (List[Expr])
-  | ELam Str Expr
-  | ELet Str Expr Expr
-  | EList (List[Expr])
-  | EBinOp Str Expr Expr
-  | ETuple Expr Expr
-  | ENil
-  | ECons Expr Expr
-
-TypeExpr =
-  | TyName Str
-  | TyApp TypeExpr TypeExpr
-  | TyFn TypeExpr TypeExpr
-
-Param = MkParam Str TypeExpr
-
-Constructor = MkCon Str (List[TypeExpr])
-
-Decl =
-  | DFn Str (List[Param]) (Maybe[TypeExpr]) Expr
-  | DType Str (List[Str]) (List[Constructor])
-  | DImport (List[Str])
-  | DExport Decl
-  | DLet Str Expr
-
-Module = MkModule (List[Str]) (List[Decl])
 
 -- ---- String helpers --------------------------------------------------------
 
@@ -415,7 +366,7 @@ emitModule(m Module) =
 
 -- ---- Tests -----------------------------------------------------------------
 
-check(label Str)(got Str)(expected Str) =
+codegenCheck(label Str)(got Str)(expected Str) =
   if got == expected
     printfn (strConcat "OK " label)
   else
@@ -429,31 +380,31 @@ checkContains(label Str)(got Str)(needle Str) =
 
 main =
   -- 1. EInt
-  _ = check "1 EInt 42" (emitExpr (EInt 42)) "42L"
+  _ = codegenCheck "1 EInt 42" (emitExpr (EInt 42)) "42L"
 
   -- 2. EStr
-  _ = check "2 EStr hello" (emitExpr (EStr "hello")) "\"hello\""
+  _ = codegenCheck "2 EStr hello" (emitExpr (EStr "hello")) "\"hello\""
 
   -- 3. EBinOp
-  _ = check "3 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1L + 2L)"
+  _ = codegenCheck "3 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1L + 2L)"
 
   -- 4. EApp
-  _ = check "4 EApp f x" (emitExpr (EApp (EVar "f") (EVar "x"))) "(f x)"
+  _ = codegenCheck "4 EApp f x" (emitExpr (EApp (EVar "f") (EVar "x"))) "(f x)"
 
   -- 5. EIf
-  _ = check "5 EIf" (emitExpr (EIf (EBool true) (EInt 1) (EInt 0))) "(if true then 1L else 0L)"
+  _ = codegenCheck "5 EIf" (emitExpr (EIf (EBool true) (EInt 1) (EInt 0))) "(if true then 1L else 0L)"
 
   -- 6. ELet
-  _ = check "6 ELet" (emitExpr (ELet "x" (EInt 1) (EVar "x"))) "(let x = 1L in x)"
+  _ = codegenCheck "6 ELet" (emitExpr (ELet "x" (EInt 1) (EVar "x"))) "(let x = 1L in x)"
 
   -- 7. Pattern PCon
-  _ = check "7 PCon Some v" (emitPattern (PCon "Some" (PVar "v" :: []))) "Some(v)"
+  _ = codegenCheck "7 PCon Some v" (emitPattern (PCon "Some" (PVar "v" :: []))) "Some(v)"
 
   -- 8. TyName Int
-  _ = check "8 TyName Int" (emitType (TyName "Int")) "int64"
+  _ = codegenCheck "8 TyName Int" (emitType (TyName "Int")) "int64"
 
   -- 9. TyApp List Int
-  _ = check "9 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "int64 list"
+  _ = codegenCheck "9 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "int64 list"
 
   -- 10. DType Color
   colorCtors = MkCon "Red" [] :: MkCon "Blue" [] :: []
@@ -475,26 +426,26 @@ main =
   _ = checkContains "12 module fn" out "let rec id"
 
   -- 13. PWild pattern
-  _ = check "13 PWild" (emitPattern PWild) "_"
+  _ = codegenCheck "13 PWild" (emitPattern PWild) "_"
 
   -- 14. PNil pattern
-  _ = check "14 PNil" (emitPattern PNil) "[]"
+  _ = codegenCheck "14 PNil" (emitPattern PNil) "[]"
 
   -- 15. ELam
-  _ = check "15 ELam" (emitExpr (ELam "x" (EVar "x"))) "(fun x -> x)"
+  _ = codegenCheck "15 ELam" (emitExpr (ELam "x" (EVar "x"))) "(fun x -> x)"
 
   -- 16. EList
   twoItems = EInt 1 :: EInt 2 :: []
-  _ = check "16 EList" (emitExpr (EList twoItems)) "[1L; 2L]"
+  _ = codegenCheck "16 EList" (emitExpr (EList twoItems)) "[1L; 2L]"
 
   -- 17. ETuple
-  _ = check "17 ETuple" (emitExpr (ETuple (EVar "a") (EVar "b"))) "(a, b)"
+  _ = codegenCheck "17 ETuple" (emitExpr (ETuple (EVar "a") (EVar "b"))) "(a, b)"
 
   -- 18. keyword escaping
-  _ = check "18 safeIdent let" (safeIdent "let") "__ll_let"
-  _ = check "19 safeIdent foo" (safeIdent "foo") "foo"
+  _ = codegenCheck "18 safeIdent let" (safeIdent "let") "__ll_let"
+  _ = codegenCheck "19 safeIdent foo" (safeIdent "foo") "foo"
 
   -- 20. TyFn
-  _ = check "20 TyFn" (emitType (TyFn (TyName "Int") (TyName "Bool"))) "int64 -> bool"
+  _ = codegenCheck "20 TyFn" (emitType (TyFn (TyName "Int") (TyName "Bool"))) "int64 -> bool"
 
   0
