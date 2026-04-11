@@ -1,6 +1,8 @@
 # Architecture overview
 
-The compiler is a straight pipeline: source text in, F# source out. Each
+**Status:** All 10 phases complete. Bootstrap fixpoint achieved (`compiler₁.fs == compiler₂.fs`).
+
+The compiler is a straight pipeline: source text in, target source out. Each
 stage is a pure function (modulo the small `InferState` used in HM) and
 returns `Result<_, LLError list>`.
 
@@ -24,14 +26,17 @@ returns `Result<_, LLError list>`.
    HMInfer.infer                  TypedModule : typed AST + Env + dispatch map
         │
         ▼
-   Codegen.emit                   F# source string
+   Codegen*.emit                  Target source string
+   (Codegen.fs | CodegenTS.fs | CodegenPy.fs | CodegenJava.fs)
         │
         ▼
-  .fs file  →  dotnet fsi  (lllc run)
-           →  dotnet build (lllc build)
+  .fs/.ts/.py/.java  →  dotnet fsi   (lllc run, F# only)
+                     →  dotnet build (lllc build --target fs)
 ```
 
-Entry point: `Compiler.compile : string -> Result<string, LLError list>`
+Entry points:
+- `Compiler.compile : string -> Result<string, LLError list>` — single-file, F# target
+- `Compiler.compileTarget : Target -> string -> Result<string, LLError list>` — single-file, any target
 
 ### Project mode (Phase 8)
 
@@ -51,10 +56,12 @@ ll.toml
    Compiler.compileProject        for each file: compile → TypedModule
         │
         ▼
-   Codegen.emitProjectModules     prelude once + all modules concatenated
-        │
+   Codegen*.emitProjectModules    prelude once + all modules concatenated
+        │   (per-target; loops over [platform] use list)
         ▼
-  bin/<name>.fs + bin/<name>.fsproj
+  bin/<name>.fs + bin/<name>.fsproj       (single target)
+  bin/fsharp/<name>.fs                    (multi-target)
+  bin/typescript/<name>.ts
 ```
 
 A `PosMap` side-table (see `AST.fs`) is populated by the parser and
@@ -168,6 +175,18 @@ with no params becomes `[<EntryPoint>] let main (argv: string[]) = ... 0`.
 
 See [06-codegen](06-codegen.md).
 
+### `CodegenTS.fs` — TypeScript emitter
+
+Emits TypeScript source. Sum types become discriminated unions with a `_tag` field. Curried functions emit as nested arrow functions. See [11-multi-target-codegen](11-multi-target-codegen.md).
+
+### `CodegenPy.fs` — Python emitter
+
+Emits Python source. Sum types become `@dataclass` classes under a `Union` alias. Curried functions emit as nested `def`. Pattern matching emits as ternary chains (Python `match` is not an expression).
+
+### `CodegenJava.fs` — Java 21 emitter
+
+Emits Java 21 source. Sum types become `sealed interface` + `record` hierarchies. Functions emit as static methods. See [11-multi-target-codegen](11-multi-target-codegen.md).
+
 ### `Manifest.fs` — TOML subset parser (Phase 8)
 
 Hand-written parser for `ll.toml` project manifests. Supports `[table]` headers,
@@ -226,14 +245,17 @@ disconnects.
 
 ### `src/LLLangTool/Program.fs` — CLI
 
-The `lllc` driver. Five commands:
+The `lllc` driver. Seven commands:
 
-- `build <file.lll>` — single-file mode.
-- `build [dir]` — project mode (reads `ll.toml`, writes `bin/<name>.fs`).
+- `build <file.lll>` — single-file mode (default target: F#).
+- `build --target ts|py|java <file.lll>` — single-file, named target.
+- `build [dir]` — project mode (reads `ll.toml`, writes `bin/<name>.fs`; multi-target via `[platform] use`).
 - `run <file.lll>` — writes a temp `.fsx` (stripping `module` and
   `[<EntryPoint>]`, appending `main [||] |> exit`) and shells out to
   `dotnet fsi`.
+- `check <file.lll>` — lex → parse → elaborate → infer without emitting output. Fast type-check.
 - `new <name>` — scaffold project directory structure.
+- `install` — fetch source-based dependencies declared in `ll.toml` into `.ll-deps/`.
 - `mcp` — launch MCP stdio server (blocks until stdin closes).
 
 ## F# compile order
@@ -251,6 +273,9 @@ in the `.fsproj`. The current order is significant:
 <Compile Include="TypedAST.fs" />
 <Compile Include="HMInfer.fs" />
 <Compile Include="Codegen.fs" />
+<Compile Include="CodegenTS.fs" />
+<Compile Include="CodegenPy.fs" />
+<Compile Include="CodegenJava.fs" />
 <Compile Include="Manifest.fs" />
 <Compile Include="ProjectLoader.fs" />
 <Compile Include="Compiler.fs" />
@@ -264,21 +289,56 @@ Dependency chain:
 - `Types.fs` depends on `AST.fs` and (for `fromElaboratorEnv`) on `Elaborator.fs`
 - `TypedAST.fs` depends on `AST.fs` + `Types.fs`
 - `HMInfer.fs` depends on all of the above
-- `Codegen.fs` depends on `AST.fs` + `Types.fs` + `TypedAST.fs`
+- `Codegen.fs`, `CodegenTS.fs`, `CodegenPy.fs`, `CodegenJava.fs` each depend on `AST.fs` + `Types.fs` + `TypedAST.fs`. Do not `open` more than one in `Compiler.fs` — all four export `emit`, which would shadow. Use fully-qualified names: `Codegen.emit`, `CodegenTS.emit`, etc.
 - `Manifest.fs` depends only on `System` (no compiler module deps)
 - `ProjectLoader.fs` depends on `Manifest.fs` + `Elaborator.fs` + `Lexer.fs` + `Parser.fs`
-- `Compiler.fs` glues everything together
+- `Compiler.fs` glues everything together; dispatches to the right codegen via `Target` DU
 
 If you add a new file, slot it in where its dependencies are satisfied.
 Adding it at the end will usually work unless it is depended on by
 `Codegen.fs` or `Compiler.fs`.
 
+## Multi-target dispatch
+
+`Compiler.fs` exposes `compileTarget`:
+
+```fsharp
+type Target = FSharp | TypeScript | Python | Java
+
+let compileTarget (target: Target) (src: string) : Result<string, LLError list> =
+    match target with
+    | FSharp      -> compile src           // Codegen.emit
+    | TypeScript  -> compileToTS src       // CodegenTS.emit
+    | Python      -> compileToPy src       // CodegenPy.emit
+    | Java        -> compileToJava src     // CodegenJava.emit
+```
+
+The front-end (lex → parse → elaborate → infer) runs once per file regardless of target count. Codegens fan out from the shared `TypedModule`. In multi-target project builds, `compileProject` runs the front-end once and then calls each target's `emitProjectModules`.
+
+Output layout:
+- Single target: `bin/<name>.fs` (backward-compatible)
+- Multi-target: `bin/fsharp/<name>.fs`, `bin/typescript/<name>.ts`, etc.
+
+See [11-multi-target-codegen](11-multi-target-codegen.md) for per-backend details.
+
+## Package system
+
+Source-based dependencies. `ll.toml` declares them:
+
+```toml
+[deps]
+std = { path = "../stdlib" }
+json = "https://github.com/user/ll-json#v0.1.0"
+```
+
+`lllc install` copies dep sources into `.ll-deps/`. `ProjectLoader.fs` resolves imports by searching `src/` then `.ll-deps/*/src/`.
+
+Platform SDKs are a future extension (`[sdk]` table in a dep's `ll.toml`). See `docs/superpowers/specs/2026-04-10-ll-lang-platform-sdk.md` for the design.
+
 ## No external parser / inference libraries
 
 Everything is hand-written. The rationale:
 
-- Future self-hosting (Phase 7) will translate this compiler into ll-lang
-  itself. Avoiding external libraries keeps the translation mechanical.
-- H-M is small (~200 lines) and the explicit form is easier to audit
-  than an FParsec or FsLexYacc pipeline.
+- Bootstrap (Phase 7) translates the compiler into ll-lang itself. Avoiding external libraries keeps the translation mechanical.
+- H-M is small (~200 lines) and the explicit form is easier to audit than an FParsec or FsLexYacc pipeline.
 - Error messages are fully under our control — no generated parser spew.
