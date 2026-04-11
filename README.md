@@ -98,8 +98,25 @@ lllc mcp                            # run MCP server (stdio, for Claude/Cursor)
 lllc new myapp          # creates myapp/ll.toml + myapp/src/Main.lll
 cd myapp
 # edit src/Main.lll, add more .lll files to src/
-lllc build              # → bin/myapp.fs + bin/myapp.fsproj
-dotnet run --project bin/myapp.fsproj
+lllc build              # → bin/fsharp/myapp.fs (default target)
+dotnet run --project bin/fsharp/myapp.fsproj
+```
+
+### Multi-target from ll.toml
+
+```toml
+# ll.toml
+[project]
+name = "myapp"
+
+[platform]
+use = ["fsharp", "typescript"]
+```
+
+```bash
+lllc build    # compiles once, emits to both targets:
+              #   bin/fsharp/myapp.fs
+              #   bin/typescript/myapp.ts
 ```
 
 ## For LLM Agents: MCP Integration
