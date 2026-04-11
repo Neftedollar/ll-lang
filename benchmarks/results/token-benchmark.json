@@ -1,46 +1,46 @@
 {
-  "generated": "2026-04-10",
+  "generated": "2026-04-11",
   "tokenizer": "cl100k_base",
   "tier1": [
     {
       "label": "01-basics",
-      "lll_tokens": 118,
-      "fs_tokens_no_prelude": 118,
-      "fs_tokens_with_prelude": 714,
+      "lll_tokens": 110,
+      "fs_tokens_no_prelude": 122,
+      "fs_tokens_with_prelude": 718,
       "ts_tokens": 142,
-      "ratio_fs_lll": 1.0
+      "ratio_fs_lll": 1.11
     },
     {
       "label": "Map (RBTree)",
-      "lll_tokens": 1910,
+      "lll_tokens": 1771,
       "fs_tokens_no_prelude": 2073,
       "fs_tokens_with_prelude": 2849,
       "ts_tokens": null,
-      "ratio_fs_lll": 1.09
+      "ratio_fs_lll": 1.17
     },
     {
       "label": "Toml parser",
-      "lll_tokens": 2175,
+      "lll_tokens": 2030,
       "fs_tokens_no_prelude": 2359,
       "fs_tokens_with_prelude": 3135,
       "ts_tokens": null,
-      "ratio_fs_lll": 1.08
+      "ratio_fs_lll": 1.16
     },
     {
       "label": "Bootstrap",
-      "lll_tokens": 17918,
-      "fs_tokens_no_prelude": 18372,
-      "fs_tokens_with_prelude": 19148,
+      "lll_tokens": 16957,
+      "fs_tokens_no_prelude": 18393,
+      "fs_tokens_with_prelude": 19169,
       "ts_tokens": null,
-      "ratio_fs_lll": 1.03
+      "ratio_fs_lll": 1.08
     }
   ],
   "tier2": [
     {
       "label": "TOML parser",
-      "lll_tokens": 2175,
-      "fs_handwritten_tokens": 1439,
-      "ratio": 0.66
+      "lll_tokens": 2030,
+      "fs_handwritten_tokens": 1823,
+      "ratio": 0.9
     }
   ],
   "tier3": [
@@ -187,21 +187,21 @@
       "lang": "lll",
       "lines": 28,
       "code_lines": 16,
-      "tokens_raw": 144,
-      "tokens_code": 118,
-      "bytes": 406,
-      "functions": 5
+      "tokens_raw": 136,
+      "tokens_code": 110,
+      "bytes": 379,
+      "functions": 0
     },
     {
       "path": "/Users/roman/Documents/dev/tens/code/ll-lang/spec/examples/valid/01-basics.fs",
       "lang": "fs",
-      "lines": 60,
-      "code_lines": 49,
-      "tokens_raw": 734,
-      "tokens_code": 714,
-      "bytes": 2343,
-      "functions": 43,
-      "tokens_no_prelude": 118,
+      "lines": 63,
+      "code_lines": 52,
+      "tokens_raw": 738,
+      "tokens_code": 718,
+      "bytes": 2359,
+      "functions": 36,
+      "tokens_no_prelude": 122,
       "prelude_tokens": 615
     },
     {
@@ -219,10 +219,10 @@
       "lang": "lll",
       "lines": 235,
       "code_lines": 164,
-      "tokens_raw": 2333,
-      "tokens_code": 1910,
-      "bytes": 6879,
-      "functions": 15
+      "tokens_raw": 2194,
+      "tokens_code": 1771,
+      "bytes": 6393,
+      "functions": 0
     },
     {
       "path": "/Users/roman/Documents/dev/tens/code/ll-lang/stdlib/src/Map.fs",
@@ -241,10 +241,10 @@
       "lang": "lll",
       "lines": 292,
       "code_lines": 214,
-      "tokens_raw": 2524,
-      "tokens_code": 2175,
-      "bytes": 8580,
-      "functions": 26
+      "tokens_raw": 2379,
+      "tokens_code": 2030,
+      "bytes": 8002,
+      "functions": 0
     },
     {
       "path": "/Users/roman/Documents/dev/tens/code/ll-lang/stdlib/src/Toml.fs",
@@ -261,35 +261,35 @@
     {
       "path": "/Users/roman/Documents/dev/tens/code/ll-lang/spec/examples/valid/20-bootstrap-compiler.lll",
       "lang": "lll",
-      "lines": 2997,
-      "code_lines": 1596,
-      "tokens_raw": 37054,
-      "tokens_code": 17918,
-      "bytes": 123685,
-      "functions": 242
+      "lines": 2987,
+      "code_lines": 1589,
+      "tokens_raw": 36055,
+      "tokens_code": 16957,
+      "bytes": 120209,
+      "functions": 0
     },
     {
       "path": "/Users/roman/Documents/dev/tens/code/ll-lang/spec/examples/valid/20-bootstrap-compiler.fs",
       "lang": "fs",
-      "lines": 1223,
-      "code_lines": 960,
-      "tokens_raw": 19739,
-      "tokens_code": 19148,
-      "bytes": 59258,
+      "lines": 1220,
+      "code_lines": 957,
+      "tokens_raw": 19759,
+      "tokens_code": 19169,
+      "bytes": 59163,
       "functions": 44,
-      "tokens_no_prelude": 18372,
+      "tokens_no_prelude": 18393,
       "prelude_tokens": 795
     },
     {
       "path": "/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangCompiler/Manifest.fs",
       "lang": "fs",
-      "lines": 182,
-      "code_lines": 154,
-      "tokens_raw": 1729,
-      "tokens_code": 1439,
-      "bytes": 7816,
-      "functions": 5,
-      "tokens_no_prelude": 1439,
+      "lines": 227,
+      "code_lines": 188,
+      "tokens_raw": 2255,
+      "tokens_code": 1823,
+      "bytes": 9638,
+      "functions": 7,
+      "tokens_no_prelude": 1823,
       "prelude_tokens": 0
     }
   ]
