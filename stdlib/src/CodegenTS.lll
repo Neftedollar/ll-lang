@@ -57,60 +57,34 @@ joinWith(sep Str)(items List[Str]) =
     | x :: rest -> strConcat x (strConcat sep (joinWith sep rest))
 
 isTsKeyword(s Str) =
-  if s == "break"
-    true
-  else if s == "const"
-    true
-  else if s == "delete"
-    true
-  else if s == "else"
-    true
-  else if s == "false"
-    true
-  else if s == "for"
-    true
-  else if s == "function"
-    true
-  else if s == "if"
-    true
-  else if s == "in"
-    true
-  else if s == "new"
-    true
-  else if s == "null"
-    true
-  else if s == "return"
-    true
-  else if s == "switch"
-    true
-  else if s == "this"
-    true
-  else if s == "true"
-    true
-  else if s == "try"
-    true
-  else if s == "var"
-    true
-  else if s == "void"
-    true
-  else if s == "while"
-    true
-  else if s == "let"
-    true
-  else if s == "type"
-    true
-  else if s == "string"
-    true
-  else if s == "number"
-    true
-  else if s == "boolean"
-    true
-  else if s == "never"
-    true
-  else if s == "object"
-    true
-  else
-    false
+  match s
+    | "break"    -> true
+    | "const"    -> true
+    | "delete"   -> true
+    | "else"     -> true
+    | "false"    -> true
+    | "for"      -> true
+    | "function" -> true
+    | "if"       -> true
+    | "in"       -> true
+    | "new"      -> true
+    | "null"     -> true
+    | "return"   -> true
+    | "switch"   -> true
+    | "this"     -> true
+    | "true"     -> true
+    | "try"      -> true
+    | "var"      -> true
+    | "void"     -> true
+    | "while"    -> true
+    | "let"      -> true
+    | "type"     -> true
+    | "string"   -> true
+    | "number"   -> true
+    | "boolean"  -> true
+    | "never"    -> true
+    | "object"   -> true
+    | _          -> false
 
 safeIdent(s Str) =
   if isTsKeyword s
@@ -118,19 +92,14 @@ safeIdent(s Str) =
   else s
 
 encodeTsEscape(c Char) =
-  if c == '\n'
-    "\\n"
-  else if c == '\t'
-    "\\t"
-  else if c == '\r'
-    "\\r"
-  else if c == '\\'
-    "\\\\"
-  else if c == '`'
-    "\\`"
-  else if c == '$'
-    "\\$"
-  else strFromChars [c]
+  match c
+    | '\n' -> "\\n"
+    | '\t' -> "\\t"
+    | '\r' -> "\\r"
+    | '\\' -> "\\\\"
+    | '`'  -> "\\`"
+    | '$'  -> "\\$"
+    | _    -> strFromChars [c]
 
 escapeStr(s Str) =
   listFold (\acc c. strConcat acc (encodeTsEscape c)) "" (strChars s)

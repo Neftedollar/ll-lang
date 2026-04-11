@@ -179,21 +179,15 @@ parseIntStr(s Str) =
     | None -> 0
 
 decodeEscape(c Char) =
-  if c == 'n'
-    '\n'
-  else if c == 't'
-    '\t'
-  else if c == 'r'
-    '\r'
-  else if c == '\\'
-    '\\'
-  else if c == '\''
-    '\''
-  else if c == '"'
-    '"'
-  else if c == '0'
-    '\0'
-  else c
+  match c
+    | 'n'  -> '\n'
+    | 't'  -> '\t'
+    | 'r'  -> '\r'
+    | '\\' -> '\\'
+    | '\'' -> '\''
+    | '"'  -> '"'
+    | '0'  -> '\0'
+    | _    -> c
 
 takeStrBody(cs List[Char]) =
   match cs
@@ -1052,117 +1046,63 @@ joinWith(sep Str)(items List[Str]) =
     | x :: rest -> strConcat x (strConcat sep (joinWith sep rest))
 
 isFsKeyword(s Str) =
-  if s == "abstract"
-    true
-  else if s == "and"
-    true
-  else if s == "as"
-    true
-  else if s == "begin"
-    true
-  else if s == "class"
-    true
-  else if s == "do"
-    true
-  else if s == "done"
-    true
-  else if s == "downcast"
-    true
-  else if s == "elif"
-    true
-  else if s == "else"
-    true
-  else if s == "end"
-    true
-  else if s == "exception"
-    true
-  else if s == "false"
-    true
-  else if s == "for"
-    true
-  else if s == "fun"
-    true
-  else if s == "function"
-    true
-  else if s == "if"
-    true
-  else if s == "in"
-    true
-  else if s == "inherit"
-    true
-  else if s == "inline"
-    true
-  else if s == "interface"
-    true
-  else if s == "let"
-    true
-  else if s == "match"
-    true
-  else if s == "member"
-    true
-  else if s == "mod"
-    true
-  else if s == "module"
-    true
-  else if s == "mutable"
-    true
-  else if s == "namespace"
-    true
-  else if s == "new"
-    true
-  else if s == "not"
-    true
-  else if s == "null"
-    true
-  else if s == "of"
-    true
-  else if s == "open"
-    true
-  else if s == "or"
-    true
-  else if s == "override"
-    true
-  else if s == "private"
-    true
-  else if s == "public"
-    true
-  else if s == "rec"
-    true
-  else if s == "return"
-    true
-  else if s == "static"
-    true
-  else if s == "struct"
-    true
-  else if s == "then"
-    true
-  else if s == "to"
-    true
-  else if s == "true"
-    true
-  else if s == "try"
-    true
-  else if s == "type"
-    true
-  else if s == "upcast"
-    true
-  else if s == "use"
-    true
-  else if s == "val"
-    true
-  else if s == "void"
-    true
-  else if s == "when"
-    true
-  else if s == "while"
-    true
-  else if s == "with"
-    true
-  else if s == "yield"
-    true
-  else if s == "trait"
-    true
-  else false
+  match s
+    | "abstract"  -> true
+    | "and"       -> true
+    | "as"        -> true
+    | "begin"     -> true
+    | "class"     -> true
+    | "do"        -> true
+    | "done"      -> true
+    | "downcast"  -> true
+    | "elif"      -> true
+    | "else"      -> true
+    | "end"       -> true
+    | "exception" -> true
+    | "false"     -> true
+    | "for"       -> true
+    | "fun"       -> true
+    | "function"  -> true
+    | "if"        -> true
+    | "in"        -> true
+    | "inherit"   -> true
+    | "inline"    -> true
+    | "interface" -> true
+    | "let"       -> true
+    | "match"     -> true
+    | "member"    -> true
+    | "mod"       -> true
+    | "module"    -> true
+    | "mutable"   -> true
+    | "namespace" -> true
+    | "new"       -> true
+    | "not"       -> true
+    | "null"      -> true
+    | "of"        -> true
+    | "open"      -> true
+    | "or"        -> true
+    | "override"  -> true
+    | "private"   -> true
+    | "public"    -> true
+    | "rec"       -> true
+    | "return"    -> true
+    | "static"    -> true
+    | "struct"    -> true
+    | "then"      -> true
+    | "to"        -> true
+    | "true"      -> true
+    | "try"       -> true
+    | "type"      -> true
+    | "upcast"    -> true
+    | "use"       -> true
+    | "val"       -> true
+    | "void"      -> true
+    | "when"      -> true
+    | "while"     -> true
+    | "with"      -> true
+    | "yield"     -> true
+    | "trait"     -> true
+    | _           -> false
 
 safeIdent(s Str) =
   if isFsKeyword s
@@ -1170,17 +1110,13 @@ safeIdent(s Str) =
   else s
 
 encodeStrEscape(c Char) =
-  if c == '\n'
-    "\\n"
-  else if c == '\t'
-    "\\t"
-  else if c == '\r'
-    "\\r"
-  else if c == '\\'
-    "\\\\"
-  else if c == '"'
-    "\\\""
-  else strFromChars [c]
+  match c
+    | '\n' -> "\\n"
+    | '\t' -> "\\t"
+    | '\r' -> "\\r"
+    | '\\' -> "\\\\"
+    | '"'  -> "\\\""
+    | _    -> strFromChars [c]
 
 escapeStr(s Str) =
   listFold (\acc c. strConcat acc (encodeStrEscape c)) "" (strChars s)

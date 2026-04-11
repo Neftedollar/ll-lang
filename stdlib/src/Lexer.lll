@@ -190,21 +190,15 @@ takeStrBodyEsc(cs List[Char]) =
 
 -- Decode one escape char.
 decodeEscape(c Char) =
-  if c == 'n'
-    '\n'
-  else if c == 't'
-    '\t'
-  else if c == 'r'
-    '\r'
-  else if c == '\\'
-    '\\'
-  else if c == '\''
-    '\''
-  else if c == '"'
-    '"'
-  else if c == '0'
-    '\0'
-  else c
+  match c
+    | 'n'  -> '\n'
+    | 't'  -> '\t'
+    | 'r'  -> '\r'
+    | '\\' -> '\\'
+    | '\'' -> '\''
+    | '"'  -> '"'
+    | '0'  -> '\0'
+    | _    -> c
 
 -- Lex a string literal; opening `"` already consumed.
 lexStr(cs List[Char]) =

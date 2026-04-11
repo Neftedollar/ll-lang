@@ -57,80 +57,44 @@ joinWith(sep Str)(items List[Str]) =
     | x :: rest -> strConcat x (strConcat sep (joinWith sep rest))
 
 isPyKeyword(s Str) =
-  if s == "False"
-    true
-  else if s == "None"
-    true
-  else if s == "True"
-    true
-  else if s == "and"
-    true
-  else if s == "as"
-    true
-  else if s == "assert"
-    true
-  else if s == "async"
-    true
-  else if s == "await"
-    true
-  else if s == "break"
-    true
-  else if s == "class"
-    true
-  else if s == "continue"
-    true
-  else if s == "def"
-    true
-  else if s == "del"
-    true
-  else if s == "elif"
-    true
-  else if s == "else"
-    true
-  else if s == "except"
-    true
-  else if s == "finally"
-    true
-  else if s == "for"
-    true
-  else if s == "from"
-    true
-  else if s == "global"
-    true
-  else if s == "if"
-    true
-  else if s == "import"
-    true
-  else if s == "in"
-    true
-  else if s == "is"
-    true
-  else if s == "lambda"
-    true
-  else if s == "not"
-    true
-  else if s == "or"
-    true
-  else if s == "pass"
-    true
-  else if s == "raise"
-    true
-  else if s == "return"
-    true
-  else if s == "try"
-    true
-  else if s == "while"
-    true
-  else if s == "with"
-    true
-  else if s == "yield"
-    true
-  else if s == "print"
-    true
-  else if s == "type"
-    true
-  else
-    false
+  match s
+    | "False"    -> true
+    | "None"     -> true
+    | "True"     -> true
+    | "and"      -> true
+    | "as"       -> true
+    | "assert"   -> true
+    | "async"    -> true
+    | "await"    -> true
+    | "break"    -> true
+    | "class"    -> true
+    | "continue" -> true
+    | "def"      -> true
+    | "del"      -> true
+    | "elif"     -> true
+    | "else"     -> true
+    | "except"   -> true
+    | "finally"  -> true
+    | "for"      -> true
+    | "from"     -> true
+    | "global"   -> true
+    | "if"       -> true
+    | "import"   -> true
+    | "in"       -> true
+    | "is"       -> true
+    | "lambda"   -> true
+    | "not"      -> true
+    | "or"       -> true
+    | "pass"     -> true
+    | "raise"    -> true
+    | "return"   -> true
+    | "try"      -> true
+    | "while"    -> true
+    | "with"     -> true
+    | "yield"    -> true
+    | "print"    -> true
+    | "type"     -> true
+    | _          -> false
 
 safeIdent(s Str) =
   if isPyKeyword s
@@ -138,17 +102,13 @@ safeIdent(s Str) =
   else s
 
 encodePyEscape(c Char) =
-  if c == '\n'
-    "\\n"
-  else if c == '\t'
-    "\\t"
-  else if c == '\r'
-    "\\r"
-  else if c == '\\'
-    "\\\\"
-  else if c == '"'
-    "\\\""
-  else strFromChars [c]
+  match c
+    | '\n' -> "\\n"
+    | '\t' -> "\\t"
+    | '\r' -> "\\r"
+    | '\\' -> "\\\\"
+    | '"'  -> "\\\""
+    | _    -> strFromChars [c]
 
 escapeStr(s Str) =
   listFold (\acc c. strConcat acc (encodePyEscape c)) "" (strChars s)

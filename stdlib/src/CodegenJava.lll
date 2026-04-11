@@ -65,121 +65,65 @@ joinWith(sep Str)(items List[Str]) =
 -- ---- Java keyword escaping -------------------------------------------------
 
 isJavaKeyword(s Str) =
-  if s == "abstract"
-    true
-  else if s == "assert"
-    true
-  else if s == "boolean"
-    true
-  else if s == "break"
-    true
-  else if s == "byte"
-    true
-  else if s == "case"
-    true
-  else if s == "catch"
-    true
-  else if s == "char"
-    true
-  else if s == "class"
-    true
-  else if s == "const"
-    true
-  else if s == "continue"
-    true
-  else if s == "default"
-    true
-  else if s == "do"
-    true
-  else if s == "double"
-    true
-  else if s == "else"
-    true
-  else if s == "enum"
-    true
-  else if s == "extends"
-    true
-  else if s == "false"
-    true
-  else if s == "final"
-    true
-  else if s == "finally"
-    true
-  else if s == "float"
-    true
-  else if s == "for"
-    true
-  else if s == "goto"
-    true
-  else if s == "if"
-    true
-  else if s == "implements"
-    true
-  else if s == "import"
-    true
-  else if s == "instanceof"
-    true
-  else if s == "int"
-    true
-  else if s == "interface"
-    true
-  else if s == "long"
-    true
-  else if s == "native"
-    true
-  else if s == "new"
-    true
-  else if s == "null"
-    true
-  else if s == "package"
-    true
-  else if s == "private"
-    true
-  else if s == "protected"
-    true
-  else if s == "public"
-    true
-  else if s == "return"
-    true
-  else if s == "short"
-    true
-  else if s == "static"
-    true
-  else if s == "super"
-    true
-  else if s == "switch"
-    true
-  else if s == "synchronized"
-    true
-  else if s == "this"
-    true
-  else if s == "throw"
-    true
-  else if s == "throws"
-    true
-  else if s == "transient"
-    true
-  else if s == "true"
-    true
-  else if s == "try"
-    true
-  else if s == "void"
-    true
-  else if s == "volatile"
-    true
-  else if s == "while"
-    true
-  else if s == "record"
-    true
-  else if s == "sealed"
-    true
-  else if s == "permits"
-    true
-  else if s == "var"
-    true
-  else if s == "yield"
-    true
-  else false
+  match s
+    | "abstract"     -> true
+    | "assert"       -> true
+    | "boolean"      -> true
+    | "break"        -> true
+    | "byte"         -> true
+    | "case"         -> true
+    | "catch"        -> true
+    | "char"         -> true
+    | "class"        -> true
+    | "const"        -> true
+    | "continue"     -> true
+    | "default"      -> true
+    | "do"           -> true
+    | "double"       -> true
+    | "else"         -> true
+    | "enum"         -> true
+    | "extends"      -> true
+    | "false"        -> true
+    | "final"        -> true
+    | "finally"      -> true
+    | "float"        -> true
+    | "for"          -> true
+    | "goto"         -> true
+    | "if"           -> true
+    | "implements"   -> true
+    | "import"       -> true
+    | "instanceof"   -> true
+    | "int"          -> true
+    | "interface"    -> true
+    | "long"         -> true
+    | "native"       -> true
+    | "new"          -> true
+    | "null"         -> true
+    | "package"      -> true
+    | "private"      -> true
+    | "protected"    -> true
+    | "public"       -> true
+    | "return"       -> true
+    | "short"        -> true
+    | "static"       -> true
+    | "super"        -> true
+    | "switch"       -> true
+    | "synchronized" -> true
+    | "this"         -> true
+    | "throw"        -> true
+    | "throws"       -> true
+    | "transient"    -> true
+    | "true"         -> true
+    | "try"          -> true
+    | "void"         -> true
+    | "volatile"     -> true
+    | "while"        -> true
+    | "record"       -> true
+    | "sealed"       -> true
+    | "permits"      -> true
+    | "var"          -> true
+    | "yield"        -> true
+    | _              -> false
 
 safeIdent(s Str) =
   if isJavaKeyword s
@@ -189,17 +133,13 @@ safeIdent(s Str) =
 -- ---- String escaping -------------------------------------------------------
 
 encodeJavaEscape(c Char) =
-  if c == '\n'
-    "\\n"
-  else if c == '\t'
-    "\\t"
-  else if c == '\r'
-    "\\r"
-  else if c == '\\'
-    "\\\\"
-  else if c == '"'
-    "\\\""
-  else strFromChars [c]
+  match c
+    | '\n' -> "\\n"
+    | '\t' -> "\\t"
+    | '\r' -> "\\r"
+    | '\\' -> "\\\\"
+    | '"'  -> "\\\""
+    | _    -> strFromChars [c]
 
 escapeStr(s Str) =
   listFold (\acc c. strConcat acc (encodeJavaEscape c)) "" (strChars s)
