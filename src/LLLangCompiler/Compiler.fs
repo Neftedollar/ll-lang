@@ -5,6 +5,7 @@ open LLLang.Elaborator
 open LLLang.Lexer
 open LLLang.Parser
 open LLLang.HMInfer
+open LLLang.Types
 open LLLang.TypedAST
 open LLLang.Codegen
 open LLLang.ProjectLoader
@@ -91,14 +92,47 @@ let private compileFile (lf: LoadedFile) : Result<TypedModule, LLError list> =
                 | Error es -> Error es
                 | Ok tm -> Ok tm
 
+/// Compile a single LoadedFile with an accumulated imported environment from
+/// previously compiled files. Imported names are made visible to the elaborator
+/// and HM inference engine so that cross-module references resolve correctly.
+let private compileFileWithEnv (lf: LoadedFile) (importedEnv: Env) : Result<TypedModule, LLError list> =
+    match tokenize lf.Src with
+    | Error e -> Error (wrapErr e)
+    | Ok toks ->
+        match parseModuleWithPos toks with
+        | Error e -> Error (wrapErr e)
+        | Ok (m, pm) ->
+            let m' = if m.Path = [] then { m with Path = lf.ModulePath } else m
+            // Convert the HM Env (name → TypeScheme) to a plain TypeEnv
+            // (name → TypeExpr) for the elaborator by extracting each scheme's body.
+            let importedTypeEnv : LLLang.Elaborator.TypeEnv =
+                importedEnv |> Map.map (fun _ sch -> sch.Body)
+            match elaborateWithImports pm m' importedTypeEnv with
+            | Error es -> Error es
+            | Ok (m'', env) ->
+                // Seed HM inference with the full elaborator env which already
+                // contains the merged imported bindings.
+                match infer pm m'' env with
+                | Error es -> Error es
+                | Ok tm -> Ok tm
+
 /// Compile a multi-file project: compile each file in topo order,
 /// then concatenate all modules into a single F# source string.
+/// The inferred exports of each file are accumulated and made available
+/// to subsequent files so that cross-module name resolution works.
 let compileProject (proj: LLProject) : Result<string, LLError list> =
-    let results =
-        proj.Files
-        |> List.map compileFile
-    let errors = results |> List.collect (fun r -> match r with Error es -> es | Ok _ -> [])
-    if not errors.IsEmpty then Error errors
-    else
-        let tms = results |> List.choose (fun r -> match r with Ok tm -> Some tm | Error _ -> None)
-        Ok (emitProjectModules tms)
+    // Fold over files in topo order, accumulating an env of exported names.
+    let rec compileAll (files: LoadedFile list) (accEnv: Env) (accModules: TypedModule list) =
+        match files with
+        | [] -> Ok (List.rev accModules)
+        | lf :: rest ->
+            match compileFileWithEnv lf accEnv with
+            | Error es -> Error es
+            | Ok tm ->
+                // Merge this file's inferred env into the accumulated env.
+                // Module-local names overwrite any previous binding with the same name.
+                let newAccEnv = Map.fold (fun acc k v -> Map.add k v acc) accEnv tm.Env
+                compileAll rest newAccEnv (tm :: accModules)
+    match compileAll proj.Files Map.empty [] with
+    | Error es -> Error es
+    | Ok tms -> Ok (emitProjectModules tms)

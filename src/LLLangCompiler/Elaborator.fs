@@ -629,3 +629,24 @@ let elaborate (pm: PosMap) (m: LLModule) : Result<LLModule * TypeEnv, LLError li
     let exhaustErrors = exhaustivenessCheck pm m' env
     let errors = checkErrors @ exhaustErrors
     if errors.IsEmpty then Ok (m', env) else Error errors
+
+/// Elaborate an LLModule with an additional imported environment (from previously
+/// compiled files). The imported bindings are merged into the initial env before
+/// this module's own declarations are collected, so imported names are visible
+/// during elaboration and will not produce E002 UnboundVar errors.
+let elaborateWithImports (pm: PosMap) (m: LLModule) (importedEnv: TypeEnv) : Result<LLModule * TypeEnv, LLError list> =
+    let m' = rewriteTagsInModule m
+    // Start collectDecls from builtinEnv + importedEnv instead of just builtinEnv.
+    // We do this by building the env with imports merged in, then collecting
+    // this module's own decls on top.
+    let baseEnv = Map.fold (fun acc k v -> Map.add k v acc) builtinEnv importedEnv
+    // Re-use collectDecls by temporarily shadowing builtinEnv is not possible
+    // from outside, so we inline the merge: run collectDecls and then merge.
+    // collectDecls always starts from builtinEnv, so we re-overlay importedEnv
+    // on top of the result (module-local decls win over imports).
+    let localEnv = collectDecls m'
+    let env = Map.fold (fun acc k v -> Map.add k v acc) baseEnv localEnv
+    let checkErrors = checkDecls pm m' env
+    let exhaustErrors = exhaustivenessCheck pm m' env
+    let errors = checkErrors @ exhaustErrors
+    if errors.IsEmpty then Ok (m', env) else Error errors
