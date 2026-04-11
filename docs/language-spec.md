@@ -1,6 +1,6 @@
 # ll-lang Language Specification
 
-**Version:** 1.0 (Phase 10)  **Extension:** `.lll`  **Encoding:** UTF-8, ASCII-only operators
+**Version:** 1.0 (Phase 10)  **Extension:** `.lll`  **Encoding:** UTF-8, ASCII-only operators  **Tests:** 529
 
 ---
 
@@ -9,12 +9,13 @@
 ll-lang is a statically-typed functional language compiled to F# (default), TypeScript, Python, and Java. Optimized for LLM code generation: minimal keywords, zero ceremony, maximum token efficiency.
 
 **Properties:**
-- 12 keywords — declarations use the uppercase/lowercase convention, not reserved words
+- 13 keywords — declarations use the uppercase/lowercase convention, not reserved words
 - Hindley-Milner inference — annotate function parameters; everything else is inferred
 - Compiled = works — tag violations, unbound variables, non-exhaustive matches, unit mismatches are compile-time errors
 - LLM-readable errors — compact one-line format: `E001 12:5 TypeMismatch expected:UserId got:Int`
 - Pure functional — no mutable state, no exceptions, no null
-- Bootstrap complete — `compiler₁.fs == compiler₂.fs` (self-hosted, 529 tests)
+- Bootstrap complete — `compiler₁.fs == compiler₂.fs` (self-hosted, 2900+ LOC bootstrap compiler)
+- Token-efficient — 8–17% more compact than F# on real code; 1.3–5.9× more compact than TypeScript/Python/Java on type definitions
 
 ---
 
@@ -24,9 +25,9 @@ ll-lang is a statically-typed functional language compiled to F# (default), Type
 
 **Comments:** `-- text to end of line`
 
-**Keywords (12):** `match  if  else  import  export  module  trait  impl  tag  unit  true  false`
+**Keywords (13):** `match  if  else  import  export  module  trait  impl  tag  unit  true  false  let`
 
-The words `fn`, `type`, `let`, `in`, `then`, `with` are not keywords; bare declaration forms are idiomatic.
+The word `let` is reserved for local bindings inside expressions (`let x = e`) and at top-level. The words `fn`, `type`, `in`, `then`, `with` are not keywords; bare declaration forms are idiomatic.
 
 **Identifiers:**
 - Value/function: `[a-z_][a-zA-Z0-9_]*` — `x`, `mapSize`, `_unused`
@@ -273,9 +274,13 @@ Module path (`Std.Map`) must match file path under `src/` (`src/Map.lll`).
 ```toml
 [project]
 name = "myapp"
+version = "0.1.0"
 
 [deps]
 std = { path = "../stdlib" }
+
+[platform]
+use = ["fsharp", "typescript"]   -- emit to multiple targets at once
 ```
 
 **CLI:**
@@ -316,8 +321,9 @@ Format: `EXXX line:col ErrorKind details`  — one line, regex-parseable.
 | `E005` | `TagViolation` | Wrong or missing tag |
 | `E007` | `PlatformMismatch` | Module requires unsupported target |
 | `E008` | `InfiniteType` | Occurs-check failure |
-| `E020` | `ModuleNotFound` | Import cannot be resolved |
+| `E020` | `ModuleNotFound` | Import cannot be resolved / path mismatch |
 | `E024` | `CyclicImport` | Circular module dependency |
+| `E025` | `ModulePathMismatch` | File path does not match declared module path |
 
 ```
 E001 12:5  TypeMismatch   expected:Str[UserId] got:Str   hint:wrap:UserId
@@ -331,42 +337,74 @@ Invalid example files declare `-- expect: E003` on line 1; the test runner asser
 
 ## 11. Standard Library
 
-Self-hosted (10 modules, ~5857 LOC). Prelude is always in scope; additional modules via `import Std.X`.
+Self-hosted (11 modules, ~5857 LOC). Prelude is always in scope; additional modules via `import Std.X`.
 
-**Prelude (selected):**
+**Prelude (always in scope):**
 
+Core (no type dependencies):
 ```
-printfn      : Str -> Unit
-listMap      : (A -> B) -> List[A] -> List[B]
-listFold     : (B -> A -> B) -> B -> List[A] -> B
-listFilter   : (A -> Bool) -> List[A] -> List[A]
+abs          : Int -> Int
+absf         : Float -> Float
+sqrt         : Float -> Float
+min          : Int -> Int -> Int
+max          : Int -> Int -> Int
 listLen      : List[A] -> Int
-listAppend   : List[A] -> List[A] -> List[A]
-listAt       : List[A] -> Int -> Maybe[A]
-listHead     : List[A] -> Maybe[A]
+listMap      : (A -> B) -> List[A] -> List[B]
+listFilter   : (A -> Bool) -> List[A] -> List[A]
+listFold     : (B -> A -> B) -> B -> List[A] -> B
 listReverse  : List[A] -> List[A]
-strConcat    : Str -> Str -> Str
+listAppend   : List[A] -> List[A] -> List[A]
+listConcat   : List[List[A]] -> List[A]
+listIsEmpty  : List[A] -> Bool
 strLen       : Str -> Int
-strSplit     : Str -> Str -> List[Str]
+strConcat    : Str -> Str -> Str
 strTrim      : Str -> Str
+strContains  : Str -> Str -> Bool
+strSplit     : Str -> Str -> List[Str]
+strSlice     : Str -> Int -> Int -> Str
+strIndexOf   : Str -> Str -> Int
+strChars     : Str -> List[Char]
+strFromChars : List[Char] -> Str
+strReverse   : Str -> Str
 intToStr     : Int -> Str
-floatToStr   : Float -> Str
+intToChar    : Int -> Char
 charToInt    : Char -> Int
 charIsDigit  : Char -> Bool
-strToInt     : Str -> Maybe[Int]
-maybeMap     : (A -> B) -> Maybe[A] -> Maybe[B]
-maybeDefault : A -> Maybe[A] -> A
-resultMap    : (A -> B) -> Result[A][E] -> Result[B][E]
-resultBind   : (A -> Result[B][E]) -> Result[A][E] -> Result[B][E]
+charIsAlpha  : Char -> Bool
+charIsSpace  : Char -> Bool
+print        : Str -> Unit
+printfn      : Str -> Unit
+readFile     : Str -> Str
+writeFile    : Str -> Str -> Unit
+fileExists   : Str -> Bool
+exit         : Int -> Unit
 ```
 
-**Stdlib modules:** `Std.Map` (red-black tree), `Std.Toml`, `Std.Lexer`, `Std.Parser`, `Std.Elaborator`, `Std.Codegen`, `Std.CodegenTS`, `Std.CodegenPy`, `Std.CodegenJava`, `Std.Compiler`.
+Maybe-dependent (requires `Maybe A = Some A | None` in scope):
+```
+listHead        : List[A] -> Maybe[A]
+listTail        : List[A] -> Maybe[List[A]]
+listAt          : List[A] -> Int -> Maybe[A]
+maybeMap        : (A -> B) -> Maybe[A] -> Maybe[B]
+maybeBind       : Maybe[A] -> (A -> Maybe[B]) -> Maybe[B]
+maybeWithDefault: A -> Maybe[A] -> A
+strToInt        : Str -> Maybe[Int]
+```
+
+Result-dependent (requires `Result A E = Ok A | Err E` in scope):
+```
+resultMap    : (A -> B) -> Result[A][E] -> Result[B][E]
+resultBind   : Result[A][E] -> (A -> Result[B][E]) -> Result[B][E]
+resultMapErr : (E -> F) -> Result[A][E] -> Result[A][F]
+```
+
+**Stdlib modules (11):** `Std.Maybe`, `Std.Map` (red-black tree), `Std.Toml`, `Std.Lexer`, `Std.Parser`, `Std.Elaborator`, `Std.Codegen`, `Std.CodegenTS`, `Std.CodegenPy`, `Std.CodegenJava`, `Std.Compiler`.
 
 ---
 
 ## 12. Reserved Words and Operators
 
-**Keywords (12):** `match  if  else  import  export  module  trait  impl  tag  unit  true  false`
+**Keywords (13):** `match  if  else  import  export  module  trait  impl  tag  unit  true  false  let`
 
 **Operators:**
 ```
@@ -390,7 +428,7 @@ _                     wildcard
 | `fn add(a Int)(b Int) = ...` | `add(a Int)(b Int) = a + b` |
 | `if cond then body` | `if cond` / indent / `body` |
 | `match x with \| ...` | `match x` / indent / `\| ...` |
-| `let x = 1 in x + 1` | layout-based local bindings |
+| `let x = 1 in ...` | bare `x = 1` layout-based local bindings |
 | `[1, 2, 3]` | `[1 2 3]` (commas make tuples) |
 | mutable state | thread state through return values |
 | throw/raise exceptions | return `Result A E` or `Maybe A` |
