@@ -18,4 +18,4 @@ in `spec/examples/`. Invalid examples declare `-- expect: EXXX` on line 1.
 
 ## Key design decisions
 
-See `../../docs/superpowers/specs/2026-04-07-ll-lang-design.md`
+See `docs/language-spec.md` and `docs/llm-best-practices.md`
