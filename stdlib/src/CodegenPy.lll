@@ -1,0 +1,501 @@
+module Std.CodegenPy
+
+-- Python code emitter in ll-lang. AST types mirrored from Parser.lll.
+
+Maybe A = Some A | None
+
+Pattern =
+  | PVar Str
+  | PWild
+  | PCon Str (List[Pattern])
+  | PLitInt Int
+  | PLitStr Str
+  | PCons Pattern Pattern
+  | PNil
+
+Expr =
+  | EInt Int
+  | EStr Str
+  | EBool Bool
+  | EChar Char
+  | EFloat Str
+  | EVar Str
+  | ECon Str
+  | EApp Expr Expr
+  | EIf Expr Expr Expr
+  | EMatch Expr (List[Pattern]) (List[Expr])
+  | ELam Str Expr
+  | ELet Str Expr Expr
+  | EList (List[Expr])
+  | EBinOp Str Expr Expr
+  | ETuple Expr Expr
+  | ENil
+  | ECons Expr Expr
+
+TypeExpr =
+  | TyName Str
+  | TyApp TypeExpr TypeExpr
+  | TyFn TypeExpr TypeExpr
+
+Param = MkParam Str TypeExpr
+
+Constructor = MkCon Str (List[TypeExpr])
+
+Decl =
+  | DFn Str (List[Param]) (Maybe[TypeExpr]) Expr
+  | DType Str (List[Str]) (List[Constructor])
+  | DImport (List[Str])
+  | DExport Decl
+  | DLet Str Expr
+
+Module = MkModule (List[Str]) (List[Decl])
+
+joinWith(sep Str)(items List[Str]) =
+  match items
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat sep (joinWith sep rest))
+
+isPyKeyword(s Str) =
+  if s == "False"
+    true
+  else if s == "None"
+    true
+  else if s == "True"
+    true
+  else if s == "and"
+    true
+  else if s == "as"
+    true
+  else if s == "assert"
+    true
+  else if s == "async"
+    true
+  else if s == "await"
+    true
+  else if s == "break"
+    true
+  else if s == "class"
+    true
+  else if s == "continue"
+    true
+  else if s == "def"
+    true
+  else if s == "del"
+    true
+  else if s == "elif"
+    true
+  else if s == "else"
+    true
+  else if s == "except"
+    true
+  else if s == "finally"
+    true
+  else if s == "for"
+    true
+  else if s == "from"
+    true
+  else if s == "global"
+    true
+  else if s == "if"
+    true
+  else if s == "import"
+    true
+  else if s == "in"
+    true
+  else if s == "is"
+    true
+  else if s == "lambda"
+    true
+  else if s == "not"
+    true
+  else if s == "or"
+    true
+  else if s == "pass"
+    true
+  else if s == "raise"
+    true
+  else if s == "return"
+    true
+  else if s == "try"
+    true
+  else if s == "while"
+    true
+  else if s == "with"
+    true
+  else if s == "yield"
+    true
+  else if s == "print"
+    true
+  else if s == "type"
+    true
+  else
+    false
+
+safeIdent(s Str) =
+  if isPyKeyword s
+    strConcat "_ll_" s
+  else s
+
+encodePyEscape(c Char) =
+  if c == '\n'
+    "\\n"
+  else if c == '\t'
+    "\\t"
+  else if c == '\r'
+    "\\r"
+  else if c == '\\'
+    "\\\\"
+  else if c == '"'
+    "\\\""
+  else strFromChars [c]
+
+escapeStr(s Str) =
+  listFold (\acc c. strConcat acc (encodePyEscape c)) "" (strChars s)
+
+mapOp(op Str) =
+  if op == "/"
+    "//"
+  else op
+
+emitType(t TypeExpr) =
+  match t
+    | TyName "Int" -> "int"
+    | TyName "Float" -> "float"
+    | TyName "Str" -> "str"
+    | TyName "Bool" -> "bool"
+    | TyName "Char" -> "str"
+    | TyName "Unit" -> "None"
+    | TyName n -> n
+    | TyApp (TyName "List") a -> strConcat "list[" (strConcat (emitType a) "]")
+    | TyApp (TyName "Maybe") a -> strConcat "Optional[" (strConcat (emitType a) "]")
+    | TyApp f a -> strConcat (emitType f) (strConcat "[" (strConcat (emitType a) "]"))
+    | TyFn a b -> strConcat "Callable[[" (strConcat (emitType a) (strConcat "], " (strConcat (emitType b) "]")))
+
+emitPattern(p Pattern) =
+  match p
+    | PVar x -> safeIdent x
+    | PWild -> "_"
+    | PNil -> "[]"
+    | PLitInt n -> intToStr n
+    | PLitStr s -> strConcat "\"" (strConcat (escapeStr s) "\"")
+    | PCons h t ->
+      strConcat "[" (strConcat (emitPattern h) (strConcat ", *" (strConcat (emitPattern t) "]")))
+    | PCon c args -> emitConPattern c args
+
+emitConPattern(c Str)(args List[Pattern]) =
+  match args
+    | [] -> safeIdent c
+    | _ ->
+      inner = joinWith ", " (listMap emitPattern args)
+      strConcat (safeIdent c) (strConcat "(" (strConcat inner ")"))
+
+patListHead(xs List[Pattern]) =
+  match xs
+    | x :: _ -> x
+    | _ -> PWild
+
+emitCharLit(c Char) =
+  if c == '\n'
+    "\"\\n\""
+  else if c == '\t'
+    "\"\\t\""
+  else if c == '\\'
+    "\"\\\\\""
+  else if c == '"'
+    "\"\\\"\""
+  else strConcat "\"" (strConcat (strFromChars [c]) "\"")
+
+emitExpr(e Expr) =
+  match e
+    | EInt n -> intToStr n
+    | EStr s -> strConcat "\"" (strConcat (escapeStr s) "\"")
+    | EBool b ->
+      if b
+        "True"
+      else "False"
+    | EChar c -> emitCharLit c
+    | EFloat s -> s
+    | EVar x -> safeIdent x
+    | ECon c -> safeIdent c
+    | ENil -> "[]"
+    | EApp f a -> emitApp f a
+    | EIf c t el ->
+      strConcat "(" (strConcat (emitExpr t) (strConcat " if " (strConcat (emitExpr c) (strConcat " else " (strConcat (emitExpr el) ")")))))
+    | EMatch scrut pats bodies ->
+      scrutStr = emitExpr scrut
+      arms = emitMatchArms scrutStr pats bodies
+      strConcat "(lambda _s: " (strConcat arms (strConcat ")(" (strConcat scrutStr ")")))
+    | ELam x body ->
+      strConcat "(lambda " (strConcat (safeIdent x) (strConcat ": " (strConcat (emitExpr body) ")")))
+    | ELet x e body ->
+      strConcat "(lambda " (strConcat (safeIdent x) (strConcat ": " (strConcat (emitExpr body) (strConcat ")(" (strConcat (emitExpr e) ")")))))
+    | EList items ->
+      strConcat "[" (strConcat (joinWith ", " (listMap emitExpr items)) "]")
+    | EBinOp op l r ->
+      strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat (mapOp op) (strConcat " " (strConcat (emitExpr r) ")")))))
+    | ETuple a b ->
+      strConcat "(" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) ")")))
+    | ECons h t ->
+      strConcat "[" (strConcat (emitExpr h) (strConcat "] + " (emitExpr t)))
+
+gatherAppHead(e Expr) =
+  match e
+    | EApp f _ -> gatherAppHead f
+    | _ -> e
+
+gatherAppArgs(e Expr) =
+  match e
+    | EApp f a -> listAppend (gatherAppArgs f) [a]
+    | _ -> []
+
+isUpperStart(s Str) =
+  match strChars s
+    | c :: _ ->
+      n = charToInt c
+      if n >= 65
+        if n <= 90
+          true
+        else false
+      else false
+    | _ -> false
+
+emitApp(f Expr)(a Expr) =
+  head = gatherAppHead (EApp f a)
+  args = gatherAppArgs (EApp f a)
+  match head
+    | ECon c -> emitConApp c args
+    | EVar x ->
+      if isUpperStart x
+        emitConApp x args
+      else
+        strConcat "(" (strConcat (emitExpr f) (strConcat ")(" (strConcat (emitExpr a) ")")))
+    | _ ->
+      strConcat "(" (strConcat (emitExpr f) (strConcat ")(" (strConcat (emitExpr a) ")")))
+
+exprListHead(xs List[Expr]) =
+  match xs
+    | x :: _ -> x
+    | _ -> ENil
+
+emitConApp(c Str)(args List[Expr]) =
+  match args
+    | [] -> safeIdent c
+    | _ ->
+      inner = joinWith ", " (listMap emitExpr args)
+      strConcat (safeIdent c) (strConcat "(" (strConcat inner ")"))
+
+emitMatchCond(scrut Str)(p Pattern) =
+  match p
+    | PWild -> ""
+    | PVar _ -> ""
+    | PNil -> strConcat "len(" (strConcat scrut ") == 0")
+    | PCons _ _ -> strConcat "len(" (strConcat scrut ") > 0")
+    | PLitInt n -> strConcat scrut (strConcat " == " (intToStr n))
+    | PLitStr s -> strConcat scrut (strConcat " == \"" (strConcat (escapeStr s) "\""))
+    | PCon c _ -> strConcat scrut (strConcat "._tag == \"" (strConcat c "\""))
+
+emitMatchBinds(scrut Str)(p Pattern)(body Expr) =
+  match p
+    | PVar x ->
+      strConcat "(lambda " (strConcat (safeIdent x) (strConcat ": " (strConcat (emitExpr body) (strConcat ")(" (strConcat scrut ")")))))
+    | PCons h t ->
+      hStr = match h
+        | PVar x -> safeIdent x
+        | _ -> "_"
+      tStr = match t
+        | PVar x -> safeIdent x
+        | _ -> "_"
+      strConcat "(lambda " (strConcat hStr (strConcat ": (lambda " (strConcat tStr (strConcat ": " (strConcat (emitExpr body) (strConcat ")(" (strConcat scrut (strConcat "[1:])))(" (strConcat scrut "[0])")))))))))
+    | PCon c args -> emitConBinds scrut c args body 0
+    | _ -> emitExpr body
+
+emitConBinds(scrut Str)(c Str)(args List[Pattern])(body Expr)(idx Int) =
+  match args
+    | [] -> emitExpr body
+    | p :: rest ->
+      inner = emitConBinds scrut c rest body (idx + 1)
+      match p
+        | PVar x ->
+          field = strConcat scrut (strConcat "._" (intToStr idx))
+          strConcat "(lambda " (strConcat (safeIdent x) (strConcat ": " (strConcat inner (strConcat ")(" (strConcat field ")")))))
+        | _ -> inner
+
+emitMatchArms(scrut Str)(pats List[Pattern])(bodies List[Expr]) =
+  match pats
+    | p :: prest ->
+      match bodies
+        | b :: brest ->
+          cond = emitMatchCond "_s" p
+          rest = emitMatchArms "_s" prest brest
+          bindExpr = emitMatchBinds "_s" p b
+          if strLen cond == 0
+            bindExpr
+          else if strLen rest == 0
+            bindExpr
+          else
+            strConcat "(" (strConcat bindExpr (strConcat " if " (strConcat cond (strConcat " else " (strConcat rest ")")))))
+        | _ -> "None"
+    | _ -> "None"
+
+emitCtorField(args List[TypeExpr])(idx Int) =
+  match args
+    | [] -> ""
+    | t :: rest ->
+      field = strConcat "    _" (strConcat (intToStr idx) (strConcat ": " (emitType t)))
+      remaining = emitCtorField rest (idx + 1)
+      if strLen remaining == 0
+        field
+      else strConcat field (strConcat "\n" remaining)
+
+emitCtor(c Constructor) =
+  match c
+    | MkCon name args ->
+      header = "@dataclass"
+      classDef = strConcat (strConcat "class " name) (strConcat ":\n    _tag: str = \"" (strConcat name "\""))
+      fields = emitCtorField args 0
+      if strLen fields == 0
+        strConcat header (strConcat "\n" (strConcat classDef "\n    pass"))
+      else
+        strConcat header (strConcat "\n" (strConcat classDef (strConcat "\n" fields)))
+
+emitCtors(cs List[Constructor]) =
+  joinWith "\n\n" (listMap emitCtor cs)
+
+emitUnionAlias(name Str)(cs List[Constructor]) =
+  names = joinWith ", " (listMap (\c. match c | MkCon n _ -> n) cs)
+  strConcat name (strConcat " = Union[" (strConcat names "]"))
+
+emitParamStr(p Param) =
+  match p
+    | MkParam n t -> strConcat (safeIdent n) (strConcat ": " (emitType t))
+
+emitParams(ps List[Param]) =
+  joinWith ", " (listMap emitParamStr ps)
+
+emitDecl(d Decl) =
+  match d
+    | DType name _ ctors ->
+      ctorDecls = emitCtors ctors
+      alias = emitUnionAlias name ctors
+      strConcat ctorDecls (strConcat "\n\n" alias)
+    | DFn name params _ body ->
+      match params
+        | [] ->
+          strConcat (safeIdent name) (strConcat " = " (strConcat (emitExpr body) ""))
+        | _ ->
+          paramStr = emitParams params
+          strConcat "def " (strConcat (safeIdent name) (strConcat "(" (strConcat paramStr (strConcat "):\n    return " (emitExpr body)))))
+    | DLet name body ->
+      strConcat (safeIdent name) (strConcat " = " (emitExpr body))
+    | DImport parts ->
+      strConcat "# import " (joinWith "." parts)
+    | DExport inner -> emitDecl inner
+
+emitDecls(ds List[Decl]) =
+  joinWith "\n\n" (listMap emitDecl ds)
+
+emitPrelude =
+  "# --- ll-lang Python runtime helpers ---\nfrom __future__ import annotations\nfrom dataclasses import dataclass\nfrom typing import Optional, Union, Callable, Any\nimport sys\ndef listLen(xs): return len(xs)\ndef listMap(f): return lambda xs: list(map(f, xs))\ndef listFilter(p): return lambda xs: list(filter(p, xs))\ndef listFold(f): return lambda z: lambda xs: (lambda: (lambda state: [state.__setitem__(0, f(state[0])(x)) for x in xs] or state[0])([z]))()\ndef listReverse(xs): return list(reversed(xs))\ndef listAppend(xs): return lambda ys: xs + ys\ndef listConcat(xss): return [x for xs in xss for x in xs]\ndef listIsEmpty(xs): return len(xs) == 0\ndef listHead(xs): return xs[0] if xs else None\ndef listTail(xs): return xs[1:] if xs else None\ndef strLen(s): return len(s)\ndef strConcat(a): return lambda b: a + b\ndef strChars(s): return list(s)\ndef strFromChars(cs): return ''.join(cs)\ndef strContains(needle): return lambda hay: needle in hay\ndef intToStr(n): return str(n)\ndef charToInt(c): return ord(c)\ndef printfn(s): print(s)\ndef _ll_print(s): sys.stdout.write(s)\n# --- end prelude ---"
+
+emitModulePath(parts List[Str]) =
+  joinWith "." parts
+
+emitModule(m Module) =
+  match m
+    | MkModule path decls ->
+      modName = emitModulePath path
+      header = strConcat "# Generated by lllc (ll-lang Python backend)\n# Module: " modName
+      prelude = emitPrelude
+      body = emitDecls decls
+      strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
+
+check(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  got:      " (strConcat got (strConcat "\n  expected: " expected)))))
+
+checkContains(label Str)(got Str)(needle Str) =
+  if strContains needle got
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  missing: " (strConcat needle (strConcat "\n  in: " got)))))
+
+main =
+  -- 1. EInt
+  _ = check "1 EInt 42" (emitExpr (EInt 42)) "42"
+
+  -- 2. EStr
+  _ = check "2 EStr hello" (emitExpr (EStr "hello")) "\"hello\""
+
+  -- 3. EBool true
+  _ = check "3 EBool true" (emitExpr (EBool true)) "True"
+
+  -- 4. EBool false
+  _ = check "4 EBool false" (emitExpr (EBool false)) "False"
+
+  -- 5. EBinOp +
+  _ = check "5 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1 + 2)"
+
+  -- 6. EIf ternary
+  _ = check "6 EIf" (emitExpr (EIf (EBool true) (EInt 1) (EInt 0))) "(1 if True else 0)"
+
+  -- 7. ELet
+  _ = check "7 ELet" (emitExpr (ELet "x" (EInt 5) (EVar "x"))) "(lambda x: x)(5)"
+
+  -- 8. ELam
+  _ = check "8 ELam" (emitExpr (ELam "x" (EVar "x"))) "(lambda x: x)"
+
+  -- 9. EList
+  twoItems = EInt 1 :: EInt 2 :: []
+  _ = check "9 EList" (emitExpr (EList twoItems)) "[1, 2]"
+
+  -- 10. TyName Int
+  _ = check "10 TyName Int" (emitType (TyName "Int")) "int"
+
+  -- 11. TyName Str
+  _ = check "11 TyName Str" (emitType (TyName "Str")) "str"
+
+  -- 12. TyApp List Int
+  _ = check "12 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "list[int]"
+
+  -- 13. TyApp Maybe Bool
+  _ = check "13 TyApp Maybe Bool" (emitType (TyApp (TyName "Maybe") (TyName "Bool"))) "Optional[bool]"
+
+  -- 14. TyFn Int Bool
+  _ = check "14 TyFn" (emitType (TyFn (TyName "Int") (TyName "Bool"))) "Callable[[int], bool]"
+
+  -- 15. DType with dataclasses
+  colorCtors = MkCon "Red" [] :: MkCon "Green" (TyName "Int" :: []) :: []
+  colorOut = emitDecl (DType "Color" [] colorCtors)
+  _ = checkContains "15 DType dataclass" colorOut "@dataclass"
+  _ = checkContains "15 DType class Red" colorOut "class Red:"
+  _ = checkContains "15 DType union alias" colorOut "Color = Union["
+
+  -- 16. DFn add
+  addParams = MkParam "a" (TyName "Int") :: MkParam "b" (TyName "Int") :: []
+  addOut = emitDecl (DFn "add" addParams None (EBinOp "+" (EVar "a") (EVar "b")))
+  _ = checkContains "16 DFn def" addOut "def add("
+  _ = checkContains "16 DFn return" addOut "return"
+
+  -- 17. safeIdent keyword
+  _ = check "17 safeIdent lambda" (safeIdent "lambda") "_ll_lambda"
+  _ = check "17 safeIdent foo" (safeIdent "foo") "foo"
+
+  -- 18. EFloat
+  _ = check "18 EFloat" (emitExpr (EFloat "3.14")) "3.14"
+
+  -- 19. ETuple
+  _ = check "19 ETuple" (emitExpr (ETuple (EVar "a") (EVar "b"))) "(a, b)"
+
+  -- 20. Full module
+  idParams = MkParam "x" (TyName "Int") :: []
+  modDecls = DType "Color" [] (MkCon "Red" [] :: []) :: DFn "id" idParams None (EVar "x") :: []
+  out = emitModule (MkModule ("Test" :: "Py" :: []) modDecls)
+  _ = checkContains "20 module header" out "Module: Test.Py"
+  _ = checkContains "20 module prelude" out "ll-lang Python runtime"
+  _ = checkContains "20 module type" out "class Red:"
+  _ = checkContains "20 module fn" out "def id("
+
+  0
