@@ -490,3 +490,7 @@ let private emitModule (tm: TypedModule) : string =
 
 /// Emit a fully-inferred module as Python source.
 let emit (tm: TypedModule) : string = emitModule tm
+
+/// Emit multiple modules as a single Python source string.
+let emitProjectModules (tms: TypedModule list) : string =
+    tms |> List.map emitModule |> String.concat "\n\n"

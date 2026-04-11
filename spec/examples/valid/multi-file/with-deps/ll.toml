@@ -3,3 +3,6 @@ name = "demo"
 
 [deps]
 std = { path = "../../../../../stdlib" }
+
+[platform]
+use = ["fsharp"]

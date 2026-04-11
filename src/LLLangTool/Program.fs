@@ -51,35 +51,68 @@ let private cmdBuild (path: string) (target: Target) : int =
         eprintfn "lllc: %s" ex.Message
         1
 
-/// Build project rooted at rootDir (has ll.toml). Returns exit code.
-let private cmdBuildProject (rootDir: string) : int =
-    try
-        match loadProject rootDir with
-        | Error es -> printErrors es; 1
-        | Ok proj ->
-            match LLLang.Compiler.compileProject proj with
-            | Error es -> printErrors es; 1
-            | Ok fs ->
-                let binDir = Path.Combine(rootDir, "bin")
-                Directory.CreateDirectory(binDir) |> ignore
-                let outPath = Path.Combine(binDir, proj.Manifest.Name + ".fs")
-                File.WriteAllText(outPath, fs)
-                // Generate a minimal .fsproj
-                let fsproj = $"""<Project Sdk="Microsoft.NET.Sdk">
+/// Write output files for one target into bin/<platform>/.
+let private writeTargetOutput (rootDir: string) (name: string) (platform: string) (code: string) : unit =
+    let outDir = Path.Combine(rootDir, "bin", platform)
+    Directory.CreateDirectory(outDir) |> ignore
+    match platform with
+    | "fsharp" ->
+        let outPath = Path.Combine(outDir, name + ".fs")
+        File.WriteAllText(outPath, code)
+        let fsproj = $"""<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>preview</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="{proj.Manifest.Name}.fs" />
+    <Compile Include="{name}.fs" />
   </ItemGroup>
 </Project>
 """
-                let fsprojPath = Path.Combine(binDir, proj.Manifest.Name + ".fsproj")
-                File.WriteAllText(fsprojPath, fsproj)
-                printfn "Built project '%s' → %s" proj.Manifest.Name outPath
-                0
+        File.WriteAllText(Path.Combine(outDir, name + ".fsproj"), fsproj)
+        printfn "Built project '%s' [fsharp] → %s" name outPath
+    | "typescript" ->
+        let outPath = Path.Combine(outDir, name + ".ts")
+        File.WriteAllText(outPath, code)
+        printfn "Built project '%s' [typescript] → %s" name outPath
+    | "python" ->
+        let outPath = Path.Combine(outDir, name + ".py")
+        File.WriteAllText(outPath, code)
+        printfn "Built project '%s' [python] → %s" name outPath
+    | "java" ->
+        let outPath = Path.Combine(outDir, name + ".java")
+        File.WriteAllText(outPath, code)
+        printfn "Built project '%s' [java] → %s" name outPath
+    | other ->
+        eprintfn "lllc: unknown platform '%s', skipping" other
+
+/// Build project rooted at rootDir (has ll.toml). Returns exit code.
+let private cmdBuildProject (rootDir: string) : int =
+    try
+        match loadProject rootDir with
+        | Error es -> printErrors es; 1
+        | Ok proj ->
+            // Front-end runs ONCE; codegen fans out to each target.
+            match LLLang.Compiler.compileProjectToModules proj with
+            | Error es -> printErrors es; 1
+            | Ok tms ->
+                let platforms =
+                    if proj.Manifest.Platform.IsEmpty then ["fsharp"]
+                    else proj.Manifest.Platform
+                let mutable exitCode = 0
+                for platform in platforms do
+                    let codeResult =
+                        match platform with
+                        | "fsharp"     -> Ok (LLLang.Codegen.emitProjectModules tms)
+                        | "typescript" -> Ok (LLLang.CodegenTS.emitProjectModules tms)
+                        | "python"     -> Ok (LLLang.CodegenPy.emitProjectModules tms)
+                        | "java"       -> Ok (LLLang.CodegenJava.emitProjectModules tms)
+                        | other        -> Error $"unknown platform '{other}'"
+                    match codeResult with
+                    | Error msg -> eprintfn "lllc: %s" msg; exitCode <- 1
+                    | Ok code   -> writeTargetOutput rootDir proj.Manifest.Name platform code
+                exitCode
     with ex ->
         eprintfn "lllc: %s" ex.Message
         1

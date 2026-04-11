@@ -116,12 +116,11 @@ let private compileFileWithEnv (lf: LoadedFile) (importedEnv: Env) : Result<Type
                 | Error es -> Error es
                 | Ok tm -> Ok tm
 
-/// Compile a multi-file project: compile each file in topo order,
-/// then concatenate all modules into a single F# source string.
-/// The inferred exports of each file are accumulated and made available
-/// to subsequent files so that cross-module name resolution works.
-let compileProject (proj: LLProject) : Result<string, LLError list> =
-    // Fold over files in topo order, accumulating an env of exported names.
+/// Front-end only: lex → parse → elaborate → infer all project files in topo
+/// order, returning the list of TypedModules without running any codegen.
+/// The inferred exports of each file are accumulated and made available to
+/// subsequent files so that cross-module name resolution works.
+let compileProjectToModules (proj: LLProject) : Result<TypedModule list, LLError list> =
     let rec compileAll (files: LoadedFile list) (accEnv: Env) (accModules: TypedModule list) =
         match files with
         | [] -> Ok (List.rev accModules)
@@ -129,10 +128,15 @@ let compileProject (proj: LLProject) : Result<string, LLError list> =
             match compileFileWithEnv lf accEnv with
             | Error es -> Error es
             | Ok tm ->
-                // Merge this file's inferred env into the accumulated env.
-                // Module-local names overwrite any previous binding with the same name.
                 let newAccEnv = Map.fold (fun acc k v -> Map.add k v acc) accEnv tm.Env
                 compileAll rest newAccEnv (tm :: accModules)
-    match compileAll proj.Files Map.empty [] with
+    compileAll proj.Files Map.empty []
+
+/// Compile a multi-file project: compile each file in topo order,
+/// then concatenate all modules into a single F# source string.
+/// The inferred exports of each file are accumulated and made available
+/// to subsequent files so that cross-module name resolution works.
+let compileProject (proj: LLProject) : Result<string, LLError list> =
+    match compileProjectToModules proj with
     | Error es -> Error es
     | Ok tms -> Ok (emitProjectModules tms)
