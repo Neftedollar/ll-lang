@@ -1,0 +1,473 @@
+module Std.Lexer
+
+-- Standalone ll-lang lexer written in ll-lang itself.
+-- Tokenizes ll-lang source code to a flat token stream.
+-- INDENT/DEDENT layout tokens are NOT emitted in this v1 (flat tokenizer).
+--
+-- Based on the bootstrap lexer in spec/examples/valid/20-bootstrap-compiler.lll
+-- and the production F# lexer in src/LLLangCompiler/Lexer.fs.
+
+-- ---- Token type --------------------------------------------------------
+
+Token =
+  -- Keywords
+  | KwLet | KwTag | KwUnit
+  | KwTrait | KwImpl | KwImport | KwExport | KwModule
+  | KwIf | KwElse | KwTrue | KwFalse
+  | KwMatch
+  -- Identifiers
+  | Ident Str | TypeId Str
+  -- Literals
+  | IntLit Int | FloatLit Str | StrLit Str | CharLit Char
+  -- Operators
+  | Arrow | Backslash | Dot | Comma | Colon | ColonColon
+  | Eq | Bar
+  | LBrack | RBrack | LParen | RParen
+  | Plus | Minus | Star | Slash | Caret
+  | Lt | Gt | Le | Ge | EqEq | Neq
+  | Underscore
+  -- Layout
+  | Newline | Indent | Dedent
+  -- Special
+  | Eof | TError Char
+
+Maybe A = Some A | None
+
+-- ---- Character helpers -------------------------------------------------
+
+isUpperChar(c Char) =
+  n = charToInt c
+  if n < 65
+    false
+  else if n > 90
+    false
+  else true
+
+isLowerChar(c Char) =
+  n = charToInt c
+  if n < 97
+    false
+  else if n > 122
+    false
+  else true
+
+isIdStart(c Char) =
+  if isUpperChar c
+    true
+  else isLowerChar c
+
+isIdCont(c Char) =
+  if isIdStart c
+    true
+  else if charIsDigit c
+    true
+  else c == '_'
+
+-- ---- Greedy collect helpers --------------------------------------------
+
+takeIdCont(cs List[Char]) =
+  match cs
+    | c :: rest ->
+      if isIdCont c
+        listAppend [c] (takeIdCont rest)
+      else []
+    | _ -> []
+
+dropIdCont(cs List[Char]) =
+  match cs
+    | c :: rest ->
+      if isIdCont c
+        dropIdCont rest
+      else cs
+    | _ -> []
+
+takeDigit(cs List[Char]) =
+  match cs
+    | c :: rest ->
+      if charIsDigit c
+        listAppend [c] (takeDigit rest)
+      else []
+    | _ -> []
+
+dropDigit(cs List[Char]) =
+  match cs
+    | c :: rest ->
+      if charIsDigit c
+        dropDigit rest
+      else cs
+    | _ -> []
+
+-- ---- Keyword classification --------------------------------------------
+
+-- Returns a Token for a keyword string, or Ident/TypeId based on case.
+classifyIdent(s Str) =
+  match s
+    | "let"    -> KwLet
+    | "tag"    -> KwTag
+    | "unit"   -> KwUnit
+    | "trait"  -> KwTrait
+    | "impl"   -> KwImpl
+    | "import" -> KwImport
+    | "export" -> KwExport
+    | "module" -> KwModule
+    | "if"     -> KwIf
+    | "else"   -> KwElse
+    | "true"   -> KwTrue
+    | "false"  -> KwFalse
+    | "match"  -> KwMatch
+    | _ ->
+      cs = strChars s
+      match cs
+        | c :: _ ->
+          if isUpperChar c
+            TypeId s
+          else Ident s
+        | _ -> Ident s
+
+-- ---- Integer parsing helper --------------------------------------------
+
+parseIntStr(s Str) =
+  match strToInt s
+    | Some n -> n
+    | None -> 0
+
+-- ---- Sub-lexers --------------------------------------------------------
+
+-- Lex an identifier or keyword.
+-- Pre: first char of cs is an id-start char.
+lexId(cs List[Char]) =
+  idChars = takeIdCont cs
+  leftover = dropIdCont cs
+  tok = classifyIdent (strFromChars idChars)
+  listAppend [tok] (lexChars leftover)
+
+-- Lex an integer or float literal.
+-- Pre: first char of cs is a digit.
+lexNum(cs List[Char]) =
+  digits = takeDigit cs
+  rest0  = dropDigit cs
+  -- Check for decimal point followed by a digit (float)
+  match rest0
+    | '.' :: c2 :: rest1 ->
+      if charIsDigit c2
+        fracDigits = takeDigit (c2 :: rest1)
+        rest2 = dropDigit (c2 :: rest1)
+        intPart = strFromChars digits
+        fracPart = strFromChars fracDigits
+        floatStr = strConcat (strConcat intPart ".") fracPart
+        listAppend [FloatLit floatStr] (lexChars rest2)
+      else
+        n = parseIntStr (strFromChars digits)
+        listAppend [IntLit n] (lexChars rest0)
+    | _ ->
+      n = parseIntStr (strFromChars digits)
+      listAppend [IntLit n] (lexChars rest0)
+
+-- Collect a string literal body; the opening `"` has been consumed.
+-- Returns (body-chars, leftover).
+takeStrBody(cs List[Char]) =
+  match cs
+    | [] -> ([], [])
+    | c :: rest ->
+      if c == '"'
+        ([], rest)
+      else if c == '\\'
+        takeStrBodyEsc rest
+      else
+        pair = takeStrBody rest
+        match pair
+          | (body, leftover) -> (c :: body, leftover)
+
+-- Consume an escape sequence inside a string body.
+-- The `\` has already been consumed; cs is at the escape char.
+takeStrBodyEsc(cs List[Char]) =
+  match cs
+    | [] -> ([], [])
+    | esc :: rest ->
+      pair = takeStrBody rest
+      match pair
+        | (body, leftover) -> (decodeEscape esc :: body, leftover)
+
+-- Decode one escape char.
+decodeEscape(c Char) =
+  if c == 'n'
+    '\n'
+  else if c == 't'
+    '\t'
+  else if c == 'r'
+    '\r'
+  else if c == '\\'
+    '\\'
+  else if c == '\''
+    '\''
+  else if c == '"'
+    '"'
+  else if c == '0'
+    '\0'
+  else c
+
+-- Lex a string literal; opening `"` already consumed.
+lexStr(cs List[Char]) =
+  pair = takeStrBody cs
+  match pair
+    | (body, leftover) -> listAppend [StrLit (strFromChars body)] (lexChars leftover)
+
+-- Lex a char literal; opening `'` already consumed.
+-- Handles plain char and escape sequences.
+lexCharLit(cs List[Char]) =
+  match cs
+    | [] -> [Eof]
+    | ch :: rest ->
+      if ch == '\\'
+        -- escape sequence
+        match rest
+          | [] -> [Eof]
+          | esc :: rest2 ->
+            match rest2
+              | '\'' :: rest3 ->
+                listAppend [CharLit (decodeEscape esc)] (lexChars rest3)
+              | _ -> lexChars cs
+      else
+        -- plain char, expect closing '
+        match rest
+          | '\'' :: rest2 ->
+            listAppend [CharLit ch] (lexChars rest2)
+          | _ -> lexChars cs
+
+-- Skip to end of line comment; `--` already consumed.
+skipLineComment(cs List[Char]) =
+  match cs
+    | [] -> [Eof]
+    | c :: rest ->
+      if c == '\n'
+        listAppend [Newline] (lexChars rest)
+      else skipLineComment rest
+
+-- Handle `=` vs `==`.
+lexEqOrEqEq(cs List[Char]) =
+  match cs
+    | '=' :: rest -> listAppend [EqEq] (lexChars rest)
+    | _ -> listAppend [Eq] (lexChars cs)
+
+-- Handle `!` — only `!=` is valid.
+lexNeq(cs List[Char]) =
+  match cs
+    | '=' :: rest -> listAppend [Neq] (lexChars rest)
+    | _ -> lexChars cs
+
+-- Handle `<` vs `<=`.
+lexLtOrLe(cs List[Char]) =
+  match cs
+    | '=' :: rest -> listAppend [Le] (lexChars rest)
+    | _ -> listAppend [Lt] (lexChars cs)
+
+-- Handle `>` vs `>=`.
+lexGtOrGe(cs List[Char]) =
+  match cs
+    | '=' :: rest -> listAppend [Ge] (lexChars rest)
+    | _ -> listAppend [Gt] (lexChars cs)
+
+-- Handle `-` vs `->` vs `--` (comment).
+lexMinusOrArrow(cs List[Char]) =
+  match cs
+    | '>' :: rest -> listAppend [Arrow] (lexChars rest)
+    | '-' :: rest -> skipLineComment rest
+    | _ -> listAppend [Minus] (lexChars cs)
+
+-- Handle `:` vs `::`.
+lexColonOrCons(cs List[Char]) =
+  match cs
+    | ':' :: rest -> listAppend [ColonColon] (lexChars rest)
+    | _ -> listAppend [Colon] (lexChars cs)
+
+-- Handle `_` — standalone `_` is Underscore, but `_foo` starts an ident.
+lexUnderOrIdent(cs List[Char]) =
+  match cs
+    | c :: _ ->
+      if isIdCont c
+        -- treat `_foo` as an identifier starting with `_`
+        idChars = listAppend ['_'] (takeIdCont cs)
+        leftover = dropIdCont cs
+        tok = classifyIdent (strFromChars idChars)
+        listAppend [tok] (lexChars leftover)
+      else listAppend [Underscore] (lexChars cs)
+    | _ -> listAppend [Underscore] (lexChars cs)
+
+-- ---- Main lexer loop ---------------------------------------------------
+
+lexChars(cs List[Char]) =
+  match cs
+    | [] -> [Eof]
+    | c :: rest ->
+      if c == '\n'
+        listAppend [Newline] (lexChars rest)
+      else if charIsSpace c
+        lexChars rest
+      else if c == '-'
+        lexMinusOrArrow rest
+      else if isIdStart c
+        lexId cs
+      else if c == '_'
+        lexUnderOrIdent rest
+      else if charIsDigit c
+        lexNum cs
+      else if c == '"'
+        lexStr rest
+      else if c == '\''
+        lexCharLit rest
+      else if c == '='
+        lexEqOrEqEq rest
+      else if c == '!'
+        lexNeq rest
+      else if c == '<'
+        lexLtOrLe rest
+      else if c == '>'
+        lexGtOrGe rest
+      else if c == ':'
+        lexColonOrCons rest
+      else if c == '('
+        listAppend [LParen] (lexChars rest)
+      else if c == ')'
+        listAppend [RParen] (lexChars rest)
+      else if c == '['
+        listAppend [LBrack] (lexChars rest)
+      else if c == ']'
+        listAppend [RBrack] (lexChars rest)
+      else if c == '|'
+        listAppend [Bar] (lexChars rest)
+      else if c == '+'
+        listAppend [Plus] (lexChars rest)
+      else if c == '*'
+        listAppend [Star] (lexChars rest)
+      else if c == '/'
+        listAppend [Slash] (lexChars rest)
+      else if c == '^'
+        listAppend [Caret] (lexChars rest)
+      else if c == '.'
+        listAppend [Dot] (lexChars rest)
+      else if c == ','
+        listAppend [Comma] (lexChars rest)
+      else if c == '\\'
+        listAppend [Backslash] (lexChars rest)
+      else listAppend [TError c] (lexChars rest)
+
+-- Public entry point: convert source string to token list.
+tokenize(src Str) =
+  lexChars (strChars src)
+
+-- ---- Token show (for tests) --------------------------------------------
+
+showToken(t Token) =
+  match t
+    | KwLet    -> "KwLet"
+    | KwTag    -> "KwTag"
+    | KwUnit   -> "KwUnit"
+    | KwTrait  -> "KwTrait"
+    | KwImpl   -> "KwImpl"
+    | KwImport -> "KwImport"
+    | KwExport -> "KwExport"
+    | KwModule -> "KwModule"
+    | KwIf     -> "KwIf"
+    | KwElse   -> "KwElse"
+    | KwTrue   -> "KwTrue"
+    | KwFalse  -> "KwFalse"
+    | KwMatch  -> "KwMatch"
+    | Ident s  -> strConcat "Ident:" s
+    | TypeId s -> strConcat "TypeId:" s
+    | IntLit n -> strConcat "Int:" (intToStr n)
+    | FloatLit s -> strConcat "Float:" s
+    | StrLit s -> strConcat "Str:" s
+    | CharLit c -> strConcat "Char:" (strFromChars [c])
+    | Arrow    -> "Arrow"
+    | Backslash -> "Backslash"
+    | Dot      -> "Dot"
+    | Comma    -> "Comma"
+    | Colon    -> "Colon"
+    | ColonColon -> "ColonColon"
+    | Eq       -> "Eq"
+    | Bar      -> "Bar"
+    | LBrack   -> "LBrack"
+    | RBrack   -> "RBrack"
+    | LParen   -> "LParen"
+    | RParen   -> "RParen"
+    | Plus     -> "Plus"
+    | Minus    -> "Minus"
+    | Star     -> "Star"
+    | Slash    -> "Slash"
+    | Caret    -> "Caret"
+    | Lt       -> "Lt"
+    | Gt       -> "Gt"
+    | Le       -> "Le"
+    | Ge       -> "Ge"
+    | EqEq     -> "EqEq"
+    | Neq      -> "Neq"
+    | Underscore -> "Underscore"
+    | Newline  -> "Newline"
+    | Indent   -> "Indent"
+    | Dedent   -> "Dedent"
+    | Eof      -> "Eof"
+    | TError c -> strConcat "Error:" (strFromChars [c])
+
+showTokens(ts List[Token]) =
+  listFold (\acc t.
+    s = showToken t
+    if strLen acc == 0
+      s
+    else strConcat (strConcat acc " ") s
+  ) "" ts
+
+-- ---- Test helpers -------------------------------------------------------
+
+-- Strip trailing Newline tokens (newlines appear between tokens in tests).
+-- Keep Eof.
+stripNewlines(ts List[Token]) =
+  match ts
+    | [] -> []
+    | Newline :: rest -> stripNewlines rest
+    | t :: rest -> t :: stripNewlines rest
+
+-- Assert that tokenize produces expected token show-string (ignoring Newlines).
+-- Returns 0 on pass, 1 on fail.
+checkTokens(label Str)(src Str)(expected Str) =
+  got = showTokens (stripNewlines (tokenize src))
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    p1 = strConcat "FAIL " label
+    p2 = strConcat p1 "\n  expected: "
+    p3 = strConcat p2 expected
+    p4 = strConcat p3 "\n  got:      "
+    p5 = strConcat p4 got
+    printfn p5
+
+-- ---- Tests -------------------------------------------------------------
+
+main() =
+  _ = checkTokens "1 keywords" "match if else" "KwMatch KwIf KwElse Eof"
+
+  _ = checkTokens "2 identifiers" "foo Bar" "Ident:foo TypeId:Bar Eof"
+
+  _ = checkTokens "3 integer" "42" "Int:42 Eof"
+
+  _ = checkTokens "4 string" "\"hello\"" "Str:hello Eof"
+
+  _ = checkTokens "5 operators" "== -> |" "EqEq Arrow Bar Eof"
+
+  _ = checkTokens "6 mixed match" "match x | Some v -> v"
+    "KwMatch Ident:x Bar TypeId:Some Ident:v Arrow Ident:v Eof"
+
+  _ = checkTokens "7 comment" "x -- comment" "Ident:x Eof"
+
+  _ = checkTokens "8 float" "3.14" "Float:3.14 Eof"
+
+  _ = checkTokens "9 char literal" "'a'" "Char:a Eof"
+
+  _ = checkTokens "10 all keywords"
+    "let tag unit trait impl import export module if else true false match"
+    "KwLet KwTag KwUnit KwTrait KwImpl KwImport KwExport KwModule KwIf KwElse KwTrue KwFalse KwMatch Eof"
+
+  _ = checkTokens "11 comparison ops" "!= <= >=" "Neq Le Ge Eof"
+
+  _ = checkTokens "12 cons pattern" "x :: xs" "Ident:x ColonColon Ident:xs Eof"
+
+  0
