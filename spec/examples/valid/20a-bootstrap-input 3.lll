@@ -1,0 +1,3 @@
+module Examples.Clean
+demo(c Char) = charToInt c
+main() = demo 'A'
