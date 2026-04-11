@@ -1,0 +1,344 @@
+module Std.Elaborator
+
+-- Simplified type checker / elaborator for ll-lang.
+-- Performs name resolution: detects unbound variables, unbound constructors,
+-- and duplicate top-level declarations.
+-- Full Hindley-Milner inference is deferred to HMInfer.
+-- AST types are redefined here (single-file mode; no cross-module imports yet).
+
+-- ---- AST types (mirrored from Parser.lll) ----------------------------------
+
+Maybe A = Some A | None
+
+Pattern =
+  | PVar Str
+  | PWild
+  | PCon Str (List[Pattern])
+  | PLitInt Int
+  | PLitStr Str
+  | PCons Pattern Pattern
+  | PNil
+
+Expr =
+  | EInt Int
+  | EStr Str
+  | EBool Bool
+  | EChar Char
+  | EFloat Str
+  | EVar Str
+  | ECon Str
+  | EApp Expr Expr
+  | EIf Expr Expr Expr
+  | EMatch Expr (List[Pattern]) (List[Expr])
+  | ELam Str Expr
+  | ELet Str Expr Expr
+  | EList (List[Expr])
+  | EBinOp Str Expr Expr
+  | ETuple Expr Expr
+  | ENil
+  | ECons Expr Expr
+
+TypeExpr =
+  | TyName Str
+  | TyApp TypeExpr TypeExpr
+  | TyFn TypeExpr TypeExpr
+
+Param = MkParam Str TypeExpr
+
+Constructor = MkCon Str (List[TypeExpr])
+
+Decl =
+  | DFn Str (List[Param]) (Maybe[TypeExpr]) Expr
+  | DType Str (List[Str]) (List[Constructor])
+  | DImport (List[Str])
+  | DExport Decl
+  | DLet Str Expr
+
+Module = MkModule (List[Str]) (List[Decl])
+
+-- ---- Error type ------------------------------------------------------------
+
+ElabError = MkError Str
+
+errMsg(e ElabError) =
+  | MkError msg -> msg
+
+-- ---- Environment -----------------------------------------------------------
+
+Env = MkEnv (List[Str])
+
+emptyEnv = MkEnv []
+
+envAdd(name Str)(env Env) =
+  match env
+    | MkEnv xs -> MkEnv (listAppend xs [name])
+
+envAddAll(names List[Str])(env Env) =
+  listFold (\acc n. envAdd n acc) env names
+
+strOrEq(target Str)(acc Bool)(x Str) =
+  if acc
+    true
+  else
+    x == target
+
+envHas(name Str)(env Env) =
+  match env
+    | MkEnv xs -> listFold (\acc x. strOrEq name acc x) false xs
+
+-- ---- Pattern binder extraction ---------------------------------------------
+
+patBinders(p Pattern) =
+  match p
+    | PVar name -> [name]
+    | PWild -> []
+    | PNil -> []
+    | PLitInt _ -> []
+    | PLitStr _ -> []
+    | PCons h t -> listAppend (patBinders h) (patBinders t)
+    | PCon _ args -> patBindersList args
+
+patBindersList(ps List[Pattern]) =
+  match ps
+    | [] -> []
+    | p :: rest -> listAppend (patBinders p) (patBindersList rest)
+
+-- ---- Param helpers ---------------------------------------------------------
+
+paramName(p Param) =
+  match p
+    | MkParam n _ -> n
+
+paramNames(ps List[Param]) =
+  listMap (\p. paramName p) ps
+
+-- ---- Constructor name extraction -------------------------------------------
+
+conName(c Constructor) =
+  match c
+    | MkCon n _ -> n
+
+conNames(cs List[Constructor]) =
+  listMap (\c. conName c) cs
+
+-- ---- List helpers ----------------------------------------------------------
+
+listContains(name Str)(xs List[Str]) =
+  listFold (\acc x. strOrEq name acc x) false xs
+
+-- ---- Duplicate detection ---------------------------------------------------
+
+findDuplicatesAcc(xs List[Str])(seen List[Str]) =
+  match xs
+    | [] -> []
+    | x :: rest ->
+      if listContains x seen
+        x :: findDuplicatesAcc rest seen
+      else
+        findDuplicatesAcc rest (x :: seen)
+
+findDuplicates(xs List[Str]) =
+  findDuplicatesAcc xs []
+
+-- ---- Collect declaration names ---------------------------------------------
+
+declName(d Decl) =
+  match d
+    | DFn name _ _ _ -> Some name
+    | DLet name _ -> Some name
+    | DType name _ _ -> Some name
+    | DImport _ -> None
+    | DExport inner -> declName inner
+
+addDeclName(acc List[Str])(d Decl) =
+  match declName d
+    | Some name -> listAppend acc [name]
+    | None -> acc
+
+collectDeclNames(decls List[Decl]) =
+  listFold (\acc d. addDeclName acc d) [] decls
+
+-- ---- Build environment from declarations -----------------------------------
+
+collectDecl(d Decl)(env Env) =
+  match d
+    | DFn name _ _ _ -> envAdd name env
+    | DLet name _ -> envAdd name env
+    | DType _ _ ctors -> envAddAll (conNames ctors) env
+    | DImport _ -> env
+    | DExport inner -> collectDecl inner env
+
+collectDecls(decls List[Decl])(env Env) =
+  listFold (\acc d. collectDecl d acc) env decls
+
+-- ---- Expression checking ---------------------------------------------------
+
+checkExpr(env Env)(e Expr) =
+  match e
+    | EInt _ -> []
+    | EStr _ -> []
+    | EBool _ -> []
+    | EChar _ -> []
+    | EFloat _ -> []
+    | ENil -> []
+    | EVar name ->
+      if envHas name env
+        []
+      else
+        [MkError (strConcat "Unbound variable: " name)]
+    | ECon name ->
+      if envHas name env
+        []
+      else
+        [MkError (strConcat "Unbound constructor: " name)]
+    | EApp f x ->
+      listAppend (checkExpr env f) (checkExpr env x)
+    | EBinOp _ l r ->
+      listAppend (checkExpr env l) (checkExpr env r)
+    | EIf cnd thn els ->
+      listAppend (listAppend (checkExpr env cnd) (checkExpr env thn)) (checkExpr env els)
+    | ELam param body ->
+      env2 = envAdd param env
+      checkExpr env2 body
+    | ELet name rhs body ->
+      rhsErrs = checkExpr env rhs
+      env2 = envAdd name env
+      bodyErrs = checkExpr env2 body
+      listAppend rhsErrs bodyErrs
+    | EMatch scrut pats bodies ->
+      scrutErrs = checkExpr env scrut
+      armErrs = checkArms env pats bodies
+      listAppend scrutErrs armErrs
+    | EList items ->
+      listFold (\acc item. listAppend acc (checkExpr env item)) [] items
+    | ECons h t ->
+      listAppend (checkExpr env h) (checkExpr env t)
+    | ETuple a b ->
+      listAppend (checkExpr env a) (checkExpr env b)
+
+checkArmsCons(env Env)(p Pattern)(restPats List[Pattern])(bodies List[Expr]) =
+  match bodies
+    | [] -> []
+    | b :: restBodies ->
+      armEnv = envAddAll (patBinders p) env
+      armErrs = checkExpr armEnv b
+      restErrs = checkArms env restPats restBodies
+      listAppend armErrs restErrs
+
+checkArms(env Env)(pats List[Pattern])(bodies List[Expr]) =
+  match pats
+    | [] -> []
+    | p :: restPats -> checkArmsCons env p restPats bodies
+
+-- ---- Declaration checking --------------------------------------------------
+
+checkDecl(env Env)(d Decl) =
+  match d
+    | DFn _ params _ body ->
+      bodyEnv = envAddAll (paramNames params) env
+      checkExpr bodyEnv body
+    | DLet _ body ->
+      checkExpr env body
+    | DType _ _ _ -> []
+    | DImport _ -> []
+    | DExport inner -> checkDecl env inner
+
+checkDecls(env Env)(decls List[Decl]) =
+  listFold (\acc d. listAppend acc (checkDecl env d)) [] decls
+
+-- ---- Duplicate declaration checking ----------------------------------------
+
+makeDupError(name Str) =
+  MkError (strConcat "Duplicate declaration: " name)
+
+checkDuplicates(decls List[Decl]) =
+  names = collectDeclNames decls
+  dups = findDuplicates names
+  listMap (\name. makeDupError name) dups
+
+-- ---- Top-level elaboration -------------------------------------------------
+
+elaborate(m Module) =
+  match m
+    | MkModule _ decls ->
+      env = collectDecls decls (emptyEnv)
+      dupErrs = checkDuplicates decls
+      bodyErrs = checkDecls env decls
+      listAppend dupErrs bodyErrs
+
+-- ---- Test helpers ----------------------------------------------------------
+
+assertNoErrors(label Str)(errs List[ElabError]) =
+  if listIsEmpty errs
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label " — unexpected errors"))
+
+errContains(needle Str)(e ElabError) =
+  strContains needle (errMsg e)
+
+errOrContains(needle Str)(acc Bool)(e ElabError) =
+  if acc
+    true
+  else
+    errContains needle e
+
+hasErrorWith(needle Str)(errs List[ElabError]) =
+  listFold (\acc e. errOrContains needle acc e) false errs
+
+assertHasError(label Str)(needle Str)(errs List[ElabError]) =
+  if hasErrorWith needle errs
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " — expected error: " needle)))
+
+-- ---- Tests -----------------------------------------------------------------
+
+main =
+  -- Test 1: Valid program — no errors
+  colorCtors1 = MkCon "Red" [] :: MkCon "Black" [] :: []
+  decls1 =
+    DType "Color" [] colorCtors1 ::
+    DFn "id" (MkParam "x" (TyName "Int") :: []) None (EVar "x") ::
+    []
+  m1 = MkModule ("M" :: []) decls1
+  _ = assertNoErrors "1 valid program" (elaborate m1)
+
+  -- Test 2: Unbound variable — error with variable name
+  decls2 = DFn "broken" (MkParam "x" (TyName "Int") :: []) None (EVar "y") :: []
+  m2 = MkModule ("M" :: []) decls2
+  _ = assertHasError "2 unbound variable" "y" (elaborate m2)
+
+  -- Test 3: Duplicate function — error
+  decls3 =
+    DFn "foo" (MkParam "x" (TyName "Int") :: []) None (EVar "x") ::
+    DFn "foo" (MkParam "y" (TyName "Int") :: []) None (EVar "y") ::
+    []
+  m3 = MkModule ("M" :: []) decls3
+  _ = assertHasError "3 duplicate function" "foo" (elaborate m3)
+
+  -- Test 4: Valid match with constructors — no errors
+  matchExpr =
+    EMatch (EVar "x")
+      (PCon "Red" [] :: PCon "Black" [] :: [])
+      (EInt 1 :: EInt 2 :: [])
+  colorCtors4 = MkCon "Red" [] :: MkCon "Black" [] :: []
+  decls4 =
+    DType "Color" [] colorCtors4 ::
+    DFn "describeColor" (MkParam "x" (TyName "Color") :: []) None matchExpr ::
+    []
+  m4 = MkModule ("M" :: []) decls4
+  _ = assertNoErrors "4 valid match with constructors" (elaborate m4)
+
+  -- Test 5: Unbound constructor — error
+  decls5 = DFn "bad" (MkParam "x" (TyName "Int") :: []) None (ECon "Nope") :: []
+  m5 = MkModule ("M" :: []) decls5
+  _ = assertHasError "5 unbound constructor" "Nope" (elaborate m5)
+
+  -- Test 6: Let binding scoping — inner var visible in body
+  letExpr = ELet "z" (EInt 10) (EBinOp "+" (EVar "z") (EInt 1))
+  decls6 = DFn "useZ" [] None letExpr :: []
+  m6 = MkModule ("M" :: []) decls6
+  _ = assertNoErrors "6 let binding scoping" (elaborate m6)
+
+  0
