@@ -18,7 +18,7 @@ type LoadedFile = {
 
 type LLProject = {
     Manifest : LLManifest
-    RootDir  : string          // absolute path to project root (where ll.toml lives)
+    RootDir  : string          // absolute path to project root (where lll.toml or ll.toml lives)
     Files    : LoadedFile list // topo-sorted (dependencies first)
 }
 
@@ -99,6 +99,16 @@ let private topoSort (nodes: 'a list) (deps: Map<'a, 'a list>) : Result<'a list,
         let cycleNodes = nodes |> List.filter (fun n -> inDegree[n] > 0)
         Error cycleNodes
 
+// ---- Manifest discovery ----------------------------------------------------
+
+/// Find the manifest file in dir, preferring lll.toml with fallback to ll.toml.
+let findManifest (dir: string) : string option =
+    let lll = Path.Combine(dir, "lll.toml")
+    let ll  = Path.Combine(dir, "ll.toml")
+    if   File.Exists(lll) then Some lll
+    elif File.Exists(ll)  then Some ll   // backwards compat
+    else None
+
 // ---- Dep loading -----------------------------------------------------------
 
 /// Load .lll files from .ll-deps/{depName}/src/ for all installed deps.
@@ -107,14 +117,14 @@ let private loadDepFiles (rootDir: string) (manifest: LLManifest) : LoadedFile l
     [ for KeyValue(depName, _source) in manifest.Deps do
         let depDir = Path.Combine(depBaseDir, depName)
         if Directory.Exists(depDir) then
-            // Read dep's own ll.toml to get its project name
-            let depManifestPath = Path.Combine(depDir, "ll.toml")
+            // Read dep's own lll.toml (or ll.toml) to get its project name
             let depProjectName =
-                if File.Exists(depManifestPath) then
+                match findManifest depDir with
+                | Some depManifestPath ->
                     match parseManifest (File.ReadAllText depManifestPath) with
                     | Ok m -> m.Name
                     | Error _ -> depName
-                else depName
+                | None -> depName
             let depSrcDir = Path.Combine(depDir, "src")
             for filePath in globLllFiles depSrcDir do
                 let src =
@@ -133,8 +143,11 @@ let private loadDepFiles (rootDir: string) (manifest: LLManifest) : LoadedFile l
 /// Load and topo-sort all .lll files in a project rooted at rootDir.
 /// Returns the sorted LLProject or a list of errors.
 let loadProject (rootDir: string) : Result<LLProject, LLError list> =
-    // 1. Parse ll.toml
-    let manifestPath = Path.Combine(rootDir, "ll.toml")
+    // 1. Parse lll.toml (falling back to ll.toml for backwards compat)
+    let manifestPath =
+        match findManifest rootDir with
+        | Some p -> p
+        | None   -> Path.Combine(rootDir, "lll.toml")  // will fail with a clear message below
     let manifestSrc =
         try Ok (File.ReadAllText manifestPath)
         with ex -> Error [{ Code = E001; Line = 0; Col = 0; Message = sprintf "E001 0:0 CannotReadManifest %s: %s" manifestPath ex.Message }]

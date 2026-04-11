@@ -72,7 +72,7 @@ let private errMsg (es: LLLang.Elaborator.LLError list) =
 let ``loadProject: two-file project sorts in dependency order`` () =
     withTempDir (fun root ->
         Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
-        File.WriteAllText(Path.Combine(root, "ll.toml"), "[project]\nname = \"hello\"\n")
+        File.WriteAllText(Path.Combine(root, "lll.toml"),"[project]\nname = \"hello\"\n")
         File.WriteAllText(Path.Combine(root, "src", "Lib.lll"),
             "module Hello.Lib\n\nexport greet() Str = \"hi\"\n")
         File.WriteAllText(Path.Combine(root, "src", "Main.lll"),
@@ -90,7 +90,7 @@ let ``loadProject: two-file project sorts in dependency order`` () =
 let ``loadProject: cycle detection returns E024`` () =
     withTempDir (fun root ->
         Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
-        File.WriteAllText(Path.Combine(root, "ll.toml"), "[project]\nname = \"cycle\"\n")
+        File.WriteAllText(Path.Combine(root, "lll.toml"),"[project]\nname = \"cycle\"\n")
         File.WriteAllText(Path.Combine(root, "src", "A.lll"),
             "module Cycle.A\nimport Cycle.B\n\nfa() Str = \"a\"\n")
         File.WriteAllText(Path.Combine(root, "src", "B.lll"),
@@ -106,7 +106,7 @@ let ``loadProject: cycle detection returns E024`` () =
 let ``loadProject: module path mismatch returns E020`` () =
     withTempDir (fun root ->
         Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
-        File.WriteAllText(Path.Combine(root, "ll.toml"), "[project]\nname = \"proj\"\n")
+        File.WriteAllText(Path.Combine(root, "lll.toml"),"[project]\nname = \"proj\"\n")
         File.WriteAllText(Path.Combine(root, "src", "Foo.lll"),
             "module Wrong.Name\n\nf() Str = \"x\"\n")
         match loadProject root with
@@ -120,7 +120,7 @@ let ``loadProject: module path mismatch returns E020`` () =
 let ``compileProject: two-file project emits concatenated F# with both modules`` () =
     withTempDir (fun root ->
         Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
-        File.WriteAllText(Path.Combine(root, "ll.toml"), "[project]\nname = \"greet\"\n")
+        File.WriteAllText(Path.Combine(root, "lll.toml"),"[project]\nname = \"greet\"\n")
         File.WriteAllText(Path.Combine(root, "src", "Lib.lll"),
             "module Greet.Lib\n\nexport greet() Str = \"hello\"\n")
         File.WriteAllText(Path.Combine(root, "src", "Main.lll"),
@@ -140,7 +140,7 @@ let ``compileProject: two-file project emits concatenated F# with both modules``
 let ``loadProject: single-file project loads correctly`` () =
     withTempDir (fun root ->
         Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
-        File.WriteAllText(Path.Combine(root, "ll.toml"), "[project]\nname = \"single\"\n")
+        File.WriteAllText(Path.Combine(root, "lll.toml"),"[project]\nname = \"single\"\n")
         File.WriteAllText(Path.Combine(root, "src", "Main.lll"),
             "module Single.Main\n\nmain() Str = \"hello\"\n")
         match loadProject root with
@@ -195,7 +195,7 @@ let ``loadProject: path dep files included in sorted results`` () =
     withTempDir (fun root ->
         // Set up main project
         Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
-        File.WriteAllText(Path.Combine(root, "ll.toml"),
+        File.WriteAllText(Path.Combine(root, "lll.toml"),
             "[project]\nname = \"app\"\n\n[deps]\nmylib = { path = \"../mylib\" }\n")
         File.WriteAllText(Path.Combine(root, "src", "Main.lll"),
             "module App.Main\nimport Mylib.Util\n\nmain() Str = \"hello\"\n")
@@ -203,7 +203,7 @@ let ``loadProject: path dep files included in sorted results`` () =
         // Set up dep project in a sibling directory
         withTempDir (fun libRoot ->
             Directory.CreateDirectory(Path.Combine(libRoot, "src")) |> ignore
-            File.WriteAllText(Path.Combine(libRoot, "ll.toml"), "[project]\nname = \"mylib\"\n")
+            File.WriteAllText(Path.Combine(libRoot, "lll.toml"), "[project]\nname = \"mylib\"\n")
             File.WriteAllText(Path.Combine(libRoot, "src", "Util.lll"),
                 "module Mylib.Util\n\nexport greet() Str = \"hi\"\n")
 
@@ -213,7 +213,7 @@ let ``loadProject: path dep files included in sorted results`` () =
             // Copy the dep directory contents instead of symlinking (portable test)
             let depTarget = Path.Combine(depsDir, "mylib")
             Directory.CreateDirectory(Path.Combine(depTarget, "src")) |> ignore
-            File.WriteAllText(Path.Combine(depTarget, "ll.toml"), "[project]\nname = \"mylib\"\n")
+            File.WriteAllText(Path.Combine(depTarget, "lll.toml"), "[project]\nname = \"mylib\"\n")
             File.WriteAllText(Path.Combine(depTarget, "src", "Util.lll"),
                 "module Mylib.Util\n\nexport greet() Str = \"hi\"\n")
 

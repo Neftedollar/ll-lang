@@ -89,7 +89,7 @@ let private writeTargetOutput (rootDir: string) (name: string) (platform: string
     | other ->
         eprintfn "lllc: unknown platform '%s', skipping" other
 
-/// Build project rooted at rootDir (has ll.toml). Returns exit code.
+/// Build project rooted at rootDir (has lll.toml or ll.toml). Returns exit code.
 let private cmdBuildProject (rootDir: string) : int =
     try
         match loadProject rootDir with
@@ -119,13 +119,16 @@ let private cmdBuildProject (rootDir: string) : int =
         eprintfn "lllc: %s" ex.Message
         1
 
-/// Walk up from startDir looking for ll.toml. Returns the directory containing it, or None.
+/// Walk up from startDir looking for lll.toml or ll.toml (in that order).
+/// Returns the directory containing the manifest, or None.
 let private findProjectRoot (startDir: string) : string option =
     let mutable dir = startDir
     let mutable found = false
     let mutable result: string option = None
     while not found do
-        if File.Exists(Path.Combine(dir, "ll.toml")) then
+        let lll = Path.Combine(dir, "lll.toml")
+        let ll  = Path.Combine(dir, "ll.toml")
+        if File.Exists(lll) || File.Exists(ll) then
             found <- true
             result <- Some dir
         else
@@ -391,10 +394,13 @@ let private cmdRun (path: string) : int =
         eprintfn "lllc: %s" ex.Message
         1
 
-/// Install dependencies listed in ll.toml into .ll-deps/. Returns exit code.
+/// Install dependencies listed in lll.toml (or ll.toml) into .ll-deps/. Returns exit code.
 let private cmdInstall (rootDir: string) : int =
     try
-        let tomlPath = Path.Combine(rootDir, "ll.toml")
+        let tomlPath =
+            match LLLang.ProjectLoader.findManifest rootDir with
+            | Some p -> p
+            | None   -> Path.Combine(rootDir, "lll.toml")
         let manifest =
             match parseManifest (File.ReadAllText tomlPath) with
             | Ok m -> m
@@ -441,7 +447,7 @@ let private cmdNew (name: string) : int =
             let capName = if name.Length = 0 then name else string (Char.ToUpper name.[0]) + name.[1..]
             let tomlContent = "[project]\nname = \"" + name + "\"\n"
             let mainContent = "module " + capName + ".Main\n\nfn main() Str = \"Hello from " + name + "!\"\n"
-            File.WriteAllText(Path.Combine(dir, "ll.toml"), tomlContent)
+            File.WriteAllText(Path.Combine(dir, "lll.toml"), tomlContent)
             File.WriteAllText(Path.Combine(dir, "src", "Main.lll"), mainContent)
             printfn "Created project '%s' in ./%s/" name name
             0
@@ -462,7 +468,7 @@ let main (argv: string[]) : int =
             match findProjectRoot (Directory.GetCurrentDirectory()) with
             | Some root -> cmdBuildProject root
             | None ->
-                eprintfn "lllc: no ll.toml found. Use 'lllc new <name>' to create a project."
+                eprintfn "lllc: no lll.toml found. Use 'lllc new <name>' to create a project."
                 1
         | _ ->
             eprintfn "lllc: unrecognized build arguments"
@@ -479,10 +485,10 @@ let main (argv: string[]) : int =
     | _ ->
         eprintfn "Usage:"
         eprintfn "  lllc build [--target fs|ts|py] <file.lll>  compile single file"
-        eprintfn "  lllc build [--target fs|ts|py] [dir]       compile project (reads ll.toml)"
+        eprintfn "  lllc build [--target fs|ts|py] [dir]       compile project (reads lll.toml)"
         eprintfn "  lllc run   <file.lll>                      compile and run single file"
         eprintfn "  lllc new   <name>                          scaffold new project"
-        eprintfn "  lllc install                               install dependencies from ll.toml"
+        eprintfn "  lllc install                               install dependencies from lll.toml"
         eprintfn "  lllc mcp                                   run MCP server (stdio transport)"
         eprintfn ""
         eprintfn "  --target fs   emit F# (default)"

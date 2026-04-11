@@ -173,7 +173,7 @@ let private knownErrors = [
     "E008", "InfiniteType",           "Type unification would produce an infinite type (occurs-check failure)."
     "E020", "ModulePathMismatch",     "module header does not match the file's location in src/."
     "E024", "ModuleCycle",            "Import graph contains a cycle."
-    "E025", "NoProjectForImport",     "Non-Std.* import used in single-file mode (no ll.toml)."
+    "E025", "NoProjectForImport",     "Non-Std.* import used in single-file mode (no lll.toml)."
 ]
 
 let listErrorsTool (_args: {| dummy: string option |}) : Task<Result<Content list, McpError>> =
@@ -333,7 +333,10 @@ let private findProjectRoot (startPath: string) =
     let mutable found = false
     let mutable result: string option = None
     while not found do
-        if File.Exists(Path.Combine(dir, "ll.toml")) then
+        // Prefer lll.toml; fall back to ll.toml for backwards compat
+        let lll = Path.Combine(dir, "lll.toml")
+        let ll  = Path.Combine(dir, "ll.toml")
+        if File.Exists(lll) || File.Exists(ll) then
             found <- true
             result <- Some dir
         else
@@ -442,7 +445,7 @@ let runServer () =
 
         tool (TypedTool.define<ProjectInfoArgs>
             "project_info"
-            "Get project metadata (manifest, modules, deps) by walking up from path to find ll.toml. Works in single-file mode too."
+            "Get project metadata (manifest, modules, deps) by walking up from path to find lll.toml (or ll.toml). Works in single-file mode too."
             projectInfoTool |> unwrapResult)
 
         useStdio
