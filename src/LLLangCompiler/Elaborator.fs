@@ -132,6 +132,7 @@ let private builtinEnv : TypeEnv =
     // Process
     let proc = [
         "exit",       TyFn(tInt, TyName "Unit")
+        "getArgs",    listOf tStr
     ]
     // List extras (listAt requires user-declared `type Maybe`)
     let listExtra = [

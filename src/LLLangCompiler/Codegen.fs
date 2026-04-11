@@ -437,7 +437,8 @@ let writeFile (path: string) (contents: string) = System.IO.File.WriteAllText(pa
 let fileExists (path: string) = System.IO.File.Exists(path: string)
 let exit (code: int64) : unit = System.Environment.Exit(int code)
 let listConcat (xss: 'a list list) = List.concat xss
-let listIsEmpty (xs: 'a list) = List.isEmpty xs"""
+let listIsEmpty (xs: 'a list) = List.isEmpty xs
+let getArgs : string list = System.Environment.GetCommandLineArgs() |> Array.toList |> List.tail"""
 
 /// Maybe-dependent prelude block — emitted only when user declares `type Maybe`.
 let private fsharpPreludeMaybe : string = """let listHead xs = match xs with [] -> None | x :: _ -> Some x

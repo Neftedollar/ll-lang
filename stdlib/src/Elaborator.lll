@@ -207,12 +207,36 @@ checkDuplicates(decls List[Decl]) =
   dups = findDuplicates names
   listMap (\name. makeDupError name) dups
 
+-- ---- Stdlib builtin names -------------------------------------------------
+-- All names provided by the F# prelude (Codegen.fsharpPrelude*).
+-- These are seeded into the environment before checking user code so that
+-- references to e.g. `strConcat`, `printfn`, `listMap` are not reported as
+-- unbound variables.
+
+builtinNames =
+  "abs" :: "absf" :: "sqrt" :: "min" :: "max" ::
+  "listLen" :: "listMap" :: "listFilter" :: "listFold" ::
+  "listReverse" :: "listAppend" :: "listConcat" :: "listIsEmpty" ::
+  "listHead" :: "listTail" :: "listAt" ::
+  "strLen" :: "strConcat" :: "strTrim" :: "strContains" ::
+  "strChars" :: "strFromChars" :: "strReverse" ::
+  "strSlice" :: "strIndexOf" :: "strSplit" :: "strToInt" ::
+  "charToInt" :: "intToChar" :: "intToStr" ::
+  "charIsDigit" :: "charIsAlpha" :: "charIsSpace" ::
+  "print" :: "printfn" ::
+  "readFile" :: "writeFile" :: "fileExists" ::
+  "exit" :: "getArgs" ::
+  "maybeMap" :: "maybeBind" :: "maybeWithDefault" ::
+  "true" :: "false" ::
+  []
+
 -- ---- Top-level elaboration -------------------------------------------------
 
 elaborate(m Module) =
   match m
     | MkModule _ decls ->
-      env = collectDecls decls (emptyEnv)
+      builtinEnv = envAddAll builtinNames emptyEnv
+      env = collectDecls decls builtinEnv
       dupErrs = checkDuplicates decls
       bodyErrs = checkDecls env decls
       listAppend dupErrs bodyErrs
