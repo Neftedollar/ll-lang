@@ -1,0 +1,802 @@
+module Std.Parser
+
+-- Standalone recursive-descent parser for ll-lang.
+-- Consumes a List[Token] produced by Std.Lexer and returns an AST.
+--
+-- Return convention: every parse function returns (result, remainingTokens).
+-- Based on the bootstrap parser in spec/examples/valid/20-bootstrap-compiler.lll.
+
+-- ---- Re-export the Token type (mirrors Lexer.lll) ----------------------
+
+Token =
+  -- Keywords
+  | KwLet | KwTag | KwUnit
+  | KwTrait | KwImpl | KwImport | KwExport | KwModule
+  | KwIf | KwElse | KwTrue | KwFalse
+  | KwMatch
+  -- Identifiers
+  | Ident Str | TypeId Str
+  -- Literals
+  | IntLit Int | FloatLit Str | StrLit Str | CharLit Char
+  -- Operators
+  | Arrow | Backslash | Dot | Comma | Colon | ColonColon
+  | Eq | Bar
+  | LBrack | RBrack | LParen | RParen
+  | Plus | Minus | Star | Slash | Caret
+  | Lt | Gt | Le | Ge | EqEq | Neq
+  | Underscore
+  -- Layout
+  | Newline | Indent | Dedent
+  -- Special
+  | Eof | TError Char
+
+Maybe A = Some A | None
+
+-- ---- AST types ---------------------------------------------------------
+
+-- Patterns (defined before Expr to avoid mutual-recursion issues)
+Pattern =
+  | PVar Str
+  | PWild
+  | PCon Str (List[Pattern])
+  | PLitInt Int
+  | PLitStr Str
+  | PCons Pattern Pattern
+  | PNil
+
+-- Expressions
+Expr =
+  | EInt Int
+  | EStr Str
+  | EBool Bool
+  | EChar Char
+  | EFloat Str
+  | EVar Str
+  | ECon Str
+  | EApp Expr Expr
+  | EIf Expr Expr Expr
+  | EMatch Expr (List[Pattern]) (List[Expr])
+  | ELam Str Expr
+  | ELet Str Expr Expr
+  | EList (List[Expr])
+  | EBinOp Str Expr Expr
+  | ETuple Expr Expr
+  | ENil
+  | ECons Expr Expr
+
+-- Type expressions
+TypeExpr =
+  | TyName Str
+  | TyApp TypeExpr TypeExpr
+  | TyFn TypeExpr TypeExpr
+
+-- Declarations
+Param = MkParam Str TypeExpr
+
+Constructor = MkCon Str (List[TypeExpr])
+
+Decl =
+  | DFn Str (List[Param]) (Maybe[TypeExpr]) Expr
+  | DType Str (List[Str]) (List[Constructor])
+  | DImport (List[Str])
+  | DExport Decl
+  | DLet Str Expr
+
+-- Module
+Module = MkModule (List[Str]) (List[Decl])
+
+-- ---- Token stream helpers ----------------------------------------------
+
+skipNewlines(toks List[Token]) =
+  match toks
+    | Newline :: rest -> skipNewlines rest
+    | Indent :: rest -> skipNewlines rest
+    | Dedent :: rest -> skipNewlines rest
+    | _ -> toks
+
+-- ---- isAtomStart -------------------------------------------------------
+
+isAtomStart(t Token) =
+  match t
+    | IntLit _ -> true
+    | FloatLit _ -> true
+    | StrLit _ -> true
+    | CharLit _ -> true
+    | KwTrue -> true
+    | KwFalse -> true
+    | Ident _ -> true
+    | TypeId _ -> true
+    | LParen -> true
+    | LBrack -> true
+    | _ -> false
+
+-- ---- Type parsing ------------------------------------------------------
+
+-- Skip bracket type args like [Int] in Maybe[Int]; we discard them.
+skipBrackTypeArgs(toks List[Token]) =
+  match toks
+    | LBrack :: rest ->
+      rest2 = skipBrackTypeBody rest
+      skipBrackTypeArgs rest2
+    | _ -> toks
+
+skipBrackTypeBody(toks List[Token]) =
+  match toks
+    | RBrack :: rest -> rest
+    | LBrack :: rest ->
+      rest2 = skipBrackTypeBody rest
+      skipBrackTypeBody rest2
+    | _ :: rest -> skipBrackTypeBody rest
+    | [] -> []
+
+-- Parse a single type expression (name or name[arg]).
+parseTypeExpr(toks List[Token]) =
+  match toks
+    | TypeId name :: rest ->
+      rest2 = skipBrackTypeArgs rest
+      (TyName name, rest2)
+    | Ident name :: rest ->
+      (TyName name, rest)
+    | _ -> (TyName "?", toks)
+
+-- Optional return type annotation before `=`.
+parseReturnType(toks List[Token]) =
+  match toks
+    | TypeId name :: rest ->
+      rest2 = skipBrackTypeArgs rest
+      (Some (TyName name), rest2)
+    | _ -> (None, toks)
+
+-- ---- Param group parsing -----------------------------------------------
+
+-- Parse zero or more (name Type) param groups.
+parseParamGroups(toks List[Token]) =
+  match toks
+    | LParen :: RParen :: rest -> ([], rest)
+    | LParen :: Ident pname :: TypeId tname :: rest ->
+      rest2 = skipBrackTypeArgs rest
+      rest3 = match rest2
+        | RParen :: r -> r
+        | _ -> rest2
+      let (ps, rest4) = parseParamGroups rest3
+      (MkParam pname (TyName tname) :: ps, rest4)
+    | LParen :: Underscore :: Ident pname :: TypeId tname :: rest ->
+      rest2 = skipBrackTypeArgs rest
+      rest3 = match rest2
+        | RParen :: r -> r
+        | _ -> rest2
+      let (ps, rest4) = parseParamGroups rest3
+      (MkParam (strConcat "_" pname) (TyName tname) :: ps, rest4)
+    | LParen :: Ident pname :: RParen :: rest ->
+      let (ps, rest2) = parseParamGroups rest
+      (MkParam pname (TyName "?") :: ps, rest2)
+    | _ -> ([], toks)
+
+-- ---- Type declaration parsing ------------------------------------------
+
+parseTypeParams(toks List[Token]) =
+  match toks
+    | TypeId s :: rest ->
+      if strLen s == 1
+        let (ps, rest2) = parseTypeParams rest
+        (s :: ps, rest2)
+      else ([], toks)
+    | _ -> ([], toks)
+
+parseConArgs(toks List[Token]) =
+  match toks
+    | TypeId _ :: _ ->
+      let (arg, rest) = parseTypeExpr toks
+      let (args, rest2) = parseConArgs rest
+      (arg :: args, rest2)
+    | _ -> ([], toks)
+
+parseCon(toks List[Token]) =
+  match toks
+    | TypeId name :: rest ->
+      let (args, rest2) = parseConArgs rest
+      (MkCon name args, rest2)
+    | _ -> (MkCon "?" [], toks)
+
+parseConsTail(acc List[Constructor])(toks List[Token]) =
+  toks2 = skipNewlines toks
+  match toks2
+    | Bar :: rest ->
+      rest2 = skipNewlines rest
+      let (c, rest3) = parseCon rest2
+      parseConsTail (listAppend acc [c]) rest3
+    | _ -> (acc, toks)
+
+parseConList(toks List[Token]) =
+  toks2 = skipNewlines toks
+  toks3 = match toks2
+    | Bar :: r -> skipNewlines r
+    | _ -> toks2
+  let (c, rest) = parseCon toks3
+  parseConsTail [c] rest
+
+parseTypeDecl(toks List[Token]) =
+  match toks
+    | TypeId name :: rest ->
+      let (prms, rest2) = parseTypeParams rest
+      rest3 = match (skipNewlines rest2)
+        | Eq :: r -> skipNewlines r
+        | _ -> skipNewlines rest2
+      let (ctors, rest4) = parseConList rest3
+      (DType name prms ctors, rest4)
+    | _ -> (DType "?" [] [], toks)
+
+-- ---- Pattern parsing ---------------------------------------------------
+
+parsePrimaryPat(toks List[Token]) =
+  match toks
+    | IntLit n :: rest -> (PLitInt n, rest)
+    | StrLit s :: rest -> (PLitStr s, rest)
+    | Underscore :: rest -> (PWild, rest)
+    | LBrack :: RBrack :: rest -> (PNil, rest)
+    | Ident s :: rest -> (PVar s, rest)
+    | TypeId name :: rest ->
+      let (args, rest2) = parsePatArgs rest
+      (PCon name args, rest2)
+    | _ -> (PWild, toks)
+
+parsePatArgs(toks List[Token]) =
+  match toks
+    | Ident _ :: _ -> parsePatArgsCons toks
+    | Underscore :: _ -> parsePatArgsCons toks
+    | IntLit _ :: _ -> parsePatArgsCons toks
+    | LBrack :: RBrack :: _ -> parsePatArgsCons toks
+    | _ -> ([], toks)
+
+parsePatArgsCons(toks List[Token]) =
+  let (p, rest) = parsePrimaryPat toks
+  let (ps, rest2) = parsePatArgs rest
+  (listAppend [p] ps, rest2)
+
+parsePat(toks List[Token]) =
+  let (p, rest) = parsePrimaryPat toks
+  match rest
+    | ColonColon :: rest2 ->
+      let (tail, rest3) = parsePat rest2
+      (PCons p tail, rest3)
+    | _ -> (p, rest)
+
+-- ---- Expression parsing ------------------------------------------------
+
+-- Arm body stops before | (next arm) but allows if/let.
+parseArmBody(toks List[Token]) =
+  toks2 = skipNewlines toks
+  match toks2
+    | KwIf :: rest -> parseIf rest
+    | KwLet :: rest -> parseLetIn rest
+    | Ident _ :: Eq :: _ -> parseLetIn toks2
+    | _ -> parseCompare toks2
+
+skipArrow(toks List[Token]) =
+  match toks
+    | Arrow :: r -> r
+    | _ -> toks
+
+-- Returns ((pat, body), rest) for one arm
+parseArm(toks List[Token]) =
+  match toks
+    | Bar :: rest ->
+      let (p, rest2) = parsePat rest
+      rest3 = skipArrow rest2
+      let (body, rest4) = parseArmBody rest3
+      ((p, body), rest4)
+    | _ -> ((PWild, EInt 0), toks)
+
+-- Returns ((pats, bodies), rest) — two parallel lists
+parseArms(toks List[Token]) =
+  toks2 = skipNewlines toks
+  match toks2
+    | Bar :: _ ->
+      let (pb, rest) = parseArm toks2
+      let (p, b) = pb
+      let (morePB, rest2) = parseArms rest
+      let (ps, bs) = morePB
+      ((p :: ps, b :: bs), rest2)
+    | _ -> (([], []), toks2)
+
+parseMatch(toks List[Token]) =
+  let (scrut, rest) = parseExpr toks
+  let (armLists, rest2) = parseArms rest
+  let (pats, bodies) = armLists
+  (EMatch scrut pats bodies, rest2)
+
+parseIf(toks List[Token]) =
+  let (cond, rest) = parseExpr toks
+  rest2 = skipNewlines rest
+  let (thenE, rest3) = parseExpr rest2
+  rest3a = skipNewlines rest3
+  rest4 = match rest3a
+    | KwElse :: r -> skipNewlines r
+    | _ -> rest3a
+  let (elseE, rest5) = parseExpr rest4
+  (EIf cond thenE elseE, rest5)
+
+skipKwIn(toks List[Token]) =
+  match toks
+    | KwLet :: r -> skipNewlines r
+    | _ -> skipNewlines toks
+
+parseLetIn(toks List[Token]) =
+  match toks
+    | LParen :: Ident a :: Comma :: Ident b :: RParen :: Eq :: rest ->
+      rest0 = skipNewlines rest
+      let (e1, rest2) = parseExpr rest0
+      rest3 = skipKwIn rest2
+      let (e2, rest4) = parseExpr rest3
+      (ELet a e1 (ELet b (ETuple e1 e2) e2), rest4)
+    | Ident name :: Eq :: rest ->
+      rest0 = skipNewlines rest
+      let (e1, rest2) = parseExpr rest0
+      rest3 = skipKwIn rest2
+      let (e2, rest4) = parseExpr rest3
+      (ELet name e1 e2, rest4)
+    | _ -> (EInt 0, toks)
+
+parseLamParams(acc List[Str])(toks List[Token]) =
+  match toks
+    | Ident name :: rest -> parseLamParams (listAppend acc [name]) rest
+    | _ -> (acc, toks)
+
+wrapLamParams(parms List[Str])(body Expr) =
+  match parms
+    | p :: rest -> ELam p (wrapLamParams rest body)
+    | _ -> body
+
+parseLam(toks List[Token]) =
+  let (parms, rest) = parseLamParams [] toks
+  match rest
+    | Dot :: rest2 ->
+      let (body, rest3) = parseExpr rest2
+      (wrapLamParams parms body, rest3)
+    | _ -> (EInt 0, toks)
+
+parseExpr(toks List[Token]) =
+  match toks
+    | KwIf :: rest -> parseIf rest
+    | KwMatch :: rest -> parseMatch rest
+    | KwLet :: rest -> parseLetIn rest
+    | Ident _ :: Eq :: _ -> parseLetIn toks
+    | Backslash :: rest -> parseLam rest
+    | _ -> parseCompare toks
+
+-- Comparison operators (==, !=, <, >, <=, >=)
+parseCompare(toks List[Token]) =
+  let (e, rest) = parseCons toks
+  parseCompareTail e rest
+
+parseCompareTail(lhs Expr)(toks List[Token]) =
+  match toks
+    | EqEq :: r ->
+      let (rhs, rest2) = parseCons r
+      parseCompareTail (EBinOp "==" lhs rhs) rest2
+    | Neq :: r ->
+      let (rhs, rest2) = parseCons r
+      parseCompareTail (EBinOp "!=" lhs rhs) rest2
+    | Lt :: r ->
+      let (rhs, rest2) = parseCons r
+      parseCompareTail (EBinOp "<" lhs rhs) rest2
+    | Gt :: r ->
+      let (rhs, rest2) = parseCons r
+      parseCompareTail (EBinOp ">" lhs rhs) rest2
+    | Le :: r ->
+      let (rhs, rest2) = parseCons r
+      parseCompareTail (EBinOp "<=" lhs rhs) rest2
+    | Ge :: r ->
+      let (rhs, rest2) = parseCons r
+      parseCompareTail (EBinOp ">=" lhs rhs) rest2
+    | _ -> (lhs, toks)
+
+-- List cons operator ::
+parseCons(toks List[Token]) =
+  let (head, rest) = parseAddSub toks
+  match rest
+    | ColonColon :: rest2 ->
+      let (tail, rest3) = parseCons rest2
+      (ECons head tail, rest3)
+    | _ -> (head, rest)
+
+-- Additive arithmetic
+parseAddSub(toks List[Token]) =
+  let (e, rest) = parseMulDiv toks
+  parseAddSubTail e rest
+
+parseAddSubTail(lhs Expr)(toks List[Token]) =
+  match toks
+    | Plus :: rest ->
+      let (r, rest2) = parseMulDiv rest
+      parseAddSubTail (EBinOp "+" lhs r) rest2
+    | Minus :: rest ->
+      let (r, rest2) = parseMulDiv rest
+      parseAddSubTail (EBinOp "-" lhs r) rest2
+    | _ -> (lhs, toks)
+
+-- Multiplicative arithmetic
+parseMulDiv(toks List[Token]) =
+  let (e, rest) = parseApp toks
+  parseMulDivTail e rest
+
+parseMulDivTail(lhs Expr)(toks List[Token]) =
+  match toks
+    | Star :: rest ->
+      let (r, rest2) = parseApp rest
+      parseMulDivTail (EBinOp "*" lhs r) rest2
+    | Slash :: rest ->
+      let (r, rest2) = parseApp rest
+      parseMulDivTail (EBinOp "/" lhs r) rest2
+    | _ -> (lhs, toks)
+
+-- Application layer: left-associative juxtaposition
+parseApp(toks List[Token]) =
+  let (e, rest) = parseAtom toks
+  parseAppTail e rest
+
+parseAppTail(lhs Expr)(toks List[Token]) =
+  match toks
+    | t :: _ ->
+      if isAtomStart t
+        let (arg, rest) = parseAtom toks
+        parseAppTail (EApp lhs arg) rest
+      else (lhs, toks)
+    | _ -> (lhs, toks)
+
+-- Parse a list literal body (after `[` consumed)
+parseListLit(toks List[Token]) =
+  match toks
+    | RBrack :: rest -> (ENil, rest)
+    | _ ->
+      let (e, rest) = parseListElem toks
+      match rest
+        | RBrack :: rest2 -> (ECons e ENil, rest2)
+        | Comma :: rest2 ->
+          let (tail, rest3) = parseListLit rest2
+          (ECons e tail, rest3)
+        | _ ->
+          let (tail, rest2) = parseListLit rest
+          (ECons e tail, rest2)
+
+parseListElem(toks List[Token]) =
+  match toks
+    | TypeId _ :: _ -> parseApp toks
+    | _ -> parseAtom toks
+
+parseAtomParenTail(e Expr)(toks List[Token]) =
+  match toks
+    | Comma :: rest ->
+      rest2 = skipNewlines rest
+      let (e2, rest3) = parseExpr rest2
+      match rest3
+        | RParen :: rest4 -> (ETuple e e2, rest4)
+        | _ -> (ETuple e e2, rest3)
+    | RParen :: rest -> (e, rest)
+    | _ -> (e, toks)
+
+-- Atomic expressions
+parseAtom(toks List[Token]) =
+  match toks
+    | IntLit n :: rest -> (EInt n, rest)
+    | FloatLit s :: rest -> (EFloat s, rest)
+    | StrLit s :: rest -> (EStr s, rest)
+    | CharLit c :: rest -> (EChar c, rest)
+    | KwTrue :: rest -> (EBool true, rest)
+    | KwFalse :: rest -> (EBool false, rest)
+    | Ident s :: rest -> (EVar s, rest)
+    | TypeId s :: rest -> (ECon s, rest)
+    | LBrack :: RBrack :: rest -> (ENil, rest)
+    | LBrack :: rest -> parseListLit rest
+    | LParen :: rest ->
+      let (e, rest2) = parseExpr rest
+      parseAtomParenTail e rest2
+    | _ -> (EInt 0, toks)
+
+-- ---- Function declaration parsing --------------------------------------
+
+lastParamVar(prms List[Param]) =
+  match prms
+    | [] -> EInt 0
+    | MkParam n _ :: [] -> EVar n
+    | _ :: rest -> lastParamVar rest
+
+parseFnBody(prms List[Param])(toks List[Token]) =
+  toks2 = skipNewlines toks
+  match toks2
+    | Bar :: _ ->
+      let (armLists, rest) = parseArms toks2
+      let (pats, bodies) = armLists
+      scrut = lastParamVar prms
+      (EMatch scrut pats bodies, rest)
+    | _ -> parseExpr toks2
+
+parseFnDecl(toks List[Token]) =
+  match toks
+    | Ident name :: rest ->
+      let (prms, rest2) = parseParamGroups rest
+      let (retTy, rest3) = parseReturnType rest2
+      rest4 = match (skipNewlines rest3)
+        | Eq :: r -> skipNewlines r
+        | _ -> skipNewlines rest3
+      let (body, rest5) = parseFnBody prms rest4
+      (DFn name prms retTy body, rest5)
+    | _ -> (DFn "?" [] None (EInt 0), toks)
+
+-- ---- Module-level let binding (no `in`, top-level) --------------------
+
+parseLetDecl(toks List[Token]) =
+  match toks
+    | KwLet :: Ident name :: Eq :: rest ->
+      rest0 = skipNewlines rest
+      let (body, rest2) = parseExpr rest0
+      (DLet name body, rest2)
+    | _ -> (DLet "?" (EInt 0), toks)
+
+-- ---- Import declaration ------------------------------------------------
+
+parseImportPath(acc List[Str])(toks List[Token]) =
+  match toks
+    | Dot :: TypeId seg :: rest ->
+      parseImportPath (listAppend acc [seg]) rest
+    | _ -> (acc, toks)
+
+parseImportDecl(toks List[Token]) =
+  match toks
+    | KwImport :: TypeId head :: rest ->
+      let (segs, rest2) = parseImportPath [head] rest
+      (DImport segs, rest2)
+    | _ -> (DImport [], toks)
+
+-- ---- Top-level declaration dispatch ------------------------------------
+
+parseOneDecl(toks List[Token]) =
+  match toks
+    | TypeId _ :: _ -> parseTypeDecl toks
+    | KwLet :: _ -> parseLetDecl toks
+    | Ident _ :: _ -> parseFnDecl toks
+    | KwImport :: _ -> parseImportDecl toks
+    | KwExport :: rest ->
+      let (inner, rest2) = parseOneDecl rest
+      (DExport inner, rest2)
+    | _ -> (DLet "?" (EInt 0), toks)
+
+parseDecls(toks List[Token]) =
+  toks2 = skipNewlines toks
+  match toks2
+    | Eof :: _ -> []
+    | [] -> []
+    | TypeId _ :: _ ->
+      let (d, rest) = parseTypeDecl toks2
+      d :: parseDecls rest
+    | KwLet :: _ ->
+      let (d, rest) = parseLetDecl toks2
+      d :: parseDecls rest
+    | Ident _ :: _ ->
+      let (d, rest) = parseFnDecl toks2
+      d :: parseDecls rest
+    | KwImport :: _ ->
+      let (d, rest) = parseImportDecl toks2
+      d :: parseDecls rest
+    | KwExport :: rest ->
+      let (inner, rest2) = parseOneDecl rest
+      DExport inner :: parseDecls rest2
+    | _ -> []
+
+-- ---- Module header parsing ---------------------------------------------
+
+parseModulePath(acc List[Str])(toks List[Token]) =
+  match toks
+    | Dot :: TypeId seg :: rest ->
+      parseModulePath (listAppend acc [seg]) rest
+    | _ -> (acc, toks)
+
+parseModuleHeader(toks List[Token]) =
+  match toks
+    | KwModule :: TypeId head :: rest ->
+      let (segs, rest2) = parseModulePath [head] rest
+      (segs, rest2)
+    | _ -> ([], toks)
+
+-- Main entry: parse a full module from a token list.
+parseModule(toks List[Token]) =
+  toks2 = skipNewlines toks
+  let (path, rest) = parseModuleHeader toks2
+  decls = parseDecls (skipNewlines rest)
+  MkModule path decls
+
+-- ---- Show helpers (for tests) ------------------------------------------
+
+boolToStr(b Bool) =
+  if b
+    "true"
+  else "false"
+
+showExpr(e Expr) =
+  match e
+    | EInt n -> strConcat "EInt " (intToStr n)
+    | EStr s -> strConcat "EStr " s
+    | EBool b -> strConcat "EBool " (boolToStr b)
+    | EChar c -> strConcat "EChar " (strFromChars [c])
+    | EFloat s -> strConcat "EFloat " s
+    | EVar s -> strConcat "EVar " s
+    | ECon s -> strConcat "ECon " s
+    | ENil -> "ENil"
+    | ECons h t ->
+      strConcat (strConcat "ECons(" (showExpr h)) (strConcat " " (strConcat (showExpr t) ")"))
+    | EApp f x ->
+      strConcat (strConcat "EApp(" (showExpr f)) (strConcat " " (strConcat (showExpr x) ")"))
+    | EIf c a b ->
+      strConcat "EIf(" (strConcat (showExpr c) (strConcat " " (strConcat (showExpr a) (strConcat " " (strConcat (showExpr b) ")")))))
+    | EBinOp op l r ->
+      strConcat "EBinOp(" (strConcat op (strConcat " " (strConcat (showExpr l) (strConcat " " (strConcat (showExpr r) ")")))))
+    | ETuple a b ->
+      strConcat "ETuple(" (strConcat (showExpr a) (strConcat " " (strConcat (showExpr b) ")")))
+    | ELet n e1 e2 ->
+      strConcat "ELet " (strConcat n (strConcat "=(" (strConcat (showExpr e1) (strConcat ") in (" (strConcat (showExpr e2) ")")))))
+    | ELam n b ->
+      strConcat "ELam " (strConcat n (strConcat "." (showExpr b)))
+    | EMatch s pats bodies ->
+      strConcat "EMatch(" (strConcat (showExpr s) "...)")
+    | EList es -> "EList(...)"
+
+showPattern(p Pattern) =
+  match p
+    | PVar s -> strConcat "PVar " s
+    | PWild -> "PWild"
+    | PCon name args -> strConcat "PCon " name
+    | PLitInt n -> strConcat "PLitInt " (intToStr n)
+    | PLitStr s -> strConcat "PLitStr " s
+    | PCons h t -> strConcat "PCons(" (strConcat (showPattern h) (strConcat " " (strConcat (showPattern t) ")")))
+    | PNil -> "PNil"
+
+showMaybeTy(m Maybe[TypeExpr]) =
+  match m
+    | Some _ -> "Some"
+    | None -> "None"
+
+joinDot(segs List[Str]) =
+  listFold (\acc s.
+    if strLen acc == 0
+      s
+    else strConcat (strConcat acc ".") s
+  ) "" segs
+
+showDecl(d Decl) =
+  match d
+    | DFn name prms retTy body ->
+      strConcat "DFn " (strConcat name (strConcat " body=(" (strConcat (showExpr body) ")")))
+    | DType name prms ctors ->
+      strConcat "DType " name
+    | DImport segs ->
+      path = joinDot segs
+      strConcat "DImport " path
+    | DExport inner ->
+      strConcat "DExport(" (strConcat (showDecl inner) ")")
+    | DLet name body ->
+      strConcat "DLet " (strConcat name (strConcat "=(" (strConcat (showExpr body) ")")))
+
+-- ---- Test helpers ------------------------------------------------------
+
+checkExpr(label Str)(toks List[Token])(expected Str) =
+  let (e, _rest) = parseExpr (skipNewlines toks)
+  got = showExpr e
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    p1 = strConcat "FAIL " label
+    p2 = strConcat p1 "\n  expected: "
+    p3 = strConcat p2 expected
+    p4 = strConcat p3 "\n  got:      "
+    p5 = strConcat p4 got
+    printfn p5
+
+checkDecl(label Str)(toks List[Token])(expected Str) =
+  let (d, _rest) = parseOneDecl (skipNewlines toks)
+  got = showDecl d
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    p1 = strConcat "FAIL " label
+    p2 = strConcat p1 "\n  expected: "
+    p3 = strConcat p2 expected
+    p4 = strConcat p3 "\n  got:      "
+    p5 = strConcat p4 got
+    printfn p5
+
+checkModule(label Str)(toks List[Token])(expectedDeclCount Int) =
+  m = parseModule toks
+  match m
+    | MkModule path decls ->
+      n = listLen decls
+      if n == expectedDeclCount
+        printfn (strConcat "OK " label)
+      else
+        p1 = strConcat "FAIL " label
+        p2 = strConcat p1 " expected "
+        p3 = strConcat p2 (intToStr expectedDeclCount)
+        p4 = strConcat p3 " decls, got "
+        p5 = strConcat p4 (intToStr n)
+        printfn p5
+
+-- ---- Tests -------------------------------------------------------------
+-- Token lists are built with :: cons (no comma list syntax in ll-lang).
+
+main() =
+  -- Each test uses a named token list to keep calls on one line.
+  -- 1. integer literal
+  t1 = IntLit 42 :: Eof :: []
+  _ = checkExpr "1 int literal" t1 "EInt 42"
+  -- 2. variable
+  t2 = Ident "x" :: Eof :: []
+  _ = checkExpr "2 variable" t2 "EVar x"
+  -- 3. function application: f x
+  t3 = Ident "f" :: Ident "x" :: Eof :: []
+  _ = checkExpr "3 application" t3 "EApp(EVar f EVar x)"
+  -- 4. string literal
+  t4 = StrLit "hello" :: Eof :: []
+  _ = checkExpr "4 string literal" t4 "EStr hello"
+  -- 5. bool true
+  t5 = KwTrue :: Eof :: []
+  _ = checkExpr "5 bool true" t5 "EBool true"
+  -- 6. bool false
+  t6 = KwFalse :: Eof :: []
+  _ = checkExpr "6 bool false" t6 "EBool false"
+  -- 7. addition: 1 + 2
+  t7 = IntLit 1 :: Plus :: IntLit 2 :: Eof :: []
+  _ = checkExpr "7 addition" t7 "EBinOp(+ EInt 1 EInt 2)"
+  -- 8. comparison: x == 42
+  t8 = Ident "x" :: EqEq :: IntLit 42 :: Eof :: []
+  _ = checkExpr "8 comparison" t8 "EBinOp(== EVar x EInt 42)"
+  -- 9. if-else: if true 1 else 2
+  t9 = KwIf :: KwTrue :: Newline :: IntLit 1 :: Newline :: KwElse :: IntLit 2 :: Eof :: []
+  _ = checkExpr "9 if-else" t9 "EIf(EBool true EInt 1 EInt 2)"
+  -- 10. let binding: x = 42; x
+  t10 = Ident "x" :: Eq :: IntLit 42 :: Newline :: Ident "x" :: Eof :: []
+  _ = checkExpr "10 let" t10 "ELet x=(EInt 42) in (EVar x)"
+  -- 11. lambda: \x. x
+  t11 = Backslash :: Ident "x" :: Dot :: Ident "x" :: Eof :: []
+  _ = checkExpr "11 lambda" t11 "ELam x.EVar x"
+  -- 12. constructor application: Some 42
+  t12 = TypeId "Some" :: IntLit 42 :: Eof :: []
+  _ = checkExpr "12 constructor app" t12 "EApp(ECon Some EInt 42)"
+  -- 13. empty list
+  t13 = LBrack :: RBrack :: Eof :: []
+  _ = checkExpr "13 empty list" t13 "ENil"
+  -- 14. cons: x :: xs
+  t14 = Ident "x" :: ColonColon :: Ident "xs" :: Eof :: []
+  _ = checkExpr "14 cons" t14 "ECons(EVar x EVar xs)"
+  -- 15. match: match x | Some v -> v | None -> 0
+  t15 = KwMatch :: Ident "x" :: Newline :: Bar :: TypeId "Some" :: Ident "v" :: Arrow :: Ident "v" :: Newline :: Bar :: TypeId "None" :: Arrow :: IntLit 0 :: Eof :: []
+  _ = checkExpr "15 match" t15 "EMatch(EVar x...)"
+  -- 16. function declaration: add(a Int)(b Int) = a + b
+  t16 = Ident "add" :: LParen :: Ident "a" :: TypeId "Int" :: RParen :: LParen :: Ident "b" :: TypeId "Int" :: RParen :: Eq :: Ident "a" :: Plus :: Ident "b" :: Eof :: []
+  _ = checkDecl "16 fn decl" t16 "DFn add body=(EBinOp(+ EVar a EVar b))"
+  -- 17. type declaration: Maybe A = Some A | None
+  t17 = TypeId "Maybe" :: TypeId "A" :: Eq :: TypeId "Some" :: TypeId "A" :: Bar :: TypeId "None" :: Eof :: []
+  _ = checkDecl "17 type decl" t17 "DType Maybe"
+  -- 18. import: import Std.Lexer
+  t18 = KwImport :: TypeId "Std" :: Dot :: TypeId "Lexer" :: Eof :: []
+  _ = checkDecl "18 import" t18 "DImport Std.Lexer"
+  -- 19. module-level let: let x = 99
+  t19 = KwLet :: Ident "x" :: Eq :: IntLit 99 :: Eof :: []
+  _ = checkDecl "19 let decl" t19 "DLet x=(EInt 99)"
+  -- 20. module with 2 decls
+  t20 = KwModule :: TypeId "Test" :: Newline :: TypeId "Foo" :: Eq :: TypeId "Bar" :: Newline :: Ident "f" :: LParen :: Ident "x" :: TypeId "Int" :: RParen :: Eq :: Ident "x" :: Eof :: []
+  _ = checkModule "20 module" t20 2
+  -- 21. nested application: f x y
+  t21 = Ident "f" :: Ident "x" :: Ident "y" :: Eof :: []
+  _ = checkExpr "21 nested app" t21 "EApp(EApp(EVar f EVar x) EVar y)"
+  -- 22. multiplication: 2 * 3
+  t22 = IntLit 2 :: Star :: IntLit 3 :: Eof :: []
+  _ = checkExpr "22 multiply" t22 "EBinOp(* EInt 2 EInt 3)"
+  -- 23. precedence: 1 + 2 * 3 => 1 + (2*3)
+  t23 = IntLit 1 :: Plus :: IntLit 2 :: Star :: IntLit 3 :: Eof :: []
+  _ = checkExpr "23 precedence" t23 "EBinOp(+ EInt 1 EBinOp(* EInt 2 EInt 3))"
+  -- 24. paren grouping: (x)
+  t24 = LParen :: Ident "x" :: RParen :: Eof :: []
+  _ = checkExpr "24 paren grouping" t24 "EVar x"
+  -- 25. tuple: (a, b)
+  t25 = LParen :: Ident "a" :: Comma :: Ident "b" :: RParen :: Eof :: []
+  _ = checkExpr "25 tuple" t25 "ETuple(EVar a EVar b)"
+  0
