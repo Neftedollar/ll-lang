@@ -7,6 +7,8 @@ open LLLang.Elaborator
 open LLLang.Compiler
 open LLLang.Manifest
 open LLLang.ProjectLoader
+open LLLang.Lexer
+open LLLang.Parser
 
 let private printErrors (es: LLError list) =
     for e in es do
@@ -134,32 +136,256 @@ let private findProjectRoot (startDir: string) : string option =
                 dir <- parent.FullName
     result
 
+// ---- Auto-resolve imports for `lllc run` ------------------------------------
+
+/// Find the stdlib directory by trying several strategies.
+let private findStdlibDir (mainFilePath: string) : string option =
+    // Strategy 1: LL_STDLIB_PATH environment variable
+    let envPath = Environment.GetEnvironmentVariable("LL_STDLIB_PATH")
+    if not (String.IsNullOrEmpty envPath) && Directory.Exists(envPath) then
+        Some envPath
+    else
+    // Strategy 2: Walk up from the compiler binary looking for stdlib/src/
+    let compilerBin = Path.GetDirectoryName(Reflection.Assembly.GetExecutingAssembly().Location)
+    let candidates =
+        [ // binary is typically at src/LLLangTool/bin/Debug/net10.0/ → 5 levels up is repo root
+          Path.GetFullPath(Path.Combine(compilerBin, "..", "..", "..", "..", "..", "stdlib", "src"))
+          Path.GetFullPath(Path.Combine(compilerBin, "..", "..", "..", "..", "stdlib", "src"))
+          Path.GetFullPath(Path.Combine(compilerBin, "..", "..", "..", "stdlib", "src"))
+          // Strategy 3: relative to main file's directory
+          Path.GetFullPath(Path.Combine(Path.GetDirectoryName(mainFilePath), "stdlib", "src"))
+          // Strategy 4: relative to current working directory
+          Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "stdlib", "src"))
+        ]
+    candidates |> List.tryFind Directory.Exists
+
+/// Parse imports out of a .lll source string without failing if there are errors.
+let private extractImports (src: string) : string list list =
+    match tokenize src with
+    | Error _ -> []
+    | Ok toks ->
+        match parseModuleWithPos toks with
+        | Error _ -> []
+        | Ok (m, _) -> m.Imports
+
+/// Given an import path like ["Std"; "Maybe"], find the file on disk.
+/// Searches stdlib/src/, .ll-deps/ relative to mainFileDir, and mainFileDir itself.
+let private resolveImport (mainFilePath: string) (importPath: string list) : string option =
+    let mainFileDir = Path.GetDirectoryName(mainFilePath)
+    // Derive filename: last segment + .lll
+    let fileName = (List.last importPath) + ".lll"
+    // For stdlib: prefix is "Std" → project name is "std" → look in stdlib/src/
+    let stdlibCandidates =
+        match findStdlibDir mainFilePath with
+        | None -> []
+        | Some stdlibSrc ->
+            // importPath like ["Std"; "Map"] → file is stdlibSrc/Map.lll
+            // or nested: ["Std"; "Foo"; "Bar"] → stdlibSrc/Foo/Bar.lll
+            let relParts = List.tail importPath  // drop "Std" prefix
+            let relPath = Path.Combine(relParts |> Array.ofList) + ".lll"
+            [ Path.Combine(stdlibSrc, relPath) ]
+    // For .ll-deps/: depName matches first segment (lowercased)
+    let depCandidates =
+        let depName = (List.head importPath).ToLower()
+        let depSrc = Path.Combine(mainFileDir, ".ll-deps", depName, "src")
+        let relParts = List.tail importPath
+        if relParts.IsEmpty then []
+        else
+            let relPath = Path.Combine(relParts |> Array.ofList) + ".lll"
+            [ Path.Combine(depSrc, relPath) ]
+    // Sibling: just fileName in same directory
+    let siblingCandidates = [ Path.Combine(mainFileDir, fileName) ]
+    let allCandidates = stdlibCandidates @ depCandidates @ siblingCandidates
+    allCandidates |> List.tryFind File.Exists
+
+/// Recursively collect all files needed to compile mainFilePath, including
+/// transitive deps. Returns topo-sorted LoadedFile list (deps first).
+/// visited prevents infinite loops on circular imports.
+let private resolveRunImports (mainFilePath: string) (mainSrc: string) : Result<LoadedFile list, string> =
+    let mutable visited: Set<string> = Set.empty  // absolute file paths seen
+    let mutable loadedMap: Map<string, LoadedFile> = Map.empty
+    let mutable depGraph: Map<string, string list> = Map.empty  // filePath → dep filePaths
+
+    let rec collect (filePath: string) (src: string) =
+        let absPath = Path.GetFullPath(filePath)
+        if Set.contains absPath visited then
+            Ok ()
+        else
+            visited <- Set.add absPath visited
+            let imports = extractImports src
+            let mutable depPaths: string list = []
+            let mutable err: string option = None
+            for imp in imports do
+                if err.IsNone then
+                    match resolveImport filePath imp with
+                    | None ->
+                        // Import not found locally — skip (may be a future dep or stdlib not installed)
+                        // We don't fail hard; the compiler will error if it truly can't resolve it.
+                        ()
+                    | Some depPath ->
+                        let absDepPath = Path.GetFullPath(depPath)
+                        depPaths <- absDepPath :: depPaths
+                        if not (Set.contains absDepPath visited) then
+                            match
+                                try Ok (File.ReadAllText depPath)
+                                with ex -> Error (sprintf "Cannot read %s: %s" depPath ex.Message)
+                            with
+                            | Error e -> err <- Some e
+                            | Ok depSrc ->
+                                match collect depPath depSrc with
+                                | Error e -> err <- Some e
+                                | Ok () ->
+                                    // Register the dep file
+                                    let modulePath =
+                                        match tokenize depSrc with
+                                        | Ok toks ->
+                                            match parseModuleWithPos toks with
+                                            | Ok (m, _) when m.Path <> [] -> m.Path
+                                            | _ ->
+                                                let stem = Path.GetFileNameWithoutExtension(depPath)
+                                                [stem]
+                                        | Error _ ->
+                                            let stem = Path.GetFileNameWithoutExtension(depPath)
+                                            [stem]
+                                    if not (Map.containsKey absDepPath loadedMap) then
+                                        loadedMap <- Map.add absDepPath { ModulePath = modulePath; FilePath = absDepPath; Src = depSrc } loadedMap
+            match err with
+            | Some e -> Error e
+            | None ->
+                depGraph <- Map.add absPath depPaths depGraph
+                // Register main file if not already
+                let modulePath =
+                    match tokenize src with
+                    | Ok toks ->
+                        match parseModuleWithPos toks with
+                        | Ok (m, _) when m.Path <> [] -> m.Path
+                        | _ ->
+                            let stem = Path.GetFileNameWithoutExtension(filePath)
+                            [stem]
+                    | Error _ ->
+                        let stem = Path.GetFileNameWithoutExtension(filePath)
+                        [stem]
+                if not (Map.containsKey absPath loadedMap) then
+                    loadedMap <- Map.add absPath { ModulePath = modulePath; FilePath = absPath; Src = src } loadedMap
+                Ok ()
+
+    match collect mainFilePath mainSrc with
+    | Error e -> Error e
+    | Ok () ->
+        // Topo-sort by file path
+        let allPaths = loadedMap |> Map.toList |> List.map fst
+        // Build dep map for topo-sort: path → dep paths (filtered to known files)
+        let depsMap =
+            allPaths
+            |> List.map (fun p ->
+                let deps = depGraph |> Map.tryFind p |> Option.defaultValue []
+                let filteredDeps = deps |> List.filter (fun d -> List.contains d allPaths) |> List.distinct
+                p, filteredDeps)
+            |> Map.ofList
+        // Simple topo sort (Kahn's)
+        let mutable inDegree = allPaths |> List.map (fun p -> p, 0) |> Map.ofList
+        let mutable revEdges = allPaths |> List.map (fun p -> p, []) |> Map.ofList
+        for p in allPaths do
+            let ds = depsMap |> Map.tryFind p |> Option.defaultValue []
+            for d in ds do
+                inDegree <- Map.add p (inDegree[p] + 1) inDegree
+                revEdges <- Map.add d (p :: revEdges[d]) revEdges
+        let mutable queue = allPaths |> List.filter (fun p -> inDegree[p] = 0)
+        let mutable sorted: string list = []
+        while not queue.IsEmpty do
+            let n = List.head queue
+            queue <- List.tail queue
+            sorted <- sorted @ [n]
+            for m in revEdges[n] do
+                let newDeg = inDegree[m] - 1
+                inDegree <- Map.add m newDeg inDegree
+                if newDeg = 0 then queue <- queue @ [m]
+        if sorted.Length <> allPaths.Length then
+            Error "Circular import detected among resolved files"
+        else
+            let files = sorted |> List.choose (fun p -> Map.tryFind p loadedMap)
+            Ok files
+
 /// Run: compile file.lll → temp .fsx → dotnet fsi. Returns exit code.
 let private cmdRun (path: string) : int =
     try
-        let src = File.ReadAllText(path)
-        match LLLang.Compiler.compile src with
-        | Ok fs ->
-            let tmp = Path.GetTempFileName() + ".fsx"
-            let stripped =
-                fs.Split('\n')
-                |> Array.filter (fun l ->
-                    let t = l.TrimStart()
-                    not (t.StartsWith("module ")) && not (t.StartsWith("[<EntryPoint>]")))
-                |> String.concat "\n"
-            let withInvoke = stripped + "\nmain [||] |> int64 |> exit\n"
-            File.WriteAllText(tmp, withInvoke)
-            let psi = ProcessStartInfo("dotnet", $"fsi \"{tmp}\"")
-            psi.RedirectStandardOutput <- false
-            psi.RedirectStandardError  <- false
-            psi.UseShellExecute        <- false
-            use proc = Process.Start(psi)
-            proc.WaitForExit()
-            try File.Delete(tmp) with _ -> ()
-            proc.ExitCode
-        | Error es ->
-            printErrors es
-            1
+        let absPath = Path.GetFullPath(path)
+        let src = File.ReadAllText(absPath)
+        let imports = extractImports src
+        if imports.IsEmpty then
+            // Fast path: no imports, compile single file as before
+            match LLLang.Compiler.compile src with
+            | Ok fs ->
+                let tmp = Path.GetTempFileName() + ".fsx"
+                let stripped =
+                    fs.Split('\n')
+                    |> Array.filter (fun l ->
+                        let t = l.TrimStart()
+                        not (t.StartsWith("module ")) && not (t.StartsWith("[<EntryPoint>]")))
+                    |> String.concat "\n"
+                let withInvoke = stripped + "\nmain [||] |> int64 |> exit\n"
+                File.WriteAllText(tmp, withInvoke)
+                let psi = ProcessStartInfo("dotnet", $"fsi \"{tmp}\"")
+                psi.RedirectStandardOutput <- false
+                psi.RedirectStandardError  <- false
+                psi.UseShellExecute        <- false
+                use proc = Process.Start(psi)
+                proc.WaitForExit()
+                try File.Delete(tmp) with _ -> ()
+                proc.ExitCode
+            | Error es ->
+                printErrors es
+                1
+        else
+            // Resolve imports and compile as mini-project
+            match resolveRunImports absPath src with
+            | Error msg ->
+                eprintfn "lllc: import resolution error: %s" msg
+                1
+            | Ok files ->
+                let fakeManifest : LLManifest = { Name = "run"; Version = "0.0.0"; Entry = ""; Deps = Map.empty; Platform = ["fsharp"] }
+                let proj : LLProject = { Manifest = fakeManifest; RootDir = Path.GetDirectoryName(absPath); Files = files }
+                match LLLang.Compiler.compileProjectToModules proj with
+                | Error es ->
+                    printErrors es
+                    1
+                | Ok tms ->
+                    let fs = LLLang.Codegen.emitProjectModules tms
+                    let tmp = Path.GetTempFileName() + ".fsx"
+                    // Strip module declarations and [<EntryPoint>] attributes.
+                    // For multi-module output, rename all `let main` except the last
+                    // occurrence so that fsi sees only one `main` binding.
+                    let lines = fs.Split('\n')
+                    // Find all line indices where `let main (argv` appears
+                    let mainLineIndices =
+                        lines
+                        |> Array.mapi (fun i l -> i, l)
+                        |> Array.filter (fun (_, l) -> l.TrimStart().StartsWith("let main (argv"))
+                        |> Array.map fst
+                    let lastMainIdx = if mainLineIndices.Length > 0 then mainLineIndices[mainLineIndices.Length - 1] else -1
+                    let mutable mainCounter = 0
+                    let processed =
+                        lines
+                        |> Array.mapi (fun i l ->
+                            let t = l.TrimStart()
+                            if t.StartsWith("module ") || t.StartsWith("[<EntryPoint>]") then ""
+                            elif t.StartsWith("let main (argv") && i <> lastMainIdx then
+                                // Rename intermediate main to avoid duplicate definition
+                                let renamed = sprintf "_dep_main_%d" mainCounter
+                                mainCounter <- mainCounter + 1
+                                l.Replace("let main (", sprintf "let %s (" renamed)
+                            else l)
+                        |> String.concat "\n"
+                    let withInvoke = processed + "\nmain [||] |> int64 |> exit\n"
+                    File.WriteAllText(tmp, withInvoke)
+                    let psi = ProcessStartInfo("dotnet", $"fsi \"{tmp}\"")
+                    psi.RedirectStandardOutput <- false
+                    psi.RedirectStandardError  <- false
+                    psi.UseShellExecute        <- false
+                    use proc = Process.Start(psi)
+                    proc.WaitForExit()
+                    try File.Delete(tmp) with _ -> ()
+                    proc.ExitCode
     with
     | ex ->
         eprintfn "lllc: %s" ex.Message
