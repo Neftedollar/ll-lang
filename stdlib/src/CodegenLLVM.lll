@@ -1,0 +1,525 @@
+module Std.CodegenLLVM
+
+import Std.Parser
+import Std.Maybe
+
+-- LLVM IR code emitter written in ll-lang.
+-- Takes the AST produced by Std.Parser and emits LLVM IR text format (.ll).
+-- Uses SSA numbering for unique register names.
+-- Each emit family (Instrs/Reg/NextCtr/NextSidx/Globs) threads state explicitly.
+
+-- ---- String helpers --------------------------------------------------------
+
+joinWith(sep Str)(items List[Str]) =
+  match items
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat sep (joinWith sep rest))
+
+strJoin2(a Str)(b Str) =
+  if strLen a == 0
+    b
+  else
+    if strLen b == 0
+      a
+    else strConcat a (strConcat "\n" b)
+
+-- ---- Type emission ---------------------------------------------------------
+
+emitLLVMType(t TypeExpr) =
+  match t
+    | TyName "Int"   -> "i64"
+    | TyName "Float" -> "double"
+    | TyName "Bool"  -> "i1"
+    | TyName "Char"  -> "i8"
+    | TyName "Str"   -> "i8*"
+    | TyName "Unit"  -> "void"
+    | TyName _       -> "i64"
+    | TyApp _ _      -> "%struct.List*"
+    | TyFn _ _       -> "i8*"
+
+-- ---- SSA name helper -------------------------------------------------------
+
+ssaName(n Int) =
+  strConcat "%t" (intToStr n)
+
+-- ---- String literal encoding -----------------------------------------------
+
+encodeLLVMChar(c Char) =
+  match c
+    | '\n' -> "\\0A"
+    | '\t' -> "\\09"
+    | '\r' -> "\\0D"
+    | '\\' -> "\\\\"
+    | '"'  -> "\\22"
+    | _    -> strFromChars [c]
+
+encodeLLVMStr(s Str) =
+  listFold (\acc c. strConcat acc (encodeLLVMChar c)) "" (strChars s)
+
+strGlobalDecl(idx Int)(s Str) =
+  encoded = encodeLLVMStr s
+  len = intToStr (strLen s + 1)
+  idxStr = intToStr idx
+  strConcat "@.str." (strConcat idxStr (strConcat " = private unnamed_addr constant [" (strConcat len (strConcat " x i8] c\"" (strConcat encoded "\\00\"")))))
+
+-- ---- Binary op helpers -----------------------------------------------------
+
+llvmIntOp(op Str) =
+  if op == "+"
+    "add i64"
+  else
+    if op == "-"
+      "sub i64"
+    else
+      if op == "*"
+        "mul i64"
+      else
+        if op == "/"
+          "sdiv i64"
+        else "add i64"
+
+llvmCmpOp(op Str) =
+  if op == "=="
+    "icmp eq i64"
+  else
+    if op == "!="
+      "icmp ne i64"
+    else
+      if op == "<"
+        "icmp slt i64"
+      else
+        if op == ">"
+          "icmp sgt i64"
+        else
+          if op == "<="
+            "icmp sle i64"
+          else
+            if op == ">="
+              "icmp sge i64"
+            else "icmp eq i64"
+
+isCmpOp(op Str) =
+  if op == "=="
+    true
+  else
+    if op == "!="
+      true
+    else
+      if op == "<"
+        true
+      else
+        if op == ">"
+          true
+        else
+          if op == "<="
+            true
+          else
+            if op == ">="
+              true
+            else false
+
+-- ---- getStrVal helper ------------------------------------------------------
+
+getStrVal(e Expr) =
+  match e
+    | EStr s -> s
+    | _ -> ""
+
+-- ---- extractFnName helper --------------------------------------------------
+
+extractFnName(e Expr) =
+  match e
+    | EVar n -> n
+    | ECon n -> n
+    | EApp f _ -> extractFnName f
+    | _ -> "unknown"
+
+-- ---- emitExprInstrs --------------------------------------------------------
+-- Returns the LLVM IR instructions (not including final ret) for expression e.
+
+emitExprInstrs(e Expr)(ctr Int)(sidx Int) =
+  match e
+    | EInt _  -> ""
+    | EFloat _ -> ""
+    | EBool _ -> ""
+    | EChar _ -> ""
+    | EStr s  -> strGlobalDecl sidx s
+    | EVar _  -> ""
+    | ECon _  -> ""
+    | ENil    -> ""
+    | EBinOp op l r ->
+      li = emitExprInstrs l ctr sidx
+      lc = emitExprNextCtr l ctr sidx
+      ls = emitExprNextSidx l ctr sidx
+      ri = emitExprInstrs r lc ls
+      rc = emitExprNextCtr r lc ls
+      lreg = emitExprReg l ctr sidx
+      rreg = emitExprReg r lc ls
+      dst = ssaName rc
+      instrBody =
+        if isCmpOp op
+          strConcat (llvmCmpOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+        else
+          strConcat (llvmIntOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+      instr = strConcat "  " (strConcat dst (strConcat " = " instrBody))
+      prefix = strJoin2 li ri
+      if strLen prefix == 0
+        instr
+      else strConcat prefix (strConcat "\n" instr)
+    | EIf cond thenE elseE ->
+      ci = emitExprInstrs cond ctr sidx
+      cc = emitExprNextCtr cond ctr sidx
+      cs = emitExprNextSidx cond ctr sidx
+      creg = emitExprReg cond ctr sidx
+      thenLbl = strConcat "then" (intToStr cc)
+      elseLbl = strConcat "else" (intToStr cc)
+      mergeLbl = strConcat "merge" (intToStr cc)
+      brInstr = strConcat "  br i1 " (strConcat creg (strConcat ", label %" (strConcat thenLbl (strConcat ", label %" elseLbl))))
+      tc1 = cc + 1
+      ti = emitExprInstrs thenE tc1 cs
+      tc = emitExprNextCtr thenE tc1 cs
+      ts = emitExprNextSidx thenE tc1 cs
+      treg = emitExprReg thenE tc1 cs
+      thenBodyPre =
+        if strLen ti == 0
+          ""
+        else strConcat ti "\n"
+      thenBlock = strConcat thenLbl (strConcat ":\n" (strConcat thenBodyPre (strConcat "  br label %" mergeLbl)))
+      ec1 = tc + 1
+      ei = emitExprInstrs elseE ec1 ts
+      ec = emitExprNextCtr elseE ec1 ts
+      ereg = emitExprReg elseE ec1 ts
+      elseBodyPre =
+        if strLen ei == 0
+          ""
+        else strConcat ei "\n"
+      elseBlock = strConcat elseLbl (strConcat ":\n" (strConcat elseBodyPre (strConcat "  br label %" mergeLbl)))
+      dst = ssaName ec
+      phiParts = strConcat treg (strConcat ", %" (strConcat thenLbl (strConcat "], [" (strConcat ereg (strConcat ", %" (strConcat elseLbl "]"))))))
+      phiInstr = strConcat "  " (strConcat dst (strConcat " = phi i64 [" phiParts))
+      mergeBlock = strConcat mergeLbl (strConcat ":\n" phiInstr)
+      condPart =
+        if strLen ci == 0
+          brInstr
+        else strConcat ci (strConcat "\n" brInstr)
+      strConcat condPart (strConcat "\n" (strConcat thenBlock (strConcat "\n" (strConcat elseBlock (strConcat "\n" mergeBlock)))))
+    | ELet name valE bodyE ->
+      vi = emitExprInstrs valE ctr sidx
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      vreg = emitExprReg valE ctr sidx
+      dst = ssaName vc
+      aliasInstr = strConcat "  " (strConcat dst (strConcat " = add i64 " (strConcat vreg ", 0")))
+      bi = emitExprInstrs bodyE (vc + 1) vs
+      viAlias =
+        if strLen vi == 0
+          aliasInstr
+        else strConcat vi (strConcat "\n" aliasInstr)
+      if strLen bi == 0
+        viAlias
+      else strConcat viAlias (strConcat "\n" bi)
+    | EApp f a ->
+      fi = emitExprInstrs f ctr sidx
+      fc = emitExprNextCtr f ctr sidx
+      fs = emitExprNextSidx f ctr sidx
+      ai = emitExprInstrs a fc fs
+      ac = emitExprNextCtr a fc fs
+      areg = emitExprReg a fc fs
+      fnName = extractFnName f
+      dst = ssaName ac
+      callInstr = strConcat "  " (strConcat dst (strConcat " = call i64 @" (strConcat fnName (strConcat "(i64 " (strConcat areg ")")))))
+      prefix = strJoin2 fi ai
+      if strLen prefix == 0
+        callInstr
+      else strConcat prefix (strConcat "\n" callInstr)
+    | _ -> ""
+
+-- ---- emitExprReg -----------------------------------------------------------
+-- Returns the LLVM register or value that holds the result of expression e.
+
+emitExprReg(e Expr)(ctr Int)(sidx Int) =
+  match e
+    | EInt n  -> intToStr n
+    | EFloat s -> s
+    | EBool b ->
+      if b
+        "1"
+      else "0"
+    | EChar c -> intToStr (charToInt c)
+    | EStr _  ->
+      idxStr = intToStr sidx
+      sv = getStrVal e
+      lenStr = intToStr (strLen sv + 1)
+      strConcat "getelementptr inbounds ([" (strConcat lenStr (strConcat " x i8], [" (strConcat lenStr (strConcat " x i8]* @.str." (strConcat idxStr ", i64 0, i64 0")))))
+    | EVar n  -> strConcat "%" n
+    | ECon _  -> "0"
+    | ENil    -> "null"
+    | EBinOp op l r ->
+      lc = emitExprNextCtr l ctr sidx
+      ls = emitExprNextSidx l ctr sidx
+      rc = emitExprNextCtr r lc ls
+      ssaName rc
+    | EIf cond thenE elseE ->
+      cc = emitExprNextCtr cond ctr sidx
+      cs = emitExprNextSidx cond ctr sidx
+      tc1 = cc + 1
+      tc = emitExprNextCtr thenE tc1 cs
+      ts = emitExprNextSidx thenE tc1 cs
+      ec1 = tc + 1
+      ec = emitExprNextCtr elseE ec1 ts
+      ssaName ec
+    | ELet name valE bodyE ->
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      emitExprReg bodyE (vc + 1) vs
+    | EApp f a ->
+      fc = emitExprNextCtr f ctr sidx
+      fs = emitExprNextSidx f ctr sidx
+      ac = emitExprNextCtr a fc fs
+      ssaName ac
+    | _ -> "0"
+
+-- ---- emitExprNextCtr -------------------------------------------------------
+
+emitExprNextCtr(e Expr)(ctr Int)(sidx Int) =
+  match e
+    | EInt _  -> ctr
+    | EFloat _ -> ctr
+    | EBool _ -> ctr
+    | EChar _ -> ctr
+    | EStr _  -> ctr
+    | EVar _  -> ctr
+    | ECon _  -> ctr
+    | ENil    -> ctr
+    | EBinOp op l r ->
+      lc = emitExprNextCtr l ctr sidx
+      ls = emitExprNextSidx l ctr sidx
+      rc = emitExprNextCtr r lc ls
+      rc + 1
+    | EIf cond thenE elseE ->
+      cc = emitExprNextCtr cond ctr sidx
+      cs = emitExprNextSidx cond ctr sidx
+      tc1 = cc + 1
+      tc = emitExprNextCtr thenE tc1 cs
+      ts = emitExprNextSidx thenE tc1 cs
+      ec1 = tc + 1
+      ec = emitExprNextCtr elseE ec1 ts
+      ec + 1
+    | ELet name valE bodyE ->
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      emitExprNextCtr bodyE (vc + 1) vs
+    | EApp f a ->
+      fc = emitExprNextCtr f ctr sidx
+      fs = emitExprNextSidx f ctr sidx
+      ac = emitExprNextCtr a fc fs
+      ac + 1
+    | _ -> ctr
+
+-- ---- emitExprNextSidx ------------------------------------------------------
+
+emitExprNextSidx(e Expr)(ctr Int)(sidx Int) =
+  match e
+    | EInt _  -> sidx
+    | EFloat _ -> sidx
+    | EBool _ -> sidx
+    | EChar _ -> sidx
+    | EStr _  -> sidx + 1
+    | EVar _  -> sidx
+    | ECon _  -> sidx
+    | ENil    -> sidx
+    | EBinOp op l r ->
+      lc = emitExprNextCtr l ctr sidx
+      ls = emitExprNextSidx l ctr sidx
+      emitExprNextSidx r lc ls
+    | EIf cond thenE elseE ->
+      cc = emitExprNextCtr cond ctr sidx
+      cs = emitExprNextSidx cond ctr sidx
+      tc1 = cc + 1
+      tc = emitExprNextCtr thenE tc1 cs
+      ts = emitExprNextSidx thenE tc1 cs
+      ec1 = tc + 1
+      emitExprNextSidx elseE ec1 ts
+    | ELet name valE bodyE ->
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      emitExprNextSidx bodyE (vc + 1) vs
+    | EApp f a ->
+      fc = emitExprNextCtr f ctr sidx
+      fs = emitExprNextSidx f ctr sidx
+      emitExprNextSidx a fc fs
+    | _ -> sidx
+
+-- ---- emitExprGlobs ---------------------------------------------------------
+-- Returns all string global declarations needed for expression e.
+
+emitExprGlobs(e Expr)(ctr Int)(sidx Int) =
+  match e
+    | EStr s  -> strGlobalDecl sidx s
+    | EBinOp op l r ->
+      lg = emitExprGlobs l ctr sidx
+      lc = emitExprNextCtr l ctr sidx
+      ls = emitExprNextSidx l ctr sidx
+      rg = emitExprGlobs r lc ls
+      strJoin2 lg rg
+    | EIf cond thenE elseE ->
+      cg = emitExprGlobs cond ctr sidx
+      cc = emitExprNextCtr cond ctr sidx
+      cs = emitExprNextSidx cond ctr sidx
+      tg = emitExprGlobs thenE (cc + 1) cs
+      tc = emitExprNextCtr thenE (cc + 1) cs
+      ts = emitExprNextSidx thenE (cc + 1) cs
+      eg = emitExprGlobs elseE (tc + 1) ts
+      strJoin2 cg (strJoin2 tg eg)
+    | ELet name valE bodyE ->
+      vg = emitExprGlobs valE ctr sidx
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      bg = emitExprGlobs bodyE (vc + 1) vs
+      strJoin2 vg bg
+    | EApp f a ->
+      fg = emitExprGlobs f ctr sidx
+      fc = emitExprNextCtr f ctr sidx
+      fs = emitExprNextSidx f ctr sidx
+      ag = emitExprGlobs a fc fs
+      strJoin2 fg ag
+    | _ -> ""
+
+-- ---- Param helpers ---------------------------------------------------------
+
+emitParam(p Param) =
+  match p
+    | MkParam name ty -> strConcat (emitLLVMType ty) (strConcat " %" name)
+
+emitParams(ps List[Param]) =
+  joinWith ", " (listMap emitParam ps)
+
+paramReturnType(retTy Maybe[TypeExpr]) =
+  match retTy
+    | Some t -> emitLLVMType t
+    | None   -> "i64"
+
+-- ---- Declaration emitter ---------------------------------------------------
+
+emitDecl(d Decl)(strIdx Int) =
+  match d
+    | DFn name params retTy body ->
+      retType = paramReturnType retTy
+      paramStr = emitParams params
+      bodyInstrs = emitExprInstrs body 0 strIdx
+      retReg = emitExprReg body 0 strIdx
+      globs = emitExprGlobs body 0 strIdx
+      globSection =
+        if strLen globs == 0
+          ""
+        else strConcat globs "\n"
+      bodySection =
+        if strLen bodyInstrs == 0
+          strConcat "  ret " (strConcat retType (strConcat " " retReg))
+        else strConcat bodyInstrs (strConcat "\n  ret " (strConcat retType (strConcat " " retReg)))
+      strConcat globSection (strConcat "define " (strConcat retType (strConcat " @" (strConcat name (strConcat "(" (strConcat paramStr (strConcat ") {\nentry:\n" (strConcat bodySection "\n}"))))))))
+    | DType name _ _ ->
+      strConcat "; type " name
+    | DImport parts ->
+      strConcat "; import " (joinWith "." parts)
+    | DLet name body ->
+      bodyInstrs = emitExprInstrs body 0 strIdx
+      reg = emitExprReg body 0 strIdx
+      globs = emitExprGlobs body 0 strIdx
+      globSection =
+        if strLen globs == 0
+          ""
+        else strConcat globs "\n"
+      strConcat globSection (strConcat "@" (strConcat name (strConcat " = global i64 " reg)))
+    | DExport inner -> emitDecl inner strIdx
+
+emitDecls(ds List[Decl])(strIdx Int) =
+  match ds
+    | [] -> ""
+    | d :: rest ->
+      first = emitDecl d strIdx
+      remaining = emitDecls rest (strIdx + 1)
+      if strLen remaining == 0
+        first
+      else strConcat first (strConcat "\n\n" remaining)
+
+-- ---- Module emission -------------------------------------------------------
+
+emitModulePath(parts List[Str]) =
+  joinWith "." parts
+
+emitModule(m Module) =
+  match m
+    | MkModule path decls ->
+      pathStr = emitModulePath path
+      header = strConcat "; module " pathStr
+      prelude = "; ll-lang LLVM IR output\n; target triple: x86_64-unknown-linux-gnu\n"
+      body = emitDecls decls 0
+      strConcat prelude (strConcat header (strConcat "\n\n" body))
+
+-- ---- Test helpers ----------------------------------------------------------
+
+checkContains(label Str)(got Str)(needle Str) =
+  if strContains needle got
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  missing: " (strConcat needle (strConcat "\n  in: " got)))))
+
+-- ---- Tests -----------------------------------------------------------------
+
+main() =
+  -- 1. EInt 42 register contains "42"
+  reg1 = emitExprReg (EInt 42) 0 0
+  _ = checkContains "1 EInt 42" reg1 "42"
+
+  -- 2. EBinOp "+" instrs contain "add i64"
+  addExpr = EBinOp "+" (EInt 1) (EInt 2)
+  instrs2 = emitExprInstrs addExpr 0 0
+  _ = checkContains "2 EBinOp add i64" instrs2 "add i64"
+
+  -- 3. EBool true register is "1"
+  reg3 = emitExprReg (EBool true) 0 0
+  _ = checkContains "3 EBool true reg" reg3 "1"
+
+  -- 4. DFn "add" contains "define i64 @add"
+  addParams = MkParam "a" (TyName "Int") :: MkParam "b" (TyName "Int") :: []
+  addDecl = DFn "add" addParams None (EBinOp "+" (EVar "a") (EVar "b"))
+  out4 = emitDecl addDecl 0
+  _ = checkContains "4 DFn define" out4 "define i64 @add"
+
+  -- 5. emitModule contains "define i64 @main"
+  mainDecl = DFn "main" [] None (EInt 0)
+  m5 = MkModule ("Test" :: []) (mainDecl :: [])
+  out5 = emitModule m5
+  _ = checkContains "5 emitModule main" out5 "define i64 @main"
+
+  -- 6. Complete module has entry: and ret i64
+  fnDecl = DFn "add" addParams None (EBinOp "+" (EVar "a") (EVar "b"))
+  m6 = MkModule ("Test" :: []) (fnDecl :: mainDecl :: [])
+  out6 = emitModule m6
+  _ = checkContains "6 entry label" out6 "entry:"
+  _ = checkContains "6 ret i64" out6 "ret i64"
+
+  -- 7. EStr global constant emitted
+  strExpr = EStr "hello"
+  globs7 = emitExprGlobs strExpr 0 0
+  _ = checkContains "7 EStr global" globs7 "hello"
+
+  -- 8. EBinOp "==" instrs contain "icmp"
+  cmpExpr = EBinOp "==" (EInt 1) (EInt 1)
+  instrs8 = emitExprInstrs cmpExpr 0 0
+  _ = checkContains "8 EBinOp icmp" instrs8 "icmp"
+
+  -- 9. EIf contains "br i1" and "phi"
+  ifExpr = EIf (EBool true) (EInt 1) (EInt 0)
+  instrs9 = emitExprInstrs ifExpr 0 0
+  _ = checkContains "9 EIf br i1" instrs9 "br i1"
+  _ = checkContains "9 EIf phi" instrs9 "phi"
+
+  -- 10. Type emission
+  _ = checkContains "10 TyName Int" (emitLLVMType (TyName "Int")) "i64"
+  _ = checkContains "10 TyName Bool" (emitLLVMType (TyName "Bool")) "i1"
+  _ = checkContains "10 TyName Str" (emitLLVMType (TyName "Str")) "i8*"
+
+  0
