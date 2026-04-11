@@ -1,0 +1,68 @@
+module Std.Maybe
+
+-- Canonical Maybe type for ll-lang stdlib.
+-- Each file that needs Maybe must define it locally (single-file lllc run mode),
+-- but this module is the canonical reference and documents the full Maybe API.
+--
+-- NOTE: maybeMap, maybeBind, maybeWithDefault are compiler prelude builtins.
+-- This module adds isSome / isNone which are not in the prelude.
+
+Maybe A = Some A | None
+
+isNone(m Maybe[A]) =
+  match m
+    | Some _ -> false
+    | None -> true
+
+isSome(m Maybe[A]) =
+  match m
+    | Some _ -> true
+    | None -> false
+
+-- ---- Tests ----------------------------------------------------------------
+
+check(label Str)(ok Bool) =
+  if ok
+    _ = printfn (strConcat "OK " label)
+    0
+  else
+    _ = printfn (strConcat "FAIL " label)
+    1
+
+doubleInMaybe(x Int) = Some (x * 2)
+
+main() =
+  -- 1. maybeMap on Some (prelude builtin)
+  r1 = maybeMap (\x. x + 1) (Some 41)
+  ok1 = match r1
+    | Some v -> v == 42
+    | None -> false
+  _ = check "1 maybeMap Some" ok1
+
+  -- 2. maybeMap on None (prelude builtin)
+  r2 = maybeMap (\x. x + 1) None
+  ok2 = match r2
+    | Some _ -> false
+    | None -> true
+  _ = check "2 maybeMap None" ok2
+
+  -- 3. maybeBind on Some (prelude builtin)
+  r3 = maybeBind (Some 10) doubleInMaybe
+  ok3 = match r3
+    | Some v -> v == 20
+    | None -> false
+  _ = check "3 maybeBind Some" ok3
+
+  -- 4. maybeWithDefault (prelude builtin)
+  d1 = maybeWithDefault 99 (Some 7)
+  d2 = maybeWithDefault 99 None
+  _ = check "4 maybeWithDefault" (if d1 == 7
+    d2 == 99
+  else false)
+
+  -- 5. isSome / isNone
+  _ = check "5 isSome/isNone" (if isSome (Some 1)
+    isNone None
+  else false)
+
+  0
