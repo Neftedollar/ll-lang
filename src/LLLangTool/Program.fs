@@ -59,6 +59,7 @@ let private writeTargetOutput (rootDir: string) (name: string) (platform: string
     Directory.CreateDirectory(outDir) |> ignore
     match platform with
     | "fsharp" ->
+        // Single-file path (kept for single-file lllc build file.lll flows).
         let outPath = Path.Combine(outDir, name + ".fs")
         File.WriteAllText(outPath, code)
         let fsproj = $"""<Project Sdk="Microsoft.NET.Sdk">
@@ -89,6 +90,32 @@ let private writeTargetOutput (rootDir: string) (name: string) (platform: string
     | other ->
         eprintfn "lllc: unknown platform '%s', skipping" other
 
+/// Write multi-file F# output into bin/fsharp/ — one .fs per module plus Prelude.fs.
+/// Generates a .fsproj that lists every file in the correct compilation order.
+let private writeTargetOutputMultiFile (rootDir: string) (name: string) (files: (string * string) list) : unit =
+    let outDir = Path.Combine(rootDir, "bin", "fsharp")
+    Directory.CreateDirectory(outDir) |> ignore
+    for (fileName, content) in files do
+        File.WriteAllText(Path.Combine(outDir, fileName), content)
+    let compileItems =
+        files
+        |> List.map (fun (fn, _) -> sprintf "    <Compile Include=\"%s\" />" fn)
+        |> String.concat "\n"
+    let fsproj =
+        "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
+        + "  <PropertyGroup>\n"
+        + "    <OutputType>Exe</OutputType>\n"
+        + "    <TargetFramework>net10.0</TargetFramework>\n"
+        + "    <LangVersion>preview</LangVersion>\n"
+        + "  </PropertyGroup>\n"
+        + "  <ItemGroup>\n"
+        + compileItems + "\n"
+        + "  </ItemGroup>\n"
+        + "</Project>\n"
+    File.WriteAllText(Path.Combine(outDir, name + ".fsproj"), fsproj)
+    let outPath = Path.Combine(outDir, name + ".fsproj")
+    printfn "Built project '%s' [fsharp] → %s (%d files)" name outPath (List.length files)
+
 /// Build project rooted at rootDir (has lll.toml or ll.toml). Returns exit code.
 let private cmdBuildProject (rootDir: string) : int =
     try
@@ -104,16 +131,23 @@ let private cmdBuildProject (rootDir: string) : int =
                     else proj.Manifest.Platform
                 let mutable exitCode = 0
                 for platform in platforms do
-                    let codeResult =
-                        match platform with
-                        | "fsharp"     -> Ok (LLLang.Codegen.emitProjectModules tms)
-                        | "typescript" -> Ok (LLLang.CodegenTS.emitProjectModules tms)
-                        | "python"     -> Ok (LLLang.CodegenPy.emitProjectModules tms)
-                        | "java"       -> Ok (LLLang.CodegenJava.emitProjectModules tms)
-                        | other        -> Error $"unknown platform '{other}'"
-                    match codeResult with
-                    | Error msg -> eprintfn "lllc: %s" msg; exitCode <- 1
-                    | Ok code   -> writeTargetOutput rootDir proj.Manifest.Name platform code
+                    match platform with
+                    | "fsharp" ->
+                        // Multi-file: Prelude.fs + one .fs per module, valid .fsproj.
+                        let files = LLLang.Codegen.emitProjectFiles tms
+                        writeTargetOutputMultiFile rootDir proj.Manifest.Name files
+                    | "typescript" ->
+                        let code = LLLang.CodegenTS.emitProjectModules tms
+                        writeTargetOutput rootDir proj.Manifest.Name platform code
+                    | "python" ->
+                        let code = LLLang.CodegenPy.emitProjectModules tms
+                        writeTargetOutput rootDir proj.Manifest.Name platform code
+                    | "java" ->
+                        let code = LLLang.CodegenJava.emitProjectModules tms
+                        writeTargetOutput rootDir proj.Manifest.Name platform code
+                    | other ->
+                        eprintfn "lllc: unknown platform '%s', skipping" other
+                        exitCode <- 1
                 exitCode
     with ex ->
         eprintfn "lllc: %s" ex.Message

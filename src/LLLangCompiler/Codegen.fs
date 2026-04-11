@@ -591,5 +591,42 @@ let emitProjectModules (tms: TypedModule list) : string =
         let restStrs = rest |> List.map emitModuleNoPrelude
         String.concat "\n\n" (firstStr :: restStrs)
 
+/// Emit a project as separate .fs files — one per module plus a shared Prelude.fs.
+/// Returns a list of (filename, content) pairs ordered so that Prelude.fs comes first
+/// and modules follow in topo-sorted input order (dependencies first).
+/// Each module file opens "LLLang.Prelude" so prelude functions are in scope.
+let emitProjectFiles (tms: TypedModule list) : (string * string) list =
+    let preludeContent =
+        "module LLLang.Prelude\n\n" + assembleCombinedPrelude tms
+    let preludeFile = ("Prelude.fs", preludeContent)
+
+    let moduleFiles =
+        tms |> List.map (fun tm ->
+            let moduleName = String.concat "." tm.Path
+            let fileName   = (List.last tm.Path) + ".fs"
+            let header     = "module " + moduleName + "\n\nopen LLLang.Prelude"
+            let isTypeDecl (d: TypedDecl) = match d with TDType _ -> true | _ -> false
+            let typeDecls  = tm.Decls |> List.filter (fun (d, _) -> isTypeDecl d)
+            let otherDecls = tm.Decls |> List.filter (fun (d, _) -> not (isTypeDecl d))
+            let typeStr =
+                typeDecls
+                |> List.map (fun (d, _) -> emitDecl d)
+                |> List.filter (fun s -> s <> "")
+                |> String.concat "\n\n"
+            let otherStr =
+                groupDecls otherDecls
+                |> List.map emitDeclGroup
+                |> List.filter (fun s -> s <> "")
+                |> String.concat "\n\n"
+            let parts =
+                [ header
+                  (if typeStr  = "" then "" else typeStr)
+                  (if otherStr = "" then "" else otherStr) ]
+                |> List.filter (fun s -> s <> "")
+            let content = String.concat "\n\n" parts
+            (fileName, content))
+
+    preludeFile :: moduleFiles
+
 /// Expose the core F# prelude block as a public constant (for tests).
 let preludeBlock : string = fsharpPreludeCore
