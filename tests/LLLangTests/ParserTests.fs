@@ -89,6 +89,34 @@ let ``parse pipe chain: x -> f -> g`` () =
     // left-associative: (x -> f) -> g
     Assert.Equal(EPipe(EPipe(EVar "x", EVar "f"), EVar "g"), parseExprStr "x -> f -> g")
 
+[<Fact>]
+let ``parse pipe precedence: multiplication/addition are tighter than pipe`` () =
+    // (a + (b * c)) -> f
+    match parseExprStr "a + b * c -> f" with
+    | EPipe(EApp(EApp(EVar "+", EVar "a"), EApp(EApp(EVar "*", EVar "b"), EVar "c")), EVar "f") -> ()
+    | e -> failwith $"Wrong precedence: {e}"
+
+[<Fact>]
+let ``parse pipe precedence: cons is tighter than pipe`` () =
+    // (a + 1 :: rest) -> f
+    match parseExprStr "a + 1 :: rest -> f" with
+    | EPipe(ECons(EApp(EApp(EVar "+", EVar "a"), ELit (LInt 1L)), EVar "rest"), EVar "f") -> ()
+    | e -> failwith $"Wrong precedence: {e}"
+
+[<Fact>]
+let ``parse pipe with comparison on lhs`` () =
+    // (a + 1 == b) -> f
+    let lhs = EApp(EApp(EVar "+", EVar "a"), ELit (LInt 1L))
+    let expected = EPipe(EApp(EApp(EVar "==", lhs), EVar "b"), EVar "f")
+    Assert.Equal(expected, parseExprStr "a + 1 == b -> f")
+
+[<Fact>]
+let ``parse pipe with function application on both sides`` () =
+    // (f x) -> (g y)
+    match parseExprStr "f x -> g y" with
+    | EPipe(EApp(EVar "f", EVar "x"), EApp(EVar "g", EVar "y")) -> ()
+    | e -> failwith $"Wrong application precedence: {e}"
+
 // --- Lambda ---
 
 [<Fact>]
