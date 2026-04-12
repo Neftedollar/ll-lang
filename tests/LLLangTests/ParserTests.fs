@@ -215,6 +215,31 @@ let ``parse fn with two params`` () =
     | d -> failwith $"Expected DFn, got {d}"
 
 [<Fact>]
+let ``parse untyped fn param maps to TyVar ?`` () =
+    let src = "module M\nid(x) = x"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(sig', _) ->
+        match sig'.Params with
+        | [("x", TyVar "?")] -> ()
+        | actualParams -> failwith $"Expected [(\"x\", TyVar \"?\")], got {actualParams}"
+    | d -> failwith $"Expected DFn, got {d}"
+
+[<Fact>]
+let ``parse mixed typed and untyped fn params with constraints`` () =
+    let src = "module M\ncompose[Showable: Show](x)(y Int) = x"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(sig', _) ->
+        let expectedConstraints : (string * string) list = [("Showable", "Show")]
+        let expectedParams : (string * TypeExpr) list = [("x", TyVar "?"); ("y", TyName "Int")]
+        let actualConstraints : (string * string) list = sig'.Constraints
+        let actualParams : (string * TypeExpr) list = sig'.Params
+        Assert.Equal<(string * string) list>(expectedConstraints, actualConstraints)
+        Assert.Equal<(string * TypeExpr) list>(expectedParams, actualParams)
+    | d -> failwith $"Expected DFn, got {d}"
+
+[<Fact>]
 let ``parse top-level let`` () =
     let src = "module M\nlet pi = 3.14"
     let m = parseModuleStr src

@@ -350,7 +350,9 @@ let pModulePath : FParser<string list> =
 let pFnParam : FParser<Param> =
     pipe2
         (skipChar '(' >>. wsOrComment >>. pIdent)
-        (pTypeExpr .>> skipChar ')' .>> wsOrComment)
+        (wsOrComment >>.
+            ((skipChar ')' >>. wsOrComment >>% TyVar "?")
+             <|> (pTypeExpr .>> skipChar ')' .>> wsOrComment)))
         (fun name ty -> (name, ty))
 
 let pFnConstraint : FParser<string * string> =
