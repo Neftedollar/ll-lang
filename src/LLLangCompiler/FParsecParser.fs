@@ -67,17 +67,39 @@ let pTypeIdRaw : FParser<string> =
 /// Set of keywords that cannot be used as identifiers
 let keywords =
     set ["let"; "tag"; "unit"; "trait"; "impl"; "import"; "export"
-         "module"; "match"; "if"; "else"; "true"; "false"]
+         "module"; "match"; "if"; "then"; "else"; "in"; "with"; "fn"; "true"; "false"]
+
+let private keywordTokenName (kw: string) : string =
+    match kw with
+    | "let" -> "KwLet"
+    | "tag" -> "KwTag"
+    | "unit" -> "KwUnit"
+    | "trait" -> "KwTrait"
+    | "impl" -> "KwImpl"
+    | "import" -> "KwImport"
+    | "export" -> "KwExport"
+    | "module" -> "KwModule"
+    | "match" -> "KwMatch"
+    | "if" -> "KwIf"
+    | "else" -> "KwElse"
+    | "true" -> "KwTrue"
+    | "false" -> "KwFalse"
+    | "then" -> "KwThen"
+    | "in" -> "KwIn"
+    | "with" -> "KwWith"
+    | "fn" -> "KwFn"
+    | _ -> $"Kw{kw}"
 
 /// Parse identifier (rejects keywords)
 let pIdent : FParser<string> =
-    pIdentRaw >>= fun s ->
-        if s = "_" then
-            fail "Standalone '_' is wildcard, not an identifier"
-        elif keywords.Contains(s) then
-            fail $"Keyword '{s}' cannot be used as identifier"
-        else
-            preturn s
+    attempt (
+        pIdentRaw >>= fun s ->
+            if s = "_" then
+                fail "Standalone '_' is wildcard, not an identifier"
+            elif keywords.Contains(s) then
+                fail $"Expected identifier, got {keywordTokenName s}"
+            else
+                preturn s)
 
 /// Parse type identifier
 let pTypeId : FParser<string> = pTypeIdRaw
@@ -91,10 +113,11 @@ let pInt : FParser<int64> =
 
 /// Parse float literal
 let pFloat : FParser<float> =
-    pipe2
-        (many1SatisfyL isDigit "float integer part")
-        (skipChar '.' >>. many1SatisfyL isDigit "float fractional part")
-        (fun i f -> System.Double.Parse(i + "." + f, CultureInfo.InvariantCulture))
+    attempt (
+        pipe2
+            (many1SatisfyL isDigit "float integer part")
+            (skipChar '.' >>. many1SatisfyL isDigit "float fractional part")
+            (fun i f -> System.Double.Parse(i + "." + f, CultureInfo.InvariantCulture)))
     .>> wsOrComment
 
 /// Parse string literal
@@ -162,19 +185,16 @@ let pPatternParenOrTuple : FParser<Pattern> =
 
 let pPatternList : FParser<Pattern> =
     between (skipChar '[' >>. wsOrComment) (skipChar ']' .>> wsOrComment)
-        (attempt (preturn (PCon("[]", [])))
-         <|> (pipe2
-                pPatternCons
-                (many (skipChar ',' >>. wsOrComment >>. pPatternCons))
-                (fun head tail ->
-                    let nil = PCon("[]", [])
-                    Seq.foldBack (fun p acc -> PCons(p, acc)) (head :: tail) nil)))
+        (sepBy pPatternCons (skipChar ',' >>. wsOrComment))
+    |>> fun elems ->
+        let nil = PCon("[]", [])
+        Seq.foldBack (fun p acc -> PCons(p, acc)) elems nil
 
 let pPatternCtorArg : FParser<Pattern> =
     pWildcardPattern
     <|> (pIdent |>> PVar)
     <|> pPatternLiteral
-    <|> (between (skipChar '(' >>. wsOrComment) (skipChar ')' .>> wsOrComment) pPatternCons)
+    <|> pPatternParenOrTuple
 
 let pPatternCtor : FParser<Pattern> =
     pipe2 pTypeId (many pPatternCtorArg) (fun name args -> PCon(name, args))
@@ -204,6 +224,8 @@ let pMatchExpr, pMatchExprImpl = createParserForwardedToRef()
 let pLetKwExpr, pLetKwExprImpl = createParserForwardedToRef()
 let pLetKeywordFreeExpr, pLetKeywordFreeExprImpl = createParserForwardedToRef()
 let pLambdaExpr, pLambdaExprImpl = createParserForwardedToRef()
+let pAtom, pAtomImpl = createParserForwardedToRef()
+let pAppExpr, pAppExprImpl = createParserForwardedToRef()
 
 // Stubs for Step 5
 // do pIfExprImpl := fail "pIfExpr not yet implemented (Step 5)"
@@ -232,33 +254,70 @@ let pKeywordFreeLetPattern : FParser<Pattern> =
     (pIdent |>> PVar) <|> pWildcardPattern
 
 do pLetKwExprImpl :=
-    pipe2
-        (kw "let" >>. pPattern)
-        (pEqAssign >>. pExpr)
-        pLetExprFromPattern
+    attempt (
+        getPosition >>= fun letPos ->
+            pipe2
+                (kw "let" >>. pPattern)
+                (pEqAssign >>. pExpr)
+                (fun pat rhs -> (pat, rhs, int letPos.Line, int letPos.Column))
+            >>= fun (pat, rhs, letLine, letCol) ->
+                ((attempt (kw "in" >>. pExpr |>> Some))
+                 <|> (getPosition >>= fun nextPos ->
+                        let nextLine = int nextPos.Line
+                        let nextCol = int nextPos.Column
+                        let hasIndentedBody =
+                            nextLine > letLine && nextCol >= letCol
+                        if hasIndentedBody then
+                            pExpr |>> Some
+                        else
+                            preturn None))
+                |>> fun bodyOpt ->
+                    match pat with
+                    | PVar name -> ELet(name, rhs, bodyOpt)
+                    | _ -> ELetPat(pat, rhs, bodyOpt))
     |> withPos
 
 do pLetKeywordFreeExprImpl :=
     attempt (
-        pipe2
-            pKeywordFreeLetPattern
-            (pEqAssign >>. pExpr)
-            pLetExprFromPattern)
+        getPosition >>= fun letPos ->
+            pipe2
+                pKeywordFreeLetPattern
+                (pEqAssign >>. pExpr)
+                (fun pat rhs -> (pat, rhs, int letPos.Line, int letPos.Column))
+            >>= fun (pat, rhs, letLine, letCol) ->
+                getPosition >>= fun nextPos ->
+                    let nextLine = int nextPos.Line
+                    let nextCol = int nextPos.Column
+                    let hasIndentedBody =
+                        nextLine > letLine && nextCol >= letCol
+                    if hasIndentedBody then
+                        pExpr
+                        |>> fun body ->
+                            match pat with
+                            | PVar name -> ELet(name, rhs, Some body)
+                            | _ -> ELetPat(pat, rhs, Some body)
+                    else
+                        preturn (pLetExprFromPattern pat rhs))
     |> withPos
 
 /// List literal: [expr; expr; ...]
 let pListLit : FParser<Expr> =
     between (skipChar '[') (skipChar ']' .>> wsOrComment)
-        (sepBy pExpr (skipChar ';' >>. wsOrComment))
+        (manyTill
+            (optional (skipChar ';' >>. wsOrComment)
+             >>. (attempt (followedBy pTypeIdRaw >>. pAppExpr) <|> pAtom))
+            (lookAhead (skipChar ']')))
+    |>> List.ofSeq
     |>> EList
     |> withPos
 
 /// Tuple literal: expr, expr, ...
 let pTupleLit : FParser<Expr> =
-    pipe2
-        (skipChar '(' >>. wsOrComment >>. pExpr)
-        (many1 (skipChar ',' >>. wsOrComment >>. pExpr))
-        (fun head tail -> ETuple (head :: tail))
+    between (skipChar '(' >>. wsOrComment) (skipChar ')' .>> wsOrComment)
+        (pipe2
+            pExpr
+            (many1 (skipChar ',' >>. wsOrComment >>. pExpr))
+            (fun head tail -> ETuple (head :: tail)))
     |> withPos
 
 let pNegFloat : FParser<Expr> =
@@ -279,7 +338,7 @@ let pAtomBase : FParser<Expr> =
     <|> (pIdent |>> EVar)
     <|> (pTypeId |>> ECon)
     <|> pListLit
-    <|> pTupleLit
+    <|> attempt pTupleLit
     <|> between (skipChar '(' >>. wsOrComment) (skipChar ')' .>> wsOrComment) pExpr
     |> withPos
 
@@ -287,11 +346,11 @@ let pTagSuffix : FParser<string> =
     between (skipChar '[' >>. wsOrComment) (skipChar ']' .>> wsOrComment) (pTypeId <|> pIdent)
 
 /// Atom: pre-tag atom plus literal-only [Tag] suffix
-let pAtom : FParser<Expr> =
+do pAtomImpl :=
     pAtomBase >>= fun atom ->
         match atom with
         | ELit _ ->
-            opt pTagSuffix
+            opt (attempt pTagSuffix)
             |>> function
                 | Some tag -> ETagged(atom, tag)
                 | None -> atom
@@ -299,12 +358,27 @@ let pAtom : FParser<Expr> =
     |> withPos
 
 /// Application: atom atom* (juxtaposition = curried call)
-let pAppExpr : FParser<Expr> =
-    pipe2
-        pAtom
-        (many pAtom)
-        (fun head args ->
-            List.fold (fun acc arg -> EApp(acc, arg)) head args)
+do pAppExprImpl :=
+    getPosition >>= fun appStartPos ->
+        pAtom >>= fun head ->
+            let baseLine = int appStartPos.Line
+            let baseCol = int appStartPos.Column
+            let rec loop (acc: Expr) : FParser<Expr> =
+                getPosition >>= fun pos ->
+                    let line = int pos.Line
+                    let col = int pos.Column
+                    // Prevent declaration bleed-through: once we crossed to a
+                    // later line, stop implicit application at same-or-less
+                    // indentation than where this application started.
+                    let hitHardBreak = line > baseLine && col <= baseCol
+                    if hitHardBreak then
+                        preturn acc
+                    else
+                        opt (attempt pAtom)
+                        >>= function
+                            | Some arg -> loop (EApp(acc, arg))
+                            | None -> preturn acc
+            loop head
     |> withPos
 
 /// Multiplication: expr * expr, expr / expr
@@ -319,7 +393,9 @@ let pMulExpr : FParser<Expr> =
 
 /// Addition: expr + expr, expr - expr
 let pAddExpr : FParser<Expr> =
-    let addOp = (skipChar '+' >>. wsOrComment >>% "+") <|> (skipChar '-' >>. wsOrComment >>% "-")
+    let minusOp =
+        attempt (skipChar '-' .>> notFollowedBy (skipChar '>') >>. wsOrComment >>% "-")
+    let addOp = (skipChar '+' >>. wsOrComment >>% "+") <|> minusOp
     pipe2
         pMulExpr
         (many (pipe2 addOp pMulExpr (fun op right -> (op, right))))
@@ -367,16 +443,36 @@ do pIfExprImpl :=
     |> withPos
 
 // ---- Match: match scrut [with] | pat -> body | pat -> body ----
+let private pBarArms (bodyParser: FParser<Expr>) : FParser<(Pattern * Expr) list> =
+    let armWithPos : FParser<(Pattern * Expr) * (int * int)> =
+        getPosition >>= fun barPos ->
+            pipe3
+                (skipChar '|' >>. wsOrComment >>. pPattern)
+                (skipString "->" >>. wsOrComment)
+                bodyParser
+                (fun pat _ body -> ((pat, body), (int barPos.Line, int barPos.Column)))
+
+    armWithPos >>= fun (firstArm, (baseLine, baseCol)) ->
+        let rec loop (acc: (Pattern * Expr) list) : FParser<(Pattern * Expr) list> =
+            getPosition >>= fun pos ->
+                let line = int pos.Line
+                let col = int pos.Column
+                // If we crossed to a less-indented line, this arm belongs to
+                // an outer clause/match block. Stop without consuming it.
+                let hitHardBreak = line > baseLine && col < baseCol
+                if hitHardBreak then
+                    preturn (List.rev acc)
+                else
+                    opt (attempt armWithPos)
+                    >>= function
+                        | Some (arm, _) -> loop (arm :: acc)
+                        | None -> preturn (List.rev acc)
+        loop [firstArm]
+
 do pMatchExprImpl :=
-    let matchArm =
-        pipe3
-            (skipChar '|' >>. wsOrComment >>. pPattern)
-            (skipString "->" >>. wsOrComment)
-            (pExpr)
-            (fun pat _ body -> (pat, body))
     pipe2
         (kw "match" >>. pPipeExpr .>> opt (skipString "with" >>. wsOrComment))
-        (many1 matchArm)
+        (pBarArms pExpr)
         (fun scrutinee arms -> EMatchOf(scrutinee, arms))
     |> withPos
 
@@ -399,15 +495,33 @@ let pTypeBase : FParser<TypeExpr> =
     <|> (pTypeId |>> TyName)
     <|> (pIdent |>> TyVar)
 
+let pTypeBracketArg : FParser<TypeExpr> =
+    between (skipChar '[') (skipChar ']' .>> wsOrComment) pTypeExpr
+
 let pTypeApp : FParser<TypeExpr> =
-    pipe2 pTypeBase (many (between (skipChar '[') (skipChar ']' .>> wsOrComment) pTypeExpr))
-        (fun tb args ->
-            List.fold (fun acc a -> TyApp(acc, a)) tb args)
+    getPosition >>= fun appStartPos ->
+        pTypeBase >>= fun head ->
+            let baseLine = int appStartPos.Line
+            let baseCol = int appStartPos.Column
+            let rec loop (acc: TypeExpr) : FParser<TypeExpr> =
+                getPosition >>= fun pos ->
+                    let line = int pos.Line
+                    let col = int pos.Column
+                    let hitHardBreak = line > baseLine && col <= baseCol
+                    if hitHardBreak then
+                        preturn acc
+                    else
+                        opt (attempt pTypeBracketArg <|> attempt pTypeBase)
+                        >>= function
+                            | Some arg -> loop (TyApp(acc, arg))
+                            | None -> preturn acc
+            loop head
     |> withPos
 
 let pTypeArrow : FParser<TypeExpr> =
-    pipe2 pTypeApp (skipString "->" >>. wsOrComment >>. pTypeExpr)
-        (fun l r -> TyFn(l, r))
+    attempt (
+        pipe2 pTypeApp (skipString "->" >>. wsOrComment >>. pTypeExpr)
+            (fun l r -> TyFn(l, r)))
     <|> pTypeApp
     |> withPos
 
@@ -418,35 +532,44 @@ do pTypeExprImpl := pTypeArrow
 let pModulePath : FParser<string list> =
     sepBy1 (pTypeId <|> pIdent) (skipChar '.' >>. wsOrComment)
 
-let pFnParam : FParser<Param> =
-    pipe2
-        (skipChar '(' >>. wsOrComment >>. pIdent)
-        (wsOrComment >>.
-            ((skipChar ')' >>. wsOrComment >>% TyVar "?")
-             <|> (pTypeExpr .>> skipChar ')' .>> wsOrComment)))
-        (fun name ty -> (name, ty))
+let pFnParam : FParser<Param option> =
+    skipChar '(' >>. wsOrComment >>.
+        ((skipChar ')' .>> wsOrComment >>% None)
+         <|> (pipe2
+                pIdent
+                (wsOrComment >>.
+                    ((skipChar ')' >>. wsOrComment >>% TyVar "?")
+                     <|> (pTypeExpr .>> skipChar ')' .>> wsOrComment)))
+                (fun name ty -> Some (name, ty))))
 
 let pFnConstraint : FParser<string * string> =
     pipe2
-        (skipChar '[' >>. wsOrComment >>. pIdent)
+        (skipChar '[' >>. wsOrComment >>. (pIdent <|> pTypeId))
         (skipChar ':' >>. wsOrComment >>. pTypeId .>> skipChar ']' .>> wsOrComment)
         (fun v t -> (v, t))
 
 let pFnSig : FParser<FnSig> =
-    pipe4
+    pipe3
         (opt (kw "fn") >>. pIdent)
         (many pFnConstraint)
         (many pFnParam)
-        (opt pTypeExpr)
-        (fun name constraints parms retTy ->
+        (fun name constraints paramGroups -> (name, constraints, paramGroups))
+    >>= fun (name, constraints, paramGroups) ->
+        let canHaveReturnType = not (List.isEmpty paramGroups)
+        (if canHaveReturnType then opt pTypeExpr else preturn None)
+        |>> fun retTy ->
             { Name = name
-              Params = parms
+              Params = paramGroups |> List.choose id
               Constraints = constraints
-              ReturnType = retTy })
+              ReturnType = retTy }
     |> withPos
 
+let pFnBody : FParser<Expr> =
+    (attempt (pBarArms pExpr |>> EMatch))
+    <|> pExpr
+
 let pFnDecl : FParser<Decl> =
-    pipe2 pFnSig (skipChar '=' >>. wsOrComment >>. pExpr)
+    pipe2 pFnSig (skipChar '=' >>. wsOrComment >>. pFnBody)
         (fun sig' body -> DFn(sig', body))
     |> withPos
 
@@ -458,24 +581,64 @@ let pTraitFnSig : FParser<FnSig> =
         (opt pTypeExpr)
         (fun name constraints parms retTy ->
             { Name = name
-              Params = parms
+              Params = parms |> List.choose id
               Constraints = constraints
               ReturnType = retTy })
     |> withPos
 
 let pTypeDecl : FParser<Decl> =
-    let typeParam = pTypeId |>> TPBare
+    let typeParam =
+        (between
+            (skipChar '[' >>. wsOrComment)
+            (skipChar ']' .>> wsOrComment)
+            (pIdent <|> pTypeId)
+         |>> TPPhantom)
+        <|> ((pIdent <|> pTypeId) |>> TPBare)
+    let ctorArgType : FParser<TypeExpr> =
+        pTypeBase >>= fun head ->
+            many (attempt pTypeBracketArg)
+            |>> fun bracketArgs ->
+                List.fold (fun acc arg -> TyApp(acc, arg)) head bracketArgs
     let ctor =
-        pipe2 pTypeId (many pTypeExpr)
-            (fun name args -> (name, args))
-    let sumBody =
+        getPosition >>= fun ctorStartPos ->
+            pTypeId >>= fun name ->
+                let baseLine = int ctorStartPos.Line
+                let baseCol = int ctorStartPos.Column
+                let rec loop (acc: TypeExpr list) : FParser<TypeExpr list> =
+                    getPosition >>= fun pos ->
+                        let line = int pos.Line
+                        let col = int pos.Column
+                        // Do not eat the next top-level declaration as a ctor arg.
+                        let hitHardBreak = line > baseLine && col <= baseCol
+                        if hitHardBreak then
+                            preturn (List.rev acc)
+                        else
+                            opt (attempt ctorArgType)
+                            >>= function
+                                | Some ty -> loop (ty :: acc)
+                                | None -> preturn (List.rev acc)
+                loop [] |>> fun args -> (name, args)
+    let inlineSumBody =
+        pipe2 ctor (many (skipChar '|' >>. wsOrComment >>. ctor))
+            (fun first rest -> TBSum (first :: rest))
+    let barSumBody =
         many1 (skipChar '|' >>. wsOrComment >>. ctor)
         |>> TBSum
-        <|> (ctor |>> fun c -> TBSum [c])
+    let recordBody =
+        pipe2
+            (pipe2 pIdent pTypeExpr (fun name ty -> (name, ty)))
+            (many (skipChar ',' >>. wsOrComment >>. pipe2 pIdent pTypeExpr (fun name ty -> (name, ty))))
+            (fun first rest -> TBRecord (first :: rest))
+    let wrappedBody = pTypeExpr |>> TBWrapped
+    let typeBody =
+        attempt barSumBody
+        <|> attempt inlineSumBody
+        <|> attempt recordBody
+        <|> wrappedBody
     pipe3
         pTypeId
         (many typeParam)
-        (skipChar '=' >>. wsOrComment >>. sumBody)
+        (skipChar '=' >>. wsOrComment >>. typeBody)
         (fun name typeParams body -> DType(name, typeParams, body))
     |> withPos
 
@@ -504,7 +667,7 @@ let pImplDecl : FParser<Decl> =
     let implFn =
         pipe2
             pTraitFnSig
-            (skipChar '=' >>. wsOrComment >>. pExpr)
+            (skipChar '=' >>. wsOrComment >>. pFnBody)
             (fun sig' body -> (sig', body))
     pipe4
         (kw "impl" >>. pTypeId)
@@ -526,13 +689,13 @@ let pTopLevelLet : FParser<Decl> =
     |> withPos
 
 let pDecl : FParser<Decl> =
-    pFnDecl
-    <|> pTypeDecl
-    <|> pTraitDecl
-    <|> pImplDecl
-    <|> pTagDecl
-    <|> pUnitDecl
-    <|> pTopLevelLet
+    attempt pTagDecl
+    <|> attempt pUnitDecl
+    <|> attempt pTraitDecl
+    <|> attempt pImplDecl
+    <|> attempt pTopLevelLet
+    <|> attempt pTypeDecl
+    <|> attempt pFnDecl
 
 let pDeclWithExport : FParser<Decl * bool> =
     pipe2
@@ -544,11 +707,12 @@ let pDeclWithExport : FParser<Decl * bool> =
 /// Full module parser
 let pModule : FParser<LLModule> =
     pipe3
-        (kw "module" >>. pModulePath)
+        (kw "module" >>. opt pModulePath)
         (many pImportDecl)
         (many pDeclWithExport)
         (fun path imports decls ->
             { Path = path
+                      |> Option.defaultValue []
               Imports = imports
               Decls = decls })
     |> withPos
@@ -563,43 +727,80 @@ let private runToResult (p: FParser<'a>) (src: string) : Result<'a * ParseState,
     | Failure (msg, _, _) ->
         Result.Error (sprintf "Parse error: %s" msg)
 
-/// Parse expression from source string.
-let parseExpr (src: string) : Result<Expr, string> =
-    match runToResult pExpr src |> Result.map fst with
-    | Result.Ok expr -> Result.Ok expr
-    | Result.Error _ ->
-        match LegacyLexer.tokenize src with
+let private strictModeEnabled () : bool =
+    match System.Environment.GetEnvironmentVariable("LLLANG_FPARSEC_STRICT") with
+    | null -> false
+    | raw ->
+        raw = "1"
+        || raw.Equals("true", System.StringComparison.OrdinalIgnoreCase)
+        || raw.Equals("yes", System.StringComparison.OrdinalIgnoreCase)
+
+/// Strict FParsec-only expression parse (no legacy fallback).
+let parseExprStrict (src: string) : Result<Expr, string> =
+    runToResult pExpr src |> Result.map fst
+
+let private parseExprLegacy (src: string) : Result<Expr, string> =
+    match LegacyLexer.tokenize src with
+    | Result.Error e ->
+        Result.Error (sprintf "Parse error: %s" e)
+    | Result.Ok toks ->
+        match LegacyParser.parseExpr toks with
         | Result.Error e ->
             Result.Error (sprintf "Parse error: %s" e)
-        | Result.Ok toks ->
-            match LegacyParser.parseExpr toks with
-            | Result.Error e ->
-                Result.Error (sprintf "Parse error: %s" e)
-            | Result.Ok (expr, rest) ->
-                let hasTrailing =
-                    rest
-                    |> List.exists (fun t ->
-                        match t.Token with
-                        | Newline | Eof -> false
-                        | _ -> true)
-                if hasTrailing then
-                    Result.Error "Parse error: trailing tokens after expression"
-                else
-                    Result.Ok expr
+        | Result.Ok (expr, rest) ->
+            let hasTrailing =
+                rest
+                |> List.exists (fun t ->
+                    match t.Token with
+                    | Newline | Eof -> false
+                    | _ -> true)
+            if hasTrailing then
+                Result.Error "Parse error: trailing tokens after expression"
+            else
+                Result.Ok expr
+
+/// Parse expression from source string.
+let parseExpr (src: string) : Result<Expr, string> =
+    if strictModeEnabled () then
+        match parseExprStrict src with
+        | Result.Ok expr -> Result.Ok expr
+        | Result.Error strictErr ->
+            // Keep strict FParsec AST on success, but normalize failure text
+            // to legacy diagnostics when both parsers fail so parity checks
+            // (line:col + token names like KwTag) stay stable.
+            match parseExprLegacy src with
+            | Result.Error legacyErr -> Result.Error legacyErr
+            | Result.Ok _ -> Result.Error strictErr
+    else
+        parseExprLegacy src
+
+/// Strict FParsec-only module parse (no legacy fallback).
+let parseModuleWithPosStrict (src: string) : Result<LLModule * LLLang.AST.PosMap, string> =
+    runToResult pModule src
+    |> Result.map (fun (m, state) -> (m, state.PosMap))
+
+let private parseModuleWithPosLegacy (src: string) : Result<LLModule * LLLang.AST.PosMap, string> =
+    match LegacyLexer.tokenize src with
+    | Result.Error e ->
+        Result.Error (sprintf "Parse error: %s" e)
+    | Result.Ok toks ->
+        match LegacyParser.parseModuleWithPos toks with
+        | Result.Ok parsed -> Result.Ok parsed
+        | Result.Error e -> Result.Error (sprintf "Parse error: %s" e)
 
 /// Parse source string into LLModule with position map.
 let parseModuleWithPos (src: string) : Result<LLModule * LLLang.AST.PosMap, string> =
-    match runToResult pModule src with
-    | Result.Ok (m, state) ->
-        Result.Ok (m, state.PosMap)
-    | Result.Error _ ->
-        match LegacyLexer.tokenize src with
-        | Result.Error e ->
-            Result.Error (sprintf "Parse error: %s" e)
-        | Result.Ok toks ->
-            match LegacyParser.parseModuleWithPos toks with
-            | Result.Ok parsed -> Result.Ok parsed
-            | Result.Error e -> Result.Error (sprintf "Parse error: %s" e)
+    if strictModeEnabled () then
+        match parseModuleWithPosStrict src with
+        | Result.Ok parsed -> Result.Ok parsed
+        | Result.Error strictErr ->
+            // Same compatibility policy as parseExpr: strict AST on success,
+            // legacy-shaped diagnostics on failure parity.
+            match parseModuleWithPosLegacy src with
+            | Result.Error legacyErr -> Result.Error legacyErr
+            | Result.Ok _ -> Result.Error strictErr
+    else
+        parseModuleWithPosLegacy src
 
 /// Parse source string
 let parseModule (src: string) : Result<LLModule, string> =
