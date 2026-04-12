@@ -23,6 +23,7 @@
   <ItemGroup>
     <Compile Include="LexerTests.fs" />
     <Compile Include="ParserTests.fs" />
+    <Compile Include="ParserParityTests.fs" />
     <Compile Include="ElaboratorTests.fs" />
     <Compile Include="HMInferTests.fs" />
     <Compile Include="CodegenTests.fs" />
