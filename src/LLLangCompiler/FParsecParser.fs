@@ -72,7 +72,9 @@ let keywords =
 /// Parse identifier (rejects keywords)
 let pIdent : FParser<string> =
     pIdentRaw >>= fun s ->
-        if keywords.Contains(s) then
+        if s = "_" then
+            fail "Standalone '_' is wildcard, not an identifier"
+        elif keywords.Contains(s) then
             fail $"Keyword '{s}' cannot be used as identifier"
         else
             preturn s
@@ -134,14 +136,63 @@ let pBool : FParser<bool> =
 
 // ---- Patterns (Step 6) ----
 
-/// Pattern: Constructor arg* | variable | _
-let pPattern : FParser<Pattern> =
-    let conArg = pIdent |>> PVar
-    let conPat =
-        pipe2 pTypeId (many conArg)
-            (fun name args -> PCon(name, args))
-    (conPat <|> (pIdent |>> PVar) <|> (skipChar '_' >>. wsOrComment >>% PWild))
+let pPattern, pPatternImpl = createParserForwardedToRef()
+let pPatternCons, pPatternConsImpl = createParserForwardedToRef()
+let pPatternAtom, pPatternAtomImpl = createParserForwardedToRef()
+
+let pWildcardPattern : FParser<Pattern> =
+    attempt (skipChar '_' >>. notFollowedBy (satisfy isIdentCont) >>. wsOrComment >>% PWild)
+
+let pPatternLiteral : FParser<Pattern> =
+    (pInt |>> (fun n -> PLit (LInt n)))
+    <|> (pFloat |>> (fun f -> PLit (LFloat f)))
+    <|> (pStrLit |>> (fun s -> PLit (LStr s)))
+    <|> (pCharLit |>> (fun c -> PLit (LChar c)))
+    <|> (pBool |>> (fun b -> PLit (LBool b)))
+
+let pPatternParenOrTuple : FParser<Pattern> =
+    between (skipChar '(' >>. wsOrComment) (skipChar ')' .>> wsOrComment)
+        (pipe2
+            pPatternCons
+            (many (skipChar ',' >>. wsOrComment >>. pPatternCons))
+            (fun head tail ->
+                match tail with
+                | [] -> head
+                | _ -> PTuple (head :: tail)))
+
+let pPatternList : FParser<Pattern> =
+    between (skipChar '[' >>. wsOrComment) (skipChar ']' .>> wsOrComment)
+        (attempt (preturn (PCon("[]", [])))
+         <|> (pipe2
+                pPatternCons
+                (many (skipChar ',' >>. wsOrComment >>. pPatternCons))
+                (fun head tail ->
+                    let nil = PCon("[]", [])
+                    Seq.foldBack (fun p acc -> PCons(p, acc)) (head :: tail) nil)))
+
+let pPatternCtorArg : FParser<Pattern> =
+    pWildcardPattern
+    <|> (pIdent |>> PVar)
+    <|> pPatternLiteral
+    <|> (between (skipChar '(' >>. wsOrComment) (skipChar ')' .>> wsOrComment) pPatternCons)
+
+let pPatternCtor : FParser<Pattern> =
+    pipe2 pTypeId (many pPatternCtorArg) (fun name args -> PCon(name, args))
+
+do pPatternAtomImpl :=
+    (pWildcardPattern
+     <|> (pIdent |>> PVar)
+     <|> pPatternLiteral
+     <|> pPatternList
+     <|> pPatternCtor
+     <|> pPatternParenOrTuple)
     |> withPos
+
+do pPatternConsImpl :=
+    chainr1 pPatternAtom (skipString "::" >>. wsOrComment >>% (fun l r -> PCons(l, r)))
+    |> withPos
+
+do pPatternImpl := pPatternCons |> withPos
 
 // ---- Expressions ----
 // Order: pListLit/pTupleLit → pAtom → pAppExpr → pMulExpr → pAddExpr → pConsExpr → pCmpExpr → pPipeExpr → pExpr
@@ -151,6 +202,7 @@ let pExpr, pExprImpl = createParserForwardedToRef()
 let pIfExpr, pIfExprImpl = createParserForwardedToRef()
 let pMatchExpr, pMatchExprImpl = createParserForwardedToRef()
 let pLetKwExpr, pLetKwExprImpl = createParserForwardedToRef()
+let pLetKeywordFreeExpr, pLetKeywordFreeExprImpl = createParserForwardedToRef()
 let pLambdaExpr, pLambdaExprImpl = createParserForwardedToRef()
 
 // Stubs for Step 5
@@ -168,12 +220,30 @@ do pLambdaExprImpl :=
     |> withPos
 
 // ---- Let binding: let x = e1 in e2 ----
+let pEqAssign : FParser<unit> =
+    skipChar '=' .>> notFollowedBy (pchar '=') .>> wsOrComment
+
+let pLetExprFromPattern (pat: Pattern) (e1: Expr) : Expr =
+    match pat with
+    | PVar name -> ELet(name, e1, None)
+    | _ -> ELetPat(pat, e1, None)
+
+let pKeywordFreeLetPattern : FParser<Pattern> =
+    (pIdent |>> PVar) <|> pWildcardPattern
+
 do pLetKwExprImpl :=
-    pipe3
-        (kw "let" >>. pIdent)
-        (skipChar '=' >>. wsOrComment >>. pExpr)
-        (kw "in" >>. pExpr)
-        (fun name e1 body -> ELet(name, e1, Some body))
+    pipe2
+        (kw "let" >>. pPattern)
+        (pEqAssign >>. pExpr)
+        pLetExprFromPattern
+    |> withPos
+
+do pLetKeywordFreeExprImpl :=
+    attempt (
+        pipe2
+            pKeywordFreeLetPattern
+            (pEqAssign >>. pExpr)
+            pLetExprFromPattern)
     |> withPos
 
 /// List literal: [expr; expr; ...]
@@ -315,6 +385,7 @@ do pExprImpl :=
     pIfExpr
     <|> pMatchExpr
     <|> pLetKwExpr
+    <|> pLetKeywordFreeExpr
     <|> pLambdaExpr
     <|> pPipeExpr
 
@@ -446,9 +517,12 @@ let pImplDecl : FParser<Decl> =
 
 let pTopLevelLet : FParser<Decl> =
     pipe2
-        (kw "let" >>. pIdent)
-        (skipChar '=' >>. wsOrComment >>. pExpr)
-        (fun name body -> DLet(name, body))
+        (kw "let" >>. pPattern)
+        (pEqAssign >>. pExpr)
+        (fun pat body ->
+            match pat with
+            | PVar name -> DLet(name, body)
+            | _ -> DLetPat(pat, body))
     |> withPos
 
 let pDecl : FParser<Decl> =

@@ -140,6 +140,16 @@ let ``parse if expression`` () =
 let ``parse let without in`` () =
     Assert.Equal(ELet("x", ELit (LInt 5L), None), parseExprStr "let x = 5")
 
+[<Fact>]
+let ``parse keyword-free let variable`` () =
+    Assert.Equal(ELet("x", ELit (LInt 5L), None), parseExprStr "x = 5")
+
+[<Fact>]
+let ``parse keyword-free wildcard let`` () =
+    match parseExprStr "_ = e" with
+    | ELetPat(PWild, EVar "e", None) -> ()
+    | e -> failwith $"Expected ELetPat PWild = e, got {e}"
+
 // --- Tagged literal ---
 
 [<Fact>]
@@ -578,6 +588,14 @@ let ``parse match expression with cons pattern`` () =
                 (PWild, ELit (LInt 0L))]) -> ()
     | e -> failwith $"Expected EMatchOf with PCons branch, got {e}"
 
+[<Fact>]
+let ``parse match with empty and non-empty list patterns`` () =
+    match parseExprStr "match xs | [] -> 0 | [a, b] -> a" with
+    | EMatchOf(EVar "xs",
+               [(PCon("[]", []), ELit (LInt 0L));
+                (PCons(PVar "a", PCons(PVar "b", PCon("[]", []))), EVar "a")]) -> ()
+    | e -> failwith $"Expected EMatchOf with [] and [a, b] branches, got {e}"
+
 // --- Phase 7.1.6: let pattern destructuring ---
 
 [<Fact>]
@@ -593,6 +611,12 @@ let ``parse let with wildcard pattern`` () =
     | e -> failwith $"Expected ELetPat PWild = e, got {e}"
 
 [<Fact>]
+let ``parse let with list pattern sugar`` () =
+    match parseExprStr "let [a, b] = pair" with
+    | ELetPat(PCons(PVar "a", PCons(PVar "b", PCon("[]", []))), EVar "pair", None) -> ()
+    | e -> failwith $"Expected ELetPat [a, b] = pair, got {e}"
+
+[<Fact>]
 let ``parse let with simple var still produces ELet (not ELetPat)`` () =
     // Regression: a single PVar should fall back to the existing ELet form.
     match parseExprStr "let x = 5" with
@@ -606,6 +630,14 @@ let ``parse top-level let with tuple pattern produces DLetPat`` () =
     match fst m.Decls[0] with
     | DLetPat(PTuple [PVar "a"; PVar "b"], EVar "pair") -> ()
     | d -> failwith $"Expected DLetPat (a, b) = pair, got {d}"
+
+[<Fact>]
+let ``parse top-level let with list pattern produces DLetPat`` () =
+    let src = "module M\nlet [a, b] = pair"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DLetPat(PCons(PVar "a", PCons(PVar "b", PCon("[]", []))), EVar "pair") -> ()
+    | d -> failwith $"Expected DLetPat [a, b] = pair, got {d}"
 
 [<Fact>]
 let ``parse top-level let with simple var still produces DLet`` () =

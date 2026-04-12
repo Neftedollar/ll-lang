@@ -95,8 +95,10 @@ let private assertModuleParity (src: string) =
 [<Theory>]
 [<InlineData("42")>]
 [<InlineData("let x = 1")>]
+[<InlineData("x = 1")>]
 [<InlineData("\\x y. x + y")>]
 [<InlineData("match xs | [] -> 0 | h :: t -> 1")>]
+[<InlineData("match xs | [] -> 0 | [a, b] -> a")>]
 [<InlineData("if x\n  1\nelse 2")>]
 let ``expression parser parity: success cases`` (src: string) =
     assertExprParity src
@@ -112,6 +114,7 @@ let ``expression parser parity: failure cases`` (src: string) =
 [<InlineData("valid", "01-basics.lll")>]
 [<InlineData("valid", "14-exprparser-real.lll")>]
 [<InlineData("valid", "15-moduleparser-real.lll")>]
+[<InlineData("valid", "20a-bootstrap-input.lll")>]
 [<InlineData("invalid", "E001-type-mismatch.lll")>]
 [<InlineData("invalid", "E005-tag-violation.lll")>]
 let ``module parser parity: selected corpus files`` (group: string) (fileName: string) =
