@@ -18,8 +18,11 @@ jobs:
       - name: Doc Contract Check
         run: ./tools/check-doc-contract.sh
         working-directory: .
+      - name: Nullability Suppression Guard
+        run: ./tools/check-no-fs3261-suppression.sh
+        working-directory: .
       - name: Build
-        run: dotnet build --nologo -warnaserror
+        run: dotnet clean --nologo && dotnet build --nologo -warnaserror
         working-directory: .
       - name: Test
         run: dotnet test --no-build --verbosity normal
