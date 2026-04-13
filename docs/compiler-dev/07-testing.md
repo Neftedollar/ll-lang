@@ -42,6 +42,7 @@ Bootstrap / self-hosting corpus coverage:
 dotnet test                            # whole suite
 dotnet test --filter LexerTests        # one file
 dotnet test --filter "ClassName.Method" # one test
+./tools/update-fixpoint-snapshot.sh    # refresh compiler1-latest.fs from self-compile output
 ```
 
 Most tests are pure in-memory — no temp files, no subprocess. The
@@ -49,6 +50,30 @@ Most tests are pure in-memory — no temp files, no subprocess. The
 exception: they shell out to `lllc run` via
 `System.Diagnostics.Process` to execute compiled F# and compare
 stdout. The full suite finishes in ~40s on a warm build.
+
+## Fixpoint snapshot workflow
+
+`BootstrapCompilerTests.fs` contains a strict regression test that compares
+bootstrap self-compile output to
+`docs/compiler-dev/fixpoint-snapshots/compiler1-latest.fs`.
+
+When a deliberate bootstrap frontend/codegen change legitimately changes
+emitted output, refresh the snapshot with:
+
+```bash
+./tools/update-fixpoint-snapshot.sh
+dotnet test --filter "self-compile output matches fixpoint snapshot"
+dotnet test
+```
+
+The updater script:
+
+1. Temporarily swaps `20a-bootstrap-input.lll` with
+   `20-bootstrap-compiler.lll`.
+2. Runs `lllc run spec/examples/valid/20-bootstrap-compiler.lll`.
+3. Writes the output to `compiler1-latest.fs`.
+4. Normalizes line endings to LF with exactly one trailing newline.
+5. Restores the shared fixture file.
 
 ## Helper patterns
 
