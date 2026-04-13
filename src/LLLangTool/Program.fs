@@ -16,6 +16,48 @@ let private printErrors (es: LLError list) =
     for e in es do
         eprintfn "%s" e.Message
 
+let private startProcessOrFail (psi: ProcessStartInfo) : Process =
+    match Process.Start(psi) with
+    | null -> failwith "Failed to start process."
+    | proc -> proc
+
+let private tryGetEnv (name: string) : string option =
+    match Environment.GetEnvironmentVariable(name) with
+    | null -> None
+    | value -> Some value
+
+let private directoryNameOrCurrent (path: string) : string =
+    match Path.GetDirectoryName(path) with
+    | null
+    | "" -> Directory.GetCurrentDirectory()
+    | dir -> dir
+
+let private tryParentDir (dir: string) : string option =
+    match Directory.GetParent(dir) with
+    | null -> None
+    | parent when parent.FullName = dir -> None
+    | parent -> Some parent.FullName
+
+let private fileNameOrEmpty (path: string) : string =
+    match Path.GetFileName(path) with
+    | null -> ""
+    | value -> value
+
+let private fileNameWithoutExtensionOrEmpty (path: string) : string =
+    match Path.GetFileNameWithoutExtension(path) with
+    | null -> ""
+    | value -> value
+
+let private extensionOrEmpty (path: string) : string =
+    match Path.GetExtension(path) with
+    | null -> ""
+    | value -> value
+
+let private changeExtensionOrInput (path: string) (ext: string) : string =
+    match Path.ChangeExtension(path, ext) with
+    | null -> path
+    | value -> value
+
 /// Parse --target flag from args list. Returns (target override, remaining args).
 let private parseTarget (args: string list) : Result<Target option * string list, string> =
     match args with
@@ -64,8 +106,8 @@ type private EmittedArtifact = {
 }
 
 let private templateOutputFileName (projectName: string) (templatePath: string) : string =
-    let fileName = Path.GetFileNameWithoutExtension(templatePath) // strip ".tmpl"
-    let ext = Path.GetExtension(fileName).ToLowerInvariant()
+    let fileName = fileNameWithoutExtensionOrEmpty templatePath // strip ".tmpl"
+    let ext = extensionOrEmpty fileName |> fun x -> x.ToLowerInvariant()
     match ext with
     | ".fsproj"
     | ".csproj" -> projectName + ext
@@ -75,7 +117,7 @@ let private writeRuntimeTemplateIfAvailable (projectName: string) (target: Targe
     match tryResolveRuntimeTemplate target with
     | None -> None
     | Some templatePath ->
-        let mainFileStem = Path.GetFileNameWithoutExtension(mainFileName)
+        let mainFileStem = fileNameWithoutExtensionOrEmpty mainFileName
         let rendered =
             File.ReadAllText(templatePath)
                 .Replace("{project_name}", projectName)
@@ -103,7 +145,7 @@ let private withJavaCommandMetadata (artifact: EmittedArtifact) : EmittedArtifac
                 let expectedFileName = className + ".java"
                 let expectedPath = Path.Combine(artifact.OutDir, expectedFileName)
                 let javaSourcePath =
-                    if StringComparer.Ordinal.Equals(Path.GetFileName(artifact.MainFilePath), expectedFileName) then
+                    if StringComparer.Ordinal.Equals(fileNameOrEmpty artifact.MainFilePath, expectedFileName) then
                         artifact.MainFilePath
                     else
                         let writeMirror =
@@ -126,12 +168,12 @@ let private renderSdkCommand (template: string) (artifact: EmittedArtifact) : st
         "'" + s.Replace("'", "'\"'\"'") + "'"
     let projectFile = artifact.ProjectFilePath |> Option.defaultValue artifact.MainFilePath
     let javaSourceFile = artifact.JavaSourceFilePath |> Option.defaultValue artifact.MainFilePath
-    let mainFileStem = Path.Combine(artifact.OutDir, Path.GetFileNameWithoutExtension(artifact.MainFilePath))
+    let mainFileStem = Path.Combine(artifact.OutDir, fileNameWithoutExtensionOrEmpty artifact.MainFilePath)
     let mainJsFile = mainFileStem + ".js"
     let mainBcFile = mainFileStem + ".bc"
     let javaClassName =
         artifact.JavaClassName
-        |> Option.defaultValue (Path.GetFileNameWithoutExtension javaSourceFile)
+        |> Option.defaultValue (fileNameWithoutExtensionOrEmpty javaSourceFile)
     template
         .Replace("{project_file}", projectFile)
         .Replace("{main_file}", artifact.MainFilePath)
@@ -167,13 +209,11 @@ let private cmdBuild (path: string) (target: Target) : int =
         let src = File.ReadAllText(path)
         match compileTarget target src with
         | Ok out ->
-            let outPath = Path.ChangeExtension(path, targetExt target)
+            let outPath = changeExtensionOrInput path (targetExt target)
             File.WriteAllText(outPath, out)
-            let outDir =
-                let d = Path.GetDirectoryName(outPath)
-                if String.IsNullOrWhiteSpace(d) then Directory.GetCurrentDirectory() else d
-            let stem = Path.GetFileName(outPath)
-            let projectStem = Path.GetFileNameWithoutExtension(outPath)
+            let outDir = directoryNameOrCurrent outPath
+            let stem = fileNameOrEmpty outPath
+            let projectStem = fileNameWithoutExtensionOrEmpty outPath
             let templatePath = writeRuntimeTemplateIfAvailable projectStem target outDir stem
             Console.WriteLine("Built " + stem)
             let artifact =
@@ -203,7 +243,7 @@ let private writeTargetOutput (rootDir: string) (name: string) (target: Target) 
     let writeMainAndTemplate (ext: string) =
         let outPath = Path.Combine(outDir, name + ext)
         File.WriteAllText(outPath, code)
-        let templatePath = writeRuntimeTemplateIfAvailable name target outDir (Path.GetFileName(outPath))
+        let templatePath = writeRuntimeTemplateIfAvailable name target outDir (fileNameOrEmpty outPath)
         outPath, templatePath
     match target with
     | FSharp ->
@@ -384,7 +424,7 @@ let private cmdCheckFile (path: string) (target: Target) : int =
         let src = File.ReadAllText(path)
         match checkTarget target src with
         | Ok () ->
-            Console.WriteLine("Checked " + Path.GetFileName(path) + " [" + targetPlatformName target + "]")
+            Console.WriteLine("Checked " + fileNameOrEmpty path + " [" + targetPlatformName target + "]")
             0
         | Error es ->
             printErrors es
@@ -437,11 +477,9 @@ let private findProjectRoot (startDir: string) : string option =
             found <- true
             result <- Some dir
         else
-            let parent = Directory.GetParent(dir)
-            if parent = null || parent.FullName = dir then
-                found <- true // no more parents
-            else
-                dir <- parent.FullName
+            match tryParentDir dir with
+            | None -> found <- true // no more parents
+            | Some parentDir -> dir <- parentDir
     result
 
 // ---- Auto-resolve imports for `lllc run` ------------------------------------
@@ -449,23 +487,37 @@ let private findProjectRoot (startDir: string) : string option =
 /// Find the stdlib directory by trying several strategies.
 let private findStdlibDir (mainFilePath: string) : string option =
     // Strategy 1: LL_STDLIB_PATH environment variable
-    let envPath = Environment.GetEnvironmentVariable("LL_STDLIB_PATH")
-    if not (String.IsNullOrEmpty envPath) && Directory.Exists(envPath) then
-        Some envPath
-    else
-    // Strategy 2: Walk up from the compiler binary looking for stdlib/src/
-    let compilerBin = Path.GetDirectoryName(Reflection.Assembly.GetExecutingAssembly().Location)
-    let candidates =
-        [ // binary is typically at src/LLLangTool/bin/Debug/net10.0/ → 5 levels up is repo root
-          Path.GetFullPath(Path.Combine(compilerBin, "..", "..", "..", "..", "..", "stdlib", "src"))
-          Path.GetFullPath(Path.Combine(compilerBin, "..", "..", "..", "..", "stdlib", "src"))
-          Path.GetFullPath(Path.Combine(compilerBin, "..", "..", "..", "stdlib", "src"))
-          // Strategy 3: relative to main file's directory
-          Path.GetFullPath(Path.Combine(Path.GetDirectoryName(mainFilePath), "stdlib", "src"))
-          // Strategy 4: relative to current working directory
-          Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "stdlib", "src"))
-        ]
-    candidates |> List.tryFind Directory.Exists
+    let envPath = tryGetEnv "LL_STDLIB_PATH"
+    match envPath with
+    | Some p when Directory.Exists(p) -> Some p
+    | _ ->
+        // Strategy 2: Walk up from app base directory looking for stdlib/src/.
+        // Assembly.Location can be empty in single-file/AOT deployments.
+        let compilerBin = AppContext.BaseDirectory
+        let fromMainAncestors =
+            let startDir = directoryNameOrCurrent mainFilePath
+            let rec loop (dir: string) =
+                let cand = Path.Combine(dir, "stdlib", "src")
+                if Directory.Exists(cand) then Some cand
+                else
+                    match tryParentDir dir with
+                    | None -> None
+                    | Some parentDir -> loop parentDir
+            loop startDir
+
+        let candidates =
+            [ // binary is typically at src/LLLangTool/bin/Debug/net10.0/ → 5 levels up is repo root
+              Path.GetFullPath(Path.Combine(compilerBin, "..", "..", "..", "..", "..", "stdlib", "src"))
+              Path.GetFullPath(Path.Combine(compilerBin, "..", "..", "..", "..", "stdlib", "src"))
+              Path.GetFullPath(Path.Combine(compilerBin, "..", "..", "..", "stdlib", "src"))
+              // Strategy 3: relative to main file's directory
+              Path.GetFullPath(Path.Combine(directoryNameOrCurrent mainFilePath, "stdlib", "src"))
+              // Strategy 4: relative to current working directory
+              Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "stdlib", "src"))
+            ]
+        match fromMainAncestors with
+        | Some p -> Some p
+        | None -> candidates |> List.tryFind Directory.Exists
 
 /// Parse imports out of a .lll source string without failing if there are errors.
 let private extractImports (src: string) : string list list =
@@ -479,7 +531,7 @@ let private extractImports (src: string) : string list list =
 /// Given an import path like ["Std"; "Maybe"], find the file on disk.
 /// Searches stdlib/src/, .ll-deps/ relative to mainFileDir, and mainFileDir itself.
 let private resolveImport (mainFilePath: string) (importPath: string list) : string option =
-    let mainFileDir = Path.GetDirectoryName(mainFilePath)
+    let mainFileDir = directoryNameOrCurrent mainFilePath
     // Derive filename: last segment + .lll
     let fileName = (List.last importPath) + ".lll"
     // For stdlib: prefix is "Std" → project name is "std" → look in stdlib/src/
@@ -545,15 +597,10 @@ let private resolveRunImports (mainFilePath: string) (mainSrc: string) : Result<
                                 | Ok () ->
                                     // Register the dep file
                                     let modulePath =
-                                        match tokenize depSrc with
-                                        | Ok toks ->
-                                            match parseModuleWithPos toks with
-                                            | Ok (m, _) when m.Path <> [] -> m.Path
-                                            | _ ->
-                                                let stem = Path.GetFileNameWithoutExtension(depPath)
-                                                [stem]
-                                        | Error _ ->
-                                            let stem = Path.GetFileNameWithoutExtension(depPath)
+                                        match parseModuleWithPos depSrc with
+                                        | Ok (m, _) when m.Path <> [] -> m.Path
+                                        | _ ->
+                                            let stem = fileNameWithoutExtensionOrEmpty depPath
                                             [stem]
                                     if not (Map.containsKey absDepPath loadedMap) then
                                         loadedMap <- Map.add absDepPath { ModulePath = modulePath; FilePath = absDepPath; Src = depSrc } loadedMap
@@ -563,15 +610,10 @@ let private resolveRunImports (mainFilePath: string) (mainSrc: string) : Result<
                 depGraph <- Map.add absPath depPaths depGraph
                 // Register main file if not already
                 let modulePath =
-                    match tokenize src with
-                    | Ok toks ->
-                        match parseModuleWithPos toks with
-                        | Ok (m, _) when m.Path <> [] -> m.Path
-                        | _ ->
-                            let stem = Path.GetFileNameWithoutExtension(filePath)
-                            [stem]
-                    | Error _ ->
-                        let stem = Path.GetFileNameWithoutExtension(filePath)
+                    match parseModuleWithPos src with
+                    | Ok (m, _) when m.Path <> [] -> m.Path
+                    | _ ->
+                        let stem = fileNameWithoutExtensionOrEmpty filePath
                         [stem]
                 if not (Map.containsKey absPath loadedMap) then
                     loadedMap <- Map.add absPath { ModulePath = modulePath; FilePath = absPath; Src = src } loadedMap
@@ -625,12 +667,10 @@ let private cmdBuildFile (path: string) (targetOverride: Target option) : int =
             Console.Error.WriteLine("lllc: import resolution error: " + msg)
             1
         | Ok files ->
-            let rootDir =
-                let d = Path.GetDirectoryName(absPath)
-                if String.IsNullOrEmpty d then Directory.GetCurrentDirectory() else d
-            let stem = Path.GetFileNameWithoutExtension(absPath)
+            let rootDir = directoryNameOrCurrent absPath
+            let stem = fileNameWithoutExtensionOrEmpty absPath
             let fakeManifest : LLManifest =
-                { Name = Path.GetFileNameWithoutExtension(absPath)
+                { Name = fileNameWithoutExtensionOrEmpty absPath
                   Version = "0.0.0"
                   Entry = ""
                   Deps = Map.empty
@@ -648,7 +688,7 @@ let private cmdBuildFile (path: string) (targetOverride: Target option) : int =
                         let filesOut = LLLang.Codegen.emitProjectFiles tms
                         let built = writeSiblingFSharpFilesAndProject rootDir stem filesOut
                         let outPath = Path.Combine(rootDir, stem + ".fs")
-                        Console.WriteLine("Built " + Path.GetFileName(outPath))
+                        Console.WriteLine("Built " + fileNameOrEmpty outPath)
                         built
                     | _ ->
                         let out =
@@ -659,14 +699,12 @@ let private cmdBuildFile (path: string) (targetOverride: Target option) : int =
                             | Java -> LLLang.CodegenJava.emitProjectModules tms
                             | CSharp -> LLLang.CodegenCSharp.emitProjectModules tms
                             | LLVM -> LLLang.CodegenLLVM.emitProjectModules tms
-                        let outPath = Path.ChangeExtension(absPath, targetExt target)
+                        let outPath = changeExtensionOrInput absPath (targetExt target)
                         File.WriteAllText(outPath, out)
-                        let outDir =
-                            let d = Path.GetDirectoryName(outPath)
-                            if String.IsNullOrWhiteSpace(d) then Directory.GetCurrentDirectory() else d
-                        let stemOut = Path.GetFileNameWithoutExtension(outPath)
-                        let templatePath = writeRuntimeTemplateIfAvailable stemOut target outDir (Path.GetFileName(outPath))
-                        Console.WriteLine("Built " + Path.GetFileName(outPath))
+                        let outDir = directoryNameOrCurrent outPath
+                        let stemOut = fileNameWithoutExtensionOrEmpty outPath
+                        let templatePath = writeRuntimeTemplateIfAvailable stemOut target outDir (fileNameOrEmpty outPath)
+                        Console.WriteLine("Built " + fileNameOrEmpty outPath)
                         {
                             Target = target
                             OutDir = outDir
@@ -701,13 +739,13 @@ let private cmdReverse (args: string list) : int =
                     1
                 | Ok lll ->
                     let outPath =
-                        let dir = Path.GetDirectoryName(absPath)
-                        let stem = Path.GetFileNameWithoutExtension(absPath)
+                        let dir = directoryNameOrCurrent absPath
+                        let stem = fileNameWithoutExtensionOrEmpty absPath
                         let baseDir =
                             if String.IsNullOrWhiteSpace(dir) then Directory.GetCurrentDirectory() else dir
                         Path.Combine(baseDir, stem + ".reversed.lll")
                     File.WriteAllText(outPath, lll)
-                    Console.WriteLine("Reversed " + Path.GetFileName(absPath) + " -> " + Path.GetFileName(outPath))
+                    Console.WriteLine("Reversed " + fileNameOrEmpty absPath + " -> " + fileNameOrEmpty outPath)
                     0
         with
         | ex ->
@@ -725,15 +763,13 @@ let private runShellCommand (workingDir: string) (command: string) : int =
     psi.RedirectStandardError <- false
     psi.ArgumentList.Add("-lc")
     psi.ArgumentList.Add(command)
-    use proc = Process.Start(psi)
+    use proc = startProcessOrFail psi
     proc.WaitForExit()
     proc.ExitCode
 
 let private inferredProjectFilePath (target: Target) (mainFilePath: string) : string option =
-    let outDir =
-        let d = Path.GetDirectoryName(mainFilePath)
-        if String.IsNullOrWhiteSpace(d) then Directory.GetCurrentDirectory() else d
-    let stem = Path.GetFileNameWithoutExtension(mainFilePath)
+    let outDir = directoryNameOrCurrent mainFilePath
+    let stem = fileNameWithoutExtensionOrEmpty mainFilePath
     let fromTemplate =
         match tryResolveRuntimeTemplate target with
         | None -> None
@@ -751,10 +787,8 @@ let private cmdRunViaSdk (path: string) (target: Target) : int =
         buildExit
     else
         let absPath = Path.GetFullPath(path)
-        let outPath = Path.ChangeExtension(absPath, targetExt target)
-        let outDir =
-            let d = Path.GetDirectoryName(outPath)
-            if String.IsNullOrWhiteSpace(d) then Directory.GetCurrentDirectory() else d
+        let outPath = changeExtensionOrInput absPath (targetExt target)
+        let outDir = directoryNameOrCurrent outPath
         let artifact =
             {
                 Target = target
@@ -801,15 +835,10 @@ let private cmdRun (path: string) (targetOverride: Target option) : int =
                     psi.RedirectStandardOutput <- false
                     psi.RedirectStandardError  <- false
                     psi.UseShellExecute        <- false
-                    match Process.Start(psi) with
-                    | null ->
-                        Console.Error.WriteLine("lllc: failed to start process")
-                        1
-                    | proc ->
-                        use p = proc
-                        p.WaitForExit()
-                        try File.Delete(tmp) with _ -> ()
-                        p.ExitCode
+                    use p = startProcessOrFail psi
+                    p.WaitForExit()
+                    try File.Delete(tmp) with _ -> ()
+                    p.ExitCode
                 | Error es ->
                     printErrors es
                     1
@@ -821,7 +850,7 @@ let private cmdRun (path: string) (targetOverride: Target option) : int =
                     1
                 | Ok files ->
                     let fakeManifest : LLManifest = { Name = "run"; Version = "0.0.0"; Entry = ""; Deps = Map.empty; Platform = ["fsharp"] }
-                    let proj : LLProject = { Manifest = fakeManifest; RootDir = Path.GetDirectoryName(absPath); Files = files }
+                    let proj : LLProject = { Manifest = fakeManifest; RootDir = directoryNameOrCurrent absPath; Files = files }
                     match LLLang.Compiler.compileProjectToModules proj with
                     | Error es ->
                         printErrors es
@@ -865,7 +894,7 @@ let private cmdRun (path: string) (targetOverride: Target option) : int =
                         psi.RedirectStandardOutput <- false
                         psi.RedirectStandardError  <- false
                         psi.UseShellExecute        <- false
-                        use proc = Process.Start(psi)
+                        use proc = startProcessOrFail psi
                         proc.WaitForExit()
                         try File.Delete(tmp) with _ -> ()
                         proc.ExitCode
@@ -887,20 +916,20 @@ let private fsStringLiteral (s: string) =
 let private findSelfMainPath () : string option =
     let cwd = Directory.GetCurrentDirectory()
     let fromEnv =
-        let p = Environment.GetEnvironmentVariable("LLLC_SELF_MAIN")
-        if String.IsNullOrWhiteSpace p then None
-        else
+        match tryGetEnv "LLLC_SELF_MAIN" with
+        | Some p when not (String.IsNullOrWhiteSpace p) ->
             let abs = Path.GetFullPath(p)
             if File.Exists(abs) then Some abs else None
+        | _ -> None
 
     let fromCwdAncestors =
         let rec loop (dir: string) =
             let candidate = Path.Combine(dir, "lllcself", "src", "Main.lll")
             if File.Exists(candidate) then Some candidate
             else
-                let parent = Directory.GetParent(dir)
-                if parent = null || parent.FullName = dir then None
-                else loop parent.FullName
+                match tryParentDir dir with
+                | None -> None
+                | Some parentDir -> loop parentDir
         loop cwd
 
     let fromBaseDirCandidates =
@@ -933,7 +962,7 @@ let private cmdRunSelf (toolArgs: string list) : int =
                 1
             | Ok files ->
                 let fakeManifest : LLManifest = { Name = "lllcself"; Version = "0.0.0"; Entry = ""; Deps = Map.empty; Platform = ["fsharp"] }
-                let proj : LLProject = { Manifest = fakeManifest; RootDir = Path.GetDirectoryName(absPath); Files = files }
+                let proj : LLProject = { Manifest = fakeManifest; RootDir = directoryNameOrCurrent absPath; Files = files }
                 match LLLang.Compiler.compileProjectToModules proj with
                 | Error es ->
                     printErrors es
@@ -976,18 +1005,14 @@ let private cmdRunSelf (toolArgs: string list) : int =
                         psi.RedirectStandardError  <- false
                         psi.UseShellExecute        <- false
                         psi.WorkingDirectory       <- tempDir
-                        match Process.Start(psi) with
-                        | null ->
-                            Console.Error.WriteLine("lllc: failed to start process")
-                            1
-                        | proc ->
-                            use p = proc
-                            p.WaitForExit()
-                            p.ExitCode
+                        use p = startProcessOrFail psi
+                        p.WaitForExit()
+                        p.ExitCode
                     finally
                         let keepTemp =
-                            let v = Environment.GetEnvironmentVariable("LL_KEEP_SELF_TEMP")
-                            not (String.IsNullOrEmpty v) && (v = "1" || v.ToLowerInvariant() = "true")
+                            match tryGetEnv "LL_KEEP_SELF_TEMP" with
+                            | Some v -> (v = "1" || v.ToLowerInvariant() = "true")
+                            | None -> false
                         if not keepTemp then
                             try Directory.Delete(tempDir, true) with _ -> ()
     with ex ->
@@ -1019,7 +1044,7 @@ let private cmdInstall (rootDir: string) : int =
                     printfn "  fetch %s from %s#%s" name url ref
                     let psi = ProcessStartInfo("git", sprintf "clone --depth 1 --branch %s %s \"%s\"" ref url targetDir)
                     psi.UseShellExecute <- false
-                    let proc = Process.Start(psi)
+                    let proc = startProcessOrFail psi
                     proc.WaitForExit()
                     if proc.ExitCode <> 0 then
                         eprintfn "  error: git clone failed for %s" name
@@ -1028,8 +1053,8 @@ let private cmdInstall (rootDir: string) : int =
                     printfn "  link %s -> %s" name resolved
                     let psi = ProcessStartInfo("ln", sprintf "-s \"%s\" \"%s\"" resolved targetDir)
                     psi.UseShellExecute <- false
-                    Process.Start(psi).WaitForExit() |> ignore
-        printfn "Installed %d dependencies." manifest.Deps.Count
+                    (startProcessOrFail psi).WaitForExit() |> ignore
+        Console.WriteLine("Installed " + string manifest.Deps.Count + " dependencies.")
         0
     with ex ->
         eprintfn "lllc: %s" ex.Message

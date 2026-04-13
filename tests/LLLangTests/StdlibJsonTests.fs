@@ -16,7 +16,7 @@ let private runJsonLll () =
     psi.RedirectStandardError <- true
     psi.UseShellExecute <- false
     psi.WorkingDirectory <- repoRoot
-    use proc = System.Diagnostics.Process.Start(psi)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
     let stdoutTask = System.Threading.Tasks.Task.Run(fun () -> proc.StandardOutput.ReadToEnd())
     let stderrTask = System.Threading.Tasks.Task.Run(fun () -> proc.StandardError.ReadToEnd())
     proc.WaitForExit()

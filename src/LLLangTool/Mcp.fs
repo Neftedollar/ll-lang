@@ -32,6 +32,23 @@ let private ok text : Task<Result<Content list, McpError>> =
 
 let private js (s: string) = JsonSerializer.Serialize(s)
 
+let private startProcessOrFail (psi: ProcessStartInfo) : Process =
+    match Process.Start(psi) with
+    | null -> failwith "Failed to start process."
+    | proc -> proc
+
+let private directoryNameOrCurrent (path: string) : string =
+    match Path.GetDirectoryName(path) with
+    | null
+    | "" -> Directory.GetCurrentDirectory()
+    | dir -> dir
+
+let private tryParentDir (dir: string) : string option =
+    match Directory.GetParent(dir) with
+    | null -> None
+    | parent when parent.FullName = dir -> None
+    | parent -> Some parent.FullName
+
 let private errorsToJson (es: LLError list) =
     let items =
         es |> List.map (fun e ->
@@ -147,7 +164,7 @@ let runFileTool (args: RunFileArgs) : Task<Result<Content list, McpError>> =
                         psi.RedirectStandardOutput <- true
                         psi.RedirectStandardError  <- true
                         psi.UseShellExecute        <- false
-                        use proc = Process.Start(psi)
+                        use proc = startProcessOrFail psi
                         let stdoutTask = proc.StandardOutput.ReadToEndAsync()
                         let stderrTask = proc.StandardError.ReadToEndAsync()
                         do! Task.WhenAll(stdoutTask, stderrTask) :> Task
@@ -331,7 +348,7 @@ let grammarLookupTool (args: GrammarLookupArgs) : Task<Result<Content list, McpE
 
 let private findProjectRoot (startPath: string) : (string * string * string) option =
     let startDir =
-        if File.Exists(startPath) then Path.GetDirectoryName(startPath)
+        if File.Exists(startPath) then directoryNameOrCurrent startPath
         elif Directory.Exists(startPath) then startPath
         else startPath
     let mutable dir = startDir
@@ -348,9 +365,9 @@ let private findProjectRoot (startPath: string) : (string * string * string) opt
             found <- true
             result <- Some (dir, ll, "ll.toml")
         else
-            let parent = Directory.GetParent(dir)
-            if parent = null || parent.FullName = dir then found <- true
-            else dir <- parent.FullName
+            match tryParentDir dir with
+            | None -> found <- true
+            | Some parentDir -> dir <- parentDir
     result
 
 let projectInfoTool (args: ProjectInfoArgs) : Task<Result<Content list, McpError>> =

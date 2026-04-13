@@ -46,7 +46,7 @@ let ``14-exprparser-real.lll runs and pretty-prints all five expression kinds`` 
     psi.RedirectStandardOutput <- true
     psi.RedirectStandardError  <- true
     psi.UseShellExecute        <- false
-    use proc = System.Diagnostics.Process.Start(psi)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()

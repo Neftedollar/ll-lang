@@ -44,7 +44,7 @@ let ``09-lexer-real.lll runs and prints tokens for fn add(a)(b) = a + b`` () =
     psi.RedirectStandardOutput <- true
     psi.RedirectStandardError  <- true
     psi.UseShellExecute        <- false
-    use proc = System.Diagnostics.Process.Start(psi)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()

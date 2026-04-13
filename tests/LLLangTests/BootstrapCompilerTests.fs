@@ -58,6 +58,26 @@ let private repoRoot =
 let private readValid name =
     File.ReadAllText(Path.Combine(repoRoot, "spec/examples/valid", name))
 
+let private sharedBootstrapInputPath =
+    Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+
+let private sharedBootstrapBackupPath =
+    sharedBootstrapInputPath + ".bak"
+
+let private sharedBootstrapBaseline =
+    """module Examples.Clean
+Maybe A = Some A | None
+inc(x Int) = x + 1
+greet() = "hello"
+main() = inc 1
+"""
+
+let private ensureSharedBootstrapFixturePresent () =
+    Directory.CreateDirectory(LLLang.Tests.TestCompat.directoryNameOrCurrent sharedBootstrapInputPath) |> ignore
+    if File.Exists sharedBootstrapBackupPath then
+        File.Delete(sharedBootstrapBackupPath)
+    File.WriteAllText(sharedBootstrapInputPath, sharedBootstrapBaseline)
+
 /// Phase 7.9c: runs `lllc run <bootstrap>` with the working directory
 /// pinned to the repo root (since the bootstrap compiler now loads
 /// its source via a repo-root-relative `readFile` call).
@@ -71,7 +91,7 @@ let private runBootstrap () =
     psi.RedirectStandardError  <- true
     psi.UseShellExecute        <- false
     psi.WorkingDirectory       <- repoRoot
-    use proc = System.Diagnostics.Process.Start(psi)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
     // Read stdout and stderr concurrently to prevent pipe-buffer deadlock.
     // If the bootstrap writes large output to one pipe while we're blocked
     // reading the other, both sides deadlock. Task.Run drains both in parallel.

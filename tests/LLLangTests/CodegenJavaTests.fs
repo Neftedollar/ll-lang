@@ -22,7 +22,7 @@ let private runProc (cwd: string) (exe: string) (args: string list) : int * stri
     psi.RedirectStandardError <- true
     for arg in args do
         psi.ArgumentList.Add(arg)
-    use proc = Process.Start(psi)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()

@@ -49,7 +49,10 @@ let private fileToExpectedModulePath (rootDir: string) (projectName: string) (fi
     // Compute relative path from src/
     let rel = Path.GetRelativePath(srcDir, filePath)
     // Strip .lll extension and split by directory separator
-    let noExt = Path.ChangeExtension(rel, null)
+    let noExt =
+        match Path.ChangeExtension(rel, null) with
+        | null -> rel
+        | value -> value
     let parts =
         noExt.Split([| Path.DirectorySeparatorChar; Path.AltDirectorySeparatorChar |], StringSplitOptions.RemoveEmptyEntries)
         |> Array.toList

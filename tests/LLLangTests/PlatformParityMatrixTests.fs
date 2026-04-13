@@ -20,7 +20,7 @@ let private runProc (cwd: string) (exe: string) (args: string list) : int * stri
     psi.RedirectStandardError <- true
     for arg in args do
         psi.ArgumentList.Add(arg)
-    use proc = Process.Start(psi)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
@@ -74,12 +74,12 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
                     (exitCode = 0),
                     $"lllc build failed for case={caseName} target={target}\nstdout:\n{stdout}\nstderr:\n{stderr}")
 
-                let outPath = Path.ChangeExtension(srcPath, ext)
+                let outPath = LLLang.Tests.TestCompat.changeExtensionOrInput srcPath ext
                 Assert.True(File.Exists(outPath), $"missing output for case={caseName} target={target}: {outPath}")
 
                 match target with
                 | "fs" ->
-                    let fsproj = Path.ChangeExtension(srcPath, ".fsproj")
+                    let fsproj = LLLang.Tests.TestCompat.changeExtensionOrInput srcPath ".fsproj"
                     Assert.True(File.Exists(fsproj), $"missing fsharp project for case={caseName}: {fsproj}")
                     let (code, so, se) = runProc tempRoot "dotnet" ["build"; "--nologo"; "--verbosity"; "quiet"; fsproj]
                     Assert.True((code = 0), $"fsharp build failed for case={caseName}\nstdout:\n{so}\nstderr:\n{se}")
@@ -96,7 +96,7 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
                         Assert.Contains("let transform", fsText)
                         Assert.Contains("(map_Maybe f) xs", fsText)
                 | "cs" ->
-                    let csproj = Path.ChangeExtension(srcPath, ".csproj")
+                    let csproj = LLLang.Tests.TestCompat.changeExtensionOrInput srcPath ".csproj"
                     Assert.True(File.Exists(csproj), $"missing csharp project for case={caseName}: {csproj}")
                     let (code, so, se) = runProc tempRoot "dotnet" ["build"; "--nologo"; "--verbosity"; "quiet"; csproj]
                     Assert.True((code = 0), $"csharp build failed for case={caseName}\nstdout:\n{so}\nstderr:\n{se}")
@@ -148,7 +148,7 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
                             if classMatch.Success then
                                 let expected = classMatch.Groups.["name"].Value + ".java"
                                 let expectedPath = Path.Combine(tempRoot, expected)
-                                if StringComparer.Ordinal.Equals(Path.GetFileName(outPath), expected) then
+                                if StringComparer.Ordinal.Equals(LLLang.Tests.TestCompat.fileNameOrEmpty outPath, expected) then
                                     outPath
                                 else
                                     Assert.True(File.Exists(expectedPath), $"missing class-aligned java output for case={caseName}: {expectedPath}")
@@ -186,7 +186,7 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
                         Assert.Contains("define ptr @map_Maybe(", llText)
                         Assert.Contains("define ptr @transform(", llText)
                     if toolExists "llvm-as" then
-                        let bcPath = Path.ChangeExtension(outPath, ".bc")
+                        let bcPath = LLLang.Tests.TestCompat.changeExtensionOrInput outPath ".bc"
                         let (code, so, se) = runProc tempRoot "llvm-as" [outPath; "-o"; bcPath]
                         Assert.True((code = 0), $"llvm-as failed for case={caseName}\nstdout:\n{so}\nstderr:\n{se}")
                 | _ -> ()

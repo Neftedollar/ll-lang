@@ -300,7 +300,7 @@ let ``lllc build writes .fs file next to source`` () =
     psi.RedirectStandardOutput <- true
     psi.RedirectStandardError  <- true
     psi.UseShellExecute        <- false
-    use proc = System.Diagnostics.Process.Start(psi)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
     proc.WaitForExit()
 
     // Assert
@@ -334,7 +334,7 @@ let ``lllc build file inside project resolves imports via project pipeline`` () 
         psi.RedirectStandardOutput <- true
         psi.RedirectStandardError  <- true
         psi.UseShellExecute        <- false
-        use proc = Process.Start(psi)
+        use proc = LLLang.Tests.TestCompat.startProcess psi
         proc.WaitForExit()
 
         let stdout = proc.StandardOutput.ReadToEnd()
@@ -424,7 +424,7 @@ let ``hello world runs via lllc run and prints Hello ll-lang!`` () =
     psi.RedirectStandardOutput <- true
     psi.RedirectStandardError  <- true
     psi.UseShellExecute        <- false
-    use proc = System.Diagnostics.Process.Start(psi)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
@@ -447,7 +447,7 @@ let private runLLLangSrc (src: string) : string =
         psi.RedirectStandardOutput <- true
         psi.RedirectStandardError  <- true
         psi.UseShellExecute        <- false
-        use proc = System.Diagnostics.Process.Start(psi)
+        use proc = LLLang.Tests.TestCompat.startProcess psi
         let stdout = proc.StandardOutput.ReadToEnd()
         let stderr = proc.StandardError.ReadToEnd()
         proc.WaitForExit()
@@ -603,7 +603,7 @@ let ``runtime: 10-multiline-sum.lll prints id:foo`` () =
     psi.RedirectStandardOutput <- true
     psi.RedirectStandardError  <- true
     psi.UseShellExecute        <- false
-    use proc = System.Diagnostics.Process.Start(psi)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()

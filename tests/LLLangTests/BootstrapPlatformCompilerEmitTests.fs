@@ -20,7 +20,7 @@ let private runLllc (cwd: string) (args: string list) : int * string * string =
     psi.ArgumentList.Add(lllcDll)
     for arg in args do
         psi.ArgumentList.Add(arg)
-    use proc = Process.Start(psi)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
@@ -37,7 +37,7 @@ let private runProc (cwd: string) (exe: string) (args: string list) : int * stri
     psi.RedirectStandardError <- true
     for arg in args do
         psi.ArgumentList.Add(arg)
-    use proc = Process.Start(psi)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
@@ -58,10 +58,10 @@ let private tempPrefix = "lll-bootstrap-platform-emit-"
 let rec private copyDirRecursive (srcDir: string) (dstDir: string) =
     Directory.CreateDirectory(dstDir) |> ignore
     for file in Directory.GetFiles(srcDir) do
-        let target = Path.Combine(dstDir, Path.GetFileName(file))
+        let target = Path.Combine(dstDir, LLLang.Tests.TestCompat.fileNameOrEmpty file)
         File.Copy(file, target, true)
     for sub in Directory.GetDirectories(srcDir) do
-        let target = Path.Combine(dstDir, Path.GetFileName(sub))
+        let target = Path.Combine(dstDir, LLLang.Tests.TestCompat.fileNameOrEmpty sub)
         copyDirRecursive sub target
 
 [<Literal>]
@@ -92,7 +92,7 @@ let ``stdlib Compiler.lll emits compiler artifacts for every Platform.*.SDK targ
               ("Platform.LLVM.SDK", ".ll", "ll-lang LLVM backend", "define i32 @main") ]
 
         for (target, ext, markerA, markerB) in targets do
-            let outPath = Path.ChangeExtension(compilerSrcPath, ext)
+            let outPath = LLLang.Tests.TestCompat.changeExtensionOrInput compilerSrcPath ext
             let (exitCode, stdout, stderr) =
                 runLllc tempRoot ["build"; "--target"; target; compilerSrcPath]
 
@@ -109,12 +109,12 @@ let ``stdlib Compiler.lll emits compiler artifacts for every Platform.*.SDK targ
 
             match target with
             | "Platform.FSharp.SDK" ->
-                let fsproj = Path.ChangeExtension(compilerSrcPath, ".fsproj")
+                let fsproj = LLLang.Tests.TestCompat.changeExtensionOrInput compilerSrcPath ".fsproj"
                 Assert.True(File.Exists(fsproj), $"missing emitted fsproj for {target}: {fsproj}")
                 let (code, so, se) = runProc tempRoot "dotnet" ["build"; "--nologo"; "--verbosity"; quietDotnetVerbosity; fsproj]
                 Assert.True((code = 0), $"dotnet build failed for {target}\nstdout:\n{so}\nstderr:\n{se}")
             | "Platform.CSharp.SDK" ->
-                let csproj = Path.ChangeExtension(compilerSrcPath, ".csproj")
+                let csproj = LLLang.Tests.TestCompat.changeExtensionOrInput compilerSrcPath ".csproj"
                 Assert.True(File.Exists(csproj), $"missing emitted csproj for {target}: {csproj}")
                 let (code, so, se) = runProc tempRoot "dotnet" ["build"; "--nologo"; "--verbosity"; quietDotnetVerbosity; csproj]
                 Assert.True((code = 0), $"dotnet build failed for {target}\nstdout:\n{so}\nstderr:\n{se}")
@@ -128,13 +128,13 @@ let ``stdlib Compiler.lll emits compiler artifacts for every Platform.*.SDK targ
                     Assert.True((code = 0), $"python3 py_compile failed for {target}\nstdout:\n{so}\nstderr:\n{se}")
             | "Platform.TypeScript.SDK" ->
                 if toolExists "tsc" then
-                    let outDir = Path.GetDirectoryName(outPath)
-                    let fileName = Path.GetFileName(outPath)
+                    let outDir = LLLang.Tests.TestCompat.directoryNameOrCurrent outPath
+                    let fileName = LLLang.Tests.TestCompat.fileNameOrEmpty outPath
                     let (code, so, se) = runProc outDir "tsc" [fileName; "--target"; "es2022"; "--module"; "esnext"; "--noEmit"]
                     Assert.True((code = 0), $"tsc --noEmit failed for {target}\nstdout:\n{so}\nstderr:\n{se}")
             | "Platform.LLVM.SDK" ->
                 if toolExists "llvm-as" then
-                    let bcPath = Path.ChangeExtension(outPath, ".bc")
+                    let bcPath = LLLang.Tests.TestCompat.changeExtensionOrInput outPath ".bc"
                     let (code, so, se) = runProc tempRoot "llvm-as" [outPath; "-o"; bcPath]
                     Assert.True((code = 0), $"llvm-as failed for {target}\nstdout:\n{so}\nstderr:\n{se}")
             | _ -> ()

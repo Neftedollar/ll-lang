@@ -420,11 +420,10 @@ let private ancestorDirs (startDir: string) : string list =
     let mutable keepGoing = true
     while keepGoing do
         dirs.Add(dir)
-        let parent = Directory.GetParent(dir)
-        if isNull parent || parent.FullName = dir then
-            keepGoing <- false
-        else
-            dir <- parent.FullName
+        match Directory.GetParent(dir) with
+        | null -> keepGoing <- false
+        | parent when parent.FullName = dir -> keepGoing <- false
+        | parent -> dir <- parent.FullName
     List.ofSeq dirs
 
 let private distinctPreservingOrder (items: string list) : string list =

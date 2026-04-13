@@ -50,7 +50,7 @@ let ``15-moduleparser-real.lll runs and pretty-prints a full module AST`` () =
     psi.RedirectStandardOutput <- true
     psi.RedirectStandardError  <- true
     psi.UseShellExecute        <- false
-    use proc = System.Diagnostics.Process.Start(psi)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
     let stdout = proc.StandardOutput.ReadToEnd()
     let stderr = proc.StandardError.ReadToEnd()
     proc.WaitForExit()

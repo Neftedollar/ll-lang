@@ -21,6 +21,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="TestCompat.fs" />
     <Compile Include="LexerTests.fs" />
     <Compile Include="ParserTests.fs" />
     <Compile Include="ParserParityTests.fs" />
