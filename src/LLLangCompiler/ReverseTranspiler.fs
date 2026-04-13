@@ -552,6 +552,35 @@ let private normalizeRecoveredExpr (raw: string) : string option =
             else
                 raw
 
+    let collapseLeadingDuplicateNumericLine (s: string) : string =
+        let raw = s.Replace("\r\n", "\n")
+        let lines = raw.Split('\n')
+        let nonEmpty =
+            lines
+            |> Array.map (fun l -> l.Trim())
+            |> Array.filter (fun l -> not (String.IsNullOrWhiteSpace l))
+        let isNumericLine (line: string) =
+            Regex.IsMatch(line, @"^-?\d+L?$")
+        if nonEmpty.Length = 2 && isNumericLine nonEmpty.[0] && isNumericLine nonEmpty.[1] then
+            nonEmpty.[1]
+        else
+            raw
+
+    let normalizeSimpleTemplateLiterals (s: string) : string =
+        // Convert plain template literals (without interpolation) into
+        // ll-lang string literals so the parser can round-trip TS output.
+        Regex.Replace(
+            s,
+            @"`(?<body>(?:\\.|[^`])*)`",
+            MatchEvaluator(fun (m: Match) ->
+                let body = m.Groups.["body"].Value
+                if body.Contains("${", StringComparison.Ordinal) then
+                    m.Value
+                else
+                    body |> decodeStringEscapes |> encodeLllString
+            )
+        )
+
     let hasBalancedOuterParens (s: string) : bool =
         if String.IsNullOrWhiteSpace s || not (s.StartsWith("(") && s.EndsWith(")")) then
             false
@@ -1085,7 +1114,11 @@ let private normalizeRecoveredExpr (raw: string) : string option =
                         name + " = " + rhs)
             Some (String.concat "\n" (bindingLines @ [finalExpr]))
 
-    let v0 = raw |> stripTrailingStandaloneExitCode |> fun s -> s.Trim().TrimEnd(';').Trim()
+    let v0 =
+        raw
+        |> stripTrailingStandaloneExitCode
+        |> collapseLeadingDuplicateNumericLine
+        |> fun s -> s.Trim().TrimEnd(';').Trim()
     let v0b = stripHostCastWrappers v0
     let v1 = normalizeCore v0b
     let v2 = Regex.Replace(v1, @"\b(-?\d+)L\b", "$1")
@@ -1093,6 +1126,7 @@ let private normalizeRecoveredExpr (raw: string) : string option =
         v2
         |> fun s -> Regex.Replace(s, @"(?<![A-Za-z0-9_])True(?![A-Za-z0-9_])", "true")
         |> fun s -> Regex.Replace(s, @"(?<![A-Za-z0-9_])False(?![A-Za-z0-9_])", "false")
+        |> normalizeSimpleTemplateLiterals
     let v4 = normalizeTupleCtorCalls v3
     let v4b = normalizeSimpleTupleCtorCalls v4
     let v5 =

@@ -4876,6 +4876,25 @@ Additional evidence:
 
 - `CSharp: match with constructor payload emits typed guarded accessor flow`
 
+## Post-7.10 hardening — reverse boomerang richer trait slices (DONE)
+
+Expanded boomerang parity beyond scalar/core slices with a trait-heavy module:
+
+- Added `trait Show` + `impl Show Box` round-trip coverage for all
+  non-LLVM targets in the reverse boomerang matrix.
+- Hardened reverse normalization to avoid two drift patterns that blocked
+  richer slices:
+  1. **TypeScript** plain template literals are normalized into ll string
+     literals (`"..."`) when no interpolation is present.
+  2. **F# entrypoint bodies** with duplicated numeric tail (`0L` + `0`) are
+     collapsed to a single numeric expression.
+
+Evidence:
+
+- `reverse boomerang matrix keeps core source slices recompilable per target`
+- `reverse parser normalizes plain TypeScript template literals into ll strings`
+- `reverse parser collapses duplicate numeric tail in FSharp entrypoint bodies`
+
 ## Current state and next work
 
 Bootstrap self-hosting blocker chain from 7.10d → 7.10r is now closed

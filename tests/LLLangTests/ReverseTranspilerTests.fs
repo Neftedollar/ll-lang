@@ -24,6 +24,9 @@ let private sampleSrcWithChars =
 let private sampleFunctionSrc =
     "module Demo\ninc(x Int) = x + 1\nmain() = inc 41\n"
 
+let private sampleTraitHeavySrc =
+    "module Demo\ntrait Show T =\n  show(x T) Str\nBox = MkBox Int\nimpl Show Box =\n  show(x Box) Str = \"box\"\nuseShow(x Box) Str = show x\nmain() Int = 0\n"
+
 [<Fact>]
 let ``reverse parser recovers numeric lets from all primary platform targets`` () =
     for target in [FSharp; TypeScript; Python; CSharp; LLVM] do
@@ -1032,6 +1035,47 @@ let ``reverse boomerang matrix keeps core source slices recompilable per target`
 
     for target in typedTargets do
         assertBoomerangRecompile target "char_lets" sampleSrcWithChars ["let initial = 'N'"]
+
+    for target in nonLlvmTargets do
+        assertBoomerangRecompile target "trait_show_impl" sampleTraitHeavySrc ["show_Box("; "useShow("]
+
+[<Fact>]
+let ``reverse parser normalizes plain TypeScript template literals into ll strings`` () =
+    let tsSrc = """
+const show_Box = (x) => `box`;
+const useShow = (x) => show_Box(x);
+"""
+    let reversed =
+        match reverseToLll TypeScript tsSrc with
+        | Ok lll -> lll
+        | Error msg -> Assert.Fail($"reverseToLll TypeScript failed: {msg}"); ""
+
+    Assert.Contains("show_Box(x) = \"box\"", reversed)
+    Assert.DoesNotContain("`box`", reversed)
+    match parseModuleWithPos reversed with
+    | Ok _ -> ()
+    | Error e -> Assert.Fail($"reverse output parse failed for TS template literal normalization: {e}\n{reversed}")
+
+[<Fact>]
+let ``reverse parser collapses duplicate numeric tail in FSharp entrypoint bodies`` () =
+    let fsSrc = """
+module Demo
+
+[<EntryPoint>]
+let main (argv: string[]) =
+    0L
+    0
+"""
+    let reversed =
+        match reverseToLll FSharp fsSrc with
+        | Ok lll -> lll
+        | Error msg -> Assert.Fail($"reverseToLll FSharp failed: {msg}"); ""
+
+    Assert.Contains("main(argv) = 0", reversed)
+    Assert.DoesNotContain("0L\n", reversed)
+    match parseModuleWithPos reversed with
+    | Ok _ -> ()
+    | Error e -> Assert.Fail($"reverse output parse failed for F# duplicate-tail normalization: {e}\n{reversed}")
 
 [<Fact>]
 let ``reverse parser strips host-only checked and cast wrappers in CSharp expressions`` () =
