@@ -47,6 +47,8 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
                "module Case.If\n\nabsLike(x Int) Int = if x > 0\n  x\nelse 0 - x\nmain() Int = absLike 2\n")
               ("adt_match",
                "module Case.Adt\n\nColor = Red | Green\nscore(c Color) Int = match c\n  | Red -> 1\n  | Green -> 2\nmain() Int = score Red\n")
+              ("adt_payload_match",
+               "module Case.AdtPayload\n\nJson = JNull | JNum Int\nkind(v Json) Int = match v\n  | JNull -> 0\n  | JNum n -> n\nmain() Int = kind (JNum 1)\n")
               ("tuple_match",
                "module Case.Tuple\n\nmain() Int = match (1, 2)\n  | (a, _) -> a\n")
               ("str_match",
@@ -87,6 +89,11 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
                         let fsText = File.ReadAllText(outPath)
                         Assert.Contains("type Color =", fsText)
                         Assert.Contains("| Red", fsText)
+                    if caseName = "adt_payload_match" then
+                        let fsText = File.ReadAllText(outPath)
+                        Assert.Contains("type Json =", fsText)
+                        Assert.Contains("| JNum of int64", fsText)
+                        Assert.Contains("JNum(n) -> n", fsText)
                     if caseName = "impl_method" then
                         let fsText = File.ReadAllText(outPath)
                         Assert.Contains("let show_Box", fsText)
@@ -118,6 +125,10 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
                         let tsText = File.ReadAllText(outPath)
                         Assert.Contains("type Color = { _tag:", tsText)
                         Assert.Contains("const Red: Color", tsText)
+                    if caseName = "adt_payload_match" then
+                        let tsText = File.ReadAllText(outPath)
+                        Assert.Contains("v?._tag === `JNum`", tsText)
+                        Assert.Contains("const n = ", tsText)
                     if caseName = "impl_method" then
                         let tsText = File.ReadAllText(outPath)
                         Assert.Contains("const show_Box =", tsText)
@@ -133,6 +144,11 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
                         let pyText = File.ReadAllText(outPath)
                         Assert.Contains("@dataclass(frozen=True)", pyText)
                         Assert.Contains("class Red", pyText)
+                    if caseName = "adt_payload_match" then
+                        let pyText = File.ReadAllText(outPath)
+                        Assert.Contains("_tag == \"JNull\"", pyText)
+                        Assert.Contains("(lambda n: n)(", pyText)
+                        Assert.Contains("._0)", pyText)
                     if caseName = "impl_method" then
                         let pyText = File.ReadAllText(outPath)
                         Assert.Contains("def show_Box(", pyText)
@@ -160,6 +176,10 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
                     if caseName = "adt_match" then
                         Assert.Contains("sealed interface Color", javaText)
                         Assert.Contains("record Red", javaText)
+                    if caseName = "adt_payload_match" then
+                        Assert.Contains("sealed interface Json", javaText)
+                        Assert.Contains("record JNum(Long _0)", javaText)
+                        Assert.Contains("((Json.JNum) v)._0()", javaText)
                     if caseName = "impl_method" then
                         Assert.Contains("show_Box(", javaText)
                     if caseName = "constrained_dispatch" then

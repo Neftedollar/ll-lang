@@ -4851,6 +4851,24 @@ Evidence:
 - `20-bootstrap-compiler.lll self-compile output satisfies structural fixpoint metrics contract`
 - `20-bootstrap-compiler.lll diagnostics contract: unbound var includes stable E002 payload`
 
+## Post-7.10 hardening — backend match payload parity (Python done, C# follow-up)
+
+Closed one backend drift where constructor-payload branches in `match`
+could lose bound values:
+
+- **Python backend** now emits payload binds via lambda parameters in ternary
+  branches (e.g. `(lambda n: ...)(v._0)`), avoiding unresolved bare names.
+
+Evidence:
+
+- `Py: match with constructor payload binds branch variable`
+
+Follow-up:
+
+- C# constructor-payload `match` for expression context is intentionally
+  deferred to a dedicated typed pattern-binder pass; current C# backend
+  remains on the stable pre-existing behavior for this case.
+
 ## Current state and next work
 
 Bootstrap self-hosting blocker chain from 7.10d → 7.10r is now closed

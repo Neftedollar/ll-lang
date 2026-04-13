@@ -277,29 +277,52 @@ and private emitMatchAsIfElse (scrutStr: string) (branches: (TypedPattern * Type
         | PCon(c, _) -> Some (scrutVar + "._tag == \"" + c + "\"")
         | _ -> None
 
-    // Binding via assignment-expression lambdas makes Python parser unhappy on
-    // complex patterns in emitted code. Prefer syntactic validity over local
-    // binding fidelity for fallback branches in generated backends.
-    let emitBinds (_scrutVar: string) (_pat: Pattern) : string = ""
+    // Bind pattern vars via lambda parameters so branch bodies can reference
+    // constructor/list/tuple payloads without generating statements.
+    let emitBodyWithBinds (scrutVar: string) (pat: Pattern) (bodyStr: string) : string =
+        let wrap (vars: string list) (values: string list) =
+            if List.isEmpty vars then bodyStr
+            else
+                "(lambda " + String.concat ", " vars + ": " + bodyStr + ")(" + String.concat ", " values + ")"
+        match pat with
+        | PVar x ->
+            wrap [safeIdent x] [scrutVar]
+        | PCon(_, args) ->
+            let vars, values =
+                args
+                |> List.mapi (fun i p ->
+                    match p with
+                    | PVar v -> Some (safeIdent v, scrutVar + "._" + string i)
+                    | _ -> None)
+                |> List.choose id
+                |> List.unzip
+            wrap vars values
+        | PCons(PVar h, PVar t) ->
+            wrap [safeIdent h; safeIdent t] [scrutVar + "[0]"; scrutVar + "[1:]"]
+        | PTuple ps ->
+            let vars, values =
+                ps
+                |> List.mapi (fun i p ->
+                    match p with
+                    | PVar v -> Some (safeIdent v, scrutVar + "[" + string i + "]")
+                    | _ -> None)
+                |> List.choose id
+                |> List.unzip
+            wrap vars values
+        | _ -> bodyStr
 
     let rec buildChain = function
         | [] -> "None  # unreachable"
         | [(tp, body)] ->
-            let bodyStr = emitExprPy body
-            let binds = emitBinds scrutStr tp.Pat
-            if binds <> "" then
-                "(lambda " + binds + ": " + bodyStr + ")()"
-            else bodyStr
+            let bodyStr = emitExprPy body |> emitBodyWithBinds scrutStr tp.Pat
+            bodyStr
         | (tp, body) :: rest ->
-            let bodyStr = emitExprPy body
+            let bodyStr = emitExprPy body |> emitBodyWithBinds scrutStr tp.Pat
             let restStr = buildChain rest
             match emitCond scrutStr tp.Pat with
             | None ->
-                // Always matches — emit with binds if any
-                let binds = emitBinds scrutStr tp.Pat
-                if binds <> "" then
-                    "(lambda " + binds + ": " + bodyStr + ")()"
-                else bodyStr
+                // Always matches.
+                bodyStr
             | Some cond ->
                 "(" + bodyStr + " if " + cond + " else " + restStr + ")"
 

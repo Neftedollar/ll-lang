@@ -243,6 +243,15 @@ let ``Py: match emits ternary chain`` () =
     Assert.Contains("if", py)
     Assert.Contains("else", py)
 
+[<Fact>]
+let ``Py: match with constructor payload binds branch variable`` () =
+    let src = "module M\nJson = JNull | JNum Int\nkind(v Json) Int = match v | JNull -> 0 | JNum n -> n"
+    let py = pySrc src
+    Assert.Contains("_tag == \"JNull\"", py)
+    Assert.Contains("(lambda n: n)(", py)
+    Assert.Contains("._0)", py)
+    Assert.DoesNotContain("else n", py)
+
 // ---------- round-trip via compileTarget ----------
 
 [<Fact>]
