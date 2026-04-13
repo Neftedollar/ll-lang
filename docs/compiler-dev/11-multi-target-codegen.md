@@ -1,6 +1,6 @@
 # Multi-Target Codegen
 
-ll-lang supports three compilation targets: F# (default), TypeScript, and Python. This document covers the architecture of the multi-target system and how to add a new target.
+ll-lang supports six compilation targets: F# (default), TypeScript, Python, Java, C#, and LLVM IR. This document covers the architecture of the multi-target system and how to add a new target.
 
 ## Architecture
 
@@ -10,15 +10,14 @@ All targets share the same pipeline up to H-M inference. Codegen is the only tar
 Lexer → Parser → Elaborator → HMInfer → TypedAST
                                               ↓
                           ┌─────────────────────────────┐
-                          │ Codegen    Codegen   Codegen  │
-                          │ (F#)       (TS)      (Py)     │
+                          │ Codegen(fs/ts/py/java/cs/llvm) │
                           └─────────────────────────────┘
 ```
 
 The `Compiler.fs` dispatches to the right emitter:
 
 ```fsharp
-type Target = FSharp | TypeScript | Python
+type Target = FSharp | TypeScript | Python | Java | CSharp | LLVM
 
 let private compileSrc (emitter: TypedModule -> string) (src: string) =
     // ... lex → parse → elaborate → infer ...
@@ -27,15 +26,21 @@ let private compileSrc (emitter: TypedModule -> string) (src: string) =
 let compile    = compileSrc Codegen.emit
 let compileToTS = compileSrc CodegenTS.emit
 let compileToPy = compileSrc CodegenPy.emit
+let compileToJava = compileSrc CodegenJava.emit
+let compileToCSharp = compileSrc CodegenCSharp.emit
+let compileToLLVM = compileSrc CodegenLLVM.emit
 
 let compileTarget target src =
     match target with
     | FSharp     -> compile src
     | TypeScript -> compileToTS src
     | Python     -> compileToPy src
+    | Java       -> compileToJava src
+    | CSharp     -> compileToCSharp src
+    | LLVM       -> compileToLLVM src
 ```
 
-**Critical:** do not add `open LLLang.CodegenTS` or `open LLLang.CodegenPy` to `Compiler.fs`. All three modules export `emit`; a broad open will shadow `Codegen.emit` and silently use the wrong backend. Use fully-qualified names instead.
+**Critical:** do not add broad `open LLLang.Codegen*` in `Compiler.fs`. All backend modules export `emit`; use fully-qualified names to avoid accidental shadowing.
 
 ## TypedAST IR
 

@@ -329,21 +329,24 @@ let grammarLookupTool (args: GrammarLookupArgs) : Task<Result<Content list, McpE
 
 // ─── project_info ────────────────────────────────────────────────────────────
 
-let private findProjectRoot (startPath: string) =
+let private findProjectRoot (startPath: string) : (string * string * string) option =
     let startDir =
         if File.Exists(startPath) then Path.GetDirectoryName(startPath)
         elif Directory.Exists(startPath) then startPath
         else startPath
     let mutable dir = startDir
     let mutable found = false
-    let mutable result: string option = None
+    let mutable result: (string * string * string) option = None
     while not found do
         // Prefer lll.toml; fall back to ll.toml for backwards compat
         let lll = Path.Combine(dir, "lll.toml")
         let ll  = Path.Combine(dir, "ll.toml")
-        if File.Exists(lll) || File.Exists(ll) then
+        if File.Exists(lll) then
             found <- true
-            result <- Some dir
+            result <- Some (dir, lll, "lll.toml")
+        elif File.Exists(ll) then
+            found <- true
+            result <- Some (dir, ll, "ll.toml")
         else
             let parent = Directory.GetParent(dir)
             if parent = null || parent.FullName = dir then found <- true
@@ -364,13 +367,22 @@ let projectInfoTool (args: ProjectInfoArgs) : Task<Result<Content list, McpError
                             |> Option.defaultValue ""
                         with _ -> ""
                     else ""
+                let sdkErrors =
+                    sdkRegistryErrors ()
+                    |> List.map js
+                    |> String.concat ","
                 return! ok (sprintf
-                    "{\"root\":null,\"manifest\":null,\"modules\":[{\"path\":%s,\"module\":%s}],\"deps\":[],\"platform_use\":[]}"
-                    (js args.path) (js modName))
-            | Some root ->
+                    "{\"root\":null,\"manifest\":null,\"manifest_path\":null,\"manifest_kind\":null,\"modules\":[{\"path\":%s,\"module\":%s}],\"deps\":[],\"platform_use\":[],\"sdk_registry_errors\":[%s]}"
+                    (js args.path) (js modName) sdkErrors)
+            | Some (root, manifestPath, manifestKind) ->
                 match loadProject root with
                 | Error es ->
-                    return! ok (sprintf "{\"root\":%s,\"errors\":%s}" (js root) (errorsToJson es))
+                    let sdkErrors =
+                        sdkRegistryErrors ()
+                        |> List.map js
+                        |> String.concat ","
+                    return! ok (sprintf "{\"root\":%s,\"manifest_path\":%s,\"manifest_kind\":%s,\"sdk_registry_errors\":[%s],\"errors\":%s}"
+                                    (js root) (js manifestPath) (js manifestKind) sdkErrors (errorsToJson es))
                 | Ok proj ->
                     let modules =
                         proj.Files |> List.map (fun lf ->
@@ -384,14 +396,21 @@ let projectInfoTool (args: ProjectInfoArgs) : Task<Result<Content list, McpError
                                 | LLLang.Manifest.PathDep(path) -> sprintf "path:%s" path
                             sprintf "{\"name\":%s,\"source\":%s}" (js k) (js srcStr))
                     let platforms = proj.Manifest.Platform |> List.map js
+                    let sdkErrors =
+                        sdkRegistryErrors ()
+                        |> List.map js
+                        |> String.concat ","
                     return! ok (sprintf
-                        "{\"root\":%s,\"manifest\":{\"name\":%s,\"version\":%s},\"modules\":[%s],\"deps\":[%s],\"platform_use\":[%s],\"errors\":[]}"
+                        "{\"root\":%s,\"manifest\":{\"name\":%s,\"version\":%s},\"manifest_path\":%s,\"manifest_kind\":%s,\"modules\":[%s],\"deps\":[%s],\"platform_use\":[%s],\"sdk_registry_errors\":[%s],\"errors\":[]}"
                         (js root)
                         (js proj.Manifest.Name)
                         (js proj.Manifest.Version)
+                        (js manifestPath)
+                        (js manifestKind)
                         (String.concat "," modules)
                         (String.concat "," deps)
-                        (String.concat "," platforms))
+                        (String.concat "," platforms)
+                        sdkErrors)
         with ex ->
             return! ok (sprintf "{\"root\":null,\"error\":%s}" (js ex.Message))
     }

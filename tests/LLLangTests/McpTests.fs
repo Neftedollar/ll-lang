@@ -78,6 +78,25 @@ let ``check and compile agree on invalid source`` () =
     | Ok (), _ -> Assert.True(false, "check should have failed")
     | _, Ok _ -> Assert.True(false, "compile should have failed")
 
+[<Fact>]
+let ``checkTarget validates external mappings per target`` () =
+    let src =
+        """module Test.External
+
+external fetch(url Str) Promise[Response]
+opaque Response
+opaque Promise[A]
+main() Int = 0
+"""
+    match checkTarget TypeScript src with
+    | Ok () -> ()
+    | Error es -> Assert.True(false, sprintf "TypeScript checkTarget should succeed: %A" es)
+
+    match checkTarget FSharp src with
+    | Error es ->
+        Assert.Contains(es, fun e -> e.Code = E026)
+    | Ok () -> Assert.True(false, "FSharp checkTarget should fail with E026")
+
 // ─── compile function ─────────────────────────────────────────────────────────
 
 [<Fact>]

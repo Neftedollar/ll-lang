@@ -58,6 +58,7 @@ Key rules:
 ```bash
 lllc run hello.lll          # compile + execute via dotnet fsi
 lllc build hello.lll        # compile → hello.fs
+lllc check hello.lll        # type-check only (no codegen output)
 ```
 
 ---

@@ -160,6 +160,60 @@ let ``lllc build validates externals per target`` () =
     )
 
 [<Fact>]
+let ``lllc check single-file validates without emitting target files`` () =
+    withTempDir (fun root ->
+        Assert.True(File.Exists(lllcDll), $"missing lllc tool at {lllcDll}")
+        let srcPath = Path.Combine(root, "CheckMe.lll")
+        File.WriteAllText(srcPath, "module Demo.CheckMe\n\nmain() Int = 42\n")
+
+        let (exitCode, stdout, stderr) = runLllc root ["check"; srcPath]
+        Assert.True((exitCode = 0), $"lllc check failed: exit={exitCode}\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        Assert.Contains("Checked CheckMe.lll [fsharp]", stdout)
+
+        let fsPath = Path.ChangeExtension(srcPath, ".fs")
+        let tsPath = Path.ChangeExtension(srcPath, ".ts")
+        Assert.False(File.Exists(fsPath), $"check should not emit codegen artifacts: {fsPath}")
+        Assert.False(File.Exists(tsPath), $"check should not emit codegen artifacts: {tsPath}")
+    )
+
+[<Fact>]
+let ``lllc check validates externals for selected target`` () =
+    withTempDir (fun root ->
+        Assert.True(File.Exists(lllcDll), $"missing lllc tool at {lllcDll}")
+        let srcPath = Path.Combine(root, "CheckExternal.lll")
+        File.WriteAllText(
+            srcPath,
+            "module Demo.CheckExternal\n" +
+            "external fetch(url Str) Promise[Response]\n" +
+            "opaque Response\n" +
+            "opaque Promise[A]\n" +
+            "main() Int = 0\n")
+
+        let (tsCode, tsOut, tsErr) = runLllc root ["check"; "--target"; "ts"; srcPath]
+        Assert.True((tsCode = 0), $"check --target ts should pass\nstdout:\n{tsOut}\nstderr:\n{tsErr}")
+
+        let (fsCode, fsOut, fsErr) = runLllc root ["check"; "--target"; "fs"; srcPath]
+        Assert.True((fsCode <> 0), $"check --target fs should fail on unknown external mapping\nstdout:\n{fsOut}\nstderr:\n{fsErr}")
+        Assert.Contains("E026", fsErr)
+        Assert.Contains("target:fsharp", fsErr)
+    )
+
+[<Fact>]
+let ``lllc build fails hard on unknown manifest platform (no skip)`` () =
+    withTempDir (fun root ->
+        Assert.True(File.Exists(lllcDll), $"missing lllc tool at {lllcDll}")
+        writeSampleProject root ["fsharp"; "wat"]
+
+        let (exitCode, stdout, stderr) = runLllc root ["build"]
+        Assert.True((exitCode <> 0), $"build should fail on unknown platform\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        Assert.Contains("unknown platform 'wat'", stderr)
+        Assert.DoesNotContain("skipping", stderr)
+
+        let fsproj = Path.Combine(root, "bin", "fsharp", "app.fsproj")
+        Assert.False(File.Exists(fsproj), "build should fail before emitting artifacts when manifest contains unknown targets")
+    )
+
+[<Fact>]
 let ``lllc build single-file csharp emits sibling csproj scaffold`` () =
     withTempDir (fun root ->
         Assert.True(File.Exists(lllcDll), $"missing lllc tool at {lllcDll}")

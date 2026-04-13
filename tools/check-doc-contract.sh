@@ -28,11 +28,11 @@ check_pattern() {
   rm -f "${tmp}"
 }
 
-check_pattern '\blllc\s+check\b' "remove stale CLI command: lllc check"
 check_pattern '\blllc\s+mod\b' "remove stale CLI command family: lllc mod"
 check_pattern '\binstall_package\b|\blist_targets\b' "remove stale MCP tool names"
 check_pattern '\b12\s+keywords\b|\b12-keyword\b' "keyword count drift (language no longer 12-keyword)"
 check_pattern '\b`fn`,\s*`type`,\s*`let`\b' "outdated phrasing: let is now a keyword"
+check_pattern 'supports three compilation targets' "outdated target matrix wording (ll-lang supports more than 3 targets)"
 check_pattern '\b[0-9]{2,4}\s+tests?\b' "avoid hardcoded test counts (refer to CI instead)"
 
 if [[ "${status}" -ne 0 ]]; then

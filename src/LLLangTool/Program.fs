@@ -33,6 +33,27 @@ let private targetExt (target: Target) = targetOutputExt target
 let private targetOrDefault (targetOpt: Target option) : Target =
     targetOpt |> Option.defaultValue FSharp
 
+let private resolveProjectTargets (manifestPlatforms: string list) : Result<Target list, string list> =
+    let platforms =
+        if manifestPlatforms.IsEmpty then ["fsharp"]
+        else normalizePlatforms manifestPlatforms
+    let unknown =
+        platforms
+        |> List.filter (fun p -> tryParseTarget p |> Option.isNone)
+        |> List.distinct
+    if not (List.isEmpty unknown) then
+        let known = knownTargetAliases () |> String.concat ", "
+        let msgs =
+            unknown
+            |> List.map (fun p -> "lllc: unknown platform '" + p + "' in manifest [platform].use; known aliases: " + known)
+        Error msgs
+    else
+        let targets =
+            platforms
+            |> List.choose tryParseTarget
+            |> List.distinct
+        Ok targets
+
 type private EmittedArtifact = {
     Target : Target
     OutDir : string
@@ -340,23 +361,65 @@ let private cmdBuildProject (rootDir: string) (targetOverride: Target option) : 
                             writeTargetOutput rootDir proj.Manifest.Name LLVM code
                     printSdkSuggestions artifact
                     true
-            let mutable exitCode = 0
-            match targetOverride with
-            | Some target ->
-                if not (compileForTarget target) then exitCode <- 1
-            | None ->
-                let platforms =
-                    if proj.Manifest.Platform.IsEmpty then ["fsharp"]
-                    else normalizePlatforms proj.Manifest.Platform
-                for platform in platforms do
-                    match tryParseTarget platform with
-                    | None ->
-                        Console.Error.WriteLine("lllc: unknown platform '" + platform + "', skipping")
+            let targetsResult =
+                match targetOverride with
+                | Some target -> Ok [target]
+                | None -> resolveProjectTargets proj.Manifest.Platform
+            match targetsResult with
+            | Error msgs ->
+                for m in msgs do Console.Error.WriteLine(m)
+                1
+            | Ok targets ->
+                let mutable exitCode = 0
+                for target in targets do
+                    if not (compileForTarget target) then exitCode <- 1
+                exitCode
+    with ex ->
+        Console.Error.WriteLine("lllc: " + ex.Message)
+        1
+
+/// Check file: lex/parse/elaborate/infer and target-specific external mapping checks.
+let private cmdCheckFile (path: string) (target: Target) : int =
+    try
+        let src = File.ReadAllText(path)
+        match checkTarget target src with
+        | Ok () ->
+            Console.WriteLine("Checked " + Path.GetFileName(path) + " [" + targetPlatformName target + "]")
+            0
+        | Error es ->
+            printErrors es
+            1
+    with ex ->
+        Console.Error.WriteLine("lllc: " + ex.Message)
+        1
+
+/// Check project rooted at rootDir (has lll.toml or ll.toml). Returns exit code.
+/// targetOverride, when present, checks only that target and ignores manifest platforms.
+let private cmdCheckProject (rootDir: string) (targetOverride: Target option) : int =
+    try
+        match loadProject rootDir with
+        | Error es ->
+            printErrors es
+            1
+        | Ok proj ->
+            let targetsResult =
+                match targetOverride with
+                | Some target -> Ok [target]
+                | None -> resolveProjectTargets proj.Manifest.Platform
+            match targetsResult with
+            | Error msgs ->
+                for m in msgs do Console.Error.WriteLine(m)
+                1
+            | Ok targets ->
+                let mutable exitCode = 0
+                for target in targets do
+                    match LLLang.Compiler.compileProjectToModulesForTarget target proj with
+                    | Ok _ ->
+                        Console.WriteLine("Checked project '" + proj.Manifest.Name + "' [" + targetPlatformName target + "]")
+                    | Error es ->
+                        printErrors es
                         exitCode <- 1
-                    | Some target ->
-                        if not (compileForTarget target) then
-                            exitCode <- 1
-            exitCode
+                exitCode
     with ex ->
         eprintfn "lllc: %s" ex.Message
         1
@@ -1016,6 +1079,27 @@ let main (argv: string[]) : int =
             | _ ->
                 Console.Error.WriteLine("lllc: unrecognized build arguments")
                 1
+    | "check" :: rest ->
+        match parseTarget rest with
+        | Error msg ->
+            Console.Error.WriteLine(msg)
+            1
+        | Ok (targetOverride, rest2) ->
+            let target = targetOrDefault targetOverride
+            match rest2 with
+            | [path] when path.EndsWith(".lll") ->
+                cmdCheckFile path target
+            | [dir] ->
+                cmdCheckProject (Path.GetFullPath dir) targetOverride
+            | [] ->
+                match findProjectRoot (Directory.GetCurrentDirectory()) with
+                | Some root -> cmdCheckProject root targetOverride
+                | None ->
+                    Console.Error.WriteLine("lllc: no lll.toml found. Use 'lllc new <name>' to create a project.")
+                    1
+            | _ ->
+                Console.Error.WriteLine("lllc: usage: lllc check [--target fs|ts|py|java|cs|llvm] <file.lll>|[dir]")
+                1
     | "run" :: rest ->
         match parseTarget rest with
         | Error msg ->
@@ -1040,6 +1124,8 @@ let main (argv: string[]) : int =
         Console.Error.WriteLine("Usage:")
         Console.Error.WriteLine("  lllc build [--target fs|ts|py|java|cs|llvm] <file.lll>  compile single file")
         Console.Error.WriteLine("  lllc build [--target fs|ts|py|java|cs|llvm] [dir]       compile project (reads lll.toml)")
+        Console.Error.WriteLine("  lllc check [--target fs|ts|py|java|cs|llvm] <file.lll>  type-check single file (no codegen)")
+        Console.Error.WriteLine("  lllc check [--target fs|ts|py|java|cs|llvm] [dir]       type-check project (no codegen)")
         Console.Error.WriteLine("  lllc run   [--target fs|ts|py|java|cs|llvm] <file.lll>  compile and run single file")
         Console.Error.WriteLine("  lllc reverse --from <target> <file>        recover minimal ll-lang from generated target code")
         Console.Error.WriteLine("  lllc self  <cmd> <file> [arg]              run self-hosted lllc tools (lll layer)")

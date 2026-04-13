@@ -6,6 +6,8 @@
 Usage:
   lllc build [--target fs|ts|py|java|cs|llvm] <file.lll>   compile single file
   lllc build [--target fs|ts|py|java|cs|llvm] [dir]        compile project (reads lll.toml)
+  lllc check [--target fs|ts|py|java|cs|llvm] <file.lll>   type-check single file (no codegen)
+  lllc check [--target fs|ts|py|java|cs|llvm] [dir]        type-check project (no codegen)
   lllc run   [--target fs|ts|py|java|cs|llvm] <file.lll>   compile and run single file
   lllc new   <name>         scaffold new project
   lllc reverse --from <target> <file>   recover minimal ll-lang from generated code
@@ -64,6 +66,29 @@ Requires a `lll.toml` manifest at the project root (see [06-modules.md](06-modul
 dotnet build bin/myapp.fsproj     # compile to .dll / .exe
 dotnet run   --project bin/myapp.fsproj
 ```
+
+---
+
+## `lllc check <file.lll>` — single-file type-check
+
+```bash
+lllc check hello.lll
+lllc check --target ts hello.lll
+```
+
+Runs lex → parse → elaborate → infer and target-specific external mapping validation (E026), without writing generated target files.
+
+---
+
+## `lllc check [dir]` — project type-check
+
+```bash
+lllc check           # finds lll.toml by walking up from cwd
+lllc check ./myapp   # checks project rooted at ./myapp
+```
+
+Checks all project modules in topo order with the selected target contract.  
+Unknown target names in `[platform].use` are hard errors.
 
 ---
 

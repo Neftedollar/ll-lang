@@ -190,6 +190,8 @@ Walk up from a path to find `lll.toml` and return project metadata.
 ```json
 {
   "root": "/abs/path/to/myapp",
+  "manifest_path": "/abs/path/to/myapp/lll.toml",
+  "manifest_kind": "lll.toml",
   "manifest": { "name": "myapp", "version": "0.1.0" },
   "modules": [
     { "path": "/abs/path/to/myapp/src/Greet.lll", "module": "Myapp.Greet" },
@@ -197,11 +199,12 @@ Walk up from a path to find `lll.toml` and return project metadata.
   ],
   "deps": [],
   "platform_use": [],
+  "sdk_registry_errors": [],
   "errors": []
 }
 ```
 
-In single-file mode (no `lll.toml`), `root` is `null` and `modules` contains one entry.
+In single-file mode (no `lll.toml`), `root`/`manifest_path`/`manifest_kind` are `null` and `modules` contains one entry.
 
 ---
 

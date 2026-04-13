@@ -357,12 +357,18 @@ let private validateAliasCollisions (sdks: PlatformSdk list) : string list =
     List.ofSeq errors
 
 let private loadSdkFromDir (packageName: string) (sdkDir: string) : Result<PlatformSdk, string list> =
+    let lllTomlPath = Path.Combine(sdkDir, "lll.toml")
     let llTomlPath = Path.Combine(sdkDir, "ll.toml")
-    if not (File.Exists llTomlPath) then
-        Error [$"missing sdk manifest: {llTomlPath}"]
-    else
-        let llText = File.ReadAllText(llTomlPath)
-        match parseTomlSubset llTomlPath llText with
+    let manifestPathOpt =
+        if File.Exists(lllTomlPath) then Some lllTomlPath
+        elif File.Exists(llTomlPath) then Some llTomlPath
+        else None
+    match manifestPathOpt with
+    | None ->
+        Error [$"missing sdk manifest: {lllTomlPath} (legacy fallback: {llTomlPath})"]
+    | Some manifestPath ->
+        let llText = File.ReadAllText(manifestPath)
+        match parseTomlSubset manifestPath llText with
         | Error es -> Error es
         | Ok llToml ->
             let metaPath = Path.Combine(sdkDir, "meta.toml")
@@ -381,13 +387,13 @@ let private loadSdkFromDir (packageName: string) (sdkDir: string) : Result<Platf
                 let ext = tryGetTomlString "sdk" "ext" llToml
                 match targetRaw, ext with
                 | None, _ ->
-                    Error [$"invalid sdk metadata in {llTomlPath}: missing [sdk].target"]
+                    Error [$"invalid sdk metadata in {manifestPath}: missing [sdk].target"]
                 | _, None ->
-                    Error [$"invalid sdk metadata in {llTomlPath}: missing [sdk].ext"]
+                    Error [$"invalid sdk metadata in {manifestPath}: missing [sdk].ext"]
                 | Some rawTarget, Some outExt ->
                     match tryParseCanonicalTarget rawTarget with
                     | None ->
-                        Error [$"invalid sdk metadata in {llTomlPath}: unknown [sdk].target = '{rawTarget}'"]
+                        Error [$"invalid sdk metadata in {manifestPath}: unknown [sdk].target = '{rawTarget}'"]
                     | Some target ->
                         let aliases = tryGetTomlStringArray "sdk" "aliases" llToml |> Option.defaultValue []
                         let hostExt = tryGetTomlString "sdk" "host-ext" llToml

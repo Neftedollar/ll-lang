@@ -87,6 +87,8 @@ lllc build --target java <file.lll> # compile → <file>.java (Java 21)
 lllc build --target cs <file.lll>   # compile → <file>.cs  (C#)
 lllc build --target llvm <file.lll> # compile → <file>.ll  (LLVM IR)
 lllc build [dir]                    # compile project (reads lll.toml)
+lllc check <file.lll>               # type-check single file (no codegen)
+lllc check [dir]                    # type-check project (no codegen)
 lllc run   <file.lll>               # compile and run via dotnet fsi
 lllc new   <name>                   # scaffold new project
 lllc install                        # fetch source-based dependencies

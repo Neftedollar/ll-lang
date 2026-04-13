@@ -52,10 +52,11 @@ let private validateExternalMappingsForTarget (target: Target) (pm: PosMap) (m: 
             Some (externalMappingError target pm sigRecord)
         | _ -> None)
 
-/// Check a ll-lang source string: lex → parse → elaborate → infer, skip codegen.
-/// Returns Ok () on success, Error es on any error.
-let check (src: string) : Result<unit, LLError list> =
-    match tokenize src with
+/// Check a ll-lang source string for a specific target:
+/// lex → parse → elaborate → infer, skip codegen.
+/// Includes target-specific external mapping validation (E026).
+let checkTarget (target: Target) (src: string) : Result<unit, LLError list> =
+    match parseModuleWithPos src with
     | Error e -> Error (wrapErr e)
     | Ok toks ->
         match parseModuleWithPos toks with
@@ -63,10 +64,14 @@ let check (src: string) : Result<unit, LLError list> =
         | Ok (m, pm) ->
             match elaborate pm m with
             | Error es -> Error es
-            | Ok (m', env) ->
-                match infer pm m' env with
-                | Error es -> Error es
-                | Ok _ -> Ok ()
+            | Ok _ ->
+                let externalErrors = validateExternalMappingsForTarget target pm m'
+                if List.isEmpty externalErrors then Ok ()
+                else Error externalErrors
+
+/// Check a ll-lang source string: lex → parse → elaborate → infer, skip codegen.
+let check (src: string) : Result<unit, LLError list> =
+    checkTarget FSharp src
 
 /// Run the pipeline through H-M inference and apply the given emitter.
 let private compileSrcForTarget (target: Target) (emitter: TypedModule -> string) (src: string) : Result<string, LLError list> =
