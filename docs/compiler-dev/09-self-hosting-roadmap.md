@@ -4863,11 +4863,18 @@ Evidence:
 
 - `Py: match with constructor payload binds branch variable`
 
-Follow-up:
+Follow-up and current C# scope:
 
-- C# constructor-payload `match` for expression context is intentionally
-  deferred to a dedicated typed pattern-binder pass; current C# backend
-  remains on the stable pre-existing behavior for this case.
+- C# now supports a **safe expression-match subset** for constructor payload
+  extraction in `Int`-returning matches with nominal constructors and simple
+  `PVar` payloads.
+- Full C# expression-match parity (nested patterns, tuple/list payloads, and
+  non-`Int` return types) remains deferred to a dedicated typed pattern-binder
+  pass.
+
+Additional evidence:
+
+- `CSharp: match with constructor payload emits typed guarded accessor flow`
 
 ## Current state and next work
 

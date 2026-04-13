@@ -341,6 +341,19 @@ let private castArgIfNeeded (expectedTy: TypeExpr) (actualTy: TypeExpr) (argExpr
         "(" + expectedCs + ")(" + argExpr + ")"
     else argExpr
 
+let private emitCtorCastType (ctor: string) (patTy: TypeExpr) : string =
+    let (_, args) = collectTyApp patTy
+    let safeCtor = safeTypeIdent ctor
+    if List.isEmpty args then
+        safeCtor
+    else
+        safeCtor + "<" + (args |> List.map emitTypeBoxed |> String.concat ", ") + ">"
+
+let private isSimpleMatchReturnType (t: TypeExpr) : bool =
+    match t with
+    | TyName "Int" -> true
+    | _ -> false
+
 let rec private tryEmitExpr (te: TypedExpr) : string option =
     match tryAsStrConcat te with
     | Some (a, b) ->
@@ -440,8 +453,9 @@ let rec private tryEmitExpr (te: TypedExpr) : string option =
                     | _ ->
                         Some ("(" + cStr + " ? " + tStr + " : " + eStr + ")")
                 | _ -> None
-            | TEMatch(_, _)
-            | TEMatchOf(_, _) -> None
+            | TEMatch(scrut, branches)
+            | TEMatchOf(scrut, branches) ->
+                emitMatchExprCSharp scrut branches te.Type
             | TEPipe(a, b) ->
                 match tryEmitExpr a, tryEmitExpr b with
                 | Some aStr, Some bStr -> Some ("((" + bStr + ")(" + aStr + "))")
@@ -477,6 +491,85 @@ let rec private tryEmitExpr (te: TypedExpr) : string option =
                 | Some elems -> Some ("(" + String.concat ", " elems + ")")
                 | None -> None
             | TECons(_, _) -> None
+
+and private emitMatchExprCSharp (scrut: TypedExpr) (branches: (TypedPattern * TypedExpr) list) (retTy: TypeExpr) : string option =
+    let isNominalCtor (c: string) = c.Length > 0 && Char.IsUpper c.[0]
+
+    let rec isSimplePattern (pat: Pattern) : bool =
+        match pat with
+        | PWild
+        | PLit _ -> true
+        | PCon(c, args) when isNominalCtor c ->
+            args |> List.forall (function PVar _ -> true | _ -> false)
+        | _ -> false
+
+    if not (isSimpleMatchReturnType retTy) then
+        None
+    elif not (branches |> List.forall (fun (tp, _) -> isSimplePattern tp.Pat)) then
+        None
+    else
+        match tryEmitExpr scrut with
+        | None -> None
+        | Some scrutExpr ->
+            let scrutVar = "__ll_match"
+            let retCs = emitTypeBoxed retTy
+
+            let emitCondition (tp: TypedPattern) : string option =
+                match tp.Pat with
+                | PWild
+                    -> None
+                | PLit l -> Some (scrutVar + " == " + emitLit l)
+                | PCon(c, _) when isNominalCtor c ->
+                    Some ("(" + scrutVar + " is " + emitCtorCastType c tp.Type + ")")
+                | _ -> None
+
+            let emitBindLines (branchIndex: int) (tp: TypedPattern) : string list =
+                match tp.Pat with
+                | PWild
+                | PLit _ -> []
+                | PCon(c, args) when isNominalCtor c ->
+                    let ctorAlias = "__ll_case_" + string branchIndex
+                    let castExpr = "((" + emitCtorCastType c tp.Type + ")" + scrutVar + ")"
+                    let ctorLine = "var " + ctorAlias + " = " + castExpr + ";"
+                    let argLines =
+                        args
+                        |> List.mapi (fun i p ->
+                            match p with
+                            | PVar v -> Some ("var " + safeIdent v + " = " + ctorAlias + "._" + string i + ";")
+                            | _ -> None)
+                        |> List.choose id
+                    ctorLine :: argLines
+                | _ -> []
+
+            let emitBoundBody (branchIndex: int) (tp: TypedPattern) (body: TypedExpr) : string option =
+                match tryEmitExpr body with
+                | None -> None
+                | Some bodyStr ->
+                    let bindLines = emitBindLines branchIndex tp
+                    if List.isEmpty bindLines then
+                        Some bodyStr
+                    else
+                        Some ("((Func<" + retCs + ">)(() => { " + String.concat " " bindLines + " return " + bodyStr + "; }))()")
+
+            let rec buildChain (idx: int) (remaining: (TypedPattern * TypedExpr) list) : string option =
+                match remaining with
+                | [] -> Some (emitDefaultExpr retTy)
+                | (tp, body) :: rest ->
+                    match emitBoundBody idx tp body with
+                    | None -> None
+                    | Some bodyExpr ->
+                        match emitCondition tp with
+                        | None -> Some bodyExpr
+                        | Some cond ->
+                            match buildChain (idx + 1) rest with
+                            | None -> None
+                            | Some tailExpr ->
+                                Some ("(" + cond + " ? " + bodyExpr + " : " + tailExpr + ")")
+
+            match buildChain 0 branches with
+            | None -> None
+            | Some chainExpr ->
+                Some ("((Func<" + retCs + ">)(() => { var " + scrutVar + " = " + scrutExpr + "; return " + chainExpr + "; }))()")
 
 let private emitExprOrDefault (t: TypeExpr) (te: TypedExpr) : string =
     match tryEmitExpr te with

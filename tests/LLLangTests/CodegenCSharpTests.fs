@@ -115,3 +115,11 @@ let ``CSharp: zero-arg constructor in expression emits object construction`` () 
     let src = "module M\nColor = Red | Green\nscore(c Color) Int = match c | Red -> 1 | Green -> 2\nmain() Int = score Red"
     let cs = csSrc src
     Assert.Contains("new Red()", cs)
+
+[<Fact>]
+let ``CSharp: match with constructor payload emits typed guarded accessor flow`` () =
+    let src = "module M\nJson = JNull | JNum Int\nkind(v Json) Int = match v | JNull -> 0 | JNum n -> n\nmain() Int = kind (JNum 1)"
+    let cs = csSrc src
+    Assert.DoesNotContain("public static long kind(Json v) => 0L;", cs)
+    Assert.Contains("__ll_match is JNum", cs)
+    Assert.Contains("__ll_case_1._0", cs)

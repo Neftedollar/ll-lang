@@ -110,6 +110,10 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
                     if caseName = "adt_match" then
                         let csText = File.ReadAllText(outPath)
                         Assert.Contains("new Red()", csText)
+                    if caseName = "adt_payload_match" then
+                        let csText = File.ReadAllText(outPath)
+                        Assert.Contains("__ll_match is JNum", csText)
+                        Assert.Contains("__ll_case_1._0", csText)
                     if caseName = "impl_method" then
                         let csText = File.ReadAllText(outPath)
                         Assert.Contains("show_Box(", csText)
