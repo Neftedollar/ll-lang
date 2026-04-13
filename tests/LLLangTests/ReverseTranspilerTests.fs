@@ -1057,7 +1057,7 @@ let ``reverse boomerang matrix keeps core source slices recompilable per target`
     for target in nonLlvmTargets do
         assertBoomerangRecompile target "maybe_ctor_if" sampleMaybeCtorSrc ["safeDiv("]
 
-    for target in [FSharp; TypeScript; Python; Java] do
+    for target in [FSharp; TypeScript; Python; Java; CSharp] do
         assertBoomerangRecompile target "maybe_match_unpack" sampleMaybeMatchSrc ["unpack("]
 
     assertBoomerangRecompile LLVM "main_i32_wrapper" sampleMainOnlySrc ["main("]
@@ -1202,6 +1202,22 @@ public class Demo {
         Assert.DoesNotContain("._0", reversed)
         Assert.DoesNotContain("instanceof", reversed)
         Assert.DoesNotContain("?_tag", reversed)
+
+[<Fact>]
+let ``reverse parser normalizes CSharp lifted Maybe match wrapper`` () =
+    let csSrc = """
+public static class Demo {
+    public static long unpack(Maybe<long> m) => ((Func<long>)(() => { var __ll_match = m; return ((__ll_match is Some<long>) ? ((Func<long>)(() => { var __ll_case_0 = ((Some<long>)__ll_match); var n = __ll_case_0._0; return n; }))() : ((__ll_match is None<long>) ? ((Func<long>)(() => { var __ll_case_1 = ((None<long>)__ll_match); return 0L; }))() : 0L)); }))();
+}
+"""
+    let reversed =
+        match reverseToLll CSharp csSrc with
+        | Ok l -> l
+        | Error msg -> Assert.Fail($"reverseToLll CSharp failed: {msg}"); ""
+
+    Assert.Contains("unpack(m) = match m | Some(", reversed)
+    Assert.Contains("| None -> 0", reversed)
+    Assert.DoesNotContain("._0", reversed)
 
 [<Fact>]
 let ``reverse parser strips host-only checked and cast wrappers in CSharp expressions`` () =

@@ -621,6 +621,34 @@ let private normalizeRecoveredExpr (raw: string) : string option =
         |> normalizeSome @"\bnew\s+(?:Maybe\.)?Some(?:<[^>]+>)?\s*\(\s*(?<arg>[^)]*)\s*\)"
 
     let normalizeHostMaybeMatchWrappers (s: string) : string =
+        let tryNormalizeCsharpLiftedMaybeMatch (input: string) : string option =
+            let t = input.Trim()
+            if not (t.Contains(" is Some<", StringComparison.Ordinal)
+                    && t.Contains(" is None<", StringComparison.Ordinal)
+                    && t.Contains("._0", StringComparison.Ordinal)) then
+                None
+            else
+                let scrutM = Regex.Match(t, @"var\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?<scrut>[A-Za-z_][A-Za-z0-9_]*)\s*;")
+                let bindM = Regex.Match(t, @"var\s+(?<bind>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*[A-Za-z_][A-Za-z0-9_]*\._0\s*;")
+                let noneM =
+                    Regex.Match(
+                        t,
+                        @"is\s+None<[^>]+>\)\s*\?\s*\(\(Func<[^>]+>\)\(\(\)\s*=>\s*\{[\s\S]*?return\s+(?<none>-?\d+L?)\s*;",
+                        RegexOptions.Singleline)
+                if scrutM.Success && bindM.Success && noneM.Success then
+                    let scrut = scrutM.Groups.["scrut"].Value
+                    let bind = bindM.Groups.["bind"].Value
+                    let noneRaw = noneM.Groups.["none"].Value
+                    let noneExpr = Regex.Replace(noneRaw, @"\b(-?\d+)L\b", "$1")
+                    if String.IsNullOrWhiteSpace scrut
+                       || String.IsNullOrWhiteSpace bind
+                       || String.IsNullOrWhiteSpace noneExpr then
+                        None
+                    else
+                        Some (sprintf "match %s | Some(%s) -> %s | None -> %s" scrut bind bind noneExpr)
+                else
+                    None
+
         let tryExtractSomeCondVar (condRaw: string) : string option =
             let cond = condRaw.Trim()
             let tryVar pattern =
@@ -704,15 +732,18 @@ let private normalizeRecoveredExpr (raw: string) : string option =
             else
                 None
 
-        match tryNormalizeMultilineIf s with
+        match tryNormalizeCsharpLiftedMaybeMatch s with
         | Some normalized -> normalized
         | None ->
-            match tryNormalizeTernary s with
+            match tryNormalizeMultilineIf s with
             | Some normalized -> normalized
             | None ->
-                match tryNormalizePythonTernary s with
+                match tryNormalizeTernary s with
                 | Some normalized -> normalized
-                | None -> s
+                | None ->
+                    match tryNormalizePythonTernary s with
+                    | Some normalized -> normalized
+                    | None -> s
 
     let normalizePythonIntDiv (s: string) : string =
         let sb = System.Text.StringBuilder(s.Length)
@@ -2248,7 +2279,7 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
         let exprBodied =
             collect
                 RegexOptions.Multiline
-                @"^\s*(?:(?:public|private|internal|protected)\s+)?static\s+[A-Za-z0-9_<>,\[\]\.? ]+\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)(?:<[^>]+>)?\((?<params>[^\)]*)\)\s*=>\s*(?<value>[^;]+);\s*$"
+                @"^\s*(?:(?:public|private|internal|protected)\s+)?static\s+[A-Za-z0-9_<>,\[\]\.? ]+\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)(?:<[^>]+>)?\((?<params>[^\)]*)\)\s*=>\s*(?<value>.+);\s*$"
                 parseFnParamsByLastToken
                 (fun m -> normalizeRecoveredExpr m.Groups.["value"].Value)
         let blockBodied =

@@ -4973,24 +4973,28 @@ Evidence:
   (case: `maybe_ctor_if` across non-LLVM targets)
 - `reverse parser normalizes host Maybe constructor wrappers across OO backends`
 
-## Post-7.10 hardening — ADT match reverse normalization (TS/Py/Java DONE)
+## Post-7.10 hardening — ADT match reverse normalization (non-LLVM DONE)
 
 Extended reverse normalization for host-lowered `match` shapes over `Some/None`
-so recovered ll code remains parseable and boomerang-compilable on more
+so recovered ll code remains parseable and boomerang-compilable on all
 non-LLVM targets:
 
 - TypeScript IIFE match lowering with `_tag` checks is recovered into
   `match m | Some(n) -> n | None -> ...`.
 - Python and Java host ternary/`if` forms over `_tag`/`instanceof` are
   normalized to the same ll match form.
+- C# lifted expression-bodied match wrappers (`Func`/`is Some<T>`/`is None<T>`)
+  are collapsed back to ll `match` expressions.
 - Python ternary order (`then if cond else else`) is now recognized in reverse
   normalization.
 
 Evidence:
 
 - `reverse boomerang matrix keeps core source slices recompilable per target`
-  (case: `maybe_match_unpack` for `FSharp`, `TypeScript`, `Python`, `Java`)
+  (case: `maybe_match_unpack` for `FSharp`, `TypeScript`, `Python`, `Java`,
+  `CSharp`)
 - `reverse parser normalizes host Maybe match wrappers for TS Py Java`
+- `reverse parser normalizes CSharp lifted Maybe match wrapper`
 
 ## Current state and next work
 
