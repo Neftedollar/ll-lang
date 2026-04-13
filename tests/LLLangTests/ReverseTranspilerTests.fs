@@ -1042,7 +1042,8 @@ let ``reverse boomerang matrix keeps core source slices recompilable per target`
     for target in nonLlvmTargets do
         assertBoomerangRecompile target "trait_show_impl" sampleTraitHeavySrc ["show_Box("; "useShow("]
 
-    assertBoomerangRecompile Java "external_console_log_main" sampleExternalMainSrc ["main(args) = 0"]
+    for target in nonLlvmTargets do
+        assertBoomerangRecompile target "external_console_log_main" sampleExternalMainSrc ["console_log("]
 
 [<Fact>]
 let ``reverse parser normalizes plain TypeScript template literals into ll strings`` () =
@@ -1081,6 +1082,24 @@ let main (argv: string[]) =
     match parseModuleWithPos reversed with
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for F# duplicate-tail normalization: {e}\n{reversed}")
+
+[<Fact>]
+let ``reverse parser recovers Java external wrapper and literal main wrapper`` () =
+    let emitted =
+        match compileTarget Java sampleExternalMainSrc with
+        | Ok code -> code
+        | Error es -> Assert.Fail($"compileTarget Java failed: {es}"); ""
+
+    let reversed =
+        match reverseToLll Java emitted with
+        | Ok lll -> lll
+        | Error msg -> Assert.Fail($"reverseToLll Java failed: {msg}"); ""
+
+    Assert.Contains("console_log(msg) = print(msg)", reversed)
+    Assert.Contains("main(args) = 0", reversed)
+    match parseModuleWithPos reversed with
+    | Ok _ -> ()
+    | Error e -> Assert.Fail($"reverse output parse failed for Java wrapper recovery: {e}\n{reversed}")
 
 [<Fact>]
 let ``reverse parser strips host-only checked and cast wrappers in CSharp expressions`` () =

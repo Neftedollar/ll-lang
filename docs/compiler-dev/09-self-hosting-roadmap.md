@@ -4917,6 +4917,26 @@ Evidence:
 - `reverse boomerang matrix keeps core source slices recompilable per target`
   (case: `external_console_log_main`)
 
+## Post-7.10 hardening — reverse FFI console-wrapper normalization (DONE)
+
+Reduced reverse/transpile drift for `external console_log` modules by mapping
+host wrapper calls back into ll-compatible builtin calls:
+
+- `System.Console.WriteLine(...)` (F# / C#) → `print(...)`
+- `console.log(...)` (TypeScript) → `print(...)`
+- `System.out.println(...)` (Java wrapper recovery path) → `print(...)`
+
+Additional recovery coverage:
+
+- C# and Java reverse now recover `static void` single-statement wrapper
+  methods (the shape emitted for external wrappers) instead of dropping them.
+
+Evidence:
+
+- `reverse boomerang matrix keeps core source slices recompilable per target`
+  (case: `external_console_log_main` across non-LLVM targets)
+- `reverse parser recovers Java external wrapper and literal main wrapper`
+
 ## Current state and next work
 
 Bootstrap self-hosting blocker chain from 7.10d → 7.10r is now closed

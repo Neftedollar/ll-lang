@@ -581,6 +581,26 @@ let private normalizeRecoveredExpr (raw: string) : string option =
             )
         )
 
+    let normalizeHostConsoleWrappers (s: string) : string =
+        let toPrint pattern (input: string) =
+            Regex.Replace(
+                input,
+                pattern,
+                MatchEvaluator(fun (m: Match) ->
+                    let arg = m.Groups.["arg"].Value.Trim()
+                    if String.IsNullOrWhiteSpace arg then
+                        m.Value
+                    else
+                        "print(" + arg + ")"
+                )
+            )
+
+        s
+        |> toPrint @"\bSystem\.Console\.WriteLine\(\s*(?<arg>[^()]*)\s*\)"
+        |> toPrint @"\bConsole\.WriteLine\(\s*(?<arg>[^()]*)\s*\)"
+        |> toPrint @"\bconsole\.log\(\s*(?<arg>[^()]*)\s*\)"
+        |> toPrint @"\bSystem\.out\.println\(\s*(?<arg>[^()]*)\s*\)"
+
     let hasBalancedOuterParens (s: string) : bool =
         if String.IsNullOrWhiteSpace s || not (s.StartsWith("(") && s.EndsWith(")")) then
             false
@@ -1119,7 +1139,7 @@ let private normalizeRecoveredExpr (raw: string) : string option =
         |> stripTrailingStandaloneExitCode
         |> collapseLeadingDuplicateNumericLine
         |> fun s -> s.Trim().TrimEnd(';').Trim()
-    let v0b = stripHostCastWrappers v0
+    let v0b = v0 |> stripHostCastWrappers |> normalizeHostConsoleWrappers
     let v1 = normalizeCore v0b
     let v2 = Regex.Replace(v1, @"\b(-?\d+)L\b", "$1")
     let v3 =
@@ -2050,6 +2070,12 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
                         m.Groups.["cond"].Value
                         m.Groups.["thenValue"].Value
                         m.Groups.["elseValue"].Value)
+        let csharpVoidSingleStmtFns =
+            collect
+                (RegexOptions.Multiline ||| RegexOptions.Singleline)
+                @"(?:(?:public|private|internal|protected)\s+)?static\s+void\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)(?:<[^>]+>)?\((?<params>[^\)]*)\)\s*\{[\s\S]*?(?<value>[A-Za-z_][A-Za-z0-9_\.]*\s*\([^\)]*\))\s*;\s*[\s\S]*?\}"
+                parseFnParamsByLastToken
+                (fun m -> normalizeRecoveredExpr m.Groups.["value"].Value)
         let exprBodied =
             collect
                 RegexOptions.Multiline
@@ -2066,6 +2092,7 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
          @ ifElseIfElseBlockFns
          @ ifElseBlockFns
          @ ifReturnThenFallbackReturnFns
+         @ csharpVoidSingleStmtFns
          @ exprBodied
          @ blockBodied)
         |> recoverCurriedArrowFns parseFnParamsByLastToken
@@ -2187,6 +2214,13 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
                 parseFnParamsByLastToken
                 (fun m ->
                     normalizeRecoveredExpr m.Groups.["value"].Value)
+        let javaVoidSingleStmtFns =
+            collect
+                (RegexOptions.Multiline ||| RegexOptions.Singleline)
+                @"(?:(?:public|private|protected)\s+)?static\s+void\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)(?:<[^>]+>)?\((?<params>[^\)]*)\)\s*\{[\s\S]*?(?<value>[A-Za-z_][A-Za-z0-9_\.]*\s*\([^\)]*\))\s*;\s*[\s\S]*?\}"
+                parseFnParamsByLastToken
+                (fun m ->
+                    normalizeRecoveredExpr m.Groups.["value"].Value)
         collect
             (RegexOptions.Multiline ||| RegexOptions.Singleline)
             @"(?:(?:public|private|protected)\s+)?static\s+[A-Za-z0-9_<>,\[\]\.? ]+\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)(?:<[^>]+>)?\((?<params>[^\)]*)\)\s*\{[\s\S]*?return\s+(?<value>[^;]+);\s*\}"
@@ -2198,6 +2232,7 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
              @ ifElseBlockFns
              @ ifReturnThenFallbackReturnFns
              @ javaMainVoidWrapperFns
+             @ javaVoidSingleStmtFns
              @ plain)
             |> recoverCurriedArrowFns parseFnParamsByLastToken
             |> List.sortBy (fun d -> d.Index)
