@@ -119,7 +119,7 @@ error codes; keep it in sync with the spec.
 dotnet test
 ```
 
-The whole suite (currently 415 tests) should pass, plus whatever
+The whole suite should pass (see CI for current count), plus whatever
 positive test you added. If a previously-valid corpus file now
 triggers your new error, decide:
 

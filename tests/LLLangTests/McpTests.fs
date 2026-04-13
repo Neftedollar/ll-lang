@@ -3,6 +3,7 @@ module LLLangTests.McpTests
 open System.IO
 open Xunit
 open LLLang.Compiler
+open LLLang.Platform
 open LLLang.Elaborator
 
 /// Helpers
@@ -207,6 +208,22 @@ let ``compileTarget Java produces Java output for valid source`` () =
         Assert.Contains("public static", java)
         Assert.DoesNotContain("let rec", java)
     | Error es -> Assert.True(false, sprintf "compileTarget Java failed: %A" es)
+
+[<Fact>]
+let ``compileTarget CSharp produces C# output for valid source`` () =
+    match compileTarget CSharp validSrc with
+    | Ok cs ->
+        Assert.Contains("public static class", cs)
+        Assert.DoesNotContain("let rec", cs)
+    | Error es -> Assert.True(false, sprintf "compileTarget CSharp failed: %A" es)
+
+[<Fact>]
+let ``compileTarget LLVM produces LLVM output for valid source`` () =
+    match compileTarget LLVM validSrc with
+    | Ok ll ->
+        Assert.Contains("define", ll)
+        Assert.DoesNotContain("let rec", ll)
+    | Error es -> Assert.True(false, sprintf "compileTarget LLVM failed: %A" es)
 
 [<Fact>]
 let ``compileTarget FSharp does not produce Python output`` () =

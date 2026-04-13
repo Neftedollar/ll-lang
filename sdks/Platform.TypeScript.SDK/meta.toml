@@ -1,0 +1,4 @@
+[build]
+compile = "npx tsc {main_file_q} --target es2022 --module esnext"
+run = "npx tsc {main_file_q} --target es2022 --module esnext && node {main_js_file_q}"
+project-template = "runtime/package.json.tmpl"

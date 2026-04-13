@@ -263,6 +263,32 @@ let ``infer fn with declared params and elided return`` () =
     Assert.Equal(TyFn(TyName "Int", TyName "Int"), sch.Body)
 
 [<Fact>]
+let ``infer external declaration is added to env`` () =
+    let src =
+        "module M\n" +
+        "opaque Promise[A]\n" +
+        "opaque Response\n" +
+        "external fetch(url Str) Promise[Response]\n"
+    let tm = inferOk src
+    let sch = schemeOf tm "fetch"
+    Assert.Equal(
+        TyFn(TyName "Str", TyApp(TyName "Promise", TyName "Response")),
+        sch.Body)
+
+[<Fact>]
+let ``infer external call uses declared type`` () =
+    let src =
+        "module M\n" +
+        "opaque Promise[A]\n" +
+        "opaque Response\n" +
+        "external fetch(url Str) Promise[Response]\n" +
+        "let req = fetch \"https://example.com\"\n"
+    let tm = inferOk src
+    Assert.Equal(
+        TyApp(TyName "Promise", TyName "Response"),
+        (schemeOf tm "req").Body)
+
+[<Fact>]
 let ``infer polymorphic id fn`` () =
     let tm = inferOk "module M\nid(x A) A = x"
     let sch = schemeOf tm "id"
@@ -636,6 +662,73 @@ let ``trait dispatch: Functor Maybe resolves at call site`` () =
     let tm = inferOk functorMaybeModule
     Assert.True(Map.containsKey "map_Maybe" tm.Env)
 
+[<Fact>]
+let ``trait dispatch rewrites concrete call map to map_Maybe`` () =
+    let src =
+        functorMaybeModule +
+        "useMap(xs Maybe[Int]) Maybe[Int] = map (\\x. x) xs\n"
+    let tm = inferOk src
+    let rec hasVar name (e: TypedExpr) =
+        match e.Expr with
+        | TEVar v -> v = name
+        | TEApp(a, b) | TEPipe(a, b) | TECons(a, b) -> hasVar name a || hasVar name b
+        | TELam(_, b) | TETagged(b, _) -> hasVar name b
+        | TELet(_, _, e1, e2) -> hasVar name e1 || (e2 |> Option.exists (hasVar name))
+        | TELetPat(_, e1, e2) -> hasVar name e1 || (e2 |> Option.exists (hasVar name))
+        | TEIf(c, t, e2) -> hasVar name c || hasVar name t || hasVar name e2
+        | TEMatch(s, brs) | TEMatchOf(s, brs) ->
+            hasVar name s || (brs |> List.exists (fun (_, b) -> hasVar name b))
+        | TEList es | TETuple es -> es |> List.exists (hasVar name)
+        | TELit _ | TECon _ -> false
+    let useMapBody =
+        tm.Decls
+        |> List.tryPick (fun (d, _) ->
+            match d with
+            | TDFn(sig_, _, body) when sig_.Name = "useMap" -> Some body
+            | _ -> None)
+        |> Option.defaultWith (fun () -> failwith "useMap decl not found")
+    Assert.True(hasVar "map_Maybe" useMapBody)
+    Assert.False(hasVar "map" useMapBody)
+
+[<Fact>]
+let ``trait dispatch rewrites constrained call map to single impl symbol`` () =
+    let src =
+        functorMaybeModule +
+        "transform[F: Functor](xs F[Int])(f Int->Int) F[Int] = map f xs\n"
+    let tm = inferOk src
+    let rec hasVar name (e: TypedExpr) =
+        match e.Expr with
+        | TEVar v -> v = name
+        | TEApp(a, b) | TEPipe(a, b) | TECons(a, b) -> hasVar name a || hasVar name b
+        | TELam(_, b) | TETagged(b, _) -> hasVar name b
+        | TELet(_, _, e1, e2) -> hasVar name e1 || (e2 |> Option.exists (hasVar name))
+        | TELetPat(_, e1, e2) -> hasVar name e1 || (e2 |> Option.exists (hasVar name))
+        | TEIf(c, t, e2) -> hasVar name c || hasVar name t || hasVar name e2
+        | TEMatch(s, brs) | TEMatchOf(s, brs) ->
+            hasVar name s || (brs |> List.exists (fun (_, b) -> hasVar name b))
+        | TEList es | TETuple es -> es |> List.exists (hasVar name)
+        | TELit _ | TECon _ -> false
+    let transformBody =
+        tm.Decls
+        |> List.tryPick (fun (d, _) ->
+            match d with
+            | TDFn(sig_, _, body) when sig_.Name = "transform" -> Some body
+            | _ -> None)
+        |> Option.defaultWith (fun () -> failwith "transform decl not found")
+    Assert.True(hasVar "map_Maybe" transformBody)
+    Assert.False(hasVar "map" transformBody)
+
+[<Fact>]
+let ``clause-sugar match prefers non-function parameter when last is function`` () =
+    let src =
+        "module M\n" +
+        "Maybe A = Some A | None\n" +
+        "bind(fa Maybe[Int])(f Int->Maybe[Int]) Maybe[Int] =\n" +
+        "  | Some a -> f a\n" +
+        "  | None -> None\n"
+    let tm = inferOk src
+    Assert.True(Map.containsKey "bind" tm.Env)
+
 // --- Phase 6.8: tuple patterns (polymorphism via untyped param) ---
 
 [<Fact>]
@@ -705,16 +798,34 @@ let ``single recursion fib still works`` () =
 [<Fact>]
 let ``E006 corpus fires in HMInfer`` () =
     let src = readInvalid "E006-missing-impl.lll"
-    // E006 may be produced by the elaborator (Phase 3) or by HMInfer
-    // Either way, parsing + elaborating should produce errors
-    // Check that the file exists and either parse/elab/infer produces an error
     let result = tryInferSrc src
     match result with
-    | Error errs -> Assert.NotEmpty(errs)
-    | Ok _ ->
-        // If it somehow infers OK, that's still acceptable since E006 may not be fully implemented yet
-        // The test is lenient: just check the file parses without throwing
-        Assert.True(true)
+    | Error errs ->
+        Assert.NotEmpty(errs)
+        Assert.Contains(errs, fun e -> e.Code = E006)
+    | Ok _ -> Assert.True(false, "Expected E006 for missing trait impl")
+
+[<Fact>]
+let ``E006 ambiguous trait impls in constrained call`` () =
+    let src =
+        "module M\n" +
+        "trait Functor F =\n" +
+        "  map(f A->B)(fa F[A]) F[B]\n" +
+        "Maybe A = Some A | None\n" +
+        "Box A = Box A\n" +
+        "impl Functor Maybe =\n" +
+        "  map(f A->B)(fa Maybe[A]) Maybe[B] =\n" +
+        "    | Some a -> Some (f a)\n" +
+        "    | None -> None\n" +
+        "impl Functor Box =\n" +
+        "  map(f A->B)(fa Box[A]) Box[B] =\n" +
+        "    | Box a -> Box (f a)\n" +
+        "transform[F: Functor](xs F[Int])(f Int->Int) F[Int] = map f xs\n"
+    match tryInferSrc src with
+    | Error errs ->
+        Assert.Contains(errs, fun e -> e.Code = E006)
+        Assert.Contains(errs, fun e -> e.Message.Contains("map"))
+    | Ok _ -> Assert.True(false, "Expected E006 for ambiguous trait dispatch")
 
 // --- Phase 7.1.5: cons patterns + cons expressions ---
 

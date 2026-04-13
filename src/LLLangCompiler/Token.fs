@@ -5,6 +5,7 @@ type Token =
     // Keywords
     | KwLet | KwTag | KwUnit
     | KwTrait | KwImpl | KwImport | KwExport | KwModule
+    | KwExternal | KwOpaque
     | KwIf | KwElse | KwTrue | KwFalse
     | KwMatch
     // Identifiers

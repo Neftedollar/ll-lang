@@ -1,0 +1,604 @@
+module Examples.JsonParser
+
+-- Full JSON parser demo:
+-- - strict RFC number grammar
+-- - string escapes including \uXXXX
+-- - surrogate-pair validation for \uD800..\uDBFF + \uDC00..\uDFFF
+-- - explicit lexer + recursive-descent parser
+
+Maybe A = Some A | None
+
+JsonField = JField Str JsonValue
+
+JsonValue =
+  | JNull
+  | JBool Bool
+  | JNum Str
+  | JStr Str
+  | JArr List[JsonValue]
+  | JObj List[JsonField]
+
+Token =
+  | TNull
+  | TTrue
+  | TFalse
+  | TNum Str
+  | TStr Str
+  | TLBrace
+  | TRBrace
+  | TLBracket
+  | TRBracket
+  | TColon
+  | TComma
+  | TEOF
+
+LexResult = LexOk List[Token] | LexErr Str
+NextTokenResult = NextTokOk Token List[Char] | NextTokErr Str
+
+Hex4Result = Hex4Ok Int List[Char] | Hex4Err Str
+EscapeResult = EscOk List[Char] List[Char] | EscErr Str
+StringScanResult = StrScanOk Str List[Char] | StrScanErr Str
+NumScanResult = NumScanOk Str List[Char] | NumScanErr Str
+
+ParseResult A = ParseOk A List[Token] | ParseErr Str
+
+isDigit19(c Char) =
+  if charIsDigit c
+    if c == '0'
+      false
+    else true
+  else false
+
+isHexDigit(c Char) =
+  if c >= '0'
+    if c <= '9'
+      true
+    else if c >= 'a'
+      if c <= 'f'
+        true
+      else if c >= 'A'
+        if c <= 'F'
+          true
+        else false
+      else false
+    else if c >= 'A'
+      if c <= 'F'
+        true
+      else false
+    else false
+  else if c >= 'a'
+    if c <= 'f'
+      true
+    else if c >= 'A'
+      if c <= 'F'
+        true
+      else false
+    else false
+  else if c >= 'A'
+    if c <= 'F'
+      true
+    else false
+  else false
+
+hexVal(c Char) =
+  if c >= '0'
+    if c <= '9'
+      charToInt c - charToInt '0'
+    else if c >= 'a'
+      if c <= 'f'
+        10 + (charToInt c - charToInt 'a')
+      else if c >= 'A'
+        if c <= 'F'
+          10 + (charToInt c - charToInt 'A')
+        else -1
+      else -1
+    else if c >= 'A'
+      if c <= 'F'
+        10 + (charToInt c - charToInt 'A')
+      else -1
+    else -1
+  else if c >= 'a'
+    if c <= 'f'
+      10 + (charToInt c - charToInt 'a')
+    else if c >= 'A'
+      if c <= 'F'
+        10 + (charToInt c - charToInt 'A')
+      else -1
+    else -1
+  else if c >= 'A'
+    if c <= 'F'
+      10 + (charToInt c - charToInt 'A')
+    else -1
+  else -1
+
+skipWs(cs List[Char]) =
+  match cs
+    | c :: rest ->
+      if charIsSpace c
+        skipWs rest
+      else cs
+    | _ -> []
+
+pushChars(cs List[Char])(acc List[Char]) =
+  match cs
+    | c :: rest -> pushChars rest (c :: acc)
+    | _ -> acc
+
+parseHex4(cs List[Char]) =
+  match cs
+    | c1 :: c2 :: c3 :: c4 :: rest ->
+      if isHexDigit c1
+        if isHexDigit c2
+          if isHexDigit c3
+            if isHexDigit c4
+              v1 = hexVal c1
+              v2 = hexVal c2
+              v3 = hexVal c3
+              v4 = hexVal c4
+              n1 = v1 * 16 + v2
+              n2 = n1 * 16 + v3
+              n3 = n2 * 16 + v4
+              Hex4Ok n3 rest
+            else Hex4Err "invalid hex digit in \\u escape (d4)"
+          else Hex4Err "invalid hex digit in \\u escape (d3)"
+        else Hex4Err "invalid hex digit in \\u escape (d2)"
+      else Hex4Err "invalid hex digit in \\u escape (d1)"
+    | _ -> Hex4Err "incomplete \\u escape"
+
+parseUnicodeEscape(cs List[Char]) =
+  match parseHex4 cs
+    | Hex4Err e -> EscErr e
+    | Hex4Ok hi rest ->
+      if hi >= 55296
+        if hi <= 56319
+          match rest
+            | '\\' :: 'u' :: rest2 ->
+              match parseHex4 rest2
+                | Hex4Err e2 -> EscErr e2
+                | Hex4Ok lo rest3 ->
+                  if lo >= 56320
+                    if lo <= 57343
+                      EscOk [(intToChar hi) (intToChar lo)] rest3
+                    else EscErr "invalid low surrogate in \\u pair"
+                  else EscErr "expected low surrogate after high surrogate"
+            | _ -> EscErr "expected second \\u escape for surrogate pair"
+        else if hi <= 57343
+          EscErr "unexpected low surrogate without leading high surrogate"
+        else EscOk [(intToChar hi)] rest
+      else EscOk [(intToChar hi)] rest
+
+parseEscape(cs List[Char]) =
+  match cs
+    | '"' :: rest -> EscOk ['"'] rest
+    | '\\' :: rest -> EscOk ['\\'] rest
+    | '/' :: rest -> EscOk ['/'] rest
+    | 'b' :: rest -> EscOk [(intToChar 8)] rest
+    | 'f' :: rest -> EscOk [(intToChar 12)] rest
+    | 'n' :: rest -> EscOk ['\n'] rest
+    | 'r' :: rest -> EscOk ['\r'] rest
+    | 't' :: rest -> EscOk ['\t'] rest
+    | 'u' :: rest -> parseUnicodeEscape rest
+    | _ -> EscErr "invalid escape sequence in string"
+
+scanStringChars(cs List[Char])(accRev List[Char]) =
+  match cs
+    | '"' :: rest -> StrScanOk (strFromChars (listReverse accRev)) rest
+    | '\\' :: rest ->
+      match parseEscape rest
+        | EscErr e -> StrScanErr e
+        | EscOk outChars rest2 ->
+          scanStringChars rest2 (pushChars outChars accRev)
+    | c :: rest ->
+      if charToInt c < 32
+        StrScanErr "control character in string literal"
+      else scanStringChars rest (c :: accRev)
+    | _ -> StrScanErr "unterminated string literal"
+
+finishNumber(accRev List[Char])(rest List[Char]) =
+  NumScanOk (strFromChars (listReverse accRev)) rest
+
+scanExpDigitsTail(cs List[Char])(accRev List[Char]) =
+  match cs
+    | c :: rest ->
+      if charIsDigit c
+        scanExpDigitsTail rest (c :: accRev)
+      else finishNumber accRev cs
+    | _ -> finishNumber accRev []
+
+scanExpDigits(cs List[Char])(accRev List[Char]) =
+  match cs
+    | c :: rest ->
+      if charIsDigit c
+        scanExpDigitsTail rest (c :: accRev)
+      else NumScanErr "expected exponent digit"
+    | _ -> NumScanErr "expected exponent digit"
+
+scanExpSignOrDigits(cs List[Char])(accRev List[Char]) =
+  match cs
+    | '+' :: rest -> scanExpDigits rest ('+' :: accRev)
+    | '-' :: rest -> scanExpDigits rest ('-' :: accRev)
+    | _ -> scanExpDigits cs accRev
+
+scanExpPart(cs List[Char])(accRev List[Char]) =
+  match cs
+    | 'e' :: rest -> scanExpSignOrDigits rest ('e' :: accRev)
+    | 'E' :: rest -> scanExpSignOrDigits rest ('E' :: accRev)
+    | _ -> finishNumber accRev cs
+
+scanFracDigitsTail(cs List[Char])(accRev List[Char]) =
+  match cs
+    | c :: rest ->
+      if charIsDigit c
+        scanFracDigitsTail rest (c :: accRev)
+      else scanExpPart cs accRev
+    | _ -> finishNumber accRev []
+
+scanFracDigits(cs List[Char])(accRev List[Char]) =
+  match cs
+    | c :: rest ->
+      if charIsDigit c
+        scanFracDigitsTail rest (c :: accRev)
+      else NumScanErr "expected digit after decimal point"
+    | _ -> NumScanErr "expected digit after decimal point"
+
+scanFracPart(cs List[Char])(accRev List[Char]) =
+  match cs
+    | '.' :: rest -> scanFracDigits rest ('.' :: accRev)
+    | _ -> scanExpPart cs accRev
+
+scanAfterZero(cs List[Char])(accRev List[Char]) =
+  match cs
+    | c :: _ ->
+      if charIsDigit c
+        NumScanErr "leading zero in number"
+      else scanFracPart cs accRev
+    | _ -> finishNumber accRev []
+
+scanIntTail(cs List[Char])(accRev List[Char]) =
+  match cs
+    | c :: rest ->
+      if charIsDigit c
+        scanIntTail rest (c :: accRev)
+      else scanFracPart cs accRev
+    | _ -> finishNumber accRev []
+
+scanIntPart(cs List[Char])(accRev List[Char]) =
+  match cs
+    | '0' :: rest -> scanAfterZero rest ('0' :: accRev)
+    | c :: rest ->
+      if isDigit19 c
+        scanIntTail rest (c :: accRev)
+      else NumScanErr "expected digit in number"
+    | _ -> NumScanErr "expected digit in number"
+
+scanNumber(cs List[Char]) =
+  match cs
+    | '-' :: rest -> scanIntPart rest ['-']
+    | _ -> scanIntPart cs []
+
+nextToken(cs List[Char]) =
+  trimmed = skipWs cs
+  match trimmed
+    | [] -> NextTokOk TEOF []
+    | '{' :: rest -> NextTokOk TLBrace rest
+    | '}' :: rest -> NextTokOk TRBrace rest
+    | '[' :: rest -> NextTokOk TLBracket rest
+    | ']' :: rest -> NextTokOk TRBracket rest
+    | ':' :: rest -> NextTokOk TColon rest
+    | ',' :: rest -> NextTokOk TComma rest
+    | '"' :: rest ->
+      match scanStringChars rest []
+        | StrScanOk s rest2 -> NextTokOk (TStr s) rest2
+        | StrScanErr e -> NextTokErr e
+    | 'n' :: 'u' :: 'l' :: 'l' :: rest -> NextTokOk TNull rest
+    | 't' :: 'r' :: 'u' :: 'e' :: rest -> NextTokOk TTrue rest
+    | 'f' :: 'a' :: 'l' :: 's' :: 'e' :: rest -> NextTokOk TFalse rest
+    | c :: _ ->
+      if c == '-'
+        match scanNumber trimmed
+          | NumScanOk n restN -> NextTokOk (TNum n) restN
+          | NumScanErr e -> NextTokErr e
+      else if charIsDigit c
+        match scanNumber trimmed
+          | NumScanOk n restN -> NextTokOk (TNum n) restN
+          | NumScanErr e -> NextTokErr e
+      else
+        NextTokErr (strConcat "unexpected character while lexing JSON: " (strFromChars [c]))
+
+tokenizeChars(cs List[Char])(accRev List[Token]) =
+  match nextToken cs
+    | NextTokErr e -> LexErr e
+    | NextTokOk tok rest ->
+      match tok
+        | TEOF -> LexOk (listReverse (TEOF :: accRev))
+        | _ -> tokenizeChars rest (tok :: accRev)
+
+tokenize(src Str) = tokenizeChars (strChars src) []
+
+showToken(tok Token) =
+  match tok
+    | TNull -> "null"
+    | TTrue -> "true"
+    | TFalse -> "false"
+    | TNum n -> strConcat "number(" (strConcat n ")")
+    | TStr _ -> "string"
+    | TLBrace -> "{"
+    | TRBrace -> "}"
+    | TLBracket -> "["
+    | TRBracket -> "]"
+    | TColon -> ":"
+    | TComma -> ","
+    | TEOF -> "<eof>"
+
+kindOf(v JsonValue) =
+  match v
+    | JNull -> "null"
+    | JBool _ -> "bool"
+    | JNum _ -> "number"
+    | JStr _ -> "string"
+    | JArr _ -> "array"
+    | JObj _ -> "object"
+
+parseValue(tokens List[Token]) =
+  match tokens
+    | TNull :: rest -> ParseOk JNull rest
+    | TTrue :: rest -> ParseOk (JBool true) rest
+    | TFalse :: rest -> ParseOk (JBool false) rest
+    | TNum n :: rest ->
+      match strToFloat n
+        | Some _ -> ParseOk (JNum n) rest
+        | None -> ParseErr (strConcat "invalid numeric literal: " n)
+    | TStr s :: rest -> ParseOk (JStr s) rest
+    | TLBracket :: rest -> parseArrayValues rest []
+    | TLBrace :: rest -> parseObjectFields rest []
+    | t :: _ -> ParseErr (strConcat "unexpected token in value: " (showToken t))
+    | _ -> ParseErr "unexpected end of input in value"
+
+parseArrayValues(tokens List[Token])(accRev List[JsonValue]) =
+  match tokens
+    | TRBracket :: rest -> ParseOk (JArr (listReverse accRev)) rest
+    | _ ->
+      match parseValue tokens
+        | ParseErr e -> ParseErr e
+        | ParseOk v rest2 ->
+          match rest2
+            | TComma :: rest3 -> parseArrayValues rest3 (v :: accRev)
+            | TRBracket :: rest3 -> ParseOk (JArr (listReverse (v :: accRev))) rest3
+            | t :: _ -> ParseErr (strConcat "expected ',' or ']' in array, got " (showToken t))
+            | _ -> ParseErr "unexpected end of input in array"
+
+parseObjectFields(tokens List[Token])(accRev List[JsonField]) =
+  match tokens
+    | TRBrace :: rest -> ParseOk (JObj (listReverse accRev)) rest
+    | TStr key :: TColon :: rest ->
+      match parseValue rest
+        | ParseErr e -> ParseErr e
+        | ParseOk v rest2 ->
+          field = JField key v
+          match rest2
+            | TComma :: rest3 -> parseObjectFields rest3 (field :: accRev)
+            | TRBrace :: rest3 -> ParseOk (JObj (listReverse (field :: accRev))) rest3
+            | t :: _ -> ParseErr (strConcat "expected ',' or '}' in object, got " (showToken t))
+            | _ -> ParseErr "unexpected end of input in object"
+    | t :: _ -> ParseErr (strConcat "expected string key or '}' in object, got " (showToken t))
+    | _ -> ParseErr "unexpected end of input in object"
+
+parseTokens(tokens List[Token]) =
+  match parseValue tokens
+    | ParseErr e -> ParseErr e
+    | ParseOk v rest ->
+      match rest
+        | TEOF :: _ -> ParseOk v []
+        | t :: _ -> ParseErr (strConcat "trailing token after JSON value: " (showToken t))
+        | _ -> ParseErr "missing EOF token"
+
+parse(src Str) =
+  match tokenize src
+    | LexErr e -> ParseErr (strConcat "lex error: " e)
+    | LexOk toks -> parseTokens toks
+
+eqJsonValueList(xs List[JsonValue])(ys List[JsonValue]) =
+  match xs
+    | x :: restX ->
+      match ys
+        | y :: restY ->
+          if eqJsonValue x y
+            eqJsonValueList restX restY
+          else false
+        | _ -> false
+    | _ ->
+      match ys
+        | [] -> true
+        | _ -> false
+
+eqJsonField(f1 JsonField)(f2 JsonField) =
+  match f1
+    | JField k1 v1 ->
+      match f2
+        | JField k2 v2 ->
+          if k1 == k2
+            eqJsonValue v1 v2
+          else false
+
+eqJsonFieldList(xs List[JsonField])(ys List[JsonField]) =
+  match xs
+    | x :: restX ->
+      match ys
+        | y :: restY ->
+          if eqJsonField x y
+            eqJsonFieldList restX restY
+          else false
+        | _ -> false
+    | _ ->
+      match ys
+        | [] -> true
+        | _ -> false
+
+eqJsonValue(v1 JsonValue)(v2 JsonValue) =
+  match v1
+    | JNull ->
+      match v2
+        | JNull -> true
+        | _ -> false
+    | JBool b1 ->
+      match v2
+        | JBool b2 -> b1 == b2
+        | _ -> false
+    | JNum n1 ->
+      match v2
+        | JNum n2 -> n1 == n2
+        | _ -> false
+    | JStr s1 ->
+      match v2
+        | JStr s2 -> s1 == s2
+        | _ -> false
+    | JArr xs1 ->
+      match v2
+        | JArr xs2 -> eqJsonValueList xs1 xs2
+        | _ -> false
+    | JObj fs1 ->
+      match v2
+        | JObj fs2 -> eqJsonFieldList fs1 fs2
+        | _ -> false
+
+escapeChar(c Char) =
+  if c == '"'
+    "\\\""
+  else if c == '\\'
+    "\\\\"
+  else if c == '\n'
+    "\\n"
+  else if c == '\r'
+    "\\r"
+  else if c == '\t'
+    "\\t"
+  else if c == (intToChar 8)
+    "\\b"
+  else if c == (intToChar 12)
+    "\\f"
+  else strFromChars [c]
+
+escapeChars(cs List[Char])(acc Str) =
+  match cs
+    | c :: rest -> escapeChars rest (strConcat acc (escapeChar c))
+    | _ -> acc
+
+renderString(s Str) =
+  strConcat "\"" (strConcat (escapeChars (strChars s) "") "\"")
+
+renderField(f JsonField) =
+  match f
+    | JField k v -> strConcat (renderString k) (strConcat ":" (renderJson v))
+
+renderArrayTail(xs List[JsonValue]) =
+  match xs
+    | x :: rest -> strConcat "," (strConcat (renderJson x) (renderArrayTail rest))
+    | _ -> ""
+
+renderArray(xs List[JsonValue]) =
+  match xs
+    | x :: rest -> strConcat "[" (strConcat (renderJson x) (strConcat (renderArrayTail rest) "]"))
+    | _ -> "[]"
+
+renderObjectTail(fs List[JsonField]) =
+  match fs
+    | f :: rest -> strConcat "," (strConcat (renderField f) (renderObjectTail rest))
+    | _ -> ""
+
+renderObject(fs List[JsonField]) =
+  match fs
+    | f :: rest -> strConcat "{" (strConcat (renderField f) (strConcat (renderObjectTail rest) "}"))
+    | _ -> "{}"
+
+renderJson(v JsonValue) =
+  match v
+    | JNull -> "null"
+    | JBool b ->
+      if b
+        "true"
+      else "false"
+    | JNum n -> n
+    | JStr s -> renderString s
+    | JArr xs -> renderArray xs
+    | JObj fs -> renderObject fs
+
+mkOk(name Str) = strConcat "OK " name
+mkFail(name Str)(msg Str) = strConcat (strConcat "FAIL " name) (strConcat " " msg)
+
+runOkCase(name Str)(src Str)(wantKind Str) =
+  match parse src
+    | ParseErr e -> mkFail name (strConcat "parse-error:" e)
+    | ParseOk v _ ->
+      got = kindOf v
+      if got == wantKind
+        mkOk name
+      else mkFail name (strConcat "kind-mismatch:" got)
+
+runErrCase(name Str)(src Str) =
+  match parse src
+    | ParseErr _ -> mkOk name
+    | ParseOk v _ -> mkFail name (strConcat "expected-error-got:" (kindOf v))
+
+runRoundtripCase(name Str)(src Str) =
+  match parse src
+    | ParseErr e -> mkFail name (strConcat "parse-error:" e)
+    | ParseOk v _ ->
+      rendered = renderJson v
+      match parse rendered
+        | ParseErr e2 -> mkFail name (strConcat "reparse-error:" e2)
+        | ParseOk v2 _ ->
+          if eqJsonValue v v2
+            mkOk name
+          else mkFail name "roundtrip-ast-mismatch"
+
+main() =
+  p1 = runOkCase "pos-null" "null" "null"
+  p2 = runOkCase "pos-bool" "true" "bool"
+  p3 = runOkCase "pos-int" "123" "number"
+  p4 = runOkCase "pos-exp" "-12.34e+5" "number"
+  p5 = runOkCase "pos-str-esc" "\"hello\\nworld\"" "string"
+  p6 = runOkCase "pos-u-basic" "\"\\u0041\"" "string"
+  p7 = runOkCase "pos-u-surrogate" "\"\\uD83D\\uDE00\"" "string"
+  p8 = runOkCase "pos-array" "[1,2,3]" "array"
+  p9 = runOkCase "pos-object" "{\"a\":1,\"b\":[false,null]}" "object"
+  r1 = runRoundtripCase "rt-num" "-12.34e+5"
+  r2 = runRoundtripCase "rt-str-esc" "\"hello\\nworld\""
+  r3 = runRoundtripCase "rt-u-surrogate" "\"\\uD83D\\uDE00\""
+  r4 = runRoundtripCase "rt-array" "[1,2,3]"
+  r5 = runRoundtripCase "rt-object" "{\"a\":1,\"b\":[false,null]}"
+  u1 =
+    if floatToStr 1.25 == "1.25"
+      mkOk "util-float-to-str"
+    else mkFail "util-float-to-str" (strConcat "unexpected:" (floatToStr 1.25))
+  n1 = runErrCase "neg-leading-zero" "01"
+  n2 = runErrCase "neg-bad-exp" "1e"
+  n3 = runErrCase "neg-bad-frac" "1."
+  n4 = runErrCase "neg-bad-escape" "\"\\x\""
+  n5 = runErrCase "neg-lone-high-surrogate" "\"\\uD83D\""
+  n6 = runErrCase "neg-lone-low-surrogate" "\"\\uDE00\""
+  n7 = runErrCase "neg-missing-comma" "[1 2]"
+  n8 = runErrCase "neg-trailing-garbage" "true false"
+  _ = printfn p1
+  _ = printfn p2
+  _ = printfn p3
+  _ = printfn p4
+  _ = printfn p5
+  _ = printfn p6
+  _ = printfn p7
+  _ = printfn p8
+  _ = printfn p9
+  _ = printfn r1
+  _ = printfn r2
+  _ = printfn r3
+  _ = printfn r4
+  _ = printfn r5
+  _ = printfn u1
+  _ = printfn n1
+  _ = printfn n2
+  _ = printfn n3
+  _ = printfn n4
+  _ = printfn n5
+  _ = printfn n6
+  _ = printfn n7
+  _ = printfn n8
+  0

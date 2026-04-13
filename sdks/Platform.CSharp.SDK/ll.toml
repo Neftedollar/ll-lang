@@ -1,0 +1,9 @@
+[project]
+name = "Platform.CSharp.SDK"
+version = "0.1.0"
+
+[sdk]
+target = "csharp"
+aliases = ["cs", "c#"]
+ext = ".cs"
+host-ext = ".csproj"

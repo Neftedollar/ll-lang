@@ -1,0 +1,12 @@
+{
+  "name": "lllang-typescript-output",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc \"{main_file}\" --target es2022 --module esnext",
+    "run": "tsc \"{main_file}\" --target es2022 --module esnext && node \"{main_file_stem}.js\""
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

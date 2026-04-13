@@ -18,7 +18,7 @@ present:
 ```
 module <dotted.path>
 
-<type decls>           -- emitted first so the prelude can see them
+<type decls>           -- emitted first; grouped as `type ... and ...` when needed
 
 <prelude block>        -- core stdlib bindings (+ Maybe/Result when used)
 
@@ -192,6 +192,24 @@ Type parameters: bare `A` in ll-lang becomes `<'A>` in F#. Phantom
 params (`[state]`) are dropped — they have no F# equivalent and exist
 only for the elaborator/inference to distinguish types.
 
+### Type dependency grouping (`type ... and ...`)
+
+F# cannot resolve forward references across separate `type` declarations.
+Example: `JsonField = JField Str JsonValue` before `JsonValue = ...` fails
+unless both are emitted in one recursive type block.
+
+Codegen computes type-name references inside each `TDType` body and groups
+consecutive declarations into minimal forward-reference closures:
+
+- no forward ref: emit standalone `type Name = ...`
+- forward ref to later decl: emit a single `type ... and ...` group covering
+  the range
+- mutual recursion: same `type ... and ...` group
+
+Invariant after grouping: every same-module type reference is either to an
+earlier emitted `type` or to a sibling inside the same `type ... and ...`
+block.
+
 ### Function declarations
 
 ```fsharp
@@ -203,6 +221,36 @@ only for the elaborator/inference to distinguish types.
         let recKw = if isRec then "rec " else ""
         "let " + recKw + emitFnClause sig_ body
 ```
+
+### External and opaque declarations
+
+```fsharp
+| TDExternal(sig_, _) -> emitExternalDecl sig_
+| TDOpaque(name, ps)  -> emitOpaqueDecl name ps
+```
+
+- `TDExternal` is backend-mapped to platform-native symbols via
+  shared target tables in `Platform.fs` and `tryGetExternalTarget`.
+
+Current mapping coverage:
+
+| Backend | Known external mappings |
+|---------|------------------------|
+| F# (`Codegen.fs`) | `console_log`, `JSON_parse` |
+| TypeScript (`CodegenTS.fs`) | `console_log`, `JSON_parse`, `fetch` |
+| Python (`CodegenPy.fs`) | `console_log`, `JSON_parse` |
+| Java (`CodegenJava.fs`) | `console_log` |
+| C# (`CodegenCSharp.fs`) | `console_log`, `JSON_parse` |
+| LLVM (`CodegenLLVM.fs`) | `console_log` |
+
+- Unknown `TDExternal` names are now rejected during compile validation before emit:
+  compilation fails with `E026 UnknownExternalMapping target:<target> name:<name>`.
+  This is no longer treated as a silent omission.
+
+The emitted helper shape follows each backend's existing calling convention.
+
+- `TDOpaque` emits erased host-side aliases (`obj`/`unknown`/language-specific
+  equivalents) so foreign handles stay typed in ll-lang but lightweight at runtime.
 
 Three decisions:
 
@@ -282,20 +330,22 @@ warning on words like `object` and `params`.
 
 ## F# prelude block
 
-`assemblePrelude` prepends an auto-generated F# prelude to every
-emitted module. It has three parts:
+`assemblePrelude` emits an auto-generated F# prelude on demand. It has
+three parts:
 
-- `fsharpPreludeCore` — always emitted. Contains the runtime
+- `fsharpPreludeCore` — emitted only when core stdlib helpers are
+  referenced. Contains runtime
   definitions for every stdlib function exposed via `builtinEnv`
   that has no dependency on user-declared types (math, list-without-
   Maybe, str, char, file IO, process, print).
 - `fsharpPreludeMaybe` — emitted only when the user module declares
-  `type Maybe`. Defines `listHead`, `listTail`, `maybeMap`,
+  `type Maybe` and references Maybe-dependent helpers. Defines `listHead`, `listTail`, `maybeMap`,
   `maybeBind`, `maybeWithDefault`, `strToInt`, `listAt` — all of
   which return `Maybe`-shaped values and therefore need the user's
   `Some`/`None` constructors in scope.
 - `fsharpPreludeResult` — emitted only when the user module declares
-  `type Result`. Defines `resultMap`, `resultBind`, `resultMapErr`.
+  `type Result` and references Result-dependent helpers. Defines
+  `resultMap`, `resultBind`, `resultMapErr`.
 
 The prelude is emitted AFTER the user's type declarations so that
 `Maybe`/`Result`-dependent helpers resolve to the user's own types

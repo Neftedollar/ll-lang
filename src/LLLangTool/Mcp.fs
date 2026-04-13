@@ -10,6 +10,7 @@ open FsMcp.Core.Validation
 open FsMcp.Server
 open LLLang.Elaborator
 open LLLang.Compiler
+open LLLang.Platform
 open LLLang.ProjectLoader
 
 // ─── Arg types ───────────────────────────────────────────────────────────────
@@ -41,14 +42,15 @@ let private errorsToJson (es: LLError list) =
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 let private parseTargetStr (t: string option) : Target =
-    match t |> Option.map (fun s -> s.ToLower()) with
-    | Some ("ts" | "typescript") -> TypeScript
-    | Some ("py" | "python")     -> Python
-    | Some ("java" | "jvm")      -> Java
-    | _                          -> FSharp
+    parseTargetOrDefault t FSharp
 
 let private targetFieldName = function
-    | FSharp -> "fsharp" | TypeScript -> "typescript" | Python -> "python" | Java -> "java"
+    | FSharp -> "fsharp"
+    | TypeScript -> "typescript"
+    | Python -> "python"
+    | Java -> "java"
+    | CSharp -> "csharp"
+    | LLVM -> "llvm"
 
 // ─── compile_file ────────────────────────────────────────────────────────────
 
@@ -171,6 +173,7 @@ let private knownErrors = [
     "E006", "MissingImpl",            "No impl TraitName TypeName found for a constrained type variable."
     "E007", "PlatformMismatch",       "Platform-specific module imported but compile target doesn't support it."
     "E008", "InfiniteType",           "Type unification would produce an infinite type (occurs-check failure)."
+    "E026", "UnknownExternalMapping", "External declaration has no matching target mapping."
     "E020", "ModulePathMismatch",     "module header does not match the file's location in src/."
     "E024", "ModuleCycle",            "Import graph contains a cycle."
     "E025", "NoProjectForImport",     "Non-Std.* import used in single-file mode (no lll.toml)."
@@ -259,9 +262,11 @@ let private stdlibEntries = [
     "strTrim",      "Str -> Str",                           "Std.Str"
     "strContains",  "Str -> Str -> Bool",                   "Std.Str"
     "strToInt",     "Str -> Maybe[Int]",                    "Std.Str"
+    "strToFloat",   "Str -> Maybe[Float]",                  "Std.Str"
     "strFromChars", "List[Char] -> Str",                    "Std.Str"
     "strChars",     "Str -> List[Char]",                    "Std.Str"
     "intToStr",     "Int -> Str",                           "Std.Str"
+    "floatToStr",   "Float -> Str",                         "Std.Str"
     "charIsDigit",  "Char -> Bool",                         "Std.Char"
     "charIsSpace",  "Char -> Bool",                         "Std.Char"
     "charIsAlpha",  "Char -> Bool",                         "Std.Char"
@@ -400,12 +405,12 @@ let runServer () =
 
         tool (TypedTool.define<CompileFileArgs>
             "compile_file"
-            "Compile a .lll file. target: 'fs'|'ts'|'py'|'java' (default 'fs'). include_output=true returns generated source. Returns {ok, errors[], target, <target>?}."
+            "Compile a .lll file. target: 'fs'|'ts'|'py'|'java'|'cs'|'llvm' (default 'fs'). include_output=true returns generated source. Returns {ok, errors[], target, <target>?}."
             compileFileTool |> unwrapResult)
 
         tool (TypedTool.define<CompileSourceArgs>
             "compile_source"
-            "Compile ll-lang source string directly (no file needed). target: 'fs'|'ts'|'py'|'java' (default 'fs'). Returns {ok, errors[], target, <target>}. Fastest way for an LLM to check generated code."
+            "Compile ll-lang source string directly (no file needed). target: 'fs'|'ts'|'py'|'java'|'cs'|'llvm' (default 'fs'). Returns {ok, errors[], target, <target>}. Fastest way for an LLM to check generated code."
             compileSourceTool |> unwrapResult)
 
         tool (TypedTool.define<CheckFileArgs>

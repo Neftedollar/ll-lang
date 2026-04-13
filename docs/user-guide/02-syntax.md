@@ -260,9 +260,10 @@ Whitespace between atoms is function application. Left-associative — curried.
 
 ```lll
 let xs = [1 2 3]
+let ys = [1; 2; 3]
 ```
 
-Space-separated, no commas.
+Both space-separated and `;`-separated list elements are valid. Commas are not list separators (`[1, 2]` is tuple syntax).
 
 ### Tuples
 

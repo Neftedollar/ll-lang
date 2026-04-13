@@ -95,9 +95,9 @@ collects until a blank line or the start of the next rule.
 
 ## `project_info`
 
-Uses `findProjectRoot` (same walk-upward-for-ll.toml logic as Program.fs) and
+Uses `findProjectRoot` (same walk-upward-for-lll.toml logic as Program.fs) and
 then calls `LLLang.ProjectLoader.loadProject`. Falls back to single-file mode
-(no ll.toml) gracefully.
+(no lll.toml) gracefully.
 
 ## Testing
 

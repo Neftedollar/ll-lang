@@ -1,0 +1,9 @@
+[project]
+name = "Platform.FSharp.SDK"
+version = "0.1.0"
+
+[sdk]
+target = "fsharp"
+aliases = ["fs", "f#"]
+ext = ".fs"
+host-ext = ".fsproj"

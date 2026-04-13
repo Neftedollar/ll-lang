@@ -4,6 +4,7 @@ open System
 open LLLang.AST
 open LLLang.Types
 open LLLang.TypedAST
+open LLLang.Platform
 
 // ---- F# keyword / reserved-word safety ---------------------------------------
 //
@@ -80,6 +81,22 @@ let rec private emitType (t: TypeExpr) : string =
 let private emitTypeParams (ps: TypeParam list) : string =
     let bare = ps |> List.choose (function TPBare n -> Some ("'" + n) | TPPhantom _ -> None)
     if List.isEmpty bare then "" else "<" + String.concat ", " bare + ">"
+
+let private emitOpaqueDecl (name: TypeIdent) (ps: TypeParam list) : string =
+    let tpStr = emitTypeParams ps
+    "type " + name + tpStr + " = obj"
+
+let private emitExternalDecl (sig_: TypedFnSig) : string =
+    let pnames = sig_.Params |> List.map (fst >> safeIdent)
+    let paramPart =
+        if List.isEmpty pnames then " ()"
+        else " " + String.concat " " pnames
+    match tryGetExternalTarget FSharp sig_.Name with
+    | None -> ""
+    | Some target ->
+        let callArgs = String.concat ", " pnames
+        let callExpr = target + "(" + callArgs + ")"
+        "let " + safeIdent sig_.Name + paramPart + " = " + callExpr
 
 // ---- Literal emission --------------------------------------------------------
 
@@ -266,12 +283,47 @@ let private emitFnClause (sig_: TypedFnSig) (body: TypedExpr) : string =
     let paramPart = if paramStr = "" then "" else " " + paramStr
     safeIdent sig_.Name + paramPart + " =\n    " + emitExpr 4 body
 
-let private emitDecl (decl: TypedDecl) : string =
-    match decl with
+let rec private typeRefsInTypeExpr (declared: Set<string>) (t: TypeExpr) : Set<string> =
+    match t with
+    | TyName n when Set.contains n declared -> Set.singleton n
+    | TyName _ | TyVar _ -> Set.empty
+    | TyApp(a, b)
+    | TyFn(a, b) ->
+        Set.union (typeRefsInTypeExpr declared a) (typeRefsInTypeExpr declared b)
+    | TyTagged(inner, _) ->
+        typeRefsInTypeExpr declared inner
 
-    | TDType(name, ps, body) ->
+let private typeRefsInTypeBody (declared: Set<string>) (body: TypeBody) : Set<string> =
+    match body with
+    | TBSum branches ->
+        branches
+        |> List.collect snd
+        |> List.fold (fun acc ty -> Set.union acc (typeRefsInTypeExpr declared ty)) Set.empty
+    | TBRecord fields ->
+        fields
+        |> List.map snd
+        |> List.fold (fun acc ty -> Set.union acc (typeRefsInTypeExpr declared ty)) Set.empty
+    | TBWrapped t ->
+        typeRefsInTypeExpr declared t
+
+let private emitTypeDeclWithKeyword (keyword: string) (allowMaybeAlias: bool) (name: string) (ps: TypeParam list) (body: TypeBody) : string =
+    // Treat canonical ll-lang Maybe as an alias to F# option in F# backend.
+    // This avoids constructor/type divergence between prelude helpers that
+    // use Some/None and user-declared `Maybe = Some | None` in project mode.
+    let maybeAlias =
+        if allowMaybeAlias then
+            match (name, ps, body) with
+            | "Maybe", [TPBare p], TBSum [("Some", [argTy]); ("None", [])]
+            | "Maybe", [TPBare p], TBSum [("None", []); ("Some", [argTy])] ->
+                Some ("type Maybe<'" + p + "> = " + emitType argTy + " option")
+            | _ -> None
+        else None
+    match maybeAlias with
+    | Some aliasDecl ->
+        aliasDecl
+    | None ->
         let params' = emitTypeParams ps
-        let header = "type " + name + params' + " ="
+        let header = keyword + " " + name + params' + " ="
         match body with
         | TBSum branches ->
             let arms =
@@ -286,9 +338,104 @@ let private emitDecl (decl: TypedDecl) : string =
         | TBWrapped t ->
             header + "\n    | " + name + " of " + emitType t
 
+/// Group type declarations so F# can resolve forward and mutually-recursive references.
+/// Invariant: every TDType that references another type in the same module either
+/// references an earlier type, or is emitted inside a `type ... and ...` block.
+let private groupTypeDecls (ds: (TypedDecl * bool) list) : (TypedDecl * bool) list list =
+    let arr = List.toArray ds
+    let n = arr.Length
+    let typeNames =
+        arr
+        |> Array.choose (fun (d, _) ->
+            match d with
+            | TDType(name, _, _) -> Some name
+            | _ -> None)
+    let declared = Set.ofArray typeNames
+    let indexByName =
+        arr
+        |> Array.mapi (fun i (d, _) ->
+            match d with
+            | TDType(name, _, _) -> Some (name, i)
+            | _ -> None)
+        |> Array.choose id
+        |> Map.ofArray
+    let refsAt =
+        arr
+        |> Array.map (fun (d, _) ->
+            match d with
+            | TDType(_, _, body) -> typeRefsInTypeBody declared body
+            | _ -> Set.empty)
+    let maxForwardRefIndex i =
+        refsAt.[i]
+        |> Seq.choose (fun nm -> Map.tryFind nm indexByName)
+        |> Seq.filter (fun j -> j >= i)
+        |> Seq.fold (fun acc j -> max acc j) i
+
+    let groups = ResizeArray<(TypedDecl * bool) list>()
+    let mutable i = 0
+    while i < n do
+        match fst arr.[i] with
+        | TDType _ ->
+            let mutable hi = maxForwardRefIndex i
+            let mutable changed = true
+            while changed do
+                changed <- false
+                let mutable k = i
+                while k <= hi do
+                    match fst arr.[k] with
+                    | TDType _ ->
+                        let m = maxForwardRefIndex k
+                        if m > hi then
+                            hi <- m
+                            changed <- true
+                    | _ -> ()
+                    k <- k + 1
+            groups.Add([ for j in i .. hi -> arr.[j] ])
+            i <- hi + 1
+        | _ ->
+            groups.Add([ arr.[i] ])
+            i <- i + 1
+
+    List.ofSeq groups
+
+let private emitTypeDeclGroup (group: (TypedDecl * bool) list) : string =
+    match group with
+    | [] -> ""
+    | [(TDOpaque(name, ps), _)] -> emitOpaqueDecl name ps
+    | [(TDType(name, ps, body), _)] ->
+        emitTypeDeclWithKeyword "type" true name ps body
+    | (TDType(name, ps, body), _) :: rest ->
+        let first = emitTypeDeclWithKeyword "type" false name ps body
+        let tail =
+            rest
+            |> List.map (fun (d, _) ->
+                match d with
+                | TDType(n, tps, b) -> emitTypeDeclWithKeyword "and" false n tps b
+                | _ -> failwith "groupTypeDecls invariant violated")
+        String.concat "\n" (first :: tail)
+    | _ ->
+        failwith "groupTypeDecls invariant violated"
+
+let private emitTypeDecls (typeDecls: (TypedDecl * bool) list) : string =
+    typeDecls
+    |> groupTypeDecls
+    |> List.map emitTypeDeclGroup
+    |> List.filter (fun s -> s <> "")
+    |> String.concat "\n\n"
+
+let private emitDecl (decl: TypedDecl) : string =
+    match decl with
+
+    | TDType(name, ps, body) ->
+        emitTypeDeclWithKeyword "type" true name ps body
+
+    | TDOpaque(name, ps) ->
+        emitOpaqueDecl name ps
+
     | TDTag _  -> ""
     | TDUnit _ -> ""
     | TDTrait _ -> ""
+    | TDExternal(sig_, _) -> emitExternalDecl sig_
 
     | TDFn(sig_, _, body) ->
         if isMainFn sig_ then
@@ -310,7 +457,7 @@ let private emitDecl (decl: TypedDecl) : string =
             let recKw = if isRec then "rec " else ""
             let paramStr = sig_.Params |> List.map (fst >> safeIdent) |> String.concat " "
             let paramPart = if paramStr = "" then "" else " " + paramStr
-            "let " + recKw + safeIdent typeName + "_" + safeIdent sig_.Name + paramPart + " =\n    " + emitExpr 4 body
+            "let " + recKw + safeIdent sig_.Name + "_" + safeIdent typeName + paramPart + " =\n    " + emitExpr 4 body
         ) |> String.concat "\n\n"
 
 // ---- Group consecutive fn decls into `let rec ... and ...` blocks ---------
@@ -389,7 +536,7 @@ let private emitDeclGroup (group: (TypedDecl * bool) list) : string =
 
 // ---- F# prelude block (Phase 6 stdlib) --------------------------------------
 //
-// Prepended to every emitted module to provide ll-lang stdlib bindings that
+// Emitted on demand to provide ll-lang stdlib bindings that
 // forward to F# standard library. Emitted AFTER user type declarations so that
 // references to user-declared constructors (e.g. Some/None from
 // `type Maybe A = Some A | None`) resolve to the user's own types rather than
@@ -398,10 +545,10 @@ let private emitDeclGroup (group: (TypedDecl * bool) list) : string =
 // their module; likewise `type Result A E = Ok A | Err E` for Result fns.
 //
 // Maybe/Result-dependent bindings are emitted conditionally: only when the
-// user module actually declares the corresponding type. This avoids referencing
-// undefined constructors in modules that don't use them.
+// user module actually declares the corresponding type *and* referenced
+// helpers are used.
 
-/// Core prelude block — always emitted. Has no dependencies on user-declared types.
+/// Core prelude block — emitted when at least one core stdlib helper is used.
 let private fsharpPreludeCore : string = """// --- ll-lang stdlib prelude (auto-generated) ---
 let abs (x: int64) = System.Math.Abs(x)
 let absf (x: float) = System.Math.Abs(x)
@@ -424,6 +571,7 @@ let strChars (s: string) = s |> Seq.toList
 let charToInt (c: char) = int64 (int c)
 let intToChar (n: int64) = char (int n)
 let intToStr (n: int64) = string n
+let floatToStr (f: float) = f.ToString(System.Globalization.CultureInfo.InvariantCulture)
 let strSlice (s: string) (start: int64) (len: int64) = s.Substring(int start, int len)
 let strIndexOf (needle: string) (haystack: string) : int64 = int64 (haystack.IndexOf(needle: string))
 let strSplit (sep: string) (s: string) = s.Split([| sep |], System.StringSplitOptions.None) |> Array.toList
@@ -440,7 +588,8 @@ let listConcat (xss: 'a list list) = List.concat xss
 let listIsEmpty (xs: 'a list) = List.isEmpty xs
 let getArgs : string list = System.Environment.GetCommandLineArgs() |> Array.toList |> List.tail"""
 
-/// Maybe-dependent prelude block — emitted only when user declares `type Maybe`.
+/// Maybe-dependent prelude block — emitted only when user declares `type Maybe`
+/// and at least one Maybe helper is referenced.
 let private fsharpPreludeMaybe : string = """let listHead xs = match xs with [] -> None | x :: _ -> Some x
 let listTail xs = match xs with [] -> None | _ :: t -> Some t
 let maybeMap f m = match m with Some x -> Some (f x) | None -> None
@@ -450,32 +599,124 @@ let strToInt (s: string) =
     match System.Int64.TryParse(s: string) with
     | true, n -> Some n
     | false, _ -> None
+let strToFloat (s: string) =
+    match System.Double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture) with
+    | true, n -> Some n
+    | false, _ -> None
 let listAt (xs: 'a list) (i: int64) =
     if int i < 0 || int i >= List.length xs then None else Some (List.item (int i) xs)"""
 
-/// Result-dependent prelude block — emitted only when user declares `type Result`.
+/// Result-dependent prelude block — emitted only when user declares `type Result`
+/// and at least one Result helper is referenced.
 let private fsharpPreludeResult : string = """let resultMap f r = match r with Ok x -> Ok (f x) | Err e -> Err e
 let resultBind r f = match r with Ok x -> f x | Err e -> Err e
 let resultMapErr f r = match r with Ok x -> Ok x | Err e -> Err (f e)"""
 
 let private preludeEnd : string = "// --- end prelude ---"
 
+let private fsharpPreludeCoreNames : Set<string> =
+    Set.ofList [
+        "abs"; "absf"; "sqrt"; "min"; "max"
+        "listLen"; "listMap"; "listFilter"; "listFold"; "listReverse"; "listAppend"
+        "strLen"; "strConcat"; "strTrim"; "strContains"
+        "print"; "printfn"
+        "strChars"; "charToInt"; "intToChar"; "intToStr"; "floatToStr"
+        "strSlice"; "strIndexOf"; "strSplit"; "strFromChars"; "strReverse"
+        "charIsDigit"; "charIsAlpha"; "charIsSpace"
+        "readFile"; "writeFile"; "fileExists"; "exit"
+        "listConcat"; "listIsEmpty"; "getArgs"
+    ]
+
+let private fsharpPreludeMaybeNames : Set<string> =
+    Set.ofList [
+        "listHead"; "listTail"
+        "maybeMap"; "maybeBind"; "maybeWithDefault"
+        "strToInt"; "strToFloat"
+        "listAt"
+    ]
+
+let private fsharpPreludeResultNames : Set<string> =
+    Set.ofList [ "resultMap"; "resultBind"; "resultMapErr" ]
+
+let private fsharpPreludeAllNames =
+    Set.unionMany [ fsharpPreludeCoreNames; fsharpPreludeMaybeNames; fsharpPreludeResultNames ]
+
+let private intersects (left: Set<string>) (right: Set<string>) =
+    not (Set.isEmpty (Set.intersect left right))
+
+let private exprStdlibUsage (te: TypedExpr) : Set<string> =
+    let rec walk (acc: Set<string>) (e: TypedExpr) =
+        let acc' =
+            match e.Expr with
+            | TEVar name when Set.contains name fsharpPreludeAllNames -> Set.add name acc
+            | _ -> acc
+        match e.Expr with
+        | TEApp(a, b)
+        | TEPipe(a, b)
+        | TECons(a, b) -> walk (walk acc' a) b
+        | TELam(_, body)
+        | TETagged(body, _) -> walk acc' body
+        | TELet(_, _, e1, e2)
+        | TELetPat(_, e1, e2) ->
+            let acc'' = walk acc' e1
+            e2 |> Option.map (walk acc'') |> Option.defaultValue acc''
+        | TEIf(c, t, e2) ->
+            walk (walk (walk acc' c) t) e2
+        | TEMatch(s, branches)
+        | TEMatchOf(s, branches) ->
+            let withScrut = walk acc' s
+            branches
+            |> List.fold (fun st (_, b) -> walk st b) withScrut
+        | TEList es
+        | TETuple es ->
+            es |> List.fold walk acc'
+        | _ -> acc'
+    walk Set.empty te
+
+let private moduleStdlibUsage (tm: TypedModule) : Set<string> =
+    tm.Decls
+    |> List.fold (fun acc (decl, _) ->
+        let used =
+            match decl with
+            | TDFn(_, _, body) -> exprStdlibUsage body
+            | TDLet(_, _, e) -> exprStdlibUsage e
+            | TDImpl(_, _, methods) ->
+                methods
+                |> List.fold (fun macc (_, _, body) -> Set.union macc (exprStdlibUsage body)) Set.empty
+            | _ -> Set.empty
+        Set.union acc used
+    ) Set.empty
+
+let private moduleTypeNames (tm: TypedModule) : Set<string> =
+    tm.Decls
+    |> List.choose (fun (d, _) ->
+        match d with TDType(n, _, _) -> Some n | _ -> None)
+    |> Set.ofList
+
+let private projectTypeNames (tms: TypedModule list) : Set<string> =
+    tms
+    |> List.collect (fun tm -> tm.Decls)
+    |> List.choose (fun (d, _) ->
+        match d with TDType(n, _, _) -> Some n | _ -> None)
+    |> Set.ofList
+
 /// Assemble the prelude block for a given module: core + optional
-/// Maybe/Result sections based on whether the user declared those types.
+/// Maybe/Result sections based on whether the user declared those types
+/// and referenced their helpers.
 let private assemblePrelude (tm: TypedModule) : string =
-    let typeNames =
-        tm.Decls
-        |> List.choose (fun (d, _) ->
-            match d with TDType(n, _, _) -> Some n | _ -> None)
-        |> Set.ofList
+    let typeNames = moduleTypeNames tm
+    let usedNames = moduleStdlibUsage tm
+    let includeCore = intersects usedNames fsharpPreludeCoreNames
     let hasMaybe  = Set.contains "Maybe"  typeNames
     let hasResult = Set.contains "Result" typeNames
+    let includeMaybe = hasMaybe && intersects usedNames fsharpPreludeMaybeNames
+    let includeResult = hasResult && intersects usedNames fsharpPreludeResultNames
     let sections =
-        [ yield fsharpPreludeCore
-          if hasMaybe  then yield fsharpPreludeMaybe
-          if hasResult then yield fsharpPreludeResult
-          yield preludeEnd ]
-    String.concat "\n" sections
+        [ if includeCore then yield fsharpPreludeCore
+          if includeMaybe then yield fsharpPreludeMaybe
+          if includeResult then yield fsharpPreludeResult ]
+    if List.isEmpty sections then ""
+    else String.concat "\n" (sections @ [preludeEnd])
 
 let private emitModule (tm: TypedModule) : string =
     let header = "module " + String.concat "." tm.Path
@@ -483,16 +724,11 @@ let private emitModule (tm: TypedModule) : string =
     // then prelude, then everything else (fns, lets, impls).
     let isTypeDecl (d: TypedDecl) =
         match d with
-        | TDType _ -> true
+        | TDType _ | TDOpaque _ -> true
         | _ -> false
     let typeDecls = tm.Decls |> List.filter (fun (d, _) -> isTypeDecl d)
     let otherDecls = tm.Decls |> List.filter (fun (d, _) -> not (isTypeDecl d))
-    // Types: flat emit (no mutual-rec grouping).
-    let typeStr =
-        typeDecls
-        |> List.map (fun (d, _) -> emitDecl d)
-        |> List.filter (fun s -> s <> "")
-        |> String.concat "\n\n"
+    let typeStr = emitTypeDecls typeDecls
     // Non-type decls: group consecutive non-main TDFn decls so F# sees a
     // `let rec ... and ...` block, enabling mutual recursion across siblings.
     let otherStr =
@@ -504,7 +740,7 @@ let private emitModule (tm: TypedModule) : string =
     let parts =
         [ header
           (if typeStr = "" then "" else typeStr)
-          prelude
+          (if prelude = "" then "" else prelude)
           (if otherStr = "" then "" else otherStr) ]
         |> List.filter (fun s -> s <> "")
     String.concat "\n\n" parts
@@ -514,34 +750,31 @@ let emit (tm: TypedModule) : string = emitModule tm
 
 /// Assemble a combined prelude across multiple modules (union of type names).
 let private assembleCombinedPrelude (tms: TypedModule list) : string =
-    let typeNames =
+    let typeNames = projectTypeNames tms
+    let usedNames =
         tms
-        |> List.collect (fun tm ->
-            tm.Decls |> List.choose (fun (d, _) ->
-                match d with TDType(n, _, _) -> Some n | _ -> None))
-        |> Set.ofList
+        |> List.fold (fun acc tm -> Set.union acc (moduleStdlibUsage tm)) Set.empty
+    let includeCore = intersects usedNames fsharpPreludeCoreNames
     let hasMaybe  = Set.contains "Maybe"  typeNames
     let hasResult = Set.contains "Result" typeNames
+    let includeMaybe = hasMaybe && intersects usedNames fsharpPreludeMaybeNames
+    let includeResult = hasResult && intersects usedNames fsharpPreludeResultNames
     let sections =
-        [ yield fsharpPreludeCore
-          if hasMaybe  then yield fsharpPreludeMaybe
-          if hasResult then yield fsharpPreludeResult
-          yield preludeEnd ]
-    String.concat "\n" sections
+        [ if includeCore then yield fsharpPreludeCore
+          if includeMaybe then yield fsharpPreludeMaybe
+          if includeResult then yield fsharpPreludeResult ]
+    if List.isEmpty sections then ""
+    else String.concat "\n" (sections @ [preludeEnd])
 
 /// Emit a single module body WITHOUT its own prelude block.
 /// Used in project builds where the prelude is emitted once at the top.
 let private emitModuleNoPrelude (tm: TypedModule) : string =
     let header = "module " + String.concat "." tm.Path
     let isTypeDecl (d: TypedDecl) =
-        match d with TDType _ -> true | _ -> false
+        match d with TDType _ | TDOpaque _ -> true | _ -> false
     let typeDecls  = tm.Decls |> List.filter (fun (d, _) -> isTypeDecl d)
     let otherDecls = tm.Decls |> List.filter (fun (d, _) -> not (isTypeDecl d))
-    let typeStr =
-        typeDecls
-        |> List.map (fun (d, _) -> emitDecl d)
-        |> List.filter (fun s -> s <> "")
-        |> String.concat "\n\n"
+    let typeStr = emitTypeDecls typeDecls
     let otherStr =
         groupDecls otherDecls
         |> List.map emitDeclGroup
@@ -567,14 +800,10 @@ let emitProjectModules (tms: TypedModule list) : string =
         let rest  = List.tail tms
 
         let firstHeader = "module " + String.concat "." first.Path
-        let isTypeDecl (d: TypedDecl) = match d with TDType _ -> true | _ -> false
+        let isTypeDecl (d: TypedDecl) = match d with TDType _ | TDOpaque _ -> true | _ -> false
         let firstTypeDecls  = first.Decls |> List.filter (fun (d, _) -> isTypeDecl d)
         let firstOtherDecls = first.Decls |> List.filter (fun (d, _) -> not (isTypeDecl d))
-        let firstTypeStr =
-            firstTypeDecls
-            |> List.map (fun (d, _) -> emitDecl d)
-            |> List.filter (fun s -> s <> "")
-            |> String.concat "\n\n"
+        let firstTypeStr = emitTypeDecls firstTypeDecls
         let firstOtherStr =
             groupDecls firstOtherDecls
             |> List.map emitDeclGroup
@@ -583,7 +812,7 @@ let emitProjectModules (tms: TypedModule list) : string =
         let firstParts =
             [ firstHeader
               (if firstTypeStr  = "" then "" else firstTypeStr)
-              prelude
+              (if prelude = "" then "" else prelude)
               (if firstOtherStr = "" then "" else firstOtherStr) ]
             |> List.filter (fun s -> s <> "")
         let firstStr = String.concat "\n\n" firstParts
@@ -596,23 +825,36 @@ let emitProjectModules (tms: TypedModule list) : string =
 /// and modules follow in topo-sorted input order (dependencies first).
 /// Each module file opens "LLLang.Prelude" so prelude functions are in scope.
 let emitProjectFiles (tms: TypedModule list) : (string * string) list =
+    let combinedPrelude = assembleCombinedPrelude tms
     let preludeContent =
-        "module LLLang.Prelude\n\n" + assembleCombinedPrelude tms
+        if String.IsNullOrWhiteSpace combinedPrelude then
+            "module LLLang.Prelude"
+        else
+            "module LLLang.Prelude\n\n" + combinedPrelude
     let preludeFile = ("Prelude.fs", preludeContent)
 
     let moduleFiles =
         tms |> List.map (fun tm ->
             let moduleName = String.concat "." tm.Path
             let fileName   = (List.last tm.Path) + ".fs"
-            let header     = "module " + moduleName + "\n\nopen LLLang.Prelude"
-            let isTypeDecl (d: TypedDecl) = match d with TDType _ -> true | _ -> false
-            let typeDecls  = tm.Decls |> List.filter (fun (d, _) -> isTypeDecl d)
-            let otherDecls = tm.Decls |> List.filter (fun (d, _) -> not (isTypeDecl d))
-            let typeStr =
-                typeDecls
-                |> List.map (fun (d, _) -> emitDecl d)
-                |> List.filter (fun s -> s <> "")
-                |> String.concat "\n\n"
+            let opens = precedingModules |> List.map (fun m -> "open " + m) |> String.concat "\n"
+            let header     = "module " + moduleName + "\n\nopen LLLang.Prelude" + (if opens = "" then "" else "\n" + opens)
+            precedingModules <- precedingModules @ [moduleName]
+            let isTypeDecl (d: TypedDecl) = match d with TDType _ | TDOpaque _ -> true | _ -> false
+            let renamedDecls =
+                tm.Decls
+                |> List.map (fun (d, exported) ->
+                    match d with
+                    | TDFn(sig_, ty, body) when isMainFn sig_ && not isLast ->
+                        let renamed = { sig_ with Name = "__test_main_" + (List.last tm.Path) }
+                        (TDFn(renamed, ty, body), exported)
+                    | TDLet(x, ty, e) when x = "main" && not isLast ->
+                        let renamed = "__test_main_" + (List.last tm.Path)
+                        (TDLet(renamed, ty, e), exported)
+                    | _ -> (d, exported))
+            let typeDecls  = renamedDecls |> List.filter (fun (d, _) -> isTypeDecl d)
+            let otherDecls = renamedDecls |> List.filter (fun (d, _) -> not (isTypeDecl d))
+            let typeStr = emitTypeDecls typeDecls
             let otherStr =
                 groupDecls otherDecls
                 |> List.map emitDeclGroup

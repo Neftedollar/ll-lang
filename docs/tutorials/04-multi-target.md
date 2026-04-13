@@ -1,6 +1,6 @@
 # Tutorial 04: Compiling to Multiple Targets
 
-Write once in ll-lang, emit F#, TypeScript, Python, or Java. Same source, same semantics, four backends.
+Write once in ll-lang, emit F#, TypeScript, Python, Java, C#, or LLVM IR.
 
 ## The source
 
@@ -27,6 +27,8 @@ lllc build --target fs   shapes.lll   # → shapes.fs
 lllc build --target ts   shapes.lll   # → shapes.ts
 lllc build --target py   shapes.lll   # → shapes.py
 lllc build --target java shapes.lll   # → shapes.java
+lllc build --target cs   shapes.lll   # → shapes.cs
+lllc build --target llvm shapes.lll   # → shapes.ll
 ```
 
 ## Generated F# (default)
@@ -150,9 +152,9 @@ public sealed interface Shape permits Shape.Circle, Shape.Rect, Shape.Empty {
 
 Java 21 sealed interfaces + records + pattern `switch`. Exhaustiveness is enforced by the JVM.
 
-## Multi-target projects via ll.toml
+## Multi-target projects via lll.toml
 
-For a project that needs to emit to multiple targets simultaneously, configure `ll.toml`:
+For a project that needs to emit to multiple targets simultaneously, configure `lll.toml`:
 
 ```toml
 [project]
@@ -181,14 +183,16 @@ No flags, no scripts. The manifest drives the build.
 | `ts` | Frontend, Node.js, Deno — share types across a TypeScript codebase |
 | `py` | Data pipelines, scripting, teams working in Python |
 | `java` | JVM services, Android, teams on Java 21+ |
+| `cs` | .NET/C# integration and tooling pipelines |
+| `llvm` | IR-level toolchains, low-level compiler integration |
 
-## Checking which targets a file supports
+## Checking target compatibility
 
 ```bash
-lllc check --target ts shapes.lll
+lllc build --target ts shapes.lll
 ```
 
-The elaborator will report `E007 PlatformMismatch` if the file uses a construct not available on the requested target (e.g., a stdlib module that has no TypeScript backend yet).
+The compiler reports target-specific compatibility errors during build. `E007 PlatformMismatch` remains reserved for `Platform.*` availability checks.
 
 ## Next steps
 

@@ -1,6 +1,10 @@
 module LLLang.Tests.CodegenJavaTests
 
+open System
+open System.IO
+open System.Diagnostics
 open Xunit
+open LLLang.Elaborator
 open LLLang.Compiler
 
 // ---------- helpers ----------
@@ -9,6 +13,24 @@ let private javaSrc (src: string) : string =
     match compileToJava src with
     | Ok java -> java
     | Error es -> failwith $"Java codegen failed: {es}"
+
+let private runProc (cwd: string) (exe: string) (args: string list) : int * string * string =
+    let psi = ProcessStartInfo(exe)
+    psi.WorkingDirectory <- cwd
+    psi.UseShellExecute <- false
+    psi.RedirectStandardOutput <- true
+    psi.RedirectStandardError <- true
+    for arg in args do
+        psi.ArgumentList.Add(arg)
+    use proc = Process.Start(psi)
+    let stdout = proc.StandardOutput.ReadToEnd()
+    let stderr = proc.StandardError.ReadToEnd()
+    proc.WaitForExit()
+    (proc.ExitCode, stdout, stderr)
+
+let private toolExists (exe: string) : bool =
+    let (code, _, _) = runProc __SOURCE_DIRECTORY__ "sh" ["-lc"; "command -v " + exe + " >/dev/null 2>&1"]
+    code = 0
 
 // ---------- basic output ----------
 
@@ -99,6 +121,22 @@ let ``Java: parametric type emits generics`` () =
     let java = javaSrc src
     Assert.Contains("<A>", java)
 
+[<Fact>]
+let ``Java: nested type application emits single generic argument list`` () =
+    let src = "module M\nid(x Result[Int][Str]) Result[Int][Str] = x"
+    let java = javaSrc src
+    Assert.Contains("Result<Long, String>", java)
+    Assert.DoesNotContain("><", java)
+
+[<Fact>]
+let ``Java: generic signatures use imported List and Optional types`` () =
+    let src = "module M\nidList(xs List[Int]) List[Int] = xs\nidMaybe(m Maybe[Int]) Maybe[Int] = m"
+    let java = javaSrc src
+    Assert.Contains("List<Long>", java)
+    Assert.Contains("Optional<Long>", java)
+    Assert.DoesNotContain("java.util.List<", java)
+    Assert.DoesNotContain("java.util.Optional<", java)
+
 // ---------- function declarations ----------
 
 [<Fact>]
@@ -119,6 +157,7 @@ let ``Java: curried fn emits Function return type`` () =
     let src = "module M\nadd(a Int)(b Int) Int = a + b"
     let java = javaSrc src
     Assert.Contains("Function", java)
+    Assert.DoesNotContain("java.util.function.Function<", java)
 
 [<Fact>]
 let ``Java: int literal has L suffix`` () =
@@ -148,6 +187,25 @@ let ``Java: main fn emits public static void main`` () =
     let java = javaSrc src
     Assert.Contains("public static void main(String[] args)", java)
 
+[<Fact>]
+let ``Java: external console_log emits System.out.println`` () =
+    let src = "module M\nexternal console_log(msg Str) Unit"
+    let java = javaSrc src
+    Assert.Contains("console_log(", java)
+    Assert.Contains("System.out.println(msg)", java)
+
+[<Fact>]
+let ``Java: unknown external declaration raises E026`` () =
+    let src = "module M\nexternal host_log(msg Str) Unit"
+    match compileToJava src with
+    | Ok java -> failwith $"unexpected success: {java}"
+    | Error es ->
+        let e = es |> List.exactlyOne
+        Assert.Equal(E026, e.Code)
+        Assert.Contains("UnknownExternalMapping", e.Message)
+        Assert.Contains("target:java", e.Message)
+        Assert.Contains("name:host_log", e.Message)
+
 // ---------- if-then-else ----------
 
 [<Fact>]
@@ -164,6 +222,61 @@ let ``Java: arithmetic uses standard operators`` () =
     let src = "module M\nadd(a Int)(b Int) Int = a + b"
     let java = javaSrc src
     Assert.Contains("+", java)
+
+[<Fact>]
+let ``Java: prelude exposes maybeWithDefault builtin`` () =
+    let src = "module M\nmain() Unit = printfn \"x\""
+    let java = javaSrc src
+    Assert.Contains("maybeWithDefault", java)
+
+[<Fact>]
+let ``Java: prelude helpers are omitted when stdlib is unused`` () =
+    let src = "module M\nlet x = 1"
+    let java = javaSrc src
+    Assert.DoesNotContain("maybeWithDefault", java)
+    Assert.DoesNotContain("listFold(", java)
+
+[<Fact>]
+let ``Java: generated stdlib and curried calls compile with javac`` () =
+    if not (toolExists "javac") then
+        ()
+    else
+        let src = "module Demo\nadd(x Int)(y Int) Int = x + y\nmain() Int = min (add 1 2) (abs 5)\n"
+        let java = javaSrc src
+        Assert.Contains("min_(", java)
+        Assert.Contains("abs_(", java)
+        Assert.Contains("add(", java)
+
+        let tempRoot = Path.Combine(Path.GetTempPath(), "lll-java-codegen-" + Guid.NewGuid().ToString("N"))
+        Directory.CreateDirectory(tempRoot) |> ignore
+        try
+            let javaPath = Path.Combine(tempRoot, "Demo.java")
+            File.WriteAllText(javaPath, java)
+            let (code, so, se) = runProc tempRoot "javac" [javaPath]
+            Assert.True((code = 0), $"javac failed\nstdout:\n{so}\nstderr:\n{se}\nsource:\n{java}")
+        finally
+            try Directory.Delete(tempRoot, true) with _ -> ()
+
+[<Fact>]
+let ``Java: constrained dispatch compiles with javac`` () =
+    if not (toolExists "javac") then
+        ()
+    else
+        let src =
+            "module Constrained\n\ntrait Functor F =\n  map(f A->B)(fa F[A]) F[B]\nMaybe A = Some A | None\nimpl Functor Maybe =\n  map(f A->B)(fa Maybe[A]) Maybe[B] =\n    | Some a -> Some (f a)\n    | None -> None\ntransform[F: Functor](xs F[Int])(f Int->Int) F[Int] = map f xs\nmain() Int = 0\n"
+        let java = javaSrc src
+        Assert.Contains("map_Maybe", java)
+        Assert.Contains("transform", java)
+
+        let tempRoot = Path.Combine(Path.GetTempPath(), "lll-java-constrained-" + Guid.NewGuid().ToString("N"))
+        Directory.CreateDirectory(tempRoot) |> ignore
+        try
+            let javaPath = Path.Combine(tempRoot, "Constrained.java")
+            File.WriteAllText(javaPath, java)
+            let (code, so, se) = runProc tempRoot "javac" [javaPath]
+            Assert.True((code = 0), $"javac failed\nstdout:\n{so}\nstderr:\n{se}\nsource:\n{java}")
+        finally
+            try Directory.Delete(tempRoot, true) with _ -> ()
 
 // ---------- compileTarget round-trip ----------
 

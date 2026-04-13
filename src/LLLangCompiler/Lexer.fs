@@ -8,6 +8,7 @@ let private keywords =
         "let", KwLet
         "tag", KwTag; "unit", KwUnit; "trait", KwTrait; "impl", KwImpl
         "import", KwImport; "export", KwExport; "module", KwModule
+        "external", KwExternal; "opaque", KwOpaque
         "if", KwIf; "else", KwElse
         "true", KwTrue; "false", KwFalse
         "match", KwMatch

@@ -8,7 +8,8 @@ module LegacyLexer = LLLang.Lexer
 module LegacyParser = LLLang.Parser
 
 type ParseState =
-    { PosMap: PosMap }
+    { PosMap: PosMap
+      Source: string }
 
 type FParser<'a> = Parser<'a, ParseState>
 
@@ -39,14 +40,27 @@ let comment : FParser<unit> =
 let wsOrComment : FParser<unit> =
     skipMany (spaces1 <|> comment)
 
+let private trailingWsHasNewline (src: string) (exclusiveEnd: int64) : bool =
+    let mutable i = int exclusiveEnd - 1
+    let mutable sawNewline = false
+    while i >= 0 && System.Char.IsWhiteSpace(src[i]) do
+        if src[i] = '\n' then
+            sawNewline <- true
+        i <- i - 1
+    sawNewline
+
 /// Combined: skip at least one whitespace char
 let ws1 : FParser<unit> = spaces1
 
 // ---- Keywords ----
 
-/// Match exact keyword
+/// Check if character is valid for identifier continuation
+let private isIdentContChar (c: char) : bool = isAsciiLetter c || isDigit c || c = '_'
+
+/// Match exact keyword with an identifier boundary.
+/// Example: `fn` must not match the `fn` prefix in `fnName`.
 let kw (s: string) : FParser<unit> =
-    skipString s .>> wsOrComment
+    attempt (skipString s .>> notFollowedBy (satisfy isIdentContChar) .>> wsOrComment)
 
 // ---- Identifiers ----
 
@@ -54,7 +68,7 @@ let kw (s: string) : FParser<unit> =
 let isIdentStart (c: char) : bool = isLower c || c = '_'
 
 /// Check if character is valid for identifier continuation
-let isIdentCont (c: char) : bool = isAsciiLetter c || isDigit c || c = '_'
+let isIdentCont (c: char) : bool = isIdentContChar c
 
 /// Parse identifier (lowercase start) — not a keyword
 let pIdentRaw : FParser<string> =
@@ -66,7 +80,7 @@ let pTypeIdRaw : FParser<string> =
 
 /// Set of keywords that cannot be used as identifiers
 let keywords =
-    set ["let"; "tag"; "unit"; "trait"; "impl"; "import"; "export"
+    set ["let"; "tag"; "unit"; "trait"; "impl"; "import"; "export"; "external"; "opaque"
          "module"; "match"; "if"; "then"; "else"; "in"; "with"; "fn"; "true"; "false"]
 
 let private keywordTokenName (kw: string) : string =
@@ -79,6 +93,8 @@ let private keywordTokenName (kw: string) : string =
     | "import" -> "KwImport"
     | "export" -> "KwExport"
     | "module" -> "KwModule"
+    | "external" -> "KwExternal"
+    | "opaque" -> "KwOpaque"
     | "match" -> "KwMatch"
     | "if" -> "KwIf"
     | "else" -> "KwElse"
@@ -129,6 +145,7 @@ let pStrLit : FParser<string> =
             <|> (skipChar 'r' >>% '\r')
             <|> (skipChar '\\' >>% '\\')
             <|> (skipChar '"' >>% '"')
+            <|> (skipChar '0' >>% '\000')
             <|> anyChar)
         <|> satisfy (fun c -> c <> '"' && c <> '\\')
     between (skipChar '"') (skipChar '"')
@@ -146,6 +163,7 @@ let pCharLit : FParser<char> =
             <|> (skipChar '\\' >>% '\\')
             <|> (skipChar '\'' >>% '\'')
             <|> (skipChar '"' >>% '"')
+            <|> (skipChar '0' >>% '\000')
             <|> anyChar)
     between (skipChar '\'') (skipChar '\'')
         (esc <|> anyChar)
@@ -226,6 +244,7 @@ let pLetKeywordFreeExpr, pLetKeywordFreeExprImpl = createParserForwardedToRef()
 let pLambdaExpr, pLambdaExprImpl = createParserForwardedToRef()
 let pAtom, pAtomImpl = createParserForwardedToRef()
 let pAppExpr, pAppExprImpl = createParserForwardedToRef()
+let pUnaryExpr, pUnaryExprImpl = createParserForwardedToRef()
 
 // Stubs for Step 5
 // do pIfExprImpl := fail "pIfExpr not yet implemented (Step 5)"
@@ -345,6 +364,12 @@ let pAtomBase : FParser<Expr> =
 let pTagSuffix : FParser<string> =
     between (skipChar '[' >>. wsOrComment) (skipChar ']' .>> wsOrComment) (pTypeId <|> pIdent)
 
+let private pKeywordFreeBindingHead : FParser<unit> =
+    let binder =
+        (skipChar '_' .>> notFollowedBy (satisfy isIdentContChar))
+        <|> (many1Satisfy2L isIdentStart isIdentCont "identifier" >>% ())
+    attempt (lookAhead (binder .>> spaces .>> skipChar '=')) >>% ()
+
 /// Atom: pre-tag atom plus literal-only [Tag] suffix
 do pAtomImpl :=
     pAtomBase >>= fun atom ->
@@ -363,7 +388,7 @@ do pAppExprImpl :=
         pAtom >>= fun head ->
             let baseLine = int appStartPos.Line
             let baseCol = int appStartPos.Column
-            let rec loop (acc: Expr) : FParser<Expr> =
+            let rec loop (acc: Expr) (continuationLine: int option) : FParser<Expr> =
                 getPosition >>= fun pos ->
                     let line = int pos.Line
                     let col = int pos.Column
@@ -371,22 +396,106 @@ do pAppExprImpl :=
                     // later line, stop implicit application at same-or-less
                     // indentation than where this application started.
                     let hitHardBreak = line > baseLine && col <= baseCol
-                    if hitHardBreak then
+                    // Exception: allow continuation on the same physical line
+                    // immediately following a multi-line argument (e.g.
+                    // `f ( ... ) x y` where `x y` appear after the closing `)`).
+                    let canContinueOnLine =
+                        match continuationLine with
+                        | Some ln when ln = line -> true
+                        | _ -> false
+                    // Never continue implicit application at column 1.
+                    // This protects top-level declaration boundaries.
+                    if hitHardBreak && (not canContinueOnLine || col = 1) then
                         preturn acc
-                    else
-                        opt (attempt pAtom)
+                    elif hitHardBreak && canContinueOnLine then
+                        // Also stop if this line starts a keyword-free
+                        // binding (`name = ...` / `_ = ...`), otherwise an
+                        // argument continuation can accidentally eat the next
+                        // let-chain statement.
+                        opt (attempt pKeywordFreeBindingHead)
                         >>= function
-                            | Some arg -> loop (EApp(acc, arg))
+                            | Some _ -> preturn acc
+                            | None ->
+                                opt (
+                                    attempt (
+                                        getPosition >>= fun argStart ->
+                                            opt (lookAhead anyChar) >>= function
+                                                | None -> fail "end of input"
+                                                | Some argHeadChar ->
+                                                    // Keep `n - 1` as subtraction, not implicit app `n (-1)`.
+                                                    if argHeadChar = '-' then
+                                                        fail "stop implicit app before minus"
+                                                    else
+                                                        pAtom >>= fun arg ->
+                                                            getPosition >>= fun argEnd ->
+                                                                getUserState >>= fun state ->
+                                                                    let hasTrailingNewline =
+                                                                        trailingWsHasNewline state.Source argEnd.Index
+                                                                    preturn (arg, argHeadChar, int argStart.Line, int argEnd.Line, int argEnd.Column, hasTrailingNewline)))
+                                >>= function
+                                    | Some (arg, argHeadChar, argStartLine, argEndLine, argEndCol, hasTrailingNewline) ->
+                                        let startedWithGrouping =
+                                            argHeadChar = '(' || argHeadChar = '[' || argHeadChar = '{'
+                                        let spansMultipleLogicalLines =
+                                            (argEndLine - argStartLine) > 1
+                                        let nextContinuationLine =
+                                            if startedWithGrouping && spansMultipleLogicalLines && argEndCol > 1 && not hasTrailingNewline then
+                                                Some argEndLine
+                                            elif continuationLine = Some argEndLine then
+                                                continuationLine
+                                            else
+                                                None
+                                        loop (EApp(acc, arg)) nextContinuationLine
+                                    | None -> preturn acc
+                    else
+                        opt (
+                            attempt (
+                                getPosition >>= fun argStart ->
+                                    opt (lookAhead anyChar) >>= function
+                                        | None -> fail "end of input"
+                                        | Some argHeadChar ->
+                                            // Keep `n - 1` as subtraction, not implicit app `n (-1)`.
+                                            if argHeadChar = '-' then
+                                                fail "stop implicit app before minus"
+                                            else
+                                                pAtom >>= fun arg ->
+                                                    getPosition >>= fun argEnd ->
+                                                        getUserState >>= fun state ->
+                                                            let hasTrailingNewline =
+                                                                trailingWsHasNewline state.Source argEnd.Index
+                                                            preturn (arg, argHeadChar, int argStart.Line, int argEnd.Line, int argEnd.Column, hasTrailingNewline)))
+                        >>= function
+                            | Some (arg, argHeadChar, argStartLine, argEndLine, argEndCol, hasTrailingNewline) ->
+                                let startedWithGrouping =
+                                    argHeadChar = '(' || argHeadChar = '[' || argHeadChar = '{'
+                                let spansMultipleLogicalLines =
+                                    (argEndLine - argStartLine) > 1
+                                let nextContinuationLine =
+                                    if startedWithGrouping && spansMultipleLogicalLines && argEndCol > 1 && not hasTrailingNewline then
+                                        Some argEndLine
+                                    elif continuationLine = Some argEndLine then
+                                        continuationLine
+                                    else
+                                        None
+                                loop (EApp(acc, arg)) nextContinuationLine
                             | None -> preturn acc
-            loop head
+            loop head None
+    |> withPos
+
+let private mkBoolNot (e: Expr) : Expr =
+    EApp(EApp(EVar "==", e), ELit (LBool false))
+
+do pUnaryExprImpl :=
+    attempt (skipChar '!' >>. wsOrComment >>. pUnaryExpr |>> mkBoolNot)
+    <|> pAppExpr
     |> withPos
 
 /// Multiplication: expr * expr, expr / expr
 let pMulExpr : FParser<Expr> =
     let mulOp = (skipChar '*' >>. wsOrComment >>% "*") <|> (skipChar '/' >>. wsOrComment >>% "/")
     pipe2
-        pAppExpr
-        (many (pipe2 mulOp pAppExpr (fun op right -> (op, right))))
+        pUnaryExpr
+        (many (pipe2 mulOp pUnaryExpr (fun op right -> (op, right))))
         (fun head tail ->
             List.fold (fun acc (op, right) -> EApp(EApp(EVar op, acc), right)) head tail)
     |> withPos
@@ -550,7 +659,7 @@ let pFnConstraint : FParser<string * string> =
 
 let pFnSig : FParser<FnSig> =
     pipe3
-        (opt (kw "fn") >>. pIdent)
+        (opt (kw "fn") >>. (pIdent <|> pTypeId))
         (many pFnConstraint)
         (many pFnParam)
         (fun name constraints paramGroups -> (name, constraints, paramGroups))
@@ -585,6 +694,15 @@ let pTraitFnSig : FParser<FnSig> =
               Constraints = constraints
               ReturnType = retTy })
     |> withPos
+
+let private hasUntypedHole (t: TypeExpr) : bool =
+    let rec go ty =
+        match ty with
+        | TyVar "?" -> true
+        | TyApp(a, b) | TyFn(a, b) -> go a || go b
+        | TyTagged(a, _) -> go a
+        | _ -> false
+    go t
 
 let pTypeDecl : FParser<Decl> =
     let typeParam =
@@ -642,6 +760,33 @@ let pTypeDecl : FParser<Decl> =
         (fun name typeParams body -> DType(name, typeParams, body))
     |> withPos
 
+let pExternalDecl : FParser<Decl> =
+    kw "external" >>. pFnSig >>= fun sig' ->
+        match sig'.ReturnType with
+        | None -> fail "external declaration requires an explicit return type"
+        | Some retTy when hasUntypedHole retTy ->
+            fail "external declaration requires fully typed return type"
+        | Some _ ->
+            if sig'.Params |> List.exists (fun (_, ty) -> hasUntypedHole ty) then
+                fail "external declaration requires fully typed parameters"
+            else
+                notFollowedBy (skipChar '=')
+                >>% DExternal sig'
+    |> withPos
+
+let pOpaqueDecl : FParser<Decl> =
+    let typeParam =
+        (between
+            (skipChar '[' >>. wsOrComment)
+            (skipChar ']' .>> wsOrComment)
+            (pIdent <|> pTypeId)
+         |>> TPBare)
+    pipe2
+        (kw "opaque" >>. (pTypeId <|> pIdent))
+        (many typeParam)
+        (fun name typeParams -> DOpaque(name, typeParams))
+    |> withPos
+
 let pTagDecl : FParser<Decl> =
     let tagId : FParser<TypeIdent> = pTypeId <|> pIdent
     kw "tag" >>. (tagId |>> DTag)
@@ -669,13 +814,30 @@ let pImplDecl : FParser<Decl> =
             pTraitFnSig
             (skipChar '=' >>. wsOrComment >>. pFnBody)
             (fun sig' body -> (sig', body))
-    pipe4
-        (kw "impl" >>. pTypeId)
-        (pTypeId <|> pIdent)
-        (skipChar '=' >>. wsOrComment)
-        (many1 (attempt implFn))
-        (fun traitName typeName _ impls ->
-            DImpl(traitName, typeName, impls))
+    getPosition >>= fun implPos ->
+        pipe3
+            (kw "impl" >>. pTypeId)
+            (pTypeId <|> pIdent)
+            (skipChar '=' >>. wsOrComment >>. implFn)
+            (fun traitName typeName firstImpl -> (traitName, typeName, firstImpl))
+        >>= fun (traitName, typeName, firstImpl) ->
+            let baseLine = int implPos.Line
+            let baseCol = int implPos.Column
+            let rec loop (acc: (FnSig * Expr) list) : FParser<(FnSig * Expr) list> =
+                getPosition >>= fun pos ->
+                    let line = int pos.Line
+                    let col = int pos.Column
+                    // Stop once we return to top-level indentation.
+                    let hitHardBreak = line > baseLine && col <= baseCol
+                    if hitHardBreak then
+                        preturn (List.rev acc)
+                    else
+                        opt (attempt implFn)
+                        >>= function
+                            | Some fn -> loop (fn :: acc)
+                            | None -> preturn (List.rev acc)
+            loop [firstImpl]
+            |>> fun impls -> DImpl(traitName, typeName, impls)
     |> withPos
 
 let pTopLevelLet : FParser<Decl> =
@@ -691,6 +853,8 @@ let pTopLevelLet : FParser<Decl> =
 let pDecl : FParser<Decl> =
     attempt pTagDecl
     <|> attempt pUnitDecl
+    <|> attempt pExternalDecl
+    <|> attempt pOpaqueDecl
     <|> attempt pTraitDecl
     <|> attempt pImplDecl
     <|> attempt pTopLevelLet
@@ -720,7 +884,7 @@ let pModule : FParser<LLModule> =
 // ---- Public API ----
 
 let private runToResult (p: FParser<'a>) (src: string) : Result<'a * ParseState, string> =
-    let state0 = { PosMap = PosMap.empty () }
+    let state0 = { PosMap = PosMap.empty (); Source = src }
     match runParserOnString (wsOrComment >>. p .>> wsOrComment .>> eof) state0 "" src with
     | Success (value, state, _) ->
         Result.Ok (value, state)

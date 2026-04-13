@@ -29,7 +29,7 @@ Three lines. That is the entire program. No imports, no main annotation, no brac
 
 **Line 3 — the entry point.** An uppercase name on the left of `=` declares a value (or type — but `printfn` returns `Unit`, so the compiler knows this is a value binding, not a type). `Hello` is the conventional entry point when there are no parameters. `printfn` is in the prelude; it takes a `Str` and prints it with a newline.
 
-No `fn`, no `let`, no `return`, no `{}`.
+No `fn`, no `return`, no `{}`.
 
 ## Run it
 
@@ -93,13 +93,13 @@ Hello, Bob
 Done.
 ```
 
-## Check without running
+## Validate without running
 
 ```bash
-lllc check hello.lll
+lllc build hello.lll
 ```
 
-Reports type errors and unbound variables without generating any output. Fast feedback loop.
+Reports syntax/type errors and writes generated output. For project builds, use `lllc build` at the project root.
 
 ## Next steps
 

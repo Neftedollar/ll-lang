@@ -1,9 +1,11 @@
 module LLLang.CodegenJava
 
 open System
+open System.Text.RegularExpressions
 open LLLang.AST
 open LLLang.Types
 open LLLang.TypedAST
+open LLLang.Platform
 
 // ── Java reserved words ───────────────────────────────────────────────────────
 
@@ -22,10 +24,52 @@ let private javaKeywords =
 let private safeIdent (s: string) =
     if Set.contains s javaKeywords then s + "_" else s
 
+let private safeTypeIdent (s: string) =
+    let mapped =
+        s
+        |> Seq.map (fun ch ->
+            if Char.IsLetterOrDigit ch || ch = '_' then string ch else "_")
+        |> String.concat ""
+    let withHead =
+        if String.IsNullOrWhiteSpace mapped then "T"
+        elif Char.IsDigit mapped.[0] then "T_" + mapped
+        else mapped
+    if Set.contains withHead javaKeywords then withHead + "_" else withHead
+
+let private javaStdlibCallAliases : Map<string, string> =
+    Map.ofList [
+        "abs", "abs_"
+        "min", "min_"
+        "max", "max_"
+        "print", "print_"
+        "exit", "exit_"
+    ]
+
+let private mapJavaCallName (name: string) : string =
+    match Map.tryFind name javaStdlibCallAliases with
+    | Some mapped -> mapped
+    | None -> name
+
+let mutable private currentKnownJavaFunctions : Set<string> = Set.empty
+let mutable private currentJavaCtorOwners : Map<string, string> = Map.empty
+let mutable private currentJavaDeclaredTypes : Set<string> = Set.empty
+
+let private qualifyJavaCtor (ctorName: string) : string =
+    match Map.tryFind ctorName currentJavaCtorOwners with
+    | Some owner -> owner + "." + ctorName
+    | None -> ctorName
+
 // ── Type emission ─────────────────────────────────────────────────────────────
 
 let private isTypeParamName (n: string) =
     n.Length = 1 && Char.IsUpper n.[0]
+
+let rec private collectTyApp (t: TypeExpr) : TypeExpr * TypeExpr list =
+    match t with
+    | TyApp(f, a) ->
+        let (head, args) = collectTyApp f
+        (head, args @ [a])
+    | _ -> (t, [])
 
 /// Emit a type as a Java reference type (boxed for generics).
 let rec private emitTypeBoxed (t: TypeExpr) : string =
@@ -37,12 +81,24 @@ let rec private emitTypeBoxed (t: TypeExpr) : string =
     | TyName "Char"  -> "Character"
     | TyName "Unit"  -> "Void"
     | TyName x when isTypeParamName x -> x
-    | TyName x       -> x
+    | TyName x       -> safeTypeIdent x
     | TyVar v        -> if isTypeParamName v then v else "Object"
-    | TyApp(TyName "List", a)  -> "java.util.List<" + emitTypeBoxed a + ">"
-    | TyApp(TyName "Maybe", a) -> "java.util.Optional<" + emitTypeBoxed a + ">"
-    | TyApp(f, a)    -> emitTypeBoxed f + "<" + emitTypeBoxed a + ">"
-    | TyFn(a, b)     -> "java.util.function.Function<" + emitTypeBoxed a + ", " + emitTypeBoxed b + ">"
+    | TyApp _ ->
+        let (head, args) = collectTyApp t
+        match head, args with
+        | TyName "List", [a] ->
+            "List<" + emitTypeBoxed a + ">"
+        | TyName "Maybe", [a] ->
+            if Set.contains (safeTypeIdent "Maybe") currentJavaDeclaredTypes then
+                safeTypeIdent "Maybe" + "<" + emitTypeBoxed a + ">"
+            else
+                "Optional<" + emitTypeBoxed a + ">"
+        | TyName name, _ when not (List.isEmpty args) ->
+            let argsStr = args |> List.map emitTypeBoxed |> String.concat ", "
+            safeTypeIdent name + "<" + argsStr + ">"
+        | _ ->
+            "Object"
+    | TyFn(a, b)     -> "Function<" + emitTypeBoxed a + ", " + emitTypeBoxed b + ">"
     | TyTagged(t, _) -> emitTypeBoxed t
 
 /// Emit a type as a Java primitive (or reference) for parameter/return positions.
@@ -55,12 +111,24 @@ let rec private emitType (t: TypeExpr) : string =
     | TyName "Char"  -> "char"
     | TyName "Unit"  -> "void"
     | TyName x when isTypeParamName x -> x
-    | TyName x       -> x
+    | TyName x       -> safeTypeIdent x
     | TyVar v        -> if isTypeParamName v then v else "Object"
-    | TyApp(TyName "List", a)  -> "java.util.List<" + emitTypeBoxed a + ">"
-    | TyApp(TyName "Maybe", a) -> "java.util.Optional<" + emitTypeBoxed a + ">"
-    | TyApp(f, a)    -> emitTypeBoxed f + "<" + emitTypeBoxed a + ">"
-    | TyFn(a, b)     -> "java.util.function.Function<" + emitTypeBoxed a + ", " + emitTypeBoxed b + ">"
+    | TyApp _ ->
+        let (head, args) = collectTyApp t
+        match head, args with
+        | TyName "List", [a] ->
+            "List<" + emitTypeBoxed a + ">"
+        | TyName "Maybe", [a] ->
+            if Set.contains (safeTypeIdent "Maybe") currentJavaDeclaredTypes then
+                safeTypeIdent "Maybe" + "<" + emitTypeBoxed a + ">"
+            else
+                "Optional<" + emitTypeBoxed a + ">"
+        | TyName name, _ when not (List.isEmpty args) ->
+            let argsStr = args |> List.map emitTypeBoxed |> String.concat ", "
+            safeTypeIdent name + "<" + argsStr + ">"
+        | _ ->
+            "Object"
+    | TyFn(a, b)     -> "Function<" + emitTypeBoxed a + ", " + emitTypeBoxed b + ">"
     | TyTagged(t, _) -> emitType t
 
 // ── Literal emission ──────────────────────────────────────────────────────────
@@ -130,10 +198,10 @@ let rec private emitMatchChain (scrutStr: string) (branches: (TypedPattern * Typ
         | PCons _ -> Some ("!" + scrutVar + ".isEmpty()")
         | PCon(c, []) ->
             // zero-arg constructor: check instanceof with inner class
-            Some (scrutVar + " instanceof " + c)
+            Some (scrutVar + " instanceof " + qualifyJavaCtor c)
         | PCon(c, _) ->
             // n-arg constructor: check instanceof with inner class
-            Some (scrutVar + " instanceof " + c)
+            Some (scrutVar + " instanceof " + qualifyJavaCtor c)
         | _ -> None
 
     let emitBranchBinds (scrutVar: string) (pat: Pattern) : (string * string) list =
@@ -142,7 +210,7 @@ let rec private emitMatchChain (scrutStr: string) (branches: (TypedPattern * Typ
         | PCon(c, args) ->
             // Cast to the concrete type to access record components
             let castVar = "_c" + c
-            let castBind = (castVar, "((" + c + ") " + scrutVar + ")")
+            let castBind = (castVar, "((" + qualifyJavaCtor c + ") " + scrutVar + ")")
             let fieldBinds =
                 args |> List.mapi (fun i arg ->
                     match arg with
@@ -150,6 +218,13 @@ let rec private emitMatchChain (scrutStr: string) (branches: (TypedPattern * Typ
                     | _ -> None)
                 |> List.choose id
             castBind :: fieldBinds
+        | PTuple ps ->
+            ps
+            |> List.mapi (fun i p ->
+                match p with
+                | PVar v -> Some (safeIdent v, scrutVar + "[" + string i + "]")
+                | _ -> None)
+            |> List.choose id
         | _ -> []
 
     let rec buildChain = function
@@ -178,17 +253,66 @@ and private applyBinds (binds: (string * string) list) (expr: string) : string =
     match binds with
     | [] -> expr
     | _ ->
-        // Use lambda-invoke pattern for binds
-        // This is only needed for PCon patterns with field destructuring
-        // For simple PVar patterns, inline the scrutinee reference
-        binds |> List.fold (fun acc (var, value) ->
-            // Replace var with value in acc - simplest approach
-            // Since we control generated var names, this is safe
-            acc.Replace(var, value)) expr
+        // Replace only whole identifier occurrences to avoid corrupting
+        // constructor/type names that contain the same substring.
+        // Apply from specific value vars to cast-alias vars.
+        // This ensures replacements like `a -> _cSome._0()` happen
+        // before `_cSome -> ((Maybe.Some) fa)`.
+        (List.rev binds) |> List.fold (fun acc (var, value) ->
+            let pattern = @"\b" + Regex.Escape(var) + @"\b"
+            Regex.Replace(acc, pattern, value)) expr
 
 // ── Expression emission ───────────────────────────────────────────────────────
 
 and private emitExprJava (te: TypedExpr) : string =
+    let rec stripTaggedType (t: TypeExpr) : TypeExpr =
+        match t with
+        | TyTagged(inner, _) -> stripTaggedType inner
+        | _ -> t
+
+    let tryFnType (t: TypeExpr) : (TypeExpr * TypeExpr) option =
+        match stripTaggedType t with
+        | TyFn(argTy, retTy) -> Some(argTy, retTy)
+        | _ -> None
+
+    let emitApplyStep (fnExpr: string) (fnType: TypeExpr option) (argExpr: TypedExpr) : string * TypeExpr option =
+        let argStr = emitExprJava argExpr
+        match fnType |> Option.bind tryFnType with
+        | Some(argTy, retTy) ->
+            let fnCast = "((Function<" + emitTypeBoxed argTy + ", " + emitTypeBoxed retTy + ">) (" + fnExpr + "))"
+            let argValue =
+                match stripTaggedType argTy with
+                | TyName "Int"
+                | TyName "Float"
+                | TyName "Bool"
+                | TyName "Char"
+                | TyName "Unit" -> argStr
+                | _ -> "((" + emitTypeBoxed argTy + ") (" + argStr + "))"
+            (fnCast + ".apply(" + argValue + ")", Some retTy)
+        | None ->
+            ("((Function) (" + fnExpr + ")).apply(" + argStr + ")", None)
+
+    let emitKnownCall (fnName: string) (args: TypedExpr list) (resultType: TypeExpr option) =
+        match args with
+        | [] -> fnName + "()"
+        | first :: rest ->
+            let firstCall = fnName + "(" + emitExprJava first + ")"
+            let applied =
+                rest
+                |> List.fold (fun accExpr arg -> "((Function) (" + accExpr + ")).apply(" + emitExprJava arg + ")") firstCall
+            match resultType with
+            | Some t when not (List.isEmpty rest) ->
+                let castTy = emitTypeBoxed t
+                if castTy = "Void" then applied
+                else "((" + castTy + ") (" + applied + "))"
+            | _ -> applied
+
+    let emitApplyChain (headExpr: TypedExpr) (args: TypedExpr list) =
+        let startExpr = emitExprJava headExpr
+        args
+        |> List.fold (fun (accExpr, accTy) arg -> emitApplyStep accExpr accTy arg) (startExpr, Some headExpr.Type)
+        |> fst
+
     // String concat
     match tryAsStrConcat te with
     | Some (a, b) -> "(" + emitExprJava a + " + " + emitExprJava b + ")"
@@ -204,7 +328,12 @@ and private emitExprJava (te: TypedExpr) : string =
         match c with
         | "true" -> "true"
         | "false" -> "false"
-        | _ -> safeIdent c
+        | _ ->
+            let qualified = qualifyJavaCtor c
+            if String.Equals(qualified, c, StringComparison.Ordinal) then
+                safeIdent c
+            else
+                "new " + safeIdent qualified + "()"
 
     | TEApp(f, a) ->
         let rec gatherArgs head acc =
@@ -216,24 +345,20 @@ and private emitExprJava (te: TypedExpr) : string =
         | TECon c ->
             // Constructor application: new OuterClass.InnerClass(args)
             let argsStr = args |> List.map emitExprJava |> String.concat ", "
-            "new " + safeIdent c + "(" + argsStr + ")"
+            "new " + safeIdent (qualifyJavaCtor c) + "(" + argsStr + ")"
         | TEVar fname ->
-            // Curried application: chain .apply() calls
-            let rec buildApply (f: TypedExpr) (args: TypedExpr list) =
-                match args with
-                | [] -> emitExprJava f
-                | [x] -> emitExprJava f + ".apply(" + emitExprJava x + ")"
-                | x :: rest ->
-                    buildApply { f with Expr = TEApp(f, x) } rest
-            buildApply f [a]
+            let baseName = safeIdent fname
+            let mappedName = safeIdent (mapJavaCallName fname)
+            let callName =
+                if Set.contains baseName currentKnownJavaFunctions then baseName
+                elif Set.contains mappedName currentKnownJavaFunctions then mappedName
+                else baseName
+            if Set.contains callName currentKnownJavaFunctions then
+                emitKnownCall callName args (Some te.Type)
+            else
+                emitApplyChain head args
         | _ ->
-            let rec buildApply (f: TypedExpr) (args: TypedExpr list) =
-                match args with
-                | [] -> emitExprJava f
-                | [x] -> emitExprJava f + ".apply(" + emitExprJava x + ")"
-                | x :: rest ->
-                    buildApply { f with Expr = TEApp(f, x) } rest
-            buildApply f [a]
+            emitApplyChain head args
 
     | TELam(ps, body) ->
         match ps with
@@ -273,14 +398,27 @@ and private emitExprJava (te: TypedExpr) : string =
     | TETagged(e, _) -> emitExprJava e
 
     | TEList es ->
-        "java.util.List.of(" + (es |> List.map emitExprJava |> String.concat ", ") + ")"
+        "List.of(" + (es |> List.map emitExprJava |> String.concat ", ") + ")"
 
     | TETuple es ->
         // Java doesn't have tuples natively; use Object array as a fallback
         "new Object[]{" + (es |> List.map emitExprJava |> String.concat ", ") + "}"
 
     | TEPipe(a, b) ->
-        emitExprJava b + ".apply(" + emitExprJava a + ")"
+        match b.Expr with
+        | TEVar fname ->
+            let baseName = safeIdent fname
+            let mappedName = safeIdent (mapJavaCallName fname)
+            let callName =
+                if Set.contains baseName currentKnownJavaFunctions then baseName
+                elif Set.contains mappedName currentKnownJavaFunctions then mappedName
+                else baseName
+            if Set.contains callName currentKnownJavaFunctions then
+                emitKnownCall callName [a] (Some te.Type)
+            else
+                emitApplyStep (emitExprJava b) (Some b.Type) a |> fst
+        | _ ->
+            emitApplyStep (emitExprJava b) (Some b.Type) a |> fst
 
     | TEMatch(scrut, branches) | TEMatchOf(scrut, branches) ->
         let scrutStr = emitExprJava scrut
@@ -288,7 +426,7 @@ and private emitExprJava (te: TypedExpr) : string =
 
     | TECons(h, t) ->
         // Prepend h to list t: Stream.concat
-        "java.util.stream.Stream.concat(java.util.stream.Stream.of(" + emitExprJava h + "), " + emitExprJava t + ".stream()).collect(java.util.stream.Collectors.toList())"
+        "Stream.concat(Stream.of(" + emitExprJava h + "), " + emitExprJava t + ".stream()).collect(Collectors.toList())"
 
 // ── Sum type emission ─────────────────────────────────────────────────────────
 
@@ -315,25 +453,58 @@ let private emitSumTypeJava (name: TypeIdent) (ps: TypeParam list) (branches: (T
 let private isMainFn (sig_: TypedFnSig) =
     sig_.Name = "main" && List.isEmpty sig_.Params
 
+let rec private isUnitType (t: TypeExpr) : bool =
+    match t with
+    | TyName "Unit" -> true
+    | TyTagged(inner, _) -> isUnitType inner
+    | _ -> false
+
+let rec private collectFnTypeParams (t: TypeExpr) : Set<string> =
+    match t with
+    | TyName n when isTypeParamName n -> Set.singleton n
+    | TyVar v when isTypeParamName v -> Set.singleton v
+    | TyApp(a, b) -> Set.union (collectFnTypeParams a) (collectFnTypeParams b)
+    | TyFn(a, b) -> Set.union (collectFnTypeParams a) (collectFnTypeParams b)
+    | TyTagged(inner, _) -> collectFnTypeParams inner
+    | _ -> Set.empty
+
+let private methodTypeParamsPrefix (sig_: TypedFnSig) : string =
+    let fromParams =
+        sig_.Params
+        |> List.map snd
+        |> List.map collectFnTypeParams
+        |> List.fold Set.union Set.empty
+    let all = Set.union fromParams (collectFnTypeParams sig_.ReturnType)
+    if Set.isEmpty all then
+        ""
+    else
+        "<" + (all |> Set.toList |> String.concat ", ") + "> "
+
 /// Build the curried return type for multiple param groups: A -> (B -> RetType)
 let rec private buildCurriedRetType (paramTypes: TypeExpr list) (retType: TypeExpr) : string =
     match paramTypes with
-    | [] -> emitType retType
-    | [_] -> emitType retType
+    | [] -> emitTypeBoxed retType
+    | [t] ->
+        "Function<" + emitTypeBoxed t + ", " + emitTypeBoxed retType + ">"
     | t :: rest ->
-        "java.util.function.Function<" + emitTypeBoxed t + ", " + buildCurriedRetType rest retType + ">"
+        "Function<" + emitTypeBoxed t + ", " + buildCurriedRetType rest retType + ">"
 
 let private emitFnJava (sig_: TypedFnSig) (body: TypedExpr) : string =
     if isMainFn sig_ then
-        "    public static void main(String[] args) {\n        " + emitExprJava body + ";\n    }"
+        let bodyExpr = emitExprJava body
+        if isUnitType sig_.ReturnType then
+            "    public static void main(String[] args) {\n        " + bodyExpr + ";\n    }"
+        else
+            "    public static void main(String[] args) {\n        var _ll_unused = " + bodyExpr + ";\n    }"
     else
+        let methodTp = methodTypeParamsPrefix sig_
         match sig_.Params with
         | [] ->
             let retType = emitType sig_.ReturnType
-            "    public static " + retType + " " + safeIdent sig_.Name + "() {\n        return " + emitExprJava body + ";\n    }"
+            "    public static " + methodTp + retType + " " + safeIdent sig_.Name + "() {\n        return " + emitExprJava body + ";\n    }"
         | [(p, pt)] ->
             let retType = emitType sig_.ReturnType
-            "    public static " + retType + " " + safeIdent sig_.Name + "(" + emitType pt + " " + safeIdent p + ") {\n        return " + emitExprJava body + ";\n    }"
+            "    public static " + methodTp + retType + " " + safeIdent sig_.Name + "(" + emitType pt + " " + safeIdent p + ") {\n        return " + emitExprJava body + ";\n    }"
         | (p, pt) :: rest ->
             // Curried: fn takes first param, returns Function<...>
             let restTypes = rest |> List.map snd
@@ -344,13 +515,54 @@ let private emitFnJava (sig_: TypedFnSig) (body: TypedExpr) : string =
                 | [(rp, rpt)] -> safeIdent rp + " -> " + emitExprJava body
                 | (rp, _) :: rest2 -> safeIdent rp + " -> " + buildLambda rest2
             let lambdaBody = buildLambda rest
-            "    public static java.util.function.Function<" + emitTypeBoxed pt + ", " + innerRetType + "> " +
+            "    public static " + methodTp + innerRetType + " " +
             safeIdent sig_.Name + "(" + emitType pt + " " + safeIdent p + ") {\n        return " + lambdaBody + ";\n    }"
+
+let rec private emitJavaCurriedLambda (sigParams: (string * TypeExpr) list) (expr: string) : string =
+    match sigParams with
+    | [] -> expr
+    | [(name, _)] ->
+        safeIdent name + " -> " + expr
+    | (name, _) :: rest ->
+        safeIdent name + " -> " + emitJavaCurriedLambda rest expr
+
+let private emitExternalDecl (sig_: TypedFnSig) : string =
+    match tryGetExternalTarget Java sig_.Name with
+    | None -> ""
+    | Some target ->
+        let methodTp = methodTypeParamsPrefix sig_
+        let argNames = sig_.Params |> List.map (fun (n, _) -> safeIdent n)
+        let callExpr = target + "(" + String.concat ", " argNames + ")"
+        let isUnit = isUnitType sig_.ReturnType
+        match sig_.Params with
+        | [] ->
+            let retType = emitType sig_.ReturnType
+            if isUnit then
+                "    public static " + methodTp + retType + " " + safeIdent sig_.Name + "() {\n        " + callExpr + ";\n    }"
+            else
+                "    public static " + methodTp + retType + " " + safeIdent sig_.Name + "() {\n        return " + callExpr + ";\n    }"
+        | [(p, pt)] ->
+            let retType = emitType sig_.ReturnType
+            if isUnit then
+                "    public static " + methodTp + retType + " " + safeIdent sig_.Name + "(" + emitType pt + " " + safeIdent p + ") {\n        " + callExpr + ";\n    }"
+            else
+                "    public static " + methodTp + retType + " " + safeIdent sig_.Name + "(" + emitType pt + " " + safeIdent p + ") {\n        return " + callExpr + ";\n    }"
+        | (p, pt) :: rest ->
+            let restTypes = rest |> List.map snd
+            let retType = buildCurriedRetType restTypes sig_.ReturnType
+            let lambdaBody = emitJavaCurriedLambda (rest |> List.map (fun (n, t) -> (n, t))) callExpr
+            "    public static " + methodTp + retType + " " + safeIdent sig_.Name + "(" + emitType pt + " " + safeIdent p + ") {\n        return " + lambdaBody + ";\n    }"
 
 // ── Declaration emission ──────────────────────────────────────────────────────
 
 let private emitDecl (decl: TypedDecl) : string =
     match decl with
+    | TDOpaque(name, ps) ->
+        let typeParams =
+            ps |> List.choose (function TPBare n -> Some n | TPPhantom _ -> None)
+        let tpStr = if List.isEmpty typeParams then "" else "<" + String.concat ", " typeParams + ">"
+        "    static final class " + safeTypeIdent name + tpStr + " {}"
+
     | TDType(name, ps, body) ->
         match body with
         | TBSum branches -> emitSumTypeJava name ps branches
@@ -364,6 +576,7 @@ let private emitDecl (decl: TypedDecl) : string =
             "    record " + name + "(" + emitTypeBoxed t + " value) {}"
 
     | TDTag _ | TDUnit _ | TDTrait _ -> ""
+    | TDExternal(sig_, _) -> emitExternalDecl sig_
 
     | TDFn(sig_, _, body) -> emitFnJava sig_ body
 
@@ -375,19 +588,11 @@ let private emitDecl (decl: TypedDecl) : string =
         "    // let pattern binding: " + emitExprJava e + ";"
 
     | TDImpl(_, typeName, methods) ->
-        methods |> List.map (fun (sig_, _, body) ->
-            match sig_.Params with
-            | [] ->
-                "    public static " + emitType sig_.ReturnType + " " +
-                safeIdent typeName + "_" + safeIdent sig_.Name + "() {\n        return " + emitExprJava body + ";\n    }"
-            | [(p, pt)] ->
-                "    public static " + emitType sig_.ReturnType + " " +
-                safeIdent typeName + "_" + safeIdent sig_.Name + "(" + emitType pt + " " + safeIdent p + ") {\n        return " + emitExprJava body + ";\n    }"
-            | ps ->
-                let paramList = ps |> List.map (fun (n, t) -> emitType t + " " + safeIdent n) |> String.concat ", "
-                "    public static " + emitType sig_.ReturnType + " " +
-                safeIdent typeName + "_" + safeIdent sig_.Name + "(" + paramList + ") {\n        return " + emitExprJava body + ";\n    }"
-        ) |> String.concat "\n\n"
+        methods
+        |> List.map (fun (sig_, sch, body) ->
+            let sig2 = { sig_ with Name = safeIdent sig_.Name + "_" + safeIdent typeName }
+            emitFnJava sig2 body)
+        |> String.concat "\n\n"
 
 // ── Java stdlib prelude ───────────────────────────────────────────────────────
 
@@ -395,8 +600,8 @@ let private javaPrelude = """    // --- ll-lang stdlib (Java) ---
     private static long abs_(long x) { return Math.abs(x); }
     private static double absf(double x) { return Math.abs(x); }
     private static double sqrt(double x) { return Math.sqrt(x); }
-    private static java.util.function.Function<Long, Long> min_(long a) { return b -> Math.min(a, b); }
-    private static java.util.function.Function<Long, Long> max_(long a) { return b -> Math.max(a, b); }
+    private static Function<Long, Long> min_(long a) { return b -> Math.min(a, b); }
+    private static Function<Long, Long> max_(long a) { return b -> Math.max(a, b); }
     private static double intToFloat(long n) { return (double) n; }
     private static long floatToInt(double f) { return (long) f; }
     private static void printfn(String s) { System.out.println(s); }
@@ -405,7 +610,7 @@ let private javaPrelude = """    // --- ll-lang stdlib (Java) ---
         try { return java.nio.file.Files.readString(java.nio.file.Path.of(path)); }
         catch (Exception e) { throw new RuntimeException(e); }
     }
-    private static java.util.function.Function<String, Void> writeFile(String path) {
+    private static Function<String, Void> writeFile(String path) {
         return contents -> {
             try { java.nio.file.Files.writeString(java.nio.file.Path.of(path), contents); }
             catch (Exception e) { throw new RuntimeException(e); }
@@ -413,43 +618,131 @@ let private javaPrelude = """    // --- ll-lang stdlib (Java) ---
         };
     }
     private static void exit_(long n) { System.exit((int) n); }
-    private static java.util.List<String> getArgs(String[] _args) { return java.util.List.of(_args); }
+    private static List<String> getArgs(String[] _args) { return List.of(_args); }
     private static long strLen(String s) { return s.length(); }
-    private static java.util.function.Function<String, String> strConcat(String a) { return b -> a + b; }
+    private static Function<String, String> strConcat(String a) { return b -> a + b; }
     private static String strTrim(String s) { return s.strip(); }
-    private static java.util.function.Function<String, Boolean> strContains(String needle) { return hay -> hay.contains(needle); }
-    private static java.util.function.Function<String, java.util.List<String>> strSplit(String sep) { return s -> java.util.List.of(s.split(java.util.regex.Pattern.quote(sep))); }
-    private static java.util.function.Function<Long, java.util.function.Function<Long, String>> strSlice(String s) { return start -> len -> s.substring((int)(long)start, (int)(long)(start + len)); }
-    private static java.util.function.Function<String, Long> strIndexOf(String needle) { return hay -> (long) hay.indexOf(needle); }
+    private static Function<String, Boolean> strContains(String needle) { return hay -> hay.contains(needle); }
+    private static Function<String, List<String>> strSplit(String sep) { return s -> List.of(s.split(Pattern.quote(sep))); }
+    private static Function<Long, Function<Long, String>> strSlice(String s) { return start -> len -> s.substring((int)(long)start, (int)(long)(start + len)); }
+    private static Function<String, Long> strIndexOf(String needle) { return hay -> (long) hay.indexOf(needle); }
     private static String strReverse(String s) { return new StringBuilder(s).reverse().toString(); }
-    private static String strFromChars(java.util.List<Character> cs) { StringBuilder sb = new StringBuilder(); for (char c : cs) sb.append(c); return sb.toString(); }
-    private static java.util.List<Character> strChars(String s) { java.util.List<Character> cs = new java.util.ArrayList<>(); for (char c : s.toCharArray()) cs.add(c); return cs; }
+    private static String strFromChars(List<Character> cs) { StringBuilder sb = new StringBuilder(); for (char c : cs) sb.append(c); return sb.toString(); }
+    private static List<Character> strChars(String s) { List<Character> cs = new ArrayList<>(); for (char c : s.toCharArray()) cs.add(c); return cs; }
     private static String intToStr(long n) { return Long.toString(n); }
-    private static java.util.Optional<Long> strToInt(String s) { try { return java.util.Optional.of(Long.parseLong(s)); } catch (NumberFormatException e) { return java.util.Optional.empty(); } }
-    private static <A> long listLen(java.util.List<A> xs) { return xs.size(); }
-    private static <A, B> java.util.function.Function<java.util.List<A>, java.util.List<B>> listMap(java.util.function.Function<A, B> f) { return xs -> xs.stream().map(f::apply).collect(java.util.stream.Collectors.toList()); }
-    private static <A> java.util.function.Function<java.util.List<A>, java.util.List<A>> listFilter(java.util.function.Function<A, Boolean> p) { return xs -> xs.stream().filter(x -> p.apply(x)).collect(java.util.stream.Collectors.toList()); }
+    private static String floatToStr(double f) { return Double.toString(f); }
+    private static Optional<Long> strToInt(String s) { try { return Optional.of(Long.parseLong(s)); } catch (NumberFormatException e) { return Optional.empty(); } }
+    private static Optional<Double> strToFloat(String s) { try { double n = Double.parseDouble(s); return Double.isFinite(n) ? Optional.of(n) : Optional.empty(); } catch (NumberFormatException e) { return Optional.empty(); } }
+    private static <A> long listLen(List<A> xs) { return xs.size(); }
+    private static <A, B> Function<List<A>, List<B>> listMap(Function<A, B> f) { return xs -> xs.stream().map(f::apply).collect(Collectors.toList()); }
+    private static <A> Function<List<A>, List<A>> listFilter(Function<A, Boolean> p) { return xs -> xs.stream().filter(x -> p.apply(x)).collect(Collectors.toList()); }
     @SuppressWarnings("unchecked")
-    private static <A, B> java.util.function.Function<B, java.util.function.Function<java.util.List<A>, B>> listFold(java.util.function.Function<B, java.util.function.Function<A, B>> f) { return z -> xs -> { B acc = z; for (A x : xs) acc = f.apply(acc).apply(x); return acc; }; }
-    private static <A> java.util.Optional<A> listHead(java.util.List<A> xs) { return xs.isEmpty() ? java.util.Optional.empty() : java.util.Optional.of(xs.get(0)); }
-    private static <A> java.util.Optional<java.util.List<A>> listTail(java.util.List<A> xs) { return xs.isEmpty() ? java.util.Optional.empty() : java.util.Optional.of(xs.subList(1, xs.size())); }
-    private static <A> java.util.List<A> listReverse(java.util.List<A> xs) { java.util.List<A> r = new java.util.ArrayList<>(xs); java.util.Collections.reverse(r); return r; }
-    private static <A> java.util.function.Function<java.util.List<A>, java.util.List<A>> listAppend(java.util.List<A> xs) { return ys -> { java.util.List<A> r = new java.util.ArrayList<>(xs); r.addAll(ys); return r; }; }
-    private static <A> boolean listIsEmpty(java.util.List<A> xs) { return xs.isEmpty(); }
-    private static <A> java.util.function.Function<A, Boolean> listContains(java.util.List<A> xs) { return x -> xs.contains(x); }
-    private static java.util.function.Function<Long, java.util.List<Long>> listRange(long lo) { return hi -> { java.util.List<Long> r = new java.util.ArrayList<>(); for (long i = lo; i < hi; i++) r.add(i); return r; }; }
-    private static <A> java.util.List<A> listConcat(java.util.List<java.util.List<A>> xss) { java.util.List<A> r = new java.util.ArrayList<>(); for (java.util.List<A> xs : xss) r.addAll(xs); return r; }
-    private static <A> java.util.function.Function<Long, java.util.Optional<A>> listAt(java.util.List<A> xs) { return i -> { int idx = (int)(long)i; return (idx >= 0 && idx < xs.size()) ? java.util.Optional.of(xs.get(idx)) : java.util.Optional.empty(); }; }
+    private static <A, B> Function<B, Function<List<A>, B>> listFold(Function<B, Function<A, B>> f) { return z -> xs -> { B acc = z; for (A x : xs) acc = f.apply(acc).apply(x); return acc; }; }
+    private static <A> Optional<A> listHead(List<A> xs) { return xs.isEmpty() ? Optional.empty() : Optional.of(xs.get(0)); }
+    private static <A> Optional<List<A>> listTail(List<A> xs) { return xs.isEmpty() ? Optional.empty() : Optional.of(xs.subList(1, xs.size())); }
+    private static <A> List<A> listReverse(List<A> xs) { List<A> r = new ArrayList<>(xs); Collections.reverse(r); return r; }
+    private static <A> Function<List<A>, List<A>> listAppend(List<A> xs) { return ys -> { List<A> r = new ArrayList<>(xs); r.addAll(ys); return r; }; }
+    private static <A> boolean listIsEmpty(List<A> xs) { return xs.isEmpty(); }
+    private static <A> Function<A, Boolean> listContains(List<A> xs) { return x -> xs.contains(x); }
+    private static Function<Long, List<Long>> listRange(long lo) { return hi -> { List<Long> r = new ArrayList<>(); for (long i = lo; i < hi; i++) r.add(i); return r; }; }
+    private static <A> List<A> listConcat(List<List<A>> xss) { List<A> r = new ArrayList<>(); for (List<A> xs : xss) r.addAll(xs); return r; }
+    private static <A> Function<Long, Optional<A>> listAt(List<A> xs) { return i -> { int idx = (int)(long)i; return (idx >= 0 && idx < xs.size()) ? Optional.of(xs.get(idx)) : Optional.empty(); }; }
     private static long charToInt(char c) { return (long) c; }
     private static char intToChar(long n) { return (char)(int) n; }
     private static boolean charIsDigit(char c) { return Character.isDigit(c); }
     private static boolean charIsAlpha(char c) { return Character.isLetter(c); }
     private static boolean charIsSpace(char c) { return Character.isWhitespace(c); }
-    private static <A, B> java.util.function.Function<java.util.Optional<A>, java.util.Optional<B>> maybeMap(java.util.function.Function<A, B> f) { return m -> m.map(f::apply); }
-    private static <A, B> java.util.function.Function<java.util.function.Function<A, java.util.Optional<B>>, java.util.Optional<B>> maybeBind(java.util.Optional<A> m) { return f -> m.flatMap(f::apply); }
-    private static <A> java.util.function.Function<java.util.Optional<A>, A> maybeDefault(A d) { return m -> m.orElse(d); }
-    private static <A> boolean maybeIsNone(java.util.Optional<A> m) { return !m.isPresent(); }
+    private static <A, B> Function<Optional<A>, Optional<B>> maybeMap(Function<A, B> f) { return m -> m.map(f::apply); }
+    private static <A, B> Function<Function<A, Optional<B>>, Optional<B>> maybeBind(Optional<A> m) { return f -> m.flatMap(f::apply); }
+    private static <A> Function<Optional<A>, A> maybeWithDefault(A d) { return m -> m.orElse(d); }
+    private static <A> Function<Optional<A>, A> maybeDefault(A d) { return maybeWithDefault(d); }
+    private static <A> boolean maybeIsNone(Optional<A> m) { return !m.isPresent(); }
     // --- end prelude ---"""
+
+let private javaStdlibNames : Set<string> =
+    Set.ofList [
+        "abs"; "abs_"; "absf"; "sqrt"; "min"; "min_"; "max"; "max_"; "intToFloat"; "floatToInt"
+        "printfn"; "print"; "print_"; "readFile"; "writeFile"; "exit"; "exit_"; "getArgs"
+        "strLen"; "strConcat"; "strTrim"; "strContains"; "strSplit"; "strSlice"; "strIndexOf"
+        "strReverse"; "strFromChars"; "strChars"; "intToStr"; "floatToStr"; "strToInt"; "strToFloat"
+        "charToInt"; "intToChar"; "charIsDigit"; "charIsAlpha"; "charIsSpace"
+        "listLen"; "listMap"; "listFilter"; "listFold"; "listHead"; "listTail"; "listReverse"
+        "listAppend"; "listIsEmpty"; "listContains"; "listRange"; "listConcat"; "listAt"
+        "maybeMap"; "maybeBind"; "maybeWithDefault"; "maybeDefault"; "maybeIsNone"
+    ]
+
+let private javaStdlibEmitNames : Set<string> =
+    javaStdlibNames
+    |> Set.map mapJavaCallName
+    |> Set.map safeIdent
+
+let private exprUsesStdlib (te: TypedExpr) : bool =
+    let rec walk (e: TypedExpr) =
+        match e.Expr with
+        | TEVar name when Set.contains name javaStdlibNames -> true
+        | TEApp(a, b)
+        | TEPipe(a, b)
+        | TECons(a, b) -> walk a || walk b
+        | TELam(_, body)
+        | TETagged(body, _) -> walk body
+        | TELet(_, _, e1, e2)
+        | TELetPat(_, e1, e2) -> walk e1 || (e2 |> Option.exists walk)
+        | TEIf(c, t, e2) -> walk c || walk t || walk e2
+        | TEMatch(s, branches)
+        | TEMatchOf(s, branches) ->
+            walk s || (branches |> List.exists (fun (_, b) -> walk b))
+        | TEList es
+        | TETuple es -> es |> List.exists walk
+        | _ -> false
+    walk te
+
+let private moduleNeedsPrelude (tm: TypedModule) : bool =
+    tm.Decls
+    |> List.exists (fun (decl, _) ->
+        match decl with
+        | TDFn(_, _, body) -> exprUsesStdlib body
+        | TDLet(_, _, e) -> exprUsesStdlib e
+        | TDImpl(_, _, methods) ->
+            methods |> List.exists (fun (_, _, body) -> exprUsesStdlib body)
+        | _ -> false)
+
+let private collectModuleFunctionNames (tm: TypedModule) : Set<string> =
+    let topLevelFns =
+        tm.Decls
+        |> List.choose (fun (decl, _) ->
+            match decl with
+            | TDFn(sig_, _, _) -> Some (safeIdent sig_.Name)
+            | TDExternal(sig_, _) -> Some (safeIdent sig_.Name)
+            | _ -> None)
+        |> Set.ofList
+    let implFns =
+        tm.Decls
+        |> List.collect (fun (decl, _) ->
+            match decl with
+            | TDImpl(_, typeName, methods) ->
+                methods
+                |> List.map (fun (sig_, _, _) -> safeIdent sig_.Name + "_" + safeIdent typeName)
+            | _ -> [])
+        |> Set.ofList
+    Set.union topLevelFns implFns
+
+let private collectCtorOwners (tm: TypedModule) : Map<string, string> =
+    tm.Decls
+    |> List.collect (fun (decl, _) ->
+        match decl with
+        | TDType(typeName, _, TBSum branches) ->
+            branches |> List.map (fun (ctorName, _) -> ctorName, typeName)
+        | _ -> [])
+    |> Map.ofList
+
+let private collectDeclaredTypeNames (tm: TypedModule) : Set<string> =
+    tm.Decls
+    |> List.choose (fun (decl, _) ->
+        match decl with
+        | TDType(name, _, _)
+        | TDOpaque(name, _) -> Some (safeTypeIdent name)
+        | _ -> None)
+    |> Set.ofList
 
 // ── Module emission ───────────────────────────────────────────────────────────
 
@@ -463,10 +756,17 @@ let private javaClassName (path: string list) : string =
         if last.Length = 0 then "LlLang"
         else string (Char.ToUpper last.[0]) + last.[1..]
 
-let private emitModule (tm: TypedModule) : string =
+let private emitModule (includePrelude: bool) (tm: TypedModule) : string =
+    let knownModuleFns = collectModuleFunctionNames tm
+    currentKnownJavaFunctions <-
+        if includePrelude then Set.union knownModuleFns javaStdlibEmitNames
+        else knownModuleFns
+    currentJavaCtorOwners <- collectCtorOwners tm
+    currentJavaDeclaredTypes <- collectDeclaredTypeNames tm
+
     let className = javaClassName tm.Path
 
-    let isTypeDecl (d: TypedDecl) = match d with TDType _ | TDTag _ | TDUnit _ -> true | _ -> false
+    let isTypeDecl (d: TypedDecl) = match d with TDType _ | TDOpaque _ | TDTag _ | TDUnit _ -> true | _ -> false
     let typeDecls  = tm.Decls |> List.filter (fun (d, _) -> isTypeDecl d)
     let otherDecls = tm.Decls |> List.filter (fun (d, _) -> not (isTypeDecl d))
 
@@ -490,12 +790,17 @@ let private emitModule (tm: TypedModule) : string =
         "// Generated by lllc (ll-lang Java backend)\n" +
         "// Requires Java 21+\n" +
         "\n" +
+        "import java.util.ArrayList;\n" +
+        "import java.util.Collections;\n" +
         "import java.util.List;\n" +
         "import java.util.Optional;\n" +
-        "import java.util.function.Function;\n"
+        "import java.util.function.Function;\n" +
+        "import java.util.regex.Pattern;\n" +
+        "import java.util.stream.Collectors;\n" +
+        "import java.util.stream.Stream;\n"
 
     let innerParts =
-        [ javaPrelude
+        [ (if includePrelude then javaPrelude else "")
           (if typeStr  <> "" then typeStr else "")
           (if otherStr <> "" then otherStr else "") ]
         |> List.filter (fun s -> s <> "")
@@ -508,8 +813,11 @@ let private emitModule (tm: TypedModule) : string =
     "}\n"
 
 /// Emit a fully-inferred module as Java source.
-let emit (tm: TypedModule) : string = emitModule tm
+let emit (tm: TypedModule) : string =
+    emitModule (moduleNeedsPrelude tm) tm
 
 /// Emit multiple modules as a single Java source string.
 let emitProjectModules (tms: TypedModule list) : string =
-    tms |> List.map emitModule |> String.concat "\n\n"
+    tms
+    |> List.map (fun tm -> emitModule (moduleNeedsPrelude tm) tm)
+    |> String.concat "\n\n"

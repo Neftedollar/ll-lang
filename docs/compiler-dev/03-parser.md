@@ -7,6 +7,10 @@ A hand-written recursive-descent parser with a mutable cursor over a
 position index, and a `PosMap` side-table for attaching source
 positions to AST nodes:
 
+Note: this file documents the **legacy parser path**. The primary strict
+front-end is `src/LLLangCompiler/FParsecParser.fs`; both paths currently
+coexist for migration/parity checks.
+
 ```fsharp
 type private Ctx = {
     Tokens: Tok array

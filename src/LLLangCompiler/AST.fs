@@ -148,6 +148,8 @@ type Decl =
     | DFn of FnSig * Expr
     | DLet of Ident * Expr
     | DLetPat of Pattern * Expr               // let (a, b) = e  /  let _ = e
+    | DExternal of FnSig                      // external foo(x Int) Int
+    | DOpaque of TypeIdent * TypeParam list   // opaque Promise[A]
     | DType of TypeIdent * TypeParam list * TypeBody
     | DTag of TypeIdent
     | DUnit of TypeIdent

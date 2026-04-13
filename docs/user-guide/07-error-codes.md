@@ -20,6 +20,7 @@ The table:
 | `E006` | MissingImpl         | No `impl` found for a constrained type       |
 | `E007` | PlatformMismatch    | Platform module unavailable on target (reserved) |
 | `E008` | InfiniteType        | Unification would produce an infinite type (occurs check) |
+| `E026` | UnknownExternalMapping | Unknown external declaration for selected target |
 
 Below: the minimal program that reproduces each error, sourced from
 `spec/examples/invalid/`.
@@ -185,6 +186,27 @@ E008 OccursCheck $0 in TyFn(TyVar "$0", TyVar "$1")
 
 **Fix:** recursive self-application requires an explicit fixed-point
 combinator or recursive type declaration. In practice, avoid the pattern.
+
+## E026 — UnknownExternalMapping
+
+```lll
+-- expect: E026
+module Invalid.E026
+
+external host_log(msg Str) Unit
+main() Unit = host_log "hi"
+```
+
+The selected backend has no mapping for the declared external name. Compilation
+now fails before codegen.
+
+**Compact output example:**
+```
+E026 2:1 UnknownExternalMapping target:python name:host_log
+```
+
+**Fix:** add a backend mapping for that external, or switch to a known external
+name.
 
 ## Testing expected errors
 

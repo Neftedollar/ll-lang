@@ -1,0 +1,415 @@
+module Std.CodegenTS
+
+import Std.Parser
+
+-- TypeScript code emitter in ll-lang.
+
+joinWith(sep Str)(items List[Str]) =
+  match items
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat sep (joinWith sep rest))
+
+isTsKeyword(s Str) =
+  match s
+    | "break"    -> true
+    | "const"    -> true
+    | "delete"   -> true
+    | "else"     -> true
+    | "false"    -> true
+    | "for"      -> true
+    | "function" -> true
+    | "if"       -> true
+    | "in"       -> true
+    | "new"      -> true
+    | "null"     -> true
+    | "return"   -> true
+    | "switch"   -> true
+    | "this"     -> true
+    | "true"     -> true
+    | "try"      -> true
+    | "var"      -> true
+    | "void"     -> true
+    | "while"    -> true
+    | "let"      -> true
+    | "type"     -> true
+    | "string"   -> true
+    | "number"   -> true
+    | "boolean"  -> true
+    | "never"    -> true
+    | "object"   -> true
+    | _          -> false
+
+safeIdent(s Str) =
+  if isTsKeyword s
+    strConcat "_ll_" s
+  else s
+
+encodeTsEscape(c Char) =
+  match c
+    | '\n' -> "\\n"
+    | '\t' -> "\\t"
+    | '\r' -> "\\r"
+    | '\\' -> "\\\\"
+    | '`'  -> "\\`"
+    | '$'  -> "\\$"
+    | _    -> strFromChars [c]
+
+escapeStr(s Str) =
+  listFold (\acc c. strConcat acc (encodeTsEscape c)) "" (strChars s)
+
+mapOp(op Str) =
+  if op == "=="
+    "==="
+  else if op == "!="
+    "!=="
+  else op
+
+emitType(t TypeExpr) =
+  match t
+    | TyName "Int" -> "number"
+    | TyName "Float" -> "number"
+    | TyName "Str" -> "string"
+    | TyName "Bool" -> "boolean"
+    | TyName "Char" -> "string"
+    | TyName "Unit" -> "void"
+    | TyName n -> n
+    | TyApp (TyName "List") a -> strConcat (emitType a) "[]"
+    | TyApp (TyName "Maybe") a -> strConcat (emitType a) " | null"
+    | TyApp f a -> strConcat (emitType f) (strConcat "<" (strConcat (emitType a) ">"))
+    | TyFn a b -> strConcat "(_: " (strConcat (emitType a) (strConcat ") => " (emitType b)))
+
+emitPattern(p Pattern) =
+  match p
+    | PVar x -> safeIdent x
+    | PWild -> "_"
+    | PNil -> "[]"
+    | PLitInt n -> intToStr n
+    | PLitStr s -> strConcat "`" (strConcat (escapeStr s) "`")
+    | PCons h t ->
+      strConcat (emitPattern h) (strConcat ", ..." (emitPattern t))
+    | PCon c args -> emitConPattern c args
+
+emitConPattern(c Str)(args List[Pattern]) =
+  match args
+    | [] -> c
+    | _ ->
+      inner = joinWith ", " (listMap emitPattern args)
+      strConcat c (strConcat "(" (strConcat inner ")"))
+
+patListHead(xs List[Pattern]) =
+  match xs
+    | x :: _ -> x
+    | _ -> PWild
+
+emitCharLit(c Char) =
+  if c == '\n'
+    "`\\n`"
+  else if c == '\t'
+    "`\\t`"
+  else if c == '\\'
+    "`\\\\`"
+  else if c == '`'
+    "`\\``"
+  else strConcat "`" (strConcat (strFromChars [c]) "`")
+
+emitExpr(e Expr) =
+  match e
+    | EInt n -> intToStr n
+    | EStr s -> strConcat "`" (strConcat (escapeStr s) "`")
+    | EBool b ->
+      if b
+        "true"
+      else "false"
+    | EChar c -> emitCharLit c
+    | EFloat s -> s
+    | EVar x -> safeIdent x
+    | ECon c -> safeIdent c
+    | ENil -> "[]"
+    | EApp f a -> emitApp f a
+    | EIf c t el ->
+      strConcat "(" (strConcat (emitExpr c) (strConcat " ? " (strConcat (emitExpr t) (strConcat " : " (strConcat (emitExpr el) ")")))))
+    | EMatch scrut pats bodies ->
+      scrutStr = emitExpr scrut
+      arms = emitMatchArms scrutStr pats bodies
+      strConcat "(() => {\n" (strConcat arms "\n})()")
+    | ELam x body ->
+      strConcat "(" (strConcat (safeIdent x) (strConcat ") => " (emitExpr body)))
+    | ELet x e body ->
+      strConcat "((" (strConcat (safeIdent x) (strConcat ") => " (strConcat (emitExpr body) (strConcat ")(" (strConcat (emitExpr e) ")")))))
+    | EList items ->
+      strConcat "[" (strConcat (joinWith ", " (listMap emitExpr items)) "]")
+    | EBinOp op l r ->
+      strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat (mapOp op) (strConcat " " (strConcat (emitExpr r) ")")))))
+    | ETuple a b ->
+      strConcat "[" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) "] as const")))
+    | ECons h t ->
+      strConcat "[" (strConcat (emitExpr h) (strConcat ", ..." (strConcat (emitExpr t) "]")))
+
+gatherAppHead(e Expr) =
+  match e
+    | EApp f _ -> gatherAppHead f
+    | _ -> e
+
+gatherAppArgs(e Expr) =
+  match e
+    | EApp f a -> listAppend (gatherAppArgs f) [a]
+    | _ -> []
+
+isUpperStart(s Str) =
+  match strChars s
+    | c :: _ ->
+      n = charToInt c
+      if n >= 65
+        if n <= 90
+          true
+        else false
+      else false
+    | _ -> false
+
+emitApp(f Expr)(a Expr) =
+  head = gatherAppHead (EApp f a)
+  args = gatherAppArgs (EApp f a)
+  match head
+    | ECon c -> emitConApp c args
+    | EVar x ->
+      if isUpperStart x
+        emitConApp x args
+      else
+        strConcat "(" (strConcat (emitExpr f) (strConcat ")(" (strConcat (emitExpr a) ")")))
+    | _ ->
+      strConcat "(" (strConcat (emitExpr f) (strConcat ")(" (strConcat (emitExpr a) ")")))
+
+exprListHead(xs List[Expr]) =
+  match xs
+    | x :: _ -> x
+    | _ -> ENil
+
+emitConApp(c Str)(args List[Expr]) =
+  match args
+    | [] -> safeIdent c
+    | _ ->
+      inner = joinWith ", " (listMap emitExpr args)
+      strConcat (safeIdent c) (strConcat "(" (strConcat inner ")"))
+
+emitConsArm(scrut Str)(h Pattern)(t Pattern)(body Expr) =
+  hBind = match h
+    | PVar x -> strConcat "const " (strConcat (safeIdent x) (strConcat " = " (strConcat scrut "[0]; ")))
+    | _ -> ""
+  tBind = match t
+    | PVar x -> strConcat "const " (strConcat (safeIdent x) (strConcat " = " (strConcat scrut ".slice(1); ")))
+    | _ -> ""
+  strConcat "  if (" (strConcat scrut (strConcat ".length > 0) { " (strConcat hBind (strConcat tBind (strConcat "return " (strConcat (emitExpr body) "; }"))))))
+
+emitConArm(scrut Str)(c Str)(args List[Pattern])(body Expr) =
+  cond = strConcat scrut (strConcat "?._tag === `" (strConcat c "`"))
+  match args
+    | [] ->
+      strConcat "  if (" (strConcat cond (strConcat ") { return " (strConcat (emitExpr body) "; }")))
+    | _ ->
+      binds = emitConBinds scrut args 0
+      strConcat "  if (" (strConcat cond (strConcat ") {" (strConcat binds (strConcat " return " (strConcat (emitExpr body) "; }")))))
+
+emitMatchArm(scrut Str)(p Pattern)(body Expr) =
+  match p
+    | PWild ->
+      strConcat "  return " (strConcat (emitExpr body) ";")
+    | PVar x ->
+      strConcat "  const " (strConcat (safeIdent x) (strConcat " = " (strConcat scrut (strConcat "; return " (strConcat (emitExpr body) ";")))))
+    | PLitInt n ->
+      strConcat "  if (" (strConcat scrut (strConcat " === " (strConcat (intToStr n) (strConcat ") { return " (strConcat (emitExpr body) "; }")))))
+    | PLitStr s ->
+      lit = strConcat "`" (strConcat (escapeStr s) "`")
+      strConcat "  if (" (strConcat scrut (strConcat " === " (strConcat lit (strConcat ") { return " (strConcat (emitExpr body) "; }")))))
+    | PNil ->
+      strConcat "  if (" (strConcat scrut (strConcat ".length === 0) { return " (strConcat (emitExpr body) "; }")))
+    | PCons h t ->
+      emitConsArm scrut h t body
+    | PCon c args ->
+      emitConArm scrut c args body
+    | _ ->
+      strConcat "  return " (strConcat (emitExpr body) ";")
+
+emitConBinds(scrut Str)(args List[Pattern])(idx Int) =
+  match args
+    | [] -> ""
+    | p :: rest ->
+      bind = match p
+        | PVar x ->
+          field = strConcat "_" (intToStr idx)
+          strConcat " const " (strConcat (safeIdent x) (strConcat " = (" (strConcat scrut (strConcat " as any)." field))))
+        | _ -> ""
+      strConcat bind (emitConBinds scrut rest (idx + 1))
+
+emitMatchArms(scrut Str)(pats List[Pattern])(bodies List[Expr]) =
+  match pats
+    | p :: prest ->
+      match bodies
+        | b :: brest ->
+          arm = emitMatchArm scrut p b
+          rest = emitMatchArms scrut prest brest
+          if strLen rest == 0
+            arm
+          else strConcat arm (strConcat "\n" rest)
+        | _ -> ""
+    | _ -> "  throw new Error(`Non-exhaustive match`);"
+
+emitTypeParams(tvars List[Str]) =
+  match tvars
+    | [] -> ""
+    | _ ->
+      strConcat "<" (strConcat (joinWith ", " tvars) ">")
+
+emitCtorFieldsStr(args List[TypeExpr])(idx Int) =
+  match args
+    | [] -> ""
+    | t :: rest ->
+      field = strConcat "_" (strConcat (intToStr idx) (strConcat ": " (emitType t)))
+      remaining = emitCtorFieldsStr rest (idx + 1)
+      if strLen remaining == 0
+        field
+      else strConcat field (strConcat "; " remaining)
+
+emitCtorVariantStr(name Str)(args List[TypeExpr]) =
+  match args
+    | [] -> strConcat "{ _tag: `" (strConcat name "` }")
+    | _ ->
+      fields = emitCtorFieldsStr args 0
+      strConcat "{ _tag: `" (strConcat name (strConcat "`; " (strConcat fields " }")))
+
+emitCtorVariants(cs List[Constructor]) =
+  joinWith " | " (listMap emitOneVariant cs)
+
+emitOneVariant(c Constructor) =
+  match c
+    | MkCon name args -> emitCtorVariantStr name args
+
+emitCtorFieldsObj(args List[TypeExpr])(idx Int) =
+  match args
+    | [] -> ""
+    | _ :: rest ->
+      field = strConcat "_" (intToStr idx)
+      remaining = emitCtorFieldsObj rest (idx + 1)
+      if strLen remaining == 0
+        field
+      else strConcat field (strConcat ", " remaining)
+
+emitCtorParams(args List[TypeExpr])(idx Int) =
+  match args
+    | [] -> ""
+    | t :: rest ->
+      param = strConcat "_" (strConcat (intToStr idx) (strConcat ": " (emitType t)))
+      remaining = emitCtorParams rest (idx + 1)
+      if strLen remaining == 0
+        param
+      else strConcat param (strConcat ", " remaining)
+
+emitCtorZeroArgCtor(typeName Str)(tpStr Str)(name Str) =
+  p1 = strConcat "const " (safeIdent name)
+  p2 = strConcat ": " typeName
+  p3 = strConcat tpStr " = { _tag: `"
+  p4 = strConcat name "` } as const;"
+  strConcat p1 (strConcat p2 (strConcat p3 p4))
+
+emitCtorNArgCtor(typeName Str)(tpStr Str)(name Str)(args List[TypeExpr]) =
+  params = emitCtorParams args 0
+  objFields = emitCtorFieldsObj args 0
+  p1 = strConcat "const " (safeIdent name)
+  p2 = strConcat tpStr " = ("
+  p3 = strConcat params "): "
+  p4 = strConcat typeName tpStr
+  p5 = strConcat " => ({ _tag: `" name
+  p6 = strConcat "` as const, " objFields
+  p7 = " });"
+  strConcat p1 (strConcat p2 (strConcat p3 (strConcat p4 (strConcat p5 (strConcat p6 p7)))))
+
+emitCtorConstructor(typeName Str)(tpStr Str)(c Constructor) =
+  match c
+    | MkCon name args ->
+      match args
+        | [] -> emitCtorZeroArgCtor typeName tpStr name
+        | _ -> emitCtorNArgCtor typeName tpStr name args
+
+emitCtorConstructors(typeName Str)(tpStr Str)(cs List[Constructor]) =
+  joinWith "\n" (listMap (\c. emitCtorConstructor typeName tpStr c) cs)
+
+emitParamStr(p Param) =
+  match p
+    | MkParam n t -> strConcat (safeIdent n) (strConcat ": " (emitType t))
+
+emitParams(ps List[Param]) =
+  joinWith ") => (" (listMap emitParamStr ps)
+
+emitDecl(d Decl) =
+  match d
+    | DType name tvars ctors ->
+      tpStr = emitTypeParams tvars
+      variants = emitCtorVariants ctors
+      typeDecl = strConcat "type " (strConcat name (strConcat tpStr (strConcat " = " (strConcat variants ";"))))
+      ctorDecls = emitCtorConstructors name tpStr ctors
+      strConcat typeDecl (strConcat "\n" ctorDecls)
+    | DFn name params _ body ->
+      match params
+        | [] ->
+          strConcat "const " (strConcat (safeIdent name) (strConcat " = " (strConcat (emitExpr body) ";")))
+        | _ ->
+          paramStr = emitParams params
+          strConcat "const " (strConcat (safeIdent name) (strConcat " = (" (strConcat paramStr (strConcat "): any => " (strConcat (emitExpr body) ";")))))
+    | DLet name body ->
+      strConcat "const " (strConcat (safeIdent name) (strConcat " = " (strConcat (emitExpr body) ";")))
+    | DImport parts ->
+      strConcat "// import " (joinWith "." parts)
+    | DExport inner -> emitDecl inner
+
+emitDecls(ds List[Decl]) =
+  joinWith "\n\n" (listMap emitDecl ds)
+
+emitPrelude =
+  "// --- ll-lang TypeScript runtime helpers ---\nconst listLen = (xs: any[]): number => xs.length;\nconst listMap = (f: (x: any) => any) => (xs: any[]): any[] => xs.map(f);\nconst listFilter = (p: (x: any) => boolean) => (xs: any[]): any[] => xs.filter(p);\nconst listFold = (f: (acc: any) => (x: any) => any) => (z: any) => (xs: any[]): any => xs.reduce((a: any, x: any) => f(a)(x), z);\nconst listReverse = (xs: any[]): any[] => [...xs].reverse();\nconst listAppend = (xs: any[]) => (ys: any[]): any[] => [...xs, ...ys];\nconst listConcat = (xss: any[][]): any[] => xss.flat();\nconst listIsEmpty = (xs: any[]): boolean => xs.length === 0;\nconst listHead = (xs: any[]): any | null => xs.length > 0 ? xs[0] : null;\nconst listTail = (xs: any[]): any[] | null => xs.length > 0 ? xs.slice(1) : null;\nconst strLen = (s: string): number => s.length;\nconst strConcat = (a: string) => (b: string): string => a + b;\nconst strChars = (s: string): string[] => Array.from(s);\nconst strFromChars = (cs: string[]): string => cs.join(\"\");\nconst intToStr = (n: number): string => String(n);\nconst charToInt = (c: string): number => c.charCodeAt(0);\nconst printfn = (s: string): void => { console.log(s); };\nconst print = (s: string): void => { process.stdout.write(s); };\n// --- end prelude ---"
+
+emitModulePath(parts List[Str]) =
+  joinWith "." parts
+
+emitModule(m Module) =
+  match m
+    | MkModule path decls ->
+      modName = emitModulePath path
+      header = strConcat "// Generated by lllc (ll-lang TypeScript backend)\n// Module: " modName
+      prelude = emitPrelude
+      body = emitDecls decls
+      strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
+
+codegenTSCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  got:      " (strConcat got (strConcat "\n  expected: " expected)))))
+
+checkContains(label Str)(got Str)(needle Str) =
+  if strContains needle got
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  missing: " (strConcat needle (strConcat "\n  in: " got)))))
+
+main =
+  _ = codegenTSCheck "1 EInt 42" (emitExpr (EInt 42)) "42"
+  _ = codegenTSCheck "2 EStr hello" (emitExpr (EStr "hello")) "`hello`"
+  _ = codegenTSCheck "3 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1 + 2)"
+  _ = codegenTSCheck "4 TyName Int" (emitType (TyName "Int")) "number"
+  _ = codegenTSCheck "5 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "number[]"
+  colorCtors = MkCon "Red" [] :: MkCon "Blue" [] :: MkCon "Green" (TyName "Int" :: []) :: []
+  colorOut = emitDecl (DType "Color" [] colorCtors)
+  _ = checkContains "6 DType has type" colorOut "type Color"
+  _ = checkContains "6 DType has tag Red" colorOut "_tag"
+  _ = checkContains "6 DType has ctor Green" colorOut "const Green"
+  addParams = MkParam "a" (TyName "Int") :: MkParam "b" (TyName "Int") :: []
+  addOut = emitDecl (DFn "add" addParams None (EBinOp "+" (EVar "a") (EVar "b")))
+  _ = checkContains "7 DFn has const" addOut "const add"
+  _ = checkContains "7 DFn has arrow" addOut "=>"
+  idParams = MkParam "x" (TyName "Int") :: []
+  modDecls = DType "Color" [] (MkCon "Red" [] :: MkCon "Blue" [] :: []) :: DFn "id" idParams None (EVar "x") :: []
+  out = emitModule (MkModule ("Test" :: "Mod" :: []) modDecls)
+  _ = checkContains "8 module header" out "Module: Test.Mod"
+  _ = checkContains "8 module type" out "type Color"
+  _ = checkContains "8 module fn" out "const id"
+  0

@@ -1,0 +1,9 @@
+module Std.CodegenJava
+
+import Std.Parser
+
+-- Java codegen mirror entrypoint for Platform.Java.SDK.
+-- The production backend is currently implemented in src/LLLangCompiler/CodegenJava.fs.
+
+emitModule(_m ModuleDecl) Str =
+  "// Codegen mirror placeholder. Host backend emits Java source."

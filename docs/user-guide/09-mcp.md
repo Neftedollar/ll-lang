@@ -38,21 +38,48 @@ These clients follow the same stdio MCP pattern. Add `lllc mcp` as a server comm
 
 ## Available tools
 
+### `compile_source`
+
+Compile ll-lang source text end-to-end and return generated code for the selected target.
+
+**Input:**
+```json
+{ "source": "module M\nmain() = 0", "target": "fs" }
+```
+`target` is optional (`fs` default). Aliases: `fs`, `ts`, `py`, `java`, `cs`, `llvm`.
+
+**Output:**
+```json
+{ "ok": true, "errors": [], "target": "FSharp", "fsharp": "module M\n..." }
+{ "ok": false, "errors": [{"code":"E001","line":3,"col":5,"message":"..."}] }
+```
+
+---
+
 ### `compile_file`
 
 Compile a `.lll` file end-to-end. Returns structured JSON.
 
 **Input:**
 ```json
-{ "path": "/abs/path/to/foo.lll", "include_output": false }
+{ "path": "/abs/path/to/foo.lll", "target": "fs", "include_output": false }
 ```
-Set `include_output: true` to get the generated F# source in the response.
+Set `include_output: true` to include generated code in the response for the selected target.
 
 **Output:**
 ```json
-{ "ok": true,  "errors": [] }
+{ "ok": true,  "errors": [], "target": "FSharp" }
 { "ok": false, "errors": [{"code": "E002", "line": 5, "col": 3, "message": "E002 5:3 UnboundVar foo"}] }
 ```
+
+---
+
+### `check_source`
+
+Type-check ll-lang source text **without** code generation.
+
+**Input:** `{ "source": "module M\nmain() = 0" }`  
+**Output:** `{ "ok": true, "errors": [] }` or `{ "ok": false, "errors": [...] }`
 
 ---
 
@@ -156,7 +183,7 @@ The grammar is read from `spec/grammar.ebnf` (relative to the binary). Returns `
 
 ### `project_info`
 
-Walk up from a path to find `ll.toml` and return project metadata.
+Walk up from a path to find `lll.toml` and return project metadata.
 
 **Input:** `{ "path": "/abs/path/to/src/Main.lll" }`  
 **Output:**
@@ -174,7 +201,7 @@ Walk up from a path to find `ll.toml` and return project metadata.
 }
 ```
 
-In single-file mode (no `ll.toml`), `root` is `null` and `modules` contains one entry.
+In single-file mode (no `lll.toml`), `root` is `null` and `modules` contains one entry.
 
 ---
 
@@ -182,6 +209,8 @@ In single-file mode (no `ll.toml`), `root` is `null` and `modules` contains one 
 
 | Task | Recommended tool |
 |------|-----------------|
+| "Does this snippet type-check?" | `check_source` |
+| "Compile this snippet and show target output" | `compile_source` |
 | "Does this file type-check?" | `check_file` — fast, no codegen overhead |
 | "Compile and show me the F# output" | `compile_file` with `include_output: true` |
 | "Run this ll-lang program" | `run_file` |

@@ -217,6 +217,149 @@ let ``parse simple fn declaration`` () =
     | d -> failwith $"Expected DFn, got {d}"
 
 [<Fact>]
+let ``strict parser: keyword prefixes do not shadow identifiers`` () =
+    let src =
+        "module M\nfnName(x Int) Int = x\nexported(y Int) Int = y\n"
+    match parseModuleWithPosStrict src with
+    | Error e -> failwith $"Parse error: {e}"
+    | Ok (m, _) ->
+        let fnNames =
+            m.Decls
+            |> List.choose (fun (decl, _) ->
+                match decl with
+                | DFn(sig', _) -> Some sig'.Name
+                | _ -> None)
+        Assert.Equal<string list>(["fnName"; "exported"], fnNames)
+
+[<Fact>]
+let ``strict parser: clause-arm body keeps args after multiline parenthesized arg`` () =
+    let src =
+        "module M\n" +
+        "f(d Decl) =\n" +
+        "  | DImport segs -> listFold (\\acc seg.\n" +
+        "    if strLen acc == 0\n" +
+        "      seg\n" +
+        "    else strConcat acc (strConcat \".\" seg)\n" +
+        "  ) \"\" segs\n" +
+        "  | _ -> \"\"\n"
+
+    let rec appHeadAndArgs (e: Expr) : Expr * Expr list =
+        match e with
+        | EApp(f, a) ->
+            let (h, args) = appHeadAndArgs f
+            (h, args @ [a])
+        | _ -> (e, [])
+
+    match parseModuleWithPosStrict src with
+    | Error e -> failwith $"Parse error: {e}"
+    | Ok (m, _) ->
+        match m.Decls with
+        | (DFn(_, EMatch arms), _) :: _ ->
+            Assert.Equal(2, arms.Length)
+            let (_, body) = arms[0]
+            let (head, args) = appHeadAndArgs body
+            Assert.Equal(EVar "listFold", head)
+            Assert.Equal(3, args.Length)
+            Assert.Equal(ELit (LStr ""), args[1])
+            Assert.Equal(EVar "segs", args[2])
+        | _ -> failwith "Expected first declaration to be clause-form function"
+
+[<Fact>]
+let ``strict parser: multiline parenthesized arg does not eat next let-body line`` () =
+    let src =
+        "module M\n" +
+        "main() =\n" +
+        "  _ = check \"x\" (if cond\n" +
+        "    1\n" +
+        "  else 2)\n" +
+        "\n" +
+        "  0\n"
+
+    match parseModuleWithPosStrict src with
+    | Error e -> failwith $"Parse error: {e}"
+    | Ok (m, _) ->
+        match m.Decls with
+        | (DFn(_, body), _) :: _ ->
+            let expectedCall =
+                EApp(
+                    EApp(EVar "check", ELit (LStr "x")),
+                    EIf(EVar "cond", ELit (LInt 1L), ELit (LInt 2L)))
+            match body with
+            | ELetPat(PWild, rhs, Some (ELit (LInt 0L))) ->
+                Assert.Equal(expectedCall, rhs)
+            | _ ->
+                failwith $"Unexpected main body shape: {body}"
+        | _ -> failwith "Expected first declaration to be function main"
+
+[<Fact>]
+let ``strict parser: unary bang desugars to equality with false`` () =
+    let src = "module M\nneg(b Bool) Bool = !b\n"
+    match parseModuleWithPosStrict src with
+    | Error e -> failwith $"Parse error: {e}"
+    | Ok (m, _) ->
+        match m.Decls with
+        | (DFn(_, body), _) :: _ ->
+            let expected = EApp(EApp(EVar "==", EVar "b"), ELit (LBool false))
+            Assert.Equal(expected, body)
+        | _ -> failwith "Expected first declaration to be function neg"
+
+[<Fact>]
+let ``strict parser: subtraction inside call arg remains binary minus`` () =
+    let src = "module M\nstep(n Int) Int = g (n - 1)\n"
+    match parseModuleWithPosStrict src with
+    | Error e -> failwith $"Parse error: {e}"
+    | Ok (m, _) ->
+        match m.Decls with
+        | (DFn(_, body), _) :: _ ->
+            let expected =
+                EApp(
+                    EVar "g",
+                    EApp(EApp(EVar "-", EVar "n"), ELit (LInt 1L)))
+            Assert.Equal(expected, body)
+        | _ -> failwith "Expected first declaration to be function step"
+
+[<Fact>]
+let ``strict parser: impl block stops at top-level dedent`` () =
+    let src =
+        "module M\n" +
+        "Maybe A = Some A | None\n" +
+        "trait Functor F =\n" +
+        "  map(f A->B)(x F[A]) F[B]\n" +
+        "impl Functor Maybe =\n" +
+        "  map(f A->B)(x Maybe[A]) Maybe[B] =\n" +
+        "    | Some a -> Some (f a)\n" +
+        "    | None -> None\n" +
+        "useMap(xs Maybe[Int]) Maybe[Int] = map (\\x. x) xs\n"
+    match parseModuleWithPosStrict src with
+    | Error e -> failwith $"Parse error: {e}"
+    | Ok (m, _) ->
+        let fnNames =
+            m.Decls
+            |> List.choose (fun (decl, _) ->
+                match decl with
+                | DFn(sig', _) -> Some sig'.Name
+                | _ -> None)
+        Assert.Contains("useMap", fnNames)
+
+[<Fact>]
+let ``strict parser: external allows mixed-case foreign symbol names`` () =
+    let src =
+        "module M\n" +
+        "opaque Any\n" +
+        "external JSON_parse(s Str) Any\n" +
+        "let raw = JSON_parse \"{}\"\n"
+    match parseModuleWithPosStrict src with
+    | Error e -> failwith $"Parse error: {e}"
+    | Ok (m, _) ->
+        let extName =
+            m.Decls
+            |> List.tryPick (fun (decl, _) ->
+                match decl with
+                | DExternal sig' -> Some sig'.Name
+                | _ -> None)
+        Assert.Equal(Some "JSON_parse", extName)
+
+[<Fact>]
 let ``parse fn with two params`` () =
     let src = "module M\nadd(a Int)(b Int) = a"
     let m = parseModuleStr src
@@ -316,6 +459,38 @@ let ``parse tag declaration`` () =
     | d -> failwith $"Expected DTag UserId, got {d}"
 
 [<Fact>]
+let ``parse external and opaque declarations`` () =
+    let src =
+        "module M\n" +
+        "opaque Promise[A]\n" +
+        "opaque Response\n" +
+        "external fetch(url Str) Promise[Response]\n"
+    let m = parseModuleStr src
+    Assert.Equal(3, m.Decls.Length)
+    match fst m.Decls[0] with
+    | DOpaque("Promise", [TPBare "A"]) -> ()
+    | d -> failwith $"Expected DOpaque Promise[A], got {d}"
+    match fst m.Decls[1] with
+    | DOpaque("Response", []) -> ()
+    | d -> failwith $"Expected DOpaque Response, got {d}"
+    match fst m.Decls[2] with
+    | DExternal sig' ->
+        Assert.Equal("fetch", sig'.Name)
+        Assert.Equal<(string * TypeExpr) list>([("url", TyName "Str")], sig'.Params)
+        Assert.Equal<TypeExpr option>(
+            Some (TyApp(TyName "Promise", TyName "Response")),
+            sig'.ReturnType)
+    | d -> failwith $"Expected DExternal fetch, got {d}"
+
+[<Fact>]
+let ``strict parser rejects external with untyped parameter`` () =
+    let src = "module M\nexternal fetch(url) Str\n"
+    match parseModuleWithPosStrict src with
+    | Ok _ -> failwith "Expected parse failure for untyped external param"
+    | Error e ->
+        Assert.Contains("external declaration requires fully typed parameters", e)
+
+[<Fact>]
 let ``parse import`` () =
     let src = "module M\nimport Std.List"
     let m = parseModuleStr src
@@ -411,6 +586,12 @@ let ``E002 parses (unbound var detected later)`` () =
 let ``list literal: three elements are separate atoms`` () =
     // [1 2 3] should be EList [ELit 1; ELit 2; ELit 3], not a one-element list with EApp
     match parseExprStr "[1 2 3]" with
+    | EList elems -> Assert.Equal(3, elems.Length)
+    | e -> failwith $"Expected EList with 3 elems, got {e}"
+
+[<Fact>]
+let ``list literal: semicolon separators are accepted for compatibility`` () =
+    match parseExprStr "[1; 2; 3]" with
     | EList elems -> Assert.Equal(3, elems.Length)
     | e -> failwith $"Expected EList with 3 elems, got {e}"
 

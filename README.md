@@ -19,7 +19,7 @@ Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting 
 
 ## Status
 
-Working end-to-end compiler with a **529-test** suite, written in F# / .NET 10. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib → module system → MCP server → TypeScript + Python + Java codegen.
+Working end-to-end compiler with a large automated xUnit suite (see CI badge), written in F# / .NET 10. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib → module system → MCP server → TypeScript + Python + Java + C# + LLVM codegen.
 
 **Bootstrap: COMPLETE.** `compiler₁.fs == compiler₂.fs` — ll-lang compiles itself (2900+ line bootstrap compiler, fixpoint achieved).
 
@@ -49,9 +49,9 @@ Working end-to-end compiler with a **529-test** suite, written in F# / .NET 10. 
 | 5 | F# codegen + `lllc` CLI | ✅ |
 | 6 | Stdlib (~50 builtins) | ✅ |
 | **7** | **Bootstrap fixpoint** — ll-lang compiles itself (`compiler₁.fs == compiler₂.fs`) | ✅ |
-| **8** | **Module system** — `ll.toml`, multi-file builds, `lllc new`, topo-sort, E020/E024 | ✅ |
+| **8** | **Module system** — `lll.toml`, multi-file builds, `lllc new`, topo-sort, E020/E024 | ✅ |
 | **9** | **MCP server** — `lllc mcp` stdio server with 10 tools for Claude Code / Cursor / Zed | ✅ |
-| **10** | **Multi-platform codegen** — `lllc build --target ts\|py\|java`; TypeScript DU + Python @dataclass + Java sealed interfaces | ✅ |
+| **10** | **Multi-platform codegen** — `lllc build --target ts\|py\|java\|cs\|llvm`; TypeScript DU + Python @dataclass + Java sealed interfaces + C# records + LLVM IR | ✅ |
 
 ## Getting Started
 
@@ -61,7 +61,7 @@ Requires [.NET 10](https://dotnet.microsoft.com/download).
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # 529 tests
+dotnet test    # run full test suite (current count in CI)
 ```
 
 ### Run your first program
@@ -84,28 +84,29 @@ lllc build <file.lll>               # compile → <file>.fs  (F# default)
 lllc build --target ts <file.lll>   # compile → <file>.ts  (TypeScript)
 lllc build --target py <file.lll>   # compile → <file>.py  (Python)
 lllc build --target java <file.lll> # compile → <file>.java (Java 21)
-lllc build [dir]                    # compile project (reads ll.toml)
+lllc build --target cs <file.lll>   # compile → <file>.cs  (C#)
+lllc build --target llvm <file.lll> # compile → <file>.ll  (LLVM IR)
+lllc build [dir]                    # compile project (reads lll.toml)
 lllc run   <file.lll>               # compile and run via dotnet fsi
 lllc new   <name>                   # scaffold new project
 lllc install                        # fetch source-based dependencies
-lllc check <file.lll>               # error-check without full build
 lllc mcp                            # run MCP server (stdio, for Claude/Cursor)
 ```
 
 ### Create a multi-file project
 
 ```bash
-lllc new myapp          # creates myapp/ll.toml + myapp/src/Main.lll
+lllc new myapp          # creates myapp/lll.toml + myapp/src/Main.lll
 cd myapp
 # edit src/Main.lll, add more .lll files to src/
 lllc build              # → bin/fsharp/myapp.fs (default target)
 dotnet run --project bin/fsharp/myapp.fsproj
 ```
 
-### Multi-target from ll.toml
+### Multi-target from lll.toml
 
 ```toml
-# ll.toml
+# lll.toml
 [project]
 name = "myapp"
 
@@ -135,7 +136,7 @@ ll-lang ships a built-in MCP server. Wire it to Claude Code, Cursor, or Zed — 
 }
 ```
 
-Available MCP tools (10): `compile_file`, `check_file`, `run_file`, `list_errors`, `lookup_error`, `stdlib_search`, `grammar_lookup`, `project_info`, `install_package`, `list_targets`.
+Available MCP tools (10): `compile_file`, `compile_source`, `check_file`, `check_source`, `run_file`, `list_errors`, `lookup_error`, `stdlib_search`, `grammar_lookup`, `project_info`.
 
 The agent can ask "does this compile?" and get a structured JSON response with error codes, line numbers, and fix hints — no scraping required.
 
@@ -149,7 +150,7 @@ The feedback loop is slow, expensive, and noisy.
 
 ll-lang is built around four properties:
 
-- **Token-efficient syntax** — no braces, no semicolons, no boilerplate. No `fn`/`type`/`let`/`in`/`then`/`with` keywords — declarations use an uppercase/lowercase convention.
+- **Token-efficient syntax** — no braces, no semicolons, no boilerplate. No `fn`/`type`/`in`/`then`/`with` keywords — declarations use an uppercase/lowercase convention.
 - **Static types with inference** — Hindley-Milner type inference. Declare types where they matter, elide them everywhere else.
 - **Compiled = works** — tag violations, unbound variables, non-exhaustive matches, and unit mismatches are caught at compile time, not runtime.
 - **LLM-readable errors** — all errors follow a compact machine-readable format (`E001 12:5 TypeMismatch ...`) designed for direct consumption by an LLM agent.
@@ -158,7 +159,7 @@ ll-lang is built around four properties:
 
 ### Functions and let bindings
 
-No `fn` or `let` keyword — uppercase names declare types, lowercase names declare values. The body follows `=`.
+No `fn` keyword — uppercase names declare types, lowercase names declare values. The body follows `=`.
 
 ```
 module Examples.Basics
@@ -173,15 +174,19 @@ square(x Int) = x * x
 
 -- multi-branch if
 clamp(x Int)(lo Int)(hi Int) Int =
-  if x < lo then lo
-  else if x > hi then hi
+  if x < lo
+    lo
+  else if x > hi
+    hi
   else x
 
 -- lambda
 triple = \x. x * 3
 
 -- local binding
-example = let y = double 5 in y + 1
+example =
+  y = double 5
+  y + 1
 ```
 
 ### Algebraic Data Types and Pattern Matching
@@ -264,7 +269,7 @@ config = Toml.parse (readFile "config.toml")
 
 ### Keywords
 
-ll-lang has exactly 12 keywords: `match`, `if`, `else`, `import`, `export`, `module`, `trait`, `impl`, `tag`, `unit`, `true`, `false`. Everything else — functions, type declarations, value bindings — is expressed through the uppercase/lowercase convention, not reserved words.
+ll-lang has 15 keywords: `match`, `if`, `else`, `import`, `export`, `module`, `trait`, `impl`, `external`, `opaque`, `tag`, `unit`, `true`, `false`, `let`. Everything else — most function/type declaration forms — is expressed through the uppercase/lowercase convention.
 
 ## Error Format
 
@@ -289,6 +294,8 @@ lllc build --target fs   adts.lll   # → F# discriminated unions
 lllc build --target ts   adts.lll   # → TypeScript sealed interfaces
 lllc build --target py   adts.lll   # → Python @dataclass + Union
 lllc build --target java adts.lll   # → Java 21 sealed interfaces
+lllc build --target cs   adts.lll   # → C# records + interfaces
+lllc build --target llvm adts.lll   # → LLVM IR
 ```
 
 Same source, same semantics, four targets. Useful when an LLM agent needs to prototype logic in ll-lang and then ship it to a specific platform.
@@ -302,7 +309,7 @@ Source (.lll)
     ▼  Elaborator  — name resolution, tag checks, exhaustiveness
     ▼  HMInfer     — Algorithm W, let-generalization, trait dispatch (E006),
                      occurs check (E008), unit algebra preservation
-    ▼  Codegen     — emits idiomatic F# / TS / Python / Java source
+    ▼  Codegen     — emits idiomatic F# / TS / Python / Java / C# / LLVM
     ▼  dotnet fsi  — runs the result (via `lllc run`)
 ```
 
@@ -328,11 +335,11 @@ src/LLLangCompiler/        — compiler library (F#)
   CodegenPy.fs             — Python source emitter
   CodegenJava.fs           — Java 21 source emitter
   Compiler.fs              — end-to-end pipeline + Target dispatch
-src/LLLangTool/            — `lllc` CLI (build / run / check / install / mcp)
+src/LLLangTool/            — `lllc` CLI (build / run / reverse / self / new / install / mcp)
   Mcp.fs                   — MCP server (10 tools for LLM clients)
   Program.fs               — entry point
 stdlib/                    — self-hosted stdlib (10 modules, 5857 LOC ll-lang)
-tests/LLLangTests/         — xUnit test suite (529 tests + 97 inline stdlib tests)
+tests/LLLangTests/         — xUnit test suite (see CI for current count)
 docs/user-guide/           — user documentation
 docs/compiler-dev/         — compiler developer documentation
 ```
@@ -349,7 +356,7 @@ All 10 phases complete. Upcoming work:
 
 ## Design Philosophy
 
-ll-lang is not a general-purpose language. It is optimized for one use case: **LLM agents writing correct code on the first attempt**. Every design decision — significant indentation, juxtaposition-based application, compact error codes, unit algebra, 12-keyword vocabulary — is evaluated against that goal.
+ll-lang is not a general-purpose language. It is optimized for one use case: **LLM agents writing correct code on the first attempt**. Every design decision — significant indentation, juxtaposition-based application, compact error codes, unit algebra, concise keyword vocabulary — is evaluated against that goal.
 
 Less syntax to generate. More errors caught before execution. Faster iteration loops.
 

@@ -90,7 +90,8 @@ literal     ::= INT_LIT | FLOAT_LIT | STR_LIT | BOOL_LIT
 tagged-lit  ::= atom OP_LBRACK TYPEID OP_RBRACK
 
 (* collections *)
-list-lit    ::= OP_LBRACK expr* OP_RBRACK          (* space-separated elements *)
+list-lit    ::= OP_LBRACK [ expr ((OP_SEMI)? expr)* ] OP_RBRACK
+              (* elements may be separated by whitespace, optional ';', or both *)
 tuple-lit   ::= expr OP_COMMA expr (OP_COMMA expr)* (* comma = tuple *)
 
 (* let binding — bare form only; continuations chain via layout (parseBlockExpr) *)
@@ -199,7 +200,9 @@ export-decl  ::= "export" decl
       tag application has exactly one TYPEID followed by "]";
       parametric type has one type-expr.
       Lookahead: if next token after "[" is TYPEID and then "]", it's a tag.
-   4. "," is tuple-forming only in expr context; record fields use "," in type-decl.
+   4. List literals accept both [1 2 3] and [1; 2; 3].
+      "," forms tuples: 1, 2, 3.
+      Record fields use "," in type-decl.
    5. Keywords are reserved — cannot be used as IDENT or TYPEID.
    6. "\" begins a lambda expression. Followed by one or more IDENT, then ".", then expr.
    ============================================================ *)

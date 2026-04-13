@@ -1,0 +1,451 @@
+module Std.Codegen
+
+import Std.Parser
+
+-- F# code emitter written in ll-lang.
+-- Takes the AST produced by Std.Parser and emits F# source code.
+
+-- ---- String helpers --------------------------------------------------------
+
+joinWith(sep Str)(items List[Str]) =
+  match items
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat sep (joinWith sep rest))
+
+-- ---- F# keyword escaping ---------------------------------------------------
+
+isFsKeyword(s Str) =
+  match s
+    | "abstract" -> true
+    | "and"      -> true
+    | "as"       -> true
+    | "assert"   -> true
+    | "base"     -> true
+    | "begin"    -> true
+    | "class"    -> true
+    | "default"  -> true
+    | "delegate" -> true
+    | "do"       -> true
+    | "done"     -> true
+    | "downcast" -> true
+    | "downto"   -> true
+    | "elif"     -> true
+    | "else"     -> true
+    | "end"      -> true
+    | "exception" -> true
+    | "extern"   -> true
+    | "false"    -> true
+    | "finally"  -> true
+    | "for"      -> true
+    | "fun"      -> true
+    | "function" -> true
+    | "global"   -> true
+    | "if"       -> true
+    | "in"       -> true
+    | "inherit"  -> true
+    | "inline"   -> true
+    | "interface" -> true
+    | "internal" -> true
+    | "let"      -> true
+    | "match"    -> true
+    | "member"   -> true
+    | "mod"      -> true
+    | "module"   -> true
+    | "mutable"  -> true
+    | "namespace" -> true
+    | "new"      -> true
+    | "not"      -> true
+    | "null"     -> true
+    | "of"       -> true
+    | "open"     -> true
+    | "or"       -> true
+    | "override" -> true
+    | "private"  -> true
+    | "public"   -> true
+    | "rec"      -> true
+    | "return"   -> true
+    | "static"   -> true
+    | "struct"   -> true
+    | "then"     -> true
+    | "to"       -> true
+    | "true"     -> true
+    | "try"      -> true
+    | "type"     -> true
+    | "upcast"   -> true
+    | "use"      -> true
+    | "val"      -> true
+    | "void"     -> true
+    | "when"     -> true
+    | "while"    -> true
+    | "with"     -> true
+    | "yield"    -> true
+    | "params"   -> true
+    | "object"   -> true
+    | "trait"    -> true
+    | _          -> false
+
+safeIdent(s Str) =
+  if isFsKeyword s
+    strConcat "__ll_" s
+  else s
+
+-- ---- String escaping -------------------------------------------------------
+
+encodeStrEscape(c Char) =
+  match c
+    | '\n' -> "\\n"
+    | '\t' -> "\\t"
+    | '\r' -> "\\r"
+    | '\\' -> "\\\\"
+    | '"'  -> "\\\""
+    | _    -> strFromChars [c]
+
+escapeStr(s Str) =
+  listFold (\acc c. strConcat acc (encodeStrEscape c)) "" (strChars s)
+
+-- ---- Operator mapping ------------------------------------------------------
+
+mapOp(op Str) =
+  if op == "=="
+    "="
+  else if op == "!="
+    "<>"
+  else op
+
+-- ---- Type emission ---------------------------------------------------------
+
+isTypeParam(s Str) =
+  match strChars s
+    | c :: [] ->
+      n = charToInt c
+      if n >= 65
+        if n <= 90
+          true
+        else false
+      else false
+    | _ -> false
+
+emitType(t TypeExpr) =
+  match t
+    | TyName "Int" -> "int64"
+    | TyName "Str" -> "string"
+    | TyName "Bool" -> "bool"
+    | TyName "Char" -> "char"
+    | TyName "Float" -> "float"
+    | TyName "Unit" -> "unit"
+    | TyName n ->
+      if isTypeParam n
+        strConcat "'" n
+      else n
+    | TyApp (TyName "List") a -> strConcat (emitType a) " list"
+    | TyApp f a ->
+      head = collectTyAppHead (TyApp f a)
+      args = collectTyAppArgs (TyApp f a)
+      match args
+        | _ :: [] -> strConcat (emitType a) (strConcat " " (emitType head))
+        | _ ->
+          inner = joinWith ", " (listMap emitType args)
+          strConcat (emitType head) (strConcat "<" (strConcat inner ">"))
+    | TyFn a b -> strConcat (emitType a) (strConcat " -> " (emitType b))
+
+collectTyAppHead(t TypeExpr) =
+  match t
+    | TyApp f _ -> collectTyAppHead f
+    | _ -> t
+
+collectTyAppArgs(t TypeExpr) =
+  match t
+    | TyApp f a -> listAppend (collectTyAppArgs f) [a]
+    | _ -> []
+
+-- ---- Pattern emission ------------------------------------------------------
+
+emitPattern(p Pattern) =
+  match p
+    | PVar x -> safeIdent x
+    | PWild -> "_"
+    | PNil -> "[]"
+    | PLitInt n -> strConcat (intToStr n) "L"
+    | PLitStr s -> strConcat "\"" (strConcat (escapeStr s) "\"")
+    | PCons h t ->
+      strConcat "(" (strConcat (emitPattern h) (strConcat " :: " (strConcat (emitPattern t) ")")))
+    | PCon c args -> emitConPattern c args
+
+emitConPattern(c Str)(args List[Pattern]) =
+  match args
+    | [] -> c
+    | _ :: [] ->
+      inner = emitPattern (patListHead args)
+      strConcat c (strConcat "(" (strConcat inner ")"))
+    | _ ->
+      inner = joinWith ", " (listMap emitPattern args)
+      strConcat c (strConcat "(" (strConcat inner ")"))
+
+patListHead(xs List[Pattern]) =
+  match xs
+    | x :: _ -> x
+    | _ -> PWild
+
+-- ---- Expression emission ---------------------------------------------------
+
+emitCharLit(c Char) =
+  if c == '\n'
+    "'\\n'"
+  else if c == '\t'
+    "'\\t'"
+  else if c == '\\'
+    "'\\\\'"
+  else if c == '\''
+    "'\\''"
+  else strConcat (strConcat "'" (strFromChars [c])) "'"
+
+emitExpr(e Expr) =
+  match e
+    | EInt n -> strConcat (intToStr n) "L"
+    | EStr s -> strConcat "\"" (strConcat (escapeStr s) "\"")
+    | EBool b ->
+      if b
+        "true"
+      else "false"
+    | EChar c -> emitCharLit c
+    | EFloat s -> s
+    | EVar x -> safeIdent x
+    | ECon c -> c
+    | ENil -> "[]"
+    | EApp f a -> emitApp f a
+    | EIf c t el ->
+      strConcat "(if " (strConcat (emitExpr c) (strConcat " then " (strConcat (emitExpr t) (strConcat " else " (strConcat (emitExpr el) ")")))))
+    | EMatch scrut pats bodies ->
+      arms = emitArms pats bodies
+      strConcat "(match " (strConcat (emitExpr scrut) (strConcat " with " (strConcat arms ")")))
+    | ELam x body ->
+      strConcat "(fun " (strConcat (safeIdent x) (strConcat " -> " (strConcat (emitExpr body) ")")))
+    | ELet x e body ->
+      strConcat "(let " (strConcat (safeIdent x) (strConcat " = " (strConcat (emitExpr e) (strConcat " in " (strConcat (emitExpr body) ")")))))
+    | EList items ->
+      strConcat "[" (strConcat (joinWith "; " (listMap emitExpr items)) "]")
+    | EBinOp op l r ->
+      strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat (mapOp op) (strConcat " " (strConcat (emitExpr r) ")")))))
+    | ETuple a b ->
+      strConcat "(" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) ")")))
+    | ECons h t ->
+      strConcat "(" (strConcat (emitExpr h) (strConcat " :: " (strConcat (emitExpr t) ")")))
+
+-- Gather EApp head
+gatherAppHead(e Expr) =
+  match e
+    | EApp f _ -> gatherAppHead f
+    | _ -> e
+
+-- Gather EApp args (left to right)
+gatherAppArgs(e Expr) =
+  match e
+    | EApp f a -> listAppend (gatherAppArgs f) [a]
+    | _ -> []
+
+isUpperStart(s Str) =
+  match strChars s
+    | c :: _ ->
+      n = charToInt c
+      if n >= 65
+        if n <= 90
+          true
+        else false
+      else false
+    | _ -> false
+
+emitApp(f Expr)(a Expr) =
+  head = gatherAppHead (EApp f a)
+  args = gatherAppArgs (EApp f a)
+  match head
+    | ECon c -> emitConApp c args
+    | EVar x ->
+      if isUpperStart x
+        emitConApp x args
+      else
+        strConcat "(" (strConcat (emitExpr f) (strConcat " " (strConcat (emitExpr a) ")")))
+    | _ ->
+      strConcat "(" (strConcat (emitExpr f) (strConcat " " (strConcat (emitExpr a) ")")))
+
+exprListHead(xs List[Expr]) =
+  match xs
+    | x :: _ -> x
+    | _ -> ENil
+
+emitConApp(c Str)(args List[Expr]) =
+  match args
+    | [] -> c
+    | _ :: [] ->
+      strConcat "(" (strConcat c (strConcat " " (strConcat (emitExpr (exprListHead args)) ")")))
+    | _ ->
+      inner = joinWith ", " (listMap emitExpr args)
+      strConcat "(" (strConcat c (strConcat " (" (strConcat inner "))")))
+
+emitArms(pats List[Pattern])(bodies List[Expr]) =
+  match pats
+    | p :: prest ->
+      match bodies
+        | b :: brest ->
+          arm = strConcat "| " (strConcat (emitPattern p) (strConcat " -> " (emitExpr b)))
+          rest = emitArms prest brest
+          if strLen rest == 0
+            arm
+          else strConcat arm (strConcat " " rest)
+        | _ -> ""
+    | _ -> ""
+
+-- ---- Declaration emission --------------------------------------------------
+
+emitTypeParam(s Str) = strConcat "'" s
+
+emitTypeParams(tvars List[Str]) =
+  match tvars
+    | [] -> ""
+    | _ ->
+      inner = joinWith ", " (listMap emitTypeParam tvars)
+      strConcat "<" (strConcat inner ">")
+
+emitCtorArgs(args List[TypeExpr]) =
+  joinWith " * " (listMap emitType args)
+
+emitCtor(c Constructor) =
+  match c
+    | MkCon name args ->
+      match args
+        | [] -> strConcat "    | " name
+        | _ -> strConcat "    | " (strConcat name (strConcat " of " (emitCtorArgs args)))
+
+emitCtors(cs List[Constructor]) =
+  joinWith "\n" (listMap emitCtor cs)
+
+emitParamName(p Param) =
+  match p
+    | MkParam n _ -> safeIdent n
+
+emitParamStr(ps List[Param]) =
+  match ps
+    | [] -> ""
+    | _ -> strConcat " " (joinWith " " (listMap emitParamName ps))
+
+emitDecl(d Decl) =
+  match d
+    | DType name tvars ctors ->
+      header = strConcat "type " (strConcat name (emitTypeParams tvars))
+      body = emitCtors ctors
+      strConcat header (strConcat " =\n" body)
+    | DFn name params _ body ->
+      paramStr = emitParamStr params
+      strConcat "let rec " (strConcat (safeIdent name) (strConcat paramStr (strConcat " =\n    " (emitExpr body))))
+    | DLet name body ->
+      strConcat "let " (strConcat (safeIdent name) (strConcat " = " (emitExpr body)))
+    | DImport parts ->
+      strConcat "// import " (joinWith "." parts)
+    | DExport inner -> emitDecl inner
+
+emitDecls(ds List[Decl]) =
+  joinWith "\n\n" (listMap emitDecl ds)
+
+-- ---- Prelude ---------------------------------------------------------------
+
+emitPrelude =
+  "// --- ll-lang stdlib prelude (auto-generated) ---\nlet listLen (xs: 'a list) : int64 = int64 (List.length xs)\nlet listMap f xs = List.map f xs\nlet listFilter p xs = List.filter p xs\nlet listFold f z xs = List.fold f z xs\nlet listReverse xs = List.rev xs\nlet listAppend xs ys = List.append xs ys\nlet listConcat xss = List.concat xss\nlet listIsEmpty xs = List.isEmpty xs\nlet strLen (s: string) : int64 = int64 s.Length\nlet strConcat (a: string) (b: string) = a + b\nlet strChars (s: string) = s |> Seq.toList\nlet strFromChars (cs: char list) = System.String(cs |> List.toArray)\nlet intToStr (n: int64) = string n\nlet charToInt (c: char) = int64 (int c)\nlet printfn (s: string) = System.Console.WriteLine(s)\nlet print (s: string) = System.Console.Write(s)\nlet listHead xs = match xs with [] -> None | x :: _ -> Some x\nlet listTail xs = match xs with [] -> None | _ :: t -> Some t\n// --- end prelude ---"
+
+-- ---- Module emission -------------------------------------------------------
+
+emitModulePath(parts List[Str]) =
+  joinWith "." parts
+
+emitModule(m Module) =
+  match m
+    | MkModule path decls ->
+      header = strConcat "module " (emitModulePath path)
+      prelude = emitPrelude
+      body = emitDecls decls
+      strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
+
+-- ---- Tests -----------------------------------------------------------------
+
+codegenCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  got:      " (strConcat got (strConcat "\n  expected: " expected)))))
+
+checkContains(label Str)(got Str)(needle Str) =
+  if strContains needle got
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  missing: " (strConcat needle (strConcat "\n  in: " got)))))
+
+main =
+  -- 1. EInt
+  _ = codegenCheck "1 EInt 42" (emitExpr (EInt 42)) "42L"
+
+  -- 2. EStr
+  _ = codegenCheck "2 EStr hello" (emitExpr (EStr "hello")) "\"hello\""
+
+  -- 3. EBinOp
+  _ = codegenCheck "3 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1L + 2L)"
+
+  -- 4. EApp
+  _ = codegenCheck "4 EApp f x" (emitExpr (EApp (EVar "f") (EVar "x"))) "(f x)"
+
+  -- 5. EIf
+  _ = codegenCheck "5 EIf" (emitExpr (EIf (EBool true) (EInt 1) (EInt 0))) "(if true then 1L else 0L)"
+
+  -- 6. ELet
+  _ = codegenCheck "6 ELet" (emitExpr (ELet "x" (EInt 1) (EVar "x"))) "(let x = 1L in x)"
+
+  -- 7. Pattern PCon
+  _ = codegenCheck "7 PCon Some v" (emitPattern (PCon "Some" (PVar "v" :: []))) "Some(v)"
+
+  -- 8. TyName Int
+  _ = codegenCheck "8 TyName Int" (emitType (TyName "Int")) "int64"
+
+  -- 9. TyApp List Int
+  _ = codegenCheck "9 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "int64 list"
+
+  -- 10. DType Color
+  colorCtors = MkCon "Red" [] :: MkCon "Blue" [] :: []
+  colorDecl = DType "Color" [] colorCtors
+  _ = checkContains "10 DType Color" (emitDecl colorDecl) "type Color"
+
+  -- 11. DFn add
+  addParams = MkParam "x" (TyName "Int") :: MkParam "y" (TyName "Int") :: []
+  addDecl = DFn "add" addParams None (EBinOp "+" (EVar "x") (EVar "y"))
+  _ = checkContains "11 DFn add" (emitDecl addDecl) "let rec add"
+
+  -- 12. Full module emit
+  idParams = MkParam "x" (TyName "Int") :: []
+  modDecls = DType "Color" [] colorCtors :: DFn "id" idParams None (EVar "x") :: []
+  m = MkModule ("Test" :: "Mod" :: []) modDecls
+  out = emitModule m
+  _ = checkContains "12 module header" out "module Test.Mod"
+  _ = checkContains "12 module type" out "type Color"
+  _ = checkContains "12 module fn" out "let rec id"
+
+  -- 13. PWild pattern
+  _ = codegenCheck "13 PWild" (emitPattern PWild) "_"
+
+  -- 14. PNil pattern
+  _ = codegenCheck "14 PNil" (emitPattern PNil) "[]"
+
+  -- 15. ELam
+  _ = codegenCheck "15 ELam" (emitExpr (ELam "x" (EVar "x"))) "(fun x -> x)"
+
+  -- 16. EList
+  twoItems = EInt 1 :: EInt 2 :: []
+  _ = codegenCheck "16 EList" (emitExpr (EList twoItems)) "[1L; 2L]"
+
+  -- 17. ETuple
+  _ = codegenCheck "17 ETuple" (emitExpr (ETuple (EVar "a") (EVar "b"))) "(a, b)"
+
+  -- 18. keyword escaping
+  _ = codegenCheck "18 safeIdent let" (safeIdent "let") "__ll_let"
+  _ = codegenCheck "19 safeIdent foo" (safeIdent "foo") "foo"
+
+  -- 20. TyFn
+  _ = codegenCheck "20 TyFn" (emitType (TyFn (TyName "Int") (TyName "Bool"))) "int64 -> bool"
+
+  0

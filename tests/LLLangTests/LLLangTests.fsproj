@@ -34,16 +34,25 @@
     <Compile Include="FnParserTests.fs" />
     <Compile Include="ExprParserTests.fs" />
     <Compile Include="ModuleParserTests.fs" />
+    <Compile Include="JsonParserTests.fs" />
     <Compile Include="ElaboratorRealTests.fs" />
     <Compile Include="PipelineRealTests.fs" />
     <Compile Include="HMInferRealTests.fs" />
     <Compile Include="CodegenRealTests.fs" />
     <Compile Include="BootstrapCompilerTests.fs" />
     <Compile Include="ModuleSystemTests.fs" />
+    <Compile Include="PlatformTests.fs" />
+    <Compile Include="PlatformSdkBuildTests.fs" />
+    <Compile Include="PlatformParityMatrixTests.fs" />
+    <Compile Include="BootstrapPlatformCompilerEmitTests.fs" />
+    <Compile Include="ReverseTranspilerTests.fs" />
     <Compile Include="McpTests.fs" />
     <Compile Include="CodegenTSTests.fs" />
     <Compile Include="CodegenPyTests.fs" />
     <Compile Include="CodegenJavaTests.fs" />
+    <Compile Include="CodegenCSharpTests.fs" />
+    <Compile Include="CodegenLLVMTests.fs" />
     <Compile Include="StdlibMapTests.fs" />
+    <Compile Include="StdlibJsonTests.fs" />
   </ItemGroup>
 </Project>

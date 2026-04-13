@@ -19,8 +19,8 @@ lllc build --target jvm  file.lll   # same (alias)
 | `Bool`     | `boolean`                     |
 | `Char`     | `char`                        |
 | `Unit`     | `void`                        |
-| `List[A]`  | `java.util.List<A>`           |
-| `Maybe[A]` | `java.util.Optional<A>`       |
+| `List[A]`  | `List<A>` (`java.util.List`)  |
+| `Maybe[A]` | `Maybe<A>` (when declared in module) or `Optional<A>` (`java.util.Optional`) |
 
 In generic positions (type parameters), primitive types are boxed automatically (`Long`, `Double`, `Boolean`, `Character`).
 
@@ -82,10 +82,12 @@ fn add(a Int)(b Int) Int = a + b
 Emits:
 
 ```java
-public static java.util.function.Function<Long, Long> add(long a) {
+public static Function<Long, Long> add(long a) {
     return b -> a + b;
 }
 ```
+
+The backend emits Java imports for commonly used JDK types (`List`, `Optional`, `Function`, `ArrayList`, `Collectors`, `Stream`, etc.), so generated signatures stay concise and idiomatic.
 
 ## Pattern Matching
 
@@ -121,7 +123,9 @@ Emits a class `Hello` wrapping all declarations as `public static` members, with
 
 ## Stdlib
 
-The Java backend embeds a `// --- ll-lang stdlib (Java) ---` block with private static implementations of all stdlib functions. Key functions:
+The Java backend emits a `// --- ll-lang stdlib (Java) ---` helper block on demand (only when stdlib helpers are referenced). Helpers are lowered to private static methods, and call-sites are mapped to Java-safe helper names where needed (`abs -> abs_`, `min -> min_`, `max -> max_`, `print -> print_`, `exit -> exit_`).
+
+Key functions:
 
 | ll-lang | Java |
 |---------|------|
@@ -136,11 +140,27 @@ The Java backend embeds a `// --- ll-lang stdlib (Java) ---` block with private 
 
 ```bash
 lllc build --target java hello.lll
-javac hello.java
+## lllc also prints SDK suggestions:
+##   suggested compile: javac /.../Hello.java
+##   suggested run: javac /.../Hello.java && java Hello
+javac Hello.java
 java Hello
 ```
 
 Requires Java 21 or later.
+
+When source filename and module-tail class name differ (for example `hello.lll` -> class `Hello`), `lllc` keeps the primary output (`hello.java`) and also writes a class-aligned mirror (`Hello.java`) for `javac`.
+
+## Validation Status
+
+Java output is covered by automated `javac` checks in the platform parity matrix for:
+
+- arithmetic / conditionals
+- ADT and tuple/string match
+- trait impl dispatch (`impl_method`)
+- constrained dispatch (`constrained_dispatch`)
+
+This coverage runs in CI tests via `PlatformParityMatrixTests` when `javac` is available.
 
 ## Reserved Words
 

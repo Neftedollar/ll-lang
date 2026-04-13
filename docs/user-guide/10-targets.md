@@ -1,6 +1,6 @@
 # Compilation Targets
 
-ll-lang supports multiple output targets. The same source compiles to F#, TypeScript, or Python.
+ll-lang supports multiple output targets. The same source compiles to F#, TypeScript, Python, Java, C#, or LLVM IR.
 
 ## Selecting a Target
 
@@ -10,11 +10,14 @@ Use the `--target` flag with `lllc build`:
 lllc build --target fs  file.lll   # F# (default)
 lllc build --target ts  file.lll   # TypeScript
 lllc build --target py  file.lll   # Python
+lllc build --target java file.lll  # Java
+lllc build --target cs  file.lll   # C#
+lllc build --target llvm file.lll  # LLVM IR
 ```
 
-Accepted aliases: `fs` / `fsharp`, `ts` / `typescript`, `py` / `python`.
+Accepted aliases: `fs` / `fsharp`, `ts` / `typescript`, `py` / `python`, `java` / `jvm`, `cs` / `csharp`, `llvm` / `ll`.
 
-The output file uses the appropriate extension (`.fs`, `.ts`, `.py`).
+The output file uses the appropriate extension (`.fs`, `.ts`, `.py`, `.java`, `.cs`, `.ll`).
 
 ## F# (default)
 
@@ -24,6 +27,8 @@ The F# backend is the primary target and the most complete. All language feature
 lllc build file.lll          # emits file.fs
 lllc build --target fs file.lll  # same
 ```
+
+F# stdlib helpers are emitted on demand. If a module does not reference ll-lang stdlib symbols, no prelude block is inserted.
 
 ## TypeScript
 
@@ -87,7 +92,7 @@ Match expressions become `switch`-like if/else chains on `._tag`.
 
 ### Stdlib
 
-The TypeScript prelude is appended at the top of the output. It provides the ll-lang standard library as TypeScript functions.
+The TypeScript backend emits a compact stdlib helper block on demand: only helpers that are actually referenced in the module/project are generated once as `const` bindings, then reused at call sites.
 
 ## Python
 
@@ -112,7 +117,7 @@ lllc build --target py file.lll  # emits file.py
 
 ### Sum types
 
-Sum types become `@dataclass` classes with a `_tag` field, collected into a `Union` type alias:
+Sum types become immutable `@dataclass(frozen=True)` classes with a `_tag` field, collected into a `Union` type alias:
 
 ```ll-lang
 type Shape = Circle Float | Rect Float Float | Empty
@@ -121,18 +126,18 @@ type Shape = Circle Float | Rect Float Float | Empty
 Emits:
 
 ```python
-@dataclass
+@dataclass(frozen=True)
 class Circle:
     _tag: str = "Circle"
     _0: float
 
-@dataclass
+@dataclass(frozen=True)
 class Rect:
     _tag: str = "Rect"
     _0: float
     _1: float
 
-@dataclass
+@dataclass(frozen=True)
 class Empty:
     _tag: str = "Empty"
     pass
@@ -163,15 +168,57 @@ Match expressions become ternary if/else chains (Python expressions, not stateme
 
 ### Stdlib
 
-The Python prelude is prepended to the output. It provides all ll-lang stdlib functions as Python lambdas and defs, plus `from __future__ import annotations`, `dataclasses`, `typing`, `sys`, and `math` imports.
+The Python backend always emits typing/import headers, and emits runtime stdlib helpers on demand. Modules that do not reference stdlib helpers avoid runtime-prelude bloat.
+
+### External mappings
+
+Python also maps `external` declarations to standard library functions. In this release `JSON_parse` is emitted as `json.loads`, and `import json` is added only when the module/project uses `JSON_parse`.
+
+## Java
+
+The Java backend emits Java source with a static-class style runtime prelude, included on demand when stdlib helpers are referenced.
+
+```bash
+lllc build --target java file.lll  # emits file.java
+# CLI also prints SDK commands, e.g.:
+#   suggested compile: javac /.../Main.java
+#   suggested run: javac /.../Main.java && java Main
+```
+
+## C#
+
+The C# backend emits idiomatic C# with platform types (`List<T>`, `Func<...>`), record/interface ADTs, and a compact runtime prelude.
+The focus is low-boilerplate target code that still compiles cleanly in generated SDK projects, including self-hosted stdlib artifacts.
+The runtime prelude is emitted on demand: modules that do not reference stdlib helpers avoid prelude bloat.
+
+```bash
+lllc build --target cs file.lll  # emits file.cs
+```
+
+### External mappings
+
+The C# backend maps `external` declarations to runtime and base-library APIs. `JSON_parse` currently uses `System.Text.Json.JsonSerializer.Deserialize<object>`, and `using System.Text.Json;` is emitted only when needed.
+
+## LLVM IR
+
+The LLVM backend emits typed LLVM IR with explicit control-flow lowering (`if`, `match`) and `main` lowering suitable for `llvm-as` validation.
+Current supported subset includes integer/float arithmetic (`add/sub/mul/div`), integer comparisons, direct calls, `let`-style local bindings, ADT constructor allocation, and list literal/cons lowering via a compact runtime node ABI.
+
+```bash
+lllc build --target llvm file.lll  # emits file.ll
+```
+
+### External mappings
+
+LLVM currently supports `external console_log(msg Str) Unit` via direct symbol declaration/call (`@console_log(ptr)`).
 
 ## Limitations
 
-The current multi-target backends cover all core language features. Known gaps:
+Known gaps:
 
-- **Trait impls** are emitted as standalone functions with the type name prefix (e.g. `maybe_map`).
+- **Trait impls** are emitted as standalone functions with a type-name prefix.
 - **Tag types** (`Str[UserId]`) are erased to the base type at the target.
-- **Java** target is planned but not yet implemented.
+- **LLVM IR** is still subset-based (full trait/ADT parity is not complete yet).
 
 ## Running Multi-Target Output
 
@@ -179,8 +226,8 @@ The current multi-target backends cover all core language features. Known gaps:
 
 ```bash
 lllc build --target ts hello.lll
-npx ts-node hello.ts
-# or: tsc hello.ts && node hello.js
+# SDK run command mirrors CLI `run --target ts`:
+npx tsc hello.ts --target es2022 --module esnext && node hello.js
 ```
 
 ### Python
@@ -188,4 +235,13 @@ npx ts-node hello.ts
 ```bash
 lllc build --target py hello.lll
 python hello.py
+```
+
+### Java / C#
+
+```bash
+lllc build --target java hello.lll
+## if module tail is Hello, class-aligned mirror is written as Hello.java
+javac Hello.java && java Hello
+lllc build --target cs hello.lll
 ```

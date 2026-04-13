@@ -4,10 +4,11 @@
 
 ```
 Usage:
-  lllc build <file.lll>     compile single file
-  lllc build [dir]          compile project (reads ll.toml)
-  lllc run   <file.lll>     compile and run single file
+  lllc build [--target fs|ts|py|java|cs|llvm] <file.lll>   compile single file
+  lllc build [--target fs|ts|py|java|cs|llvm] [dir]        compile project (reads lll.toml)
+  lllc run   [--target fs|ts|py|java|cs|llvm] <file.lll>   compile and run single file
   lllc new   <name>         scaffold new project
+  lllc reverse --from <target> <file>   recover minimal ll-lang from generated code
 ```
 
 ---
@@ -44,19 +45,19 @@ Note: integer literals emit as `int64` (`2L` not `2`).
 ## `lllc build [dir]` — project build
 
 ```bash
-lllc build           # finds ll.toml by walking up from cwd
+lllc build           # finds lll.toml by walking up from cwd
 lllc build ./myapp   # builds project rooted at ./myapp
 ```
 
-Requires a `ll.toml` manifest at the project root (see [06-modules.md](06-modules.md)).
+Requires a `lll.toml` manifest at the project root (see [06-modules.md](06-modules.md)).
 
-1. Reads `ll.toml` from the project root.
+1. Reads `lll.toml` from the project root.
 2. Globs all `*.lll` files under `src/` recursively.
 3. Validates each file's `module` header matches its path (E020).
 4. Topologically sorts by imports (E024 on cycle).
-5. Compiles each file in dependency order.
-6. Concatenates all modules into `bin/<name>.fs`.
-7. Generates `bin/<name>.fsproj` for `dotnet build`.
+5. Compiles each file in dependency order using the selected target's external mapping validation.
+6. Concatenates/emit modules into target output directory/file(s).
+7. Generates `bin/<name>.fsproj` for `dotnet build` (F#/legacy single-target path).
 
 ```bash
 # After lllc build:
@@ -75,7 +76,7 @@ lllc new myapp
 Creates:
 ```
 myapp/
-├── ll.toml           [project] name = "myapp"
+├── lll.toml           [project] name = "myapp"
 └── src/
     └── Main.lll      module Myapp.Main
 ```
@@ -106,6 +107,14 @@ fn main() = printfn "Hello, ll-lang!"
 ```bash
 lllc run examples/hello.lll
 # Hello, ll-lang!
+```
+
+For non-F# targets, `lllc run --target <target> file.lll` uses Platform SDK run commands.
+Example TypeScript run path:
+
+```bash
+lllc run --target ts hello.lll
+# internally: npx tsc hello.ts --target es2022 --module esnext && node hello.js
 ```
 
 ---
@@ -188,4 +197,43 @@ If you have not set up the `lllc` alias (see [01-installation.md](01-installatio
 dotnet run --project src/LLLangTool -- build hello.lll
 dotnet run --project src/LLLangTool -- build ./myapp
 dotnet run --project src/LLLangTool -- new myapp
+dotnet run --project src/LLLangTool -- reverse --from ts bin/typescript/myapp.ts
 ```
+
+---
+
+## `lllc reverse --from <target> <file>` — reverse generated code to ll-lang
+
+```bash
+lllc reverse --from ts   out.ts
+lllc reverse --from py   out.py
+lllc reverse --from java out.java
+lllc reverse --from cs   out.cs
+lllc reverse --from llvm out.ll
+```
+
+Accepted source aliases are the same as build targets, including `Platform.*.SDK` aliases.
+
+Behavior:
+1. Reads generated source from the given file.
+2. Recovers minimal ll-lang declarations (`let` and simple function declarations).
+3. Writes sibling output as `<input-stem>.reversed.lll` (never overwrites existing `.lll` sources).
+
+Use this as a migration/bootstrap tool for target code that follows emitted idioms:
+- constant declarations (`Int`, `Float`, `Bool`, `Str`; plus `Char` where target type carries it)
+- typed top-level constants in TS/Python are also recovered (`const x: number = ...`, `x: int = ...`)
+- C#/Java numeric field variants for idiomatic hand-written code (`int/long`, `float/double`)
+- TypeScript arrow functions (including single-param and block-bodied) and `function ... { return ... }` (including generic signatures)
+- Semicolonless TypeScript forms are supported for the same function/const recovery shapes
+- Curried lambda chains in TS/C#/Java (`x => y => ...`) and Python nested `def` currying are rehydrated to multi-parameter ll-lang signatures
+- Python `def ...: return ...` (single-line or simple block-bodied)
+- Java/C# static methods with `return ...` (public/private/protected variants, including generic method signatures)
+- Top-level ternary return expressions in TS/C#/Java are lowered to ll-lang `if ... else ...` form
+- Block `if/else` + `return` method/function shapes in TS/Python/C#/Java are also lowered to ll-lang `if ... else ...`
+- Block `if / else if / else` (and Python `if / elif / else`) + `return` shapes are lowered to nested ll-lang `if ... else if ... else ...`
+- Block `if / else if` + fallback `return` (no explicit `else`) is also lowered to nested ll-lang `if ... else if ... else ...`
+- TypeScript strict equality operators are normalized during recovery (`===` → `==`, `!==` → `!=`)
+- F# `if ... then ... else ...` expressions are lowered to ll-lang `if ... else ...` blocks
+- F# nested `let ... in ...` chains are flattened into ll-lang local-binding statement blocks
+- F# tuple-style DU constructor calls (e.g. `Ctor(a, b)`) are normalized to curried ll-lang constructor application
+- Identifier normalization from `PascalCase` to ll-lang-compatible `lowerCamelCase` during recovery

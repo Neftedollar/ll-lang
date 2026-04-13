@@ -1,0 +1,8 @@
+[project]
+name = "Platform.Python.SDK"
+version = "0.1.0"
+
+[sdk]
+target = "python"
+aliases = ["py"]
+ext = ".py"

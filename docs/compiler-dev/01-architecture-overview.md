@@ -27,7 +27,7 @@ returns `Result<_, LLError list>`.
         │
         ▼
    Codegen*.emit                  Target source string
-   (Codegen.fs | CodegenTS.fs | CodegenPy.fs | CodegenJava.fs)
+   (Codegen.fs | CodegenTS.fs | CodegenPy.fs | CodegenJava.fs | CodegenCSharp.fs | CodegenLLVM.fs)
         │
         ▼
   .fs/.ts/.py/.java  →  dotnet fsi   (lllc run, F# only)
@@ -41,7 +41,7 @@ Entry points:
 ### Project mode (Phase 8)
 
 ```
-ll.toml
+lll.toml
         │
         ▼
    Manifest.parseManifest         LLManifest (name, version, deps, platform)
@@ -187,9 +187,21 @@ Emits Python source. Sum types become `@dataclass` classes under a `Union` alias
 
 Emits Java 21 source. Sum types become `sealed interface` + `record` hierarchies. Functions emit as static methods. See [11-multi-target-codegen](11-multi-target-codegen.md).
 
+### `CodegenCSharp.fs` — C# emitter
+
+Emits compile-safe C# source skeletons for all typed declarations. Current focus is stable emission contract and buildability.
+
+### `CodegenLLVM.fs` — LLVM IR emitter
+
+Emits typed LLVM IR with explicit control-flow lowering (`if`/`match`) plus a minimal heap-node runtime (`__ll_alloc`) for ADT/list/tuple representation. The backend is still intentionally subset-oriented (for example full trait parity remains pending).
+
+### `Platform.fs` — target/SDK registry
+
+Defines canonical target names, aliases, output extensions, and built-in `Platform.*.SDK` metadata.
+
 ### `Manifest.fs` — TOML subset parser (Phase 8)
 
-Hand-written parser for `ll.toml` project manifests. Supports `[table]` headers,
+Hand-written parser for `lll.toml` project manifests. Supports `[table]` headers,
 `key = "value"` strings, and `key = ["a","b"]` string arrays. No NuGet
 dependencies. Entry point: `parseManifest : string -> Result<LLManifest, string>`.
 
@@ -209,9 +221,8 @@ Entry point: `loadProject : string -> Result<LLProject, LLError list>`.
 Two entry points:
 
 - `compile : string -> Result<string, LLError list>` — single-file pipeline.
-- `compileProject : LLProject -> Result<string, LLError list>` — multi-file
-  pipeline: runs `compile` on each topo-sorted file, concatenates via
-  `Codegen.emitProjectModules`.
+- `compileProjectToModulesForTarget : Target -> LLProject -> Result<TypedModule list, LLError list>` — multi-file front-end pass for a specific target, used for target-specific external validation.
+- `compileProject : LLProject -> Result<string, LLError list>` — multi-file pipeline.
 
 ### `src/LLLangTool/Mcp.fs` — MCP server (Phase 9)
 
@@ -228,7 +239,7 @@ tools over stdio:
 | `lookup_error` | One code → description + minimal repro from `spec/examples/invalid/` |
 | `stdlib_search` | Substring search over ~50 stdlib entries → `[{name, signature, module, scope}]` |
 | `grammar_lookup` | Rule name → EBNF production from `spec/grammar.ebnf` |
-| `project_info` | Walk to `ll.toml` → `{root, manifest, modules[], deps[], platform_use[]}` |
+| `project_info` | Walk to `lll.toml` → `{root, manifest, modules[], deps[], platform_use[]}` |
 
 Uses `FsMcp.Core` + `FsMcp.Server` (same packages as the `age-mcp` server
 in this repo). Entry: `Mcp.runServer ()` blocks on stdio until the client
@@ -249,13 +260,13 @@ The `lllc` driver. Seven commands:
 
 - `build <file.lll>` — single-file mode (default target: F#).
 - `build --target ts|py|java <file.lll>` — single-file, named target.
-- `build [dir]` — project mode (reads `ll.toml`, writes `bin/<name>.fs`; multi-target via `[platform] use`).
+- `build [dir]` — project mode (reads `lll.toml`, writes `bin/<name>.fs`; multi-target via `[platform] use`).
 - `run <file.lll>` — writes a temp `.fsx` (stripping `module` and
   `[<EntryPoint>]`, appending `main [||] |> exit`) and shells out to
   `dotnet fsi`.
 - `check <file.lll>` — lex → parse → elaborate → infer without emitting output. Fast type-check.
 - `new <name>` — scaffold project directory structure.
-- `install` — fetch source-based dependencies declared in `ll.toml` into `.ll-deps/`.
+- `install` — fetch source-based dependencies declared in `lll.toml` into `.ll-deps/`.
 - `mcp` — launch MCP stdio server (blocks until stdin closes).
 
 ## F# compile order
@@ -276,6 +287,9 @@ in the `.fsproj`. The current order is significant:
 <Compile Include="CodegenTS.fs" />
 <Compile Include="CodegenPy.fs" />
 <Compile Include="CodegenJava.fs" />
+<Compile Include="CodegenCSharp.fs" />
+<Compile Include="CodegenLLVM.fs" />
+<Compile Include="Platform.fs" />
 <Compile Include="Manifest.fs" />
 <Compile Include="ProjectLoader.fs" />
 <Compile Include="Compiler.fs" />
@@ -289,7 +303,8 @@ Dependency chain:
 - `Types.fs` depends on `AST.fs` and (for `fromElaboratorEnv`) on `Elaborator.fs`
 - `TypedAST.fs` depends on `AST.fs` + `Types.fs`
 - `HMInfer.fs` depends on all of the above
-- `Codegen.fs`, `CodegenTS.fs`, `CodegenPy.fs`, `CodegenJava.fs` each depend on `AST.fs` + `Types.fs` + `TypedAST.fs`. Do not `open` more than one in `Compiler.fs` — all four export `emit`, which would shadow. Use fully-qualified names: `Codegen.emit`, `CodegenTS.emit`, etc.
+- `Codegen.fs`, `CodegenTS.fs`, `CodegenPy.fs`, `CodegenJava.fs`, `CodegenCSharp.fs`, `CodegenLLVM.fs` each depend on `AST.fs` + `Types.fs` + `TypedAST.fs`. Do not `open` more than one in `Compiler.fs` — they export `emit`, which would shadow. Use fully-qualified names.
+- `Platform.fs` is independent metadata/target mapping used by `Compiler.fs` and tooling.
 - `Manifest.fs` depends only on `System` (no compiler module deps)
 - `ProjectLoader.fs` depends on `Manifest.fs` + `Elaborator.fs` + `Lexer.fs` + `Parser.fs`
 - `Compiler.fs` glues everything together; dispatches to the right codegen via `Target` DU
@@ -303,7 +318,7 @@ Adding it at the end will usually work unless it is depended on by
 `Compiler.fs` exposes `compileTarget`:
 
 ```fsharp
-type Target = FSharp | TypeScript | Python | Java
+type Target = FSharp | TypeScript | Python | Java | CSharp | LLVM
 
 let compileTarget (target: Target) (src: string) : Result<string, LLError list> =
     match target with
@@ -311,9 +326,11 @@ let compileTarget (target: Target) (src: string) : Result<string, LLError list> 
     | TypeScript  -> compileToTS src       // CodegenTS.emit
     | Python      -> compileToPy src       // CodegenPy.emit
     | Java        -> compileToJava src     // CodegenJava.emit
+    | CSharp      -> compileToCSharp src   // CodegenCSharp.emit
+    | LLVM        -> compileToLLVM src     // CodegenLLVM.emit
 ```
 
-The front-end (lex → parse → elaborate → infer) runs once per file regardless of target count. Codegens fan out from the shared `TypedModule`. In multi-target project builds, `compileProject` runs the front-end once and then calls each target's `emitProjectModules`.
+The front-end (lex → parse → elaborate → infer) runs once per target in multi-target project builds because external declarations are validated through target-specific mappings. `compileProject` remains the backward-compatible F# wrapper.
 
 Output layout:
 - Single target: `bin/<name>.fs` (backward-compatible)
@@ -323,7 +340,7 @@ See [11-multi-target-codegen](11-multi-target-codegen.md) for per-backend detail
 
 ## Package system
 
-Source-based dependencies. `ll.toml` declares them:
+Source-based dependencies. `lll.toml` declares them:
 
 ```toml
 [deps]
@@ -333,12 +350,11 @@ json = "https://github.com/user/ll-json#v0.1.0"
 
 `lllc install` copies dep sources into `.ll-deps/`. `ProjectLoader.fs` resolves imports by searching `src/` then `.ll-deps/*/src/`.
 
-Platform SDKs are a future extension (`[sdk]` table in a dep's `ll.toml`). See `docs/superpowers/specs/2026-04-10-ll-lang-platform-sdk.md` for the design.
+Platform SDKs are a future extension (`[sdk]` table in a dep's `lll.toml`). See `docs/superpowers/specs/2026-04-10-ll-lang-platform-sdk.md` for the design.
 
-## No external parser / inference libraries
+## Parser and Inference Stack
 
-Everything is hand-written. The rationale:
-
-- Bootstrap (Phase 7) translates the compiler into ll-lang itself. Avoiding external libraries keeps the translation mechanical.
-- H-M is small (~200 lines) and the explicit form is easier to audit than an FParsec or FsLexYacc pipeline.
-- Error messages are fully under our control — no generated parser spew.
+- The parser front-end uses `FParsec` (`FParsecParser.fs`) as the primary parser.
+- A legacy handwritten token/parser path is still present for parity diagnostics and migration fallback.
+- Hindley-Milner inference remains handwritten in `HMInfer.fs`; only parsing is library-backed.
+- Error formatting and ll-lang diagnostics (`E001`..`E006`) are still owned by the compiler pipeline, not delegated to generated parser output.

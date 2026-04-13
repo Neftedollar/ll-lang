@@ -1,5 +1,7 @@
 module LLLang.Tests.CodegenTests
 
+open System
+open System.Diagnostics
 open System.IO
 open Xunit
 open LLLang.Codegen
@@ -60,9 +62,28 @@ let ``TDType record type emits record syntax`` () =
     Assert.Contains("y: float", fs)
 
 [<Fact>]
+let ``TDType forward reference emits type-and group`` () =
+    let src =
+        "module M\n" +
+        "JsonField = JField Str JsonValue\n" +
+        "JsonValue = JNull | JObj List[JsonField]"
+    let fs = codegenSrc src
+    Assert.Contains("type JsonField =", fs)
+    Assert.Contains("and JsonValue =", fs)
+
+[<Fact>]
 let ``TDTag emits nothing`` () =
     let src = "module M\ntag Meter"
     Assert.DoesNotContain("Meter", codegenSrc src)
+
+[<Fact>]
+let ``external console_log emits F# Console.WriteLine mapping`` () =
+    let src =
+        "module M\n" +
+        "external console_log(msg Str) Unit\n" +
+        "main() = console_log \"hi\"\n"
+    let fs = codegenSrc src
+    Assert.Contains("let console_log msg = System.Console.WriteLine(msg)", fs)
 
 // ---------- Task 3: expression emission ----------
 
@@ -289,6 +310,42 @@ let ``lllc build writes .fs file next to source`` () =
     Assert.True(System.IO.File.Exists(fsPath), $"Expected {fsPath} to exist. stdout={stdout} stderr={stderr}")
     let content = System.IO.File.ReadAllText(fsPath)
     Assert.Contains("module Tmp.Test", content)
+
+[<Fact>]
+let ``lllc build file inside project resolves imports via project pipeline`` () =
+    let root = Path.Combine(Path.GetTempPath(), "lllc-build-proj-" + Guid.NewGuid().ToString("N"))
+    Directory.CreateDirectory(root) |> ignore
+    Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
+    try
+        File.WriteAllText(Path.Combine(root, "lll.toml"), "[project]\nname = \"demo\"\n")
+        File.WriteAllText(
+            Path.Combine(root, "src", "Lib.lll"),
+            "module Demo.Lib\n\nexport greet() Str = \"hi\"\n")
+        let mainPath = Path.Combine(root, "src", "Main.lll")
+        File.WriteAllText(
+            mainPath,
+            "module Demo.Main\nimport Demo.Lib\n\nmain() Str = greet\n")
+
+        let llcDll =
+            Path.Combine(
+                __SOURCE_DIRECTORY__,
+                "../../src/LLLangTool/bin/Debug/net10.0/lllc.dll")
+        let psi = ProcessStartInfo("dotnet", $"\"{llcDll}\" build \"{mainPath}\"")
+        psi.RedirectStandardOutput <- true
+        psi.RedirectStandardError  <- true
+        psi.UseShellExecute        <- false
+        use proc = Process.Start(psi)
+        proc.WaitForExit()
+
+        let stdout = proc.StandardOutput.ReadToEnd()
+        let stderr = proc.StandardError.ReadToEnd()
+        let outFs = Path.ChangeExtension(mainPath, ".fs")
+
+        Assert.Equal(0, proc.ExitCode)
+        Assert.True(File.Exists(outFs), $"Expected {outFs} to exist. stdout={stdout} stderr={stderr}")
+        Assert.DoesNotContain("UnboundVar", stderr + "\n" + stdout)
+    finally
+        try Directory.Delete(root, true) with _ -> ()
 
 // ---------- Task 8: corpus round-trip ----------
 

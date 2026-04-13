@@ -5,8 +5,8 @@
 ll-lang is a statically-typed functional language compiled to F# (also TS, Python, Java). It was designed for LLM code generation: minimal keywords, zero syntactic noise, maximal token efficiency.
 
 Key properties:
-- 12 keywords: `match if else import export module trait impl tag unit true false`
-- No `fn`, `type`, `let`, `in`, `then`, `with` needed for most declarations
+- 15 keywords: `match if else import export module trait impl tag unit true false external opaque let`
+- No `fn`, `type`, `in`, `then`, `with` needed for most declarations
 - Hindley-Milner type inference -- annotate only when needed
 - Significant indentation (2 or 4 spaces, consistent per file)
 - ASCII-only operators, no Unicode
@@ -368,7 +368,7 @@ ll-lang provides an MCP server (`lllc mcp`) with 10 tools. Use them for instant 
 | `lookup_error` | Get explanation + repro for error code | `{ "code": "E003" }` |
 | `stdlib_search` | Search stdlib by name or type signature | `{ "query": "list" }` |
 | `grammar_lookup` | Get EBNF production for a grammar rule | `{ "rule": "Expr" }` |
-| `project_info` | Get project metadata from ll.toml | `{ "path": "/path/to/src/Main.lll" }` |
+| `project_info` | Get project metadata from lll.toml | `{ "path": "/path/to/src/Main.lll" }` |
 
 ### Recommended workflow
 

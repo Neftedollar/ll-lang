@@ -3,7 +3,7 @@
 ll-lang ships two layers of stdlib:
 
 1. **Prelude** — ~50 builtin functions always in scope. No `import` needed.
-2. **Self-hosted modules** — 10 modules written in ll-lang. Import with `import Std.X`.
+2. **Self-hosted modules** — modules written in ll-lang under `stdlib/src`. Import with `import Std.X`.
 
 ---
 
@@ -106,7 +106,8 @@ joined = listJoin ", " ["a" "b" "c"]   -- "a, b, c"
 | Function | Type | Description |
 |----------|------|-------------|
 | `maybeMap` | `(A -> B) -> Maybe[A] -> Maybe[B]` | Transform the value if present |
-| `maybeDefault` | `A -> Maybe[A] -> A` | Unwrap with a fallback |
+| `maybeWithDefault` | `A -> Maybe[A] -> A` | Unwrap with a fallback |
+| `maybeDefault` | `A -> Maybe[A] -> A` | Alias for `maybeWithDefault` |
 | `maybeBind` | `(A -> Maybe[B]) -> Maybe[A] -> Maybe[B]` | Chain Maybe operations |
 | `maybeToList` | `Maybe[A] -> List[A]` | `None` → `[]`, `Some x` → `[x]` |
 | `resultMap` | `(A -> B) -> Result[A][E] -> Result[B][E]` | Transform Ok value |
@@ -122,8 +123,8 @@ parseAndDouble(s Str) =
   s -> strToInt -> maybeMap (\n. n * 2)
 
 -- unwrap with default
-value = maybeDefault 0 (strToInt "42")  -- 42
-missing = maybeDefault 0 (strToInt "x") -- 0
+value = maybeWithDefault 0 (strToInt "42")  -- 42
+missing = maybeWithDefault 0 (strToInt "x") -- 0
 ```
 
 ### File I/O
@@ -236,11 +237,47 @@ loadConfig(path Str) =
 
 ---
 
+### `Std.Json` — JSON parser and serializer
+
+**Import:** `import Std.Json`  
+**LOC:** 609  
+**Description:** RFC-style JSON parser with strict number validation, escape handling (`\uXXXX` + surrogate pairs), deterministic serializer, and structural equality helpers.
+
+**Key functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `parseJson` | `Str -> ParseResult[JsonValue]` | Parse JSON text into AST |
+| `stringify` | `JsonValue -> Str` | Serialize AST back to JSON text |
+| `equalJson` | `JsonValue -> JsonValue -> Bool` | Structural AST equality |
+
+**Usage:**
+
+```lll
+module MyApp.JsonUse
+
+import Std.Json
+
+validateAndRoundtrip(src Str) =
+  match parseJson src
+    | ParseErr e -> strConcat "ERR: " e
+    | ParseOk v _ ->
+      out = stringify v
+      match parseJson out
+        | ParseErr e2 -> strConcat "ERR2: " e2
+        | ParseOk v2 _ ->
+          if equalJson v v2
+            "OK"
+          else "MISMATCH"
+```
+
+---
+
 ### `Std.Lexer` — ll-lang tokenizer
 
 **Import:** `import Std.Lexer`  
 **LOC:** 473  
-**Description:** Standalone ll-lang lexer written in ll-lang. Tokenizes ll-lang source to a flat `List[Token]`. Recognizes all 12 keywords, identifiers (by case), literals, and operators.
+**Description:** Standalone ll-lang lexer written in ll-lang. Tokenizes ll-lang source to a flat `List[Token]`. Recognizes all language keywords, identifiers (by case), literals, and operators.
 
 **Token type (selected constructors):**
 
@@ -466,23 +503,28 @@ buildFile(path Str) =
 
 ## Module index by category
 
-| Category | Module | LOC | Purpose |
-|----------|--------|-----|---------|
-| Data structures | `Std.Map` | 223 | Ordered map, O(log n) |
-| Config | `Std.Toml` | 292 | TOML manifest parser |
-| Parsing | `Std.Lexer` | 473 | ll-lang tokenizer |
-| Parsing | `Std.Parser` | 802 | Recursive-descent parser |
-| Type checking | `Std.Elaborator` | 344 | Name resolution, binding checks |
-| Code generation | `Std.Codegen` | 569 | F# emitter |
-| Code generation | `Std.CodegenTS` | 492 | TypeScript emitter |
-| Code generation | `Std.CodegenPy` | 501 | Python emitter |
-| Code generation | `Std.CodegenJava` | 633 | Java 21 emitter |
-| Full pipeline | `Std.Compiler` | 1516 | Source → F# (self-hosted) |
+| Category | Module | Purpose |
+|----------|--------|---------|
+| Core types | `Std.Maybe` | Maybe helpers and tests |
+| Data structures | `Std.Map` | Ordered map, O(log n) |
+| Config | `Std.Toml` | TOML manifest parser |
+| Parsing | `Std.Json` | JSON parse + stringify + roundtrip helpers |
+| Parsing | `Std.Lexer` | ll-lang tokenizer |
+| Parsing | `Std.Parser` | Recursive-descent parser |
+| Type checking | `Std.Elaborator` | Name resolution, binding checks |
+| Code generation | `Std.Codegen` | F# emitter |
+| Code generation | `Std.CodegenTS` | TypeScript emitter |
+| Code generation | `Std.CodegenPy` | Python emitter |
+| Code generation | `Std.CodegenJava` | Java emitter |
+| Code generation | `Std.CodegenLLVM` | LLVM emitter |
+| Rendering | `Std.Render` | Shared rendering helpers |
+| Testing | `Std.Test` | Test assertions/utilities |
+| Full pipeline | `Std.Compiler` | Source pipeline helpers |
 
 ---
 
 ## Notes on self-hosted modules
 
-The 10 stdlib modules are written in ll-lang and compiled via the bootstrap compiler. Because the module system does not yet support cross-module type sharing in all configurations, each module redefines the shared AST types inline (Token, Expr, Pattern, Decl). This is intentional for standalone compilation — each module is independently runnable with `lllc run`.
+The stdlib modules are written in ll-lang and compiled via the bootstrap compiler. Because the module system does not yet support cross-module type sharing in all configurations, each module redefines the shared AST types inline (Token, Expr, Pattern, Decl). This is intentional for standalone compilation — each module is independently runnable with `lllc run`.
 
 When using multiple modules together in a project, import them in dependency order: `Std.Lexer` before `Std.Parser` before `Std.Elaborator` before `Std.Codegen`.

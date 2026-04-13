@@ -20,7 +20,7 @@ dotnet --version   # must report 10.x
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test        # 529 tests, all green
+dotnet test        # run full test suite (current count in CI)
 ```
 
 ### Set up the `lllc` alias
@@ -49,7 +49,7 @@ lllc run hello.lll
 Key rules:
 - Every file starts with `module Name`
 - Uppercase names = types, lowercase names = values/functions
-- No `fn`, `type`, `let` keywords needed
+- No `fn` / `type` keywords needed
 
 ---
 
@@ -58,7 +58,6 @@ Key rules:
 ```bash
 lllc run hello.lll          # compile + execute via dotnet fsi
 lllc build hello.lll        # compile → hello.fs
-lllc check hello.lll        # type-check only, no output file
 ```
 
 ---
@@ -73,12 +72,12 @@ Creates:
 
 ```
 myapp/
-├── ll.toml
+├── lll.toml
 └── src/
     └── Main.lll
 ```
 
-`ll.toml` — the project manifest:
+`lll.toml` — the project manifest:
 
 ```toml
 [project]
@@ -142,7 +141,7 @@ main() = printfn (greet "world")
 
 ## Add dependencies
 
-Dependencies are source-based. Add them to `ll.toml`:
+Dependencies are source-based. Add them to `lll.toml`:
 
 ```toml
 [project]
@@ -164,7 +163,7 @@ lllc install
 
 ## Multi-target build
 
-Compile to multiple platforms from one source. Set targets in `ll.toml`:
+Compile to multiple platforms from one source. Set targets in `lll.toml`:
 
 ```toml
 [project]
@@ -186,6 +185,8 @@ Or pass `--target` for a one-off:
 lllc build --target ts   myapp.lll   # TypeScript
 lllc build --target py   myapp.lll   # Python
 lllc build --target java myapp.lll   # Java 21
+lllc build --target cs   myapp.lll   # C#
+lllc build --target llvm myapp.lll   # LLVM IR
 lllc build --target fs   myapp.lll   # F# (default)
 ```
 
@@ -233,7 +234,7 @@ Or if you have the `lllc` alias:
 | `lookup_error` | One error code → explanation + repro |
 | `stdlib_search` | Search stdlib by name or signature |
 | `grammar_lookup` | EBNF production for a grammar rule |
-| `project_info` | Project metadata from `ll.toml` |
+| `project_info` | Project metadata from `lll.toml` |
 
 ### Recommended LLM workflow
 

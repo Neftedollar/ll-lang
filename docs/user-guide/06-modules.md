@@ -37,9 +37,9 @@ Prefixing a declaration with `export` marks it as public to other modules. Witho
 
 ---
 
-## Project mode (`ll.toml`)
+## Project mode (`lll.toml`)
 
-For multi-file programs, create a project manifest `ll.toml` at the project root:
+For multi-file programs, create a project manifest `lll.toml` at the project root:
 
 ```toml
 [project]
@@ -60,7 +60,7 @@ entry   = "src/Main.lll"  # optional, default src/Main.lll
 
 ```
 myapp/
-├── ll.toml          ← project manifest
+├── lll.toml          ← project manifest
 ├── src/
 │   ├── Main.lll     ← module Myapp.Main
 │   └── Lib.lll      ← module Myapp.Lib
@@ -88,13 +88,13 @@ Files are compiled in topological order (dependencies first). Import cycles prod
 # Scaffold a new project
 lllc new myapp
 
-# Build the project (reads ll.toml in current directory or any parent)
+# Build the project (reads lll.toml in current directory or any parent)
 cd myapp && lllc build
 
 # Build a project in a specific directory
 lllc build ./myapp
 
-# Single-file (no ll.toml needed — unchanged from before)
+# Single-file (no lll.toml needed — unchanged from before)
 lllc build hello.lll
 ```
 
@@ -117,7 +117,7 @@ import Hello.Greet
 fn main() Str = greet "World"
 ```
 
-`ll.toml`:
+`lll.toml`:
 ```toml
 [project]
 name = "hello"
@@ -135,19 +135,20 @@ lllc build   # → bin/hello.fs (both modules concatenated)
 |------|------|---------|
 | E020 | ModulePathMismatch | `module` header does not match the file's location in `src/` |
 | E024 | ModuleCycle | Import graph contains a cycle |
-| E025 | NoProjectForImport | Non-`Std.*` import used in single-file mode (no `ll.toml`) |
+| E025 | NoProjectForImport | Non-`Std.*` import used in single-file mode (no `lll.toml`) |
 
 ---
 
 ## Known limitations
 
 - **No dep resolution yet.** The `[deps]` section is parsed and schema-frozen but packages are not fetched. Writing a dep that isn't vendored locally produces `E022 UnresolvedDep` (only when actually imported).
-- **No `Platform.*` stubs yet.** The `[platform]` section is parsed; actual stubs (Phase 8 PR4) are pending.
+- **`[platform]` target selection is live, `Platform.*` module APIs are still partial.**  
+  The manifest's `[platform] use = [...]` and `Platform.*.SDK` aliases are wired into build/CLI flow, but many `import Platform.*` module surfaces are still being implemented incrementally.
 - **Cross-module type checking is partial.** Each file is elaborated and type-checked independently; F# handles cross-module type resolution in the concatenated output. This means `E002 UnboundVar` may not fire for missing imported names at compile time — but `dotnet build` will catch them.
 - **No `export` visibility enforcement yet.** The `export` flag is tracked in the AST but not enforced — every declaration is accessible.
 
 ## Practical advice
 
-- For learning/scripts: use a single `.lll` file with no `ll.toml`. The implicit prelude (`listMap`, `strLen`, `printfn`, `readFile`, …) is always available.
+- For learning/scripts: use a single `.lll` file with no `lll.toml`. The implicit prelude (`listMap`, `strLen`, `printfn`, `readFile`, …) is always available.
 - For `Maybe` / `Result` in single-file mode: declare them locally — `type Maybe A = Some A | None`.
 - For multi-file projects: use `lllc new <name>` to get the right directory structure, then add `.lll` files to `src/`.

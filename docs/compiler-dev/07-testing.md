@@ -2,7 +2,7 @@
 
 Project: `tests/LLLangTests/LLLangTests.fsproj` — xUnit 2.6.3.
 
-415 tests across seventeen files. The main per-pass files cover the
+The test suite spans host-compiler passes and bootstrap/self-hosting scenarios (see CI for current totals). The main per-pass files cover the
 host F# compiler, and a matching set of `*RealTests.fs` plus the
 dedicated parser slices cover the self-hosted bootstrap compiler
 corpus (`spec/examples/valid/20-bootstrap-compiler.lll` and its
@@ -215,5 +215,5 @@ assertion explicitly.
 ## CI
 
 `.github/workflows/build.yml` (referenced in the README badge) runs
-`dotnet build` followed by `dotnet test`. All 415 tests must pass on
+`dotnet build` followed by `dotnet test`. All tests must pass on
 merges to `main`.

@@ -1,0 +1,12 @@
+{
+  "name": "lllang-typescript-output",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc Compiler.ts --target es2022 --module esnext",
+    "run": "node Compiler.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

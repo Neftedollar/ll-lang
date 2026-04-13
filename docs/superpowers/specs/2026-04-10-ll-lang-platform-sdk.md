@@ -1,5 +1,7 @@
 # Platform.*.SDK Package Architecture — Design Spec
 
+> **Non-normative design document.** This is forward-looking architecture. Implemented platform behavior and CLI contracts are defined by current code and user docs, not this draft.
+
 **Date:** 2026-04-10
 **Status:** Draft
 **Depends on:** Phase 8 project system (2026-04-09-ll-lang-project-system.md)
@@ -21,7 +23,7 @@ LLVM) can be added without modifying the compiler.
 
 ```
 platform-fsharp/
-  ll.toml
+  lll.toml
   src/
     Codegen.lll          -- AST → F# source emitter
     Runtime.lll          -- runtime helper type declarations
@@ -32,7 +34,7 @@ platform-fsharp/
   meta.toml              -- target metadata (extensions, build commands)
 ```
 
-### 2.1 `ll.toml`
+### 2.1 `lll.toml`
 
 ```toml
 [project]
@@ -47,7 +49,7 @@ host-ext = ".fsproj"             # project file extension (optional)
 ```
 
 The `[sdk]` table is what distinguishes a platform package from a regular
-library. When `lllc` loads a dep whose `ll.toml` has `[sdk]`, it registers that
+library. When `lllc` loads a dep whose `lll.toml` has `[sdk]`, it registers that
 package as a platform provider rather than treating it as source code to compile.
 
 ### 2.2 `src/Codegen.lll`
@@ -90,7 +92,7 @@ project-template = "templates/project.fsproj.tmpl"
 
 This replaces the hardcoded `.fsproj` generation in `Program.fs` line 68-77.
 
-## 3. `ll.toml` Format for Platform Selection
+## 3. `lll.toml` Format for Platform Selection
 
 ### 3.1 User project manifest
 
@@ -226,7 +228,7 @@ destructured in ll-lang. The codegen emits the target's native type name.
 
 ```
 lllc build
-  1. Read ll.toml
+  1. Read lll.toml
   2. Parse [platform] use = ["fsharp", "typescript"]
   3. For each target:
      a. Resolve SDK (built-in or from .ll-deps/)
@@ -279,7 +281,7 @@ When `[platform] use` has exactly one entry, output goes directly into `bin/`
 
 | Component | Change | Effort |
 |-----------|--------|--------|
-| `Manifest.fs` | Parse `[sdk]` table in ll.toml | Small |
+| `Manifest.fs` | Parse `[sdk]` table in lll.toml | Small |
 | `Compiler.fs` | `compileProjectTarget(proj, target)` dispatching to the right emitter | Small |
 | `Program.fs` | `cmdBuildProject` reads `[platform] use`, loops over targets | Small |
 | `Program.fs` | Multi-target output directory (`bin/<target>/`) | Small |
@@ -312,7 +314,7 @@ files; extending `compileProject` to accept a target is mechanical.
 
 ```
 platform-fsharp/
-  ll.toml
+  lll.toml
   meta.toml
   src/
     Codegen.lll              # ← already exists as stdlib/src/Codegen.lll
@@ -326,7 +328,7 @@ platform-fsharp/
     project.fsproj.tmpl      # .fsproj template (currently inline in Program.fs)
 ```
 
-### 7.1 `ll.toml`
+### 7.1 `lll.toml`
 
 ```toml
 [project]
@@ -370,7 +372,7 @@ compile time.
 
 ```
 platform-typescript/
-  ll.toml                    # [sdk] target = "typescript", aliases = ["ts"]
+  lll.toml                    # [sdk] target = "typescript", aliases = ["ts"]
   meta.toml                  # compile = "tsc", project-template for tsconfig
   src/
     Codegen.lll              # ← stdlib/src/CodegenTS.lll
@@ -431,7 +433,7 @@ cannot evaluate ll-lang code yet. Built-in codegens are the bridge. Once
 self-hosting works, they can be removed. The SDK packages are written in
 parallel as the source-of-truth specification.
 
-**Why `meta.toml` separate from `ll.toml`?** `ll.toml` is the standard
+**Why `meta.toml` separate from `lll.toml`?** `lll.toml` is the standard
 manifest that all ll-lang packages share. `meta.toml` carries SDK-specific
 build metadata that a regular library would never have. Keeping them separate
 means the manifest parser stays simple and SDK awareness is opt-in.
@@ -439,4 +441,4 @@ means the manifest parser stays simple and SDK awareness is opt-in.
 **Why not target-specific ll-lang syntax?** No `#if typescript` conditionals.
 ll-lang source is target-agnostic. Target-specific behavior comes from:
 (a) the SDK's codegen mapping types/patterns differently, (b) `external`
-declarations for target-native APIs, (c) conditional deps in `ll.toml` (future).
+declarations for target-native APIs, (c) conditional deps in `lll.toml` (future).

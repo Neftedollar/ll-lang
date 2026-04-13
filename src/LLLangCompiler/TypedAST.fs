@@ -49,6 +49,8 @@ type TypedDecl =
     | TDFn of TypedFnSig * TypeScheme * TypedExpr
     | TDLet of Ident * TypeScheme * TypedExpr
     | TDLetPat of TypedPattern * TypedExpr
+    | TDExternal of TypedFnSig * TypeScheme
+    | TDOpaque of TypeIdent * TypeParam list
     | TDType of TypeIdent * TypeParam list * TypeBody
     | TDTag of TypeIdent
     | TDUnit of TypeIdent

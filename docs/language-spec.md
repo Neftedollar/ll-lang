@@ -1,15 +1,15 @@
 # ll-lang Language Specification
 
-**Version:** 1.0 (Phase 10)  **Extension:** `.lll`  **Encoding:** UTF-8, ASCII-only operators  **Tests:** 529
+**Version:** 1.0 (Phase 10)  **Extension:** `.lll`  **Encoding:** UTF-8, ASCII-only operators  **Tests:** see CI
 
 ---
 
 ## 1. Overview
 
-ll-lang is a statically-typed functional language compiled to F# (default), TypeScript, Python, and Java. Optimized for LLM code generation: minimal keywords, zero ceremony, maximum token efficiency.
+ll-lang is a statically-typed functional language compiled to F# (default), TypeScript, Python, Java, C#, and LLVM IR. Optimized for LLM code generation: minimal keywords, zero ceremony, maximum token efficiency.
 
 **Properties:**
-- 13 keywords — declarations use the uppercase/lowercase convention, not reserved words
+- 15 keywords — declarations use the uppercase/lowercase convention, not reserved words
 - Hindley-Milner inference — annotate function parameters; everything else is inferred
 - Compiled = works — tag violations, unbound variables, non-exhaustive matches, unit mismatches are compile-time errors
 - LLM-readable errors — compact one-line format: `E001 12:5 TypeMismatch expected:UserId got:Int`
@@ -25,13 +25,14 @@ ll-lang is a statically-typed functional language compiled to F# (default), Type
 
 **Comments:** `-- text to end of line`
 
-**Keywords (13):** `match  if  else  import  export  module  trait  impl  tag  unit  true  false  let`
+**Keywords (15):** `match  if  else  import  export  module  trait  impl  external  opaque  tag  unit  true  false  let`
 
 The word `let` is reserved for local bindings inside expressions (`let x = e`) and at top-level. The words `fn`, `type`, `in`, `then`, `with` are not keywords; bare declaration forms are idiomatic.
 
 **Identifiers:**
 - Value/function: `[a-z_][a-zA-Z0-9_]*` — `x`, `mapSize`, `_unused`
 - Type/constructor/module: `[A-Z][a-zA-Z0-9_]*` — `Int`, `Some`, `Std`
+- `external` declarations may use mixed-case foreign symbol names (for example `JSON_parse`)
 
 **Literals:** `42` (Int), `3.14` (Float), `"hello"` (Str), `true`/`false` (Bool), `'a'` (Char)
 
@@ -46,7 +47,8 @@ The word `let` is reserved for local bindings inside expressions (`let x = e`) a
 ### Composite
 
 ```lll
-[1 2 3]          -- List[Int]  (space-separated elements)
+[1 2 3]          -- List[Int]
+[1; 2; 3]        -- List[Int]  (semicolon-separated variant)
 1, "hello"       -- (Int, Str) tuple  (comma forms tuples)
 Int -> Int -> Bool  -- function type (right-associative)
 List[A]  RBMap[K][V]  -- parametric: brackets apply type args
@@ -97,6 +99,8 @@ Unit rules: `Float[m] + Float[m]` → `Float[m]` (same required, E004 if differe
 | `Uppercase A = ...` | Type declaration |
 | `lowercase(p T)(q T) = expr` | Function declaration |
 | `lowercase = expr` | Value binding (top-level: `let` optional) |
+| `external name(p T) Ret` | Foreign function declaration (no body) |
+| `opaque Type[A]` | Opaque host type (runtime-erased handle) |
 | `tag Name` | Tag declaration |
 | `unit Name` | Unit declaration |
 | `trait Name T = ...` | Trait declaration |
@@ -126,6 +130,13 @@ process(xs List[Int]) =
   doubled = listMap (\x. x * 2) xs
   listLen doubled
 
+-- External/opaque FFI surface
+opaque Any
+opaque Promise[A]
+opaque Response
+external fetch(url Str) Promise[Response]
+external JSON_parse(s Str) Any
+
 -- Trait and impl
 trait Show A =
   show(a A) Str
@@ -133,6 +144,24 @@ trait Show A =
 impl Show Int =
   show(n Int) Str = intToStr n
 ```
+
+### External mapping status
+
+`external` is backend-aware in codegen and validated during compilation.
+Unknown declarations now produce `E026 UnknownExternalMapping` before emit.
+
+| Backend | Known mappings |
+|---------|----------------|
+| F# (`Codegen.fs`) | `console_log`, `JSON_parse` |
+| Python (`CodegenPy.fs`) | `console_log`, `JSON_parse` |
+| TypeScript (`CodegenTS.fs`) | `console_log`, `JSON_parse`, `fetch` |
+| Java (`CodegenJava.fs`) | `console_log` |
+| C# (`CodegenCSharp.fs`) | `console_log`, `JSON_parse` |
+| LLVM (`CodegenLLVM.fs`) | `console_log` |
+
+At the compile stage, each backend target checks whether every `external` name is
+known. If a mapping is missing, compilation fails with:
+`E026 line:col UnknownExternalMapping target:<target> name:<name>`.
 
 ---
 
@@ -147,8 +176,9 @@ impl Show Int =
 | Pipe | `expr -> f -> g` | `xs -> listMap f -> listLen` |
 | Arithmetic | `+  -  *  /  ^` | `a * b + c` |
 | Comparison | `==  !=  <  >  <=  >=` | `x == 0` |
+| Boolean not | `!expr` | `!isReady` |
 | Cons | `x :: xs` | `1 :: [2 3]` |
-| List | `[a b c]` | `[1 2 3]` |
+| List | `[a b c]` or `[a; b; c]` | `[1 2 3]`, `[1; 2; 3]` |
 | Tuple | `a, b` | `x, y` |
 | Tagged | `value[Tag]` | `"u1"[UserId]` |
 | Lambda | `\x. body` | `\a. \b. a + b` |
@@ -269,7 +299,7 @@ Module path (`Std.Map`) must match file path under `src/` (`src/Map.lll`).
 
 `import` brings exported names into scope. `export` marks declarations public; all others are private.
 
-**`ll.toml`** — project manifest at the project root:
+**`lll.toml`** — project manifest at the project root (legacy `ll.toml` is still accepted):
 
 ```toml
 [project]
@@ -286,12 +316,11 @@ use = ["fsharp", "typescript"]   -- emit to multiple targets at once
 **CLI:**
 
 ```bash
-lllc new myapp       # scaffold: ll.toml + src/Main.lll
+lllc new myapp       # scaffold: lll.toml + src/Main.lll
 lllc build           # compile project (topo-sorted)
 lllc build --target ts  # compile to TypeScript
 lllc install         # fetch source-based dependencies
 lllc run src/Main.lll
-lllc check src/Main.lll
 lllc mcp             # start MCP server (stdio, 10 tools)
 ```
 
@@ -305,6 +334,8 @@ lllc mcp             # start MCP server (stdio, 10 tools)
 | `--target ts` | TypeScript | Sealed interfaces |
 | `--target py` | Python | `@dataclass` + `Union` |
 | `--target java` | Java 21 | Sealed interfaces + records |
+| `--target cs` | C# | Compile-safe MVP skeleton backend |
+| `--target llvm` | LLVM IR | Deterministic IR stub backend |
 
 ---
 
@@ -321,9 +352,10 @@ Format: `EXXX line:col ErrorKind details`  — one line, regex-parseable.
 | `E005` | `TagViolation` | Wrong or missing tag |
 | `E007` | `PlatformMismatch` | Module requires unsupported target |
 | `E008` | `InfiniteType` | Occurs-check failure |
-| `E020` | `ModuleNotFound` | Import cannot be resolved / path mismatch |
-| `E024` | `CyclicImport` | Circular module dependency |
-| `E025` | `ModulePathMismatch` | File path does not match declared module path |
+| `E026` | `UnknownExternalMapping` | External name has no backend mapping |
+| `E020` | `ModulePathMismatch` | `module` header does not match file path under `src/` |
+| `E024` | `ModuleCycle` | Circular module dependency |
+| `E025` | `NoProjectForImport` | Non-`Std.*` import used in single-file mode (no `lll.toml`) |
 
 ```
 E001 12:5  TypeMismatch   expected:Str[UserId] got:Str   hint:wrap:UserId
@@ -337,7 +369,7 @@ Invalid example files declare `-- expect: E003` on line 1; the test runner asser
 
 ## 11. Standard Library
 
-Self-hosted (11 modules, ~5857 LOC). Prelude is always in scope; additional modules via `import Std.X`.
+Self-hosted modules live under `stdlib/src`. Prelude is always in scope; additional modules are imported via `import Std.X`.
 
 **Prelude (always in scope):**
 
@@ -367,6 +399,7 @@ strChars     : Str -> List[Char]
 strFromChars : List[Char] -> Str
 strReverse   : Str -> Str
 intToStr     : Int -> Str
+floatToStr   : Float -> Str
 intToChar    : Int -> Char
 charToInt    : Char -> Int
 charIsDigit  : Char -> Bool
@@ -389,6 +422,7 @@ maybeMap        : (A -> B) -> Maybe[A] -> Maybe[B]
 maybeBind       : Maybe[A] -> (A -> Maybe[B]) -> Maybe[B]
 maybeWithDefault: A -> Maybe[A] -> A
 strToInt        : Str -> Maybe[Int]
+strToFloat      : Str -> Maybe[Float]
 ```
 
 Result-dependent (requires `Result A E = Ok A | Err E` in scope):
@@ -398,13 +432,13 @@ resultBind   : Result[A][E] -> (A -> Result[B][E]) -> Result[B][E]
 resultMapErr : (E -> F) -> Result[A][E] -> Result[A][F]
 ```
 
-**Stdlib modules (11):** `Std.Maybe`, `Std.Map` (red-black tree), `Std.Toml`, `Std.Lexer`, `Std.Parser`, `Std.Elaborator`, `Std.Codegen`, `Std.CodegenTS`, `Std.CodegenPy`, `Std.CodegenJava`, `Std.Compiler`.
+**Stdlib modules:** `Std.Maybe`, `Std.Map` (red-black tree), `Std.Toml`, `Std.Json`, `Std.Lexer`, `Std.Parser`, `Std.Elaborator`, `Std.Codegen`, `Std.CodegenTS`, `Std.CodegenPy`, `Std.CodegenJava`, `Std.CodegenLLVM`, `Std.Render`, `Std.Test`, `Std.Compiler`.
 
 ---
 
 ## 12. Reserved Words and Operators
 
-**Keywords (13):** `match  if  else  import  export  module  trait  impl  tag  unit  true  false  let`
+**Keywords (15):** `match  if  else  import  export  module  trait  impl  external  opaque  tag  unit  true  false  let`
 
 **Operators:**
 ```
@@ -429,7 +463,7 @@ _                     wildcard
 | `if cond then body` | `if cond` / indent / `body` |
 | `match x with \| ...` | `match x` / indent / `\| ...` |
 | `let x = 1 in ...` | bare `x = 1` layout-based local bindings |
-| `[1, 2, 3]` | `[1 2 3]` (commas make tuples) |
+| `[1, 2, 3]` | `[1 2 3]` or `[1; 2; 3]` (commas make tuples) |
 | mutable state | thread state through return values |
 | throw/raise exceptions | return `Result A E` or `Maybe A` |
 | Unicode operators | ASCII only: `->` not `→` |

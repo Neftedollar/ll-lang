@@ -5,8 +5,8 @@ open LLLang.AST
 /// Symbol table: name → declared type.
 type TypeEnv = Map<string, TypeExpr>
 
-type ErrorCode = E001 | E002 | E003 | E004 | E005 | E008
-                | E020 | E024 | E025
+type ErrorCode = E001 | E002 | E003 | E004 | E005 | E006 | E008
+                | E020 | E024 | E025 | E026
 
 type LLError = {
     Code: ErrorCode
@@ -35,6 +35,10 @@ let private e004 line col got expected = {
 let private e005 line col paramType argType = {
     Code = E005; Line = line; Col = col
     Message = sprintf "E005 %d:%d TagViolation %s %s" line col (typeExprToStr paramType) (typeExprToStr argType) }
+
+let private e026 line col target name = {
+    Code = E026; Line = line; Col = col
+    Message = sprintf "E026 %d:%d UnknownExternalMapping target:%s name:%s" line col target name }
 
 /// Arithmetic and comparison operators pre-populated as TyVar wildcards.
 /// These are parsed as EApp(EApp(EVar "+", ...), ...) and must not trigger E002
@@ -105,6 +109,7 @@ let private builtinEnv : TypeEnv =
         "strTrim",     TyFn(tStr, tStr)
         "strContains", TyFn(tStr, TyFn(tStr, tBool))
         "strToInt",    TyFn(tStr, maybeOf tInt)
+        "strToFloat",  TyFn(tStr, maybeOf tFloat)
     ]
     // --- Phase 6.5 extensions ---
     let charT = TyName "Char"
@@ -114,6 +119,7 @@ let private builtinEnv : TypeEnv =
         "charToInt",    TyFn(charT, tInt)
         "intToChar",    TyFn(tInt, charT)
         "intToStr",     TyFn(tInt, tStr)
+        "floatToStr",   TyFn(tFloat, tStr)
         "strSlice",     TyFn(tStr, TyFn(tInt, TyFn(tInt, tStr)))
         "strIndexOf",   TyFn(tStr, TyFn(tStr, tInt))
         "strSplit",     TyFn(tStr, TyFn(tStr, listOf tStr))
@@ -184,6 +190,9 @@ let private collectDecls (m: LLModule) : TypeEnv =
         | DFn(sigRecord, _body) ->
             addFnSig sigRecord None
 
+        | DExternal sigRecord ->
+            addFnSig sigRecord None
+
         | DLet(name, expr) ->
             let ty =
                 match expr with
@@ -243,9 +252,17 @@ let private collectDecls (m: LLModule) : TypeEnv =
             for (sigRecord, _body) in fns do
                 addFnSig sigRecord (Some implType)
 
+        | DTrait(_traitName, _traitVars, sigs) ->
+            // Expose trait method signatures as plain names so constrained
+            // calls like `map f xs` pass elaboration (E002) before HMInfer
+            // rewrites monomorphic call sites to `map_Maybe`-style symbols.
+            for sigRecord in sigs do
+                if not (Map.containsKey sigRecord.Name env) then
+                    addFnSig sigRecord None
+
         | DTag _
         | DUnit _
-        | DTrait _
+        | DOpaque _
         | DType(_, _, TBRecord _)
         | DType(_, _, TBWrapped _) -> ()
 
@@ -473,7 +490,7 @@ let private checkDecl (pm: PosMap) (decl: Decl) (env: TypeEnv) : LLError list =
                 |> List.fold (fun acc (paramName, paramType) -> Map.add paramName (normalizeFnTy paramType) acc) env
             snd (typeOf pm body localEnv))
 
-    | DType _ | DTag _ | DUnit _ | DTrait _ -> []
+    | DType _ | DTag _ | DUnit _ | DTrait _ | DExternal _ | DOpaque _ -> []
 
 /// Check all declarations in a module, accumulating errors.
 let private checkDecls (pm: PosMap) (m: LLModule) (env: TypeEnv) : LLError list =
@@ -542,7 +559,15 @@ let private exhaustivenessCheck (pm: PosMap) (m: LLModule) (_env: TypeEnv) : LLE
                             | _ -> None)
                     // Look up the match expression's position so E003
                     // points at the `match` / first `|` arm rather than 0:0.
-                    let (ln, col) = posOf pm (box body)
+                    let (lnBody, colBody) = posOf pm (box body)
+                    // Clause-sugar `|` bodies can be synthesized as a bare
+                    // `EMatch` node without a direct PosMap entry. Fall back
+                    // to the function signature position instead of 0:0.
+                    let (ln, col) =
+                        if lnBody > 0 then
+                            (lnBody, colBody)
+                        else
+                            posOf pm (box sigRecord)
                     for c in requiredCtors do
                         if not (List.contains c coveredCtors) then
                             yield e003 ln col typeName c
@@ -608,6 +633,7 @@ let rewriteTagsInModule (m: LLModule) : LLModule =
             | TBWrapped t -> TBWrapped (rewriteTyWithTags tags t)
         let rewriteDecl = function
             | DFn(s, body) -> DFn(rewriteFnSigTags tags s, body)
+            | DExternal s -> DExternal (rewriteFnSigTags tags s)
             | DType(name, ps, body) -> DType(name, ps, rewriteBody body)
             | DTrait(name, vars, sigs) ->
                 DTrait(name, vars, sigs |> List.map (rewriteFnSigTags tags))

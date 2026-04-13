@@ -2,7 +2,8 @@
 
 For contributors working on the ll-lang compiler itself. Assumes you know
 F# well enough to read it; the compiler is ~3.8k lines across the source
-tree and deliberately avoids external parser/inference libraries.
+tree and keeps HM inference handwritten while using a FParsec-based parser
+front-end.
 
 ## Contents
 
@@ -33,6 +34,7 @@ ll-lang/
 │   │   ├── Lexer.fs              tokenizer with layout
 │   │   ├── AST.fs                untyped surface AST
 │   │   ├── Parser.fs             recursive-descent parser
+│   │   ├── FParsecParser.fs      strict parser (primary path)
 │   │   ├── Elaborator.fs         name resolution, E001-E005, exhaustiveness
 │   │   ├── Types.fs              TypeScheme, Subst, generalize, instantiate
 │   │   ├── TypedAST.fs           typed AST after inference
@@ -44,7 +46,7 @@ ll-lang/
 │       ├── Program.fs
 │       └── LLLangTool.fsproj
 ├── tests/
-│   └── LLLangTests/              xUnit suite (415 tests)
+│   └── LLLangTests/              xUnit suite (see CI for current count)
 │       ├── LexerTests.fs           RealLexerTests.fs
 │       ├── ParserTests.fs          ArithmeticParserTests.fs
 │       │                           TypeParserTests.fs   FnParserTests.fs
@@ -63,17 +65,17 @@ ll-lang/
 
 ```bash
 dotnet build                      # all three projects
-dotnet test                       # run xUnit suite (415 tests)
+dotnet test                       # run xUnit suite (see CI for current count)
 ```
 
 The compiler library targets `net10.0` with `LangVersion=preview` and
-`Nullable=enable`, and has no external package dependencies. Tests
+`Nullable=enable`, and depends on `FParsec` for strict parsing. Tests
 depend on `xunit 2.6.3` and `Microsoft.NET.Test.Sdk 17.8.0`.
 
 ## Conventions
 
-- **No external parser generators.** Lexer and parser are hand-written
-  recursive descent for transparency.
+- **Parser stack:** strict mode uses `FParsecParser`; legacy recursive-descent
+  parser is retained for parity/fallback diagnostics.
 - **No mutable global state.** Inference uses a small `InferState` record
   passed through the tree walk.
 - **Errors are collected, not raised.** Compiler functions return

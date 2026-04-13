@@ -11,3 +11,7 @@ my-mcps/
 
 # generated F# from `lllc build` next to .lll sources
 spec/examples/**/*.fs
+
+# macOS / Python local artifacts
+.DS_Store
+__pycache__/

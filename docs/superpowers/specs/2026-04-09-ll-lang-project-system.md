@@ -1,13 +1,15 @@
 # ll-lang Project & Module System — Design Spec
 
+> **Non-normative design document.** This file captures planned architecture and may describe commands/flows not implemented yet. For current behavior, use `README.md`, `docs/getting-started.md`, and `docs/user-guide/*`.
+
 **Date:** 2026-04-09
 **Status:** Draft, pending implementation (deferred until after Phase 7.10 fixpoint)
 **Scope:** Multi-file projects, external deps, CLI surface. Implementation is a
 single subsequent phase ("Phase 8: Projects"); this doc makes every decision.
 
-## 1. Project manifest — `ll.toml`
+## 1. Project manifest — `lll.toml`
 
-**Decision:** one file at the project root named `ll.toml`, minimal TOML.
+**Decision:** one file at the project root named `lll.toml`, minimal TOML.
 
 Justification: TOML is stable, has a hand-writable grammar (~400 lines), one
 file, and we already need to parse strings/lists/tables. Putting the manifest
@@ -17,7 +19,7 @@ moment `lllc mod tidy` wants to fetch a dep before it has a working compiler.
 Keep manifest and code on separate sides of the cut.
 
 ```toml
-# ll.toml
+# lll.toml
 [project]
 name    = "my-app"             # required, becomes root module namespace
 version = "0.1.0"              # semver, required
@@ -46,7 +48,7 @@ dependency-free for the same reason we hand-wrote the parser.
 
 ```
 my-app/
-├── ll.toml                  manifest (root marker)
+├── lll.toml                  manifest (root marker)
 ├── ll.sum                   lock file (checked in)
 ├── src/                     first-party sources
 │   ├── Main.lll             entry point, module path = my-app.Main
@@ -56,7 +58,7 @@ my-app/
 │   └── github.com/
 │       └── alice/
 │           └── json/
-│               ├── ll.toml
+│               ├── lll.toml
 │               └── src/
 │                   └── Json.lll
 ├── bin/                     build artifacts (gitignored)
@@ -67,7 +69,7 @@ my-app/
     └── <hash>.tast          cached TypedModule per source file
 ```
 
-**Root discovery.** `lllc` walks upward from cwd looking for `ll.toml`. First
+**Root discovery.** `lllc` walks upward from cwd looking for `lll.toml`. First
 hit wins; that directory is the project root. If none is found and the CLI
 was invoked with a single `.lll` file, falls back to single-file mode
 (§8). Anywhere else is an error.
@@ -125,17 +127,17 @@ No change to AST other than the `Imports` field becoming
 
 ## 4. External dependency model — Go-style
 
-**Add a dep.** User edits `ll.toml` `[deps]` manually, runs `lllc mod tidy`.
+**Add a dep.** User edits `lll.toml` `[deps]` manually, runs `lllc mod tidy`.
 `mod tidy` does:
 
-1. Read `ll.toml`. For each dep not already in `vendor/` at the pinned
+1. Read `lll.toml`. For each dep not already in `vendor/` at the pinned
    version: shell out to `git clone --depth 1 --branch <tag> <url>
    vendor/<path>/` (or `git -C vendor/... fetch + checkout` if it's there at
    the wrong rev). We use git for everything in v1 — no custom registry, no
    protocol negotiation, just "git URL = dep URL".
 2. Compute `sha256` over the content of each vendored dep's source tree
    (sorted-file, NUL-separated, excluding `.git`).
-3. Walk each dep's `ll.toml` transitively and repeat. Version selection is
+3. Walk each dep's `lll.toml` transitively and repeat. Version selection is
    **minimum version selection** (MVS), exactly like Go: if two deps require
    different versions of a third, pick the higher of the two; the manifest's
    own constraint always wins if present.
@@ -146,9 +148,9 @@ No change to AST other than the `Imports` field becoming
 
 ```
 github.com/alice/json v1.2.0 sha256:3f7e9c1a2b4d...
-github.com/alice/json/ll.toml v1.2.0 sha256:a1b2c3...
+github.com/alice/json/lll.toml v1.2.0 sha256:a1b2c3...
 github.com/bob/http v0.4.1 sha256:998877...
-github.com/bob/http/ll.toml v0.4.1 sha256:ddeeff...
+github.com/bob/http/lll.toml v0.4.1 sha256:ddeeff...
 ```
 
 Two lines per dep: one for the source tree content, one for the manifest
@@ -163,9 +165,9 @@ dir.
 
 **CLI:**
 
-- `lllc mod init <name>` — create `ll.toml`, `src/Main.lll`, `.gitignore`.
+- `lllc mod init <name>` — create `lll.toml`, `src/Main.lll`, `.gitignore`.
 - `lllc mod tidy` — sync vendor + rewrite `ll.sum` as above.
-- `lllc mod add <path>@<version>` — shortcut; writes the line to `ll.toml`
+- `lllc mod add <path>@<version>` — shortcut; writes the line to `lll.toml`
   then calls tidy.
 
 No `mod vendor` (already always vendored), no `mod download` (same), no
@@ -176,12 +178,12 @@ No `mod vendor` (already always vendored), no `mod download` (same), no
 The compiler grows one new stage at the front: **ProjectLoader**. Pipeline becomes:
 
 ```
-ll.toml → ProjectLoader → [Lexer → Parser → Elaborator → HMInfer] per file → LinkedCodegen → bin/<name>.fs
+lll.toml → ProjectLoader → [Lexer → Parser → Elaborator → HMInfer] per file → LinkedCodegen → bin/<name>.fs
 ```
 
 `ProjectLoader`:
 
-1. Reads `ll.toml`, resolves vendor.
+1. Reads `lll.toml`, resolves vendor.
 2. Globs `src/**/*.lll` + every vendored dep's `src/**/*.lll`. Parses each
    file to get its `module` header + `imports`.
 3. Builds a module DAG. Cycle → `E024 ModuleCycle` with the full SCC.
@@ -253,7 +255,7 @@ or `--release` yet — release is the only mode.
 **Yes, existing single-file `.lll` programs keep working unchanged.**
 
 Rule: if `lllc build foo.lll` is invoked **and** walking upward from `foo.lll`
-finds no `ll.toml` before hitting the filesystem root, we stay in the current
+finds no `lll.toml` before hitting the filesystem root, we stay in the current
 legacy single-file path: parse, elaborate, infer, codegen to `foo.fs`
 next to the source. The entire project system is a no-op in this mode.
 

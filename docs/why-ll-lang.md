@@ -24,7 +24,7 @@ Four properties, all working together:
 
 ### 1. Token-efficient syntax
 
-No `fn`, `type`, `let`, `in`, `then`, `with`, `return`, `{}`, `;`. 12 keywords total. Declarations use an uppercase/lowercase naming convention instead of reserved words.
+No `fn`, `type`, `in`, `then`, `with`, `return`, `{}`, `;`. 15 keywords total. Declarations use an uppercase/lowercase naming convention instead of reserved words.
 
 **Benchmark numbers** (cl100k_base tokenizer, from `benchmarks/results/`):
 
@@ -52,7 +52,7 @@ The compiler catches at compile time what other languages defer to runtime:
 
 No null, no exceptions, no mutable state. If `lllc build` succeeds, the logic is correct by construction.
 
-For an LLM agent, this turns code generation into a tight loop: write → `lllc check` → fix one error code → repeat. No execution required.
+For an LLM agent, this turns code generation into a tight loop: write → `lllc build` → fix one error code → repeat. No execution required.
 
 ### 3. LLM-readable errors
 
@@ -112,7 +112,7 @@ This is not just a parlor trick. It means:
 - **The stdlib is real code, not toy examples.** Every idiom in the tutorials works at scale.
 - **The compiler validates itself.** Any change to the language that breaks the stdlib breaks the bootstrap test.
 
-The 529-test suite includes 97 inline stdlib tests that run the self-hosted compiler end-to-end on every commit.
+The test suite includes inline stdlib tests that run the self-hosted compiler end-to-end on every commit (see CI for current totals).
 
 ---
 
@@ -125,6 +125,8 @@ lllc build --target fs   # F# discriminated unions
 lllc build --target ts   # TypeScript sealed interfaces
 lllc build --target py   # Python @dataclass + Union
 lllc build --target java # Java 21 sealed interfaces + records
+lllc build --target cs   # C# compile-safe skeleton backend
+lllc build --target llvm # LLVM IR deterministic stub backend
 ```
 
 An LLM agent can prototype in ll-lang (fast iteration, compile-time safety), then ship to whichever runtime the rest of the team uses.

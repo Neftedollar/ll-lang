@@ -18,6 +18,7 @@ let private e001 t1 t2 = mkErr E001 0 0 $"TypeMismatch {typeExprToStr t1} vs {ty
 let private e002 name  = mkErr E002 0 0 $"UnboundVar {name}"
 let private e004 t1 t2 = mkErr E004 0 0 $"UnitMismatch {typeExprToStr t1} vs {typeExprToStr t2}"
 let private e005 t1 t2 = mkErr E005 0 0 $"TaggedUntaggedMismatch {typeExprToStr t1} vs {typeExprToStr t2}"
+let private e006 msg    = mkErr E006 0 0 $"MissingImpl {msg}"
 let private e008 v  t  = mkErr E008 0 0 $"OccursCheck {v} in {typeExprToStr t}"
 
 /// Look up a node's source position in the PosMap side-table.
@@ -573,6 +574,31 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
         let td = TDLetPat(typedPat, applyTE sAll te)
         ((td, exported), env2)
 
+    | DExternal sig_ ->
+        let normParams = sig_.Params |> List.map (fun (n, ty) -> n, normalizeTy ty)
+        let retTy =
+            match sig_.ReturnType with
+            | Some ty -> normalizeTy ty
+            | None -> freshVar st.Fresh
+        let declaredTyVars =
+            let paramVars = normParams |> List.collect (fun (_, ty) -> collectRigidVars ty)
+            let retVars = collectRigidVars retTy
+            (paramVars @ retVars) |> List.distinct |> List.sort
+        let fnTy = buildFnType (normParams |> List.map snd) retTy
+        let baseSch = generalize env fnTy
+        let sch = { baseSch with Vars = (declaredTyVars @ baseSch.Vars) |> List.distinct |> List.sort }
+        let typedSig : TypedFnSig = {
+            Name = sig_.Name
+            Constraints = sig_.Constraints
+            Params = normParams
+            ReturnType = retTy
+        }
+        let env2 = Map.add sig_.Name sch env
+        ((TDExternal(typedSig, sch), exported), env2)
+
+    | DOpaque(name, ps) ->
+        ((TDOpaque(name, ps), exported), env)
+
     | DFn(sig_, body) ->
         // Normalize param and return types: TyName X -> TyVar X for type params.
         // `TyVar "?"` marks an untyped slot (e.g. `fn f(p) = ...`) and gets
@@ -626,9 +652,30 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
         let (sBody, tauBody, teBody) =
             match body with
             | EMatch branches when not (List.isEmpty normParams) ->
-                // Last param is the scrutinee
-                let lastParam = fst (List.last normParams)
-                let lastParamTy = snd (List.last normParams)
+                let isFnTy ty =
+                    match ty with
+                    | TyFn _ -> true
+                    | TyTagged(inner, _) ->
+                        match inner with
+                        | TyFn _ -> true
+                        | _ -> false
+                    | _ -> false
+                let hasStructuredPat =
+                    branches
+                    |> List.exists (fun (pat, _) ->
+                        match pat with
+                        | PWild | PVar _ -> false
+                        | _ -> true)
+                let defaultScrut = List.last normParams
+                let chosenScrut =
+                    if isFnTy (snd defaultScrut) && hasStructuredPat then
+                        normParams
+                        |> List.rev
+                        |> List.tryFind (fun (_, ty) -> not (isFnTy ty))
+                        |> Option.defaultValue defaultScrut
+                    else defaultScrut
+                let lastParam = fst chosenScrut
+                let lastParamTy = snd chosenScrut
                 let beta = freshVar st.Fresh
                 let (sAll, typedBranches) =
                     List.fold (fun (sAcc, brsAcc) (pat, branchBody) ->
@@ -704,8 +751,30 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
             let (sBody, tauBody, teBody) =
                 match body with
                 | EMatch branches when not (List.isEmpty normParams) ->
-                    let lastParam = fst (List.last normParams)
-                    let lastParamTy = snd (List.last normParams)
+                    let isFnTy ty =
+                        match ty with
+                        | TyFn _ -> true
+                        | TyTagged(inner, _) ->
+                            match inner with
+                            | TyFn _ -> true
+                            | _ -> false
+                        | _ -> false
+                    let hasStructuredPat =
+                        branches
+                        |> List.exists (fun (pat, _) ->
+                            match pat with
+                            | PWild | PVar _ -> false
+                            | _ -> true)
+                    let defaultScrut = List.last normParams
+                    let chosenScrut =
+                        if isFnTy (snd defaultScrut) && hasStructuredPat then
+                            normParams
+                            |> List.rev
+                            |> List.tryFind (fun (_, ty) -> not (isFnTy ty))
+                            |> Option.defaultValue defaultScrut
+                        else defaultScrut
+                    let lastParam = fst chosenScrut
+                    let lastParamTy = snd chosenScrut
                     let beta = freshVar st.Fresh
                     let (sAll, typedBranches) =
                         List.fold (fun (sAcc, brsAcc) (pat, branchBody) ->
@@ -743,6 +812,235 @@ let private inferDecl (env: Env) (st: InferState) (decl: Decl) (exported: bool) 
                 inferImplFn envAcc fnsAcc sig_ body
             ) (env, []) fns
         ((TDImpl(traitName, implType, typedFns), exported), env2)
+
+let private typeHeadName (ty: TypeExpr) : string option =
+    let rec loop t =
+        match t with
+        | TyName n -> Some n
+        | TyApp(f, _) -> loop f
+        | TyTagged(inner, _) -> loop inner
+        | _ -> None
+    loop ty
+
+let private traitReceiverPositions (traitVars: string list) (sig_: FnSig) : int list =
+    let vars = Set.ofList traitVars
+    let rec containsTraitVar ty =
+        match ty with
+        | TyName n | TyVar n -> Set.contains n vars
+        | TyApp(a, b) | TyFn(a, b) -> containsTraitVar a || containsTraitVar b
+        | TyTagged(a, _) -> containsTraitVar a
+    sig_.Params
+    |> List.mapi (fun i (_, ty) -> i, containsTraitVar ty)
+    |> List.choose (fun (i, hit) -> if hit then Some i else None)
+
+let private gatherAppHeadAndArgs (te: TypedExpr) : TypedExpr * TypedExpr list =
+    let rec loop head acc =
+        match head.Expr with
+        | TEApp(f, a) -> loop f (a :: acc)
+        | _ -> (head, acc)
+    loop te []
+
+let private rewriteAppHeadName (newName: string) (newType: TypeExpr option) (te: TypedExpr) : TypedExpr =
+    let rec loop e =
+        match e.Expr with
+        | TEApp(f, a) -> { e with Expr = TEApp(loop f, a) }
+        | TEVar _ ->
+            let ty = newType |> Option.defaultValue e.Type
+            { e with Type = ty; Expr = TEVar newName }
+        | _ -> e
+    loop te
+
+let private rewriteTraitCallsDecls (decls: (TypedDecl * bool) list) : (TypedDecl * bool) list * (string * Set<string>) list =
+    let topLevelFnNames =
+        decls
+        |> List.choose (fun (d, _) ->
+            match d with
+            | TDFn(sig_, _, _) -> Some sig_.Name
+            | TDExternal(sig_, _) -> Some sig_.Name
+            | _ -> None)
+        |> Set.ofList
+
+    let receiverPositionsByMethod =
+        decls
+        |> List.fold (fun acc (d, _) ->
+            match d with
+            | TDTrait(_, vars, sigs) ->
+                sigs
+                |> List.fold (fun acc2 sig_ ->
+                    let receiverPositions = traitReceiverPositions vars sig_
+                    if List.isEmpty receiverPositions then acc2
+                    else
+                        let existing = Map.tryFind sig_.Name acc2 |> Option.defaultValue []
+                        let merged = (existing @ receiverPositions) |> List.distinct
+                        Map.add sig_.Name merged acc2
+                ) acc
+            | _ -> acc
+        ) Map.empty
+
+    let implTypesByMethod =
+        decls
+        |> List.fold (fun acc (d, _) ->
+            match d with
+            | TDImpl(_, implType, methods) ->
+                methods
+                |> List.fold (fun st (sig_, _, _) ->
+                    let prev = Map.tryFind sig_.Name st |> Option.defaultValue Set.empty
+                    Map.add sig_.Name (Set.add implType prev) st
+                ) acc
+            | _ -> acc
+        ) Map.empty
+
+    let mangledMethodTypeByName =
+        decls
+        |> List.fold (fun acc (d, _) ->
+            match d with
+            | TDImpl(_, implType, methods) ->
+                methods
+                |> List.fold (fun st (sig_, sch, _) ->
+                    let mangled = sig_.Name + "_" + implType
+                    if Map.containsKey mangled st then st
+                    else Map.add mangled sch.Body st
+                ) acc
+            | _ -> acc
+        ) Map.empty
+
+    let singleImplByMethod =
+        implTypesByMethod
+        |> Map.fold (fun acc methodName implTypes ->
+            if Set.count implTypes = 1 then
+                match Set.toList implTypes with
+                | [singleImpl] -> Map.add methodName singleImpl acc
+                | _ -> acc
+            else acc
+        ) Map.empty
+
+    let rec rewriteExpr (te: TypedExpr) : TypedExpr =
+        let rewrittenKind =
+            match te.Expr with
+            | TEApp(a, b) -> TEApp(rewriteExpr a, rewriteExpr b)
+            | TELam(ps, body) -> TELam(ps, rewriteExpr body)
+            | TELet(x, sch, e1, e2) -> TELet(x, sch, rewriteExpr e1, e2 |> Option.map rewriteExpr)
+            | TELetPat(tp, e1, e2) -> TELetPat(tp, rewriteExpr e1, e2 |> Option.map rewriteExpr)
+            | TEIf(c, t, e) -> TEIf(rewriteExpr c, rewriteExpr t, rewriteExpr e)
+            | TEMatch(s, branches) ->
+                TEMatch(rewriteExpr s, branches |> List.map (fun (p, b) -> (p, rewriteExpr b)))
+            | TEMatchOf(s, branches) ->
+                TEMatchOf(rewriteExpr s, branches |> List.map (fun (p, b) -> (p, rewriteExpr b)))
+            | TEPipe(a, b) -> TEPipe(rewriteExpr a, rewriteExpr b)
+            | TETagged(e, tag) -> TETagged(rewriteExpr e, tag)
+            | TEList es -> TEList(List.map rewriteExpr es)
+            | TETuple es -> TETuple(List.map rewriteExpr es)
+            | TECons(h, t) -> TECons(rewriteExpr h, rewriteExpr t)
+            | TELit _ | TEVar _ | TECon _ -> te.Expr
+
+        let te1 = { te with Expr = rewrittenKind }
+
+        match te1.Expr with
+        | TEApp _ ->
+            let (head, args) = gatherAppHeadAndArgs te1
+            match head.Expr with
+            | TEVar methodName when not (Set.contains methodName topLevelFnNames) ->
+                let mangledOpt : (string * TypeExpr option) option =
+                    match Map.tryFind methodName receiverPositionsByMethod, Map.tryFind methodName implTypesByMethod with
+                    | Some receiverPositions, Some implTypes ->
+                        let concreteOpt =
+                            receiverPositions
+                            |> List.tryPick (fun idx ->
+                                if idx < List.length args then
+                                    match typeHeadName args[idx].Type with
+                                    | Some concreteType when Set.contains concreteType implTypes ->
+                                        let mangled = methodName + "_" + concreteType
+                                        Some (mangled, Map.tryFind mangled mangledMethodTypeByName)
+                                    | _ -> None
+                                else None)
+                        match concreteOpt with
+                        | Some _ -> concreteOpt
+                        | None ->
+                            // Generic constrained sites (e.g. `map f xs` where xs : F[A])
+                            // have no concrete receiver head here. If exactly one impl is
+                            // present, prefer that impl symbol to keep generated code closed.
+                            Map.tryFind methodName singleImplByMethod
+                            |> Option.map (fun implType ->
+                                let mangled = methodName + "_" + implType
+                                (mangled, Map.tryFind mangled mangledMethodTypeByName))
+                    | _ -> None
+                match mangledOpt with
+                | Some (mangledName, mangledTy) when mangledName <> methodName -> rewriteAppHeadName mangledName mangledTy te1
+                | _ -> te1
+            | _ -> te1
+        | _ -> te1
+
+    let rewrittenDecls =
+        decls
+        |> List.map (fun (d, exported) ->
+            let d' =
+                match d with
+                | TDFn(sig_, sch, body) -> TDFn(sig_, sch, rewriteExpr body)
+                | TDLet(name, sch, body) -> TDLet(name, sch, rewriteExpr body)
+                | TDLetPat(tp, body) -> TDLetPat(tp, rewriteExpr body)
+                | TDImpl(traitName, implType, methods) ->
+                    let methods' =
+                        methods
+                        |> List.map (fun (sig_, sch, body) -> (sig_, sch, rewriteExpr body))
+                    TDImpl(traitName, implType, methods')
+                | _ -> d
+            (d', exported))
+
+    let rec collectIssuesExpr (acc: Map<string, Set<string>>) (te: TypedExpr) : Map<string, Set<string>> =
+        let acc1 =
+            match te.Expr with
+            | TEApp _ ->
+                let (head, _args) = gatherAppHeadAndArgs te
+                match head.Expr with
+                | TEVar methodName
+                    when not (Set.contains methodName topLevelFnNames)
+                         && Map.containsKey methodName receiverPositionsByMethod ->
+                    let implTypes = Map.tryFind methodName implTypesByMethod |> Option.defaultValue Set.empty
+                    if Set.isEmpty implTypes || Set.count implTypes > 1 then
+                        Map.add methodName implTypes acc
+                    else acc
+                | _ -> acc
+            | _ -> acc
+        match te.Expr with
+        | TEApp(a, b) | TEPipe(a, b) | TECons(a, b) ->
+            let acc2 = collectIssuesExpr acc1 a
+            collectIssuesExpr acc2 b
+        | TELam(_, body) | TETagged(body, _) ->
+            collectIssuesExpr acc1 body
+        | TELet(_, _, e1, e2) | TELetPat(_, e1, e2) ->
+            let acc2 = collectIssuesExpr acc1 e1
+            match e2 with
+            | Some e -> collectIssuesExpr acc2 e
+            | None -> acc2
+        | TEIf(c, t, e) ->
+            let acc2 = collectIssuesExpr acc1 c
+            let acc3 = collectIssuesExpr acc2 t
+            collectIssuesExpr acc3 e
+        | TEMatch(s, branches) | TEMatchOf(s, branches) ->
+            let acc2 = collectIssuesExpr acc1 s
+            branches |> List.fold (fun st (_, b) -> collectIssuesExpr st b) acc2
+        | TEList es | TETuple es ->
+            es |> List.fold collectIssuesExpr acc1
+        | TELit _ | TEVar _ | TECon _ ->
+            acc1
+
+    let unresolvedMap =
+        rewrittenDecls
+        |> List.fold (fun acc (d, _) ->
+            match d with
+            | TDFn(_, _, body) | TDLet(_, _, body) -> collectIssuesExpr acc body
+            | TDImpl(_, _, methods) ->
+                methods |> List.fold (fun st (_, _, body) -> collectIssuesExpr st body) acc
+            | TDLetPat(_, body) -> collectIssuesExpr acc body
+            | _ -> acc
+        ) Map.empty
+
+    let unresolved =
+        unresolvedMap
+        |> Map.toList
+        |> List.sortBy fst
+
+    (rewrittenDecls, unresolved)
 
 // ---- Main entry point -------------------------------------------------------
 
@@ -789,6 +1087,17 @@ let infer (pm: PosMap) (m: LLModule) (env0: Elaborator.TypeEnv) : Result<TypedMo
             let (td, env') = inferDecl envAcc st decl exported
             (declsAcc @ [td], env')
         ) ([], envWithTentative) m.Decls
+    let (decls, unresolvedTraitCalls) = rewriteTraitCallsDecls decls
+    if not (List.isEmpty unresolvedTraitCalls) then
+        let errs =
+            unresolvedTraitCalls
+            |> List.map (fun (methodName, implTypes) ->
+                if Set.isEmpty implTypes then
+                    e006 $"trait method {methodName} has no impls in scope"
+                else
+                    let cands = implTypes |> Set.toList |> List.sort |> String.concat ", "
+                    e006 $"trait method {methodName} is ambiguous between impls: {cands}")
+        st.Errors <- st.Errors @ errs
     // Collect final env from accumulated decls
     let finalEnv =
         // Walk a Pattern and pair each name with the corresponding sub-type
@@ -848,6 +1157,7 @@ let infer (pm: PosMap) (m: LLModule) (env0: Elaborator.TypeEnv) : Result<TypedMo
             match td with
             | TDFn(sig_, sch, _) -> Map.add sig_.Name sch envAcc
             | TDLet(name, sch, _) -> Map.add name sch envAcc
+            | TDExternal(sig_, sch) -> Map.add sig_.Name sch envAcc
             | TDLetPat(typedPat, _) ->
                 destructure typedPat.Pat typedPat.Type
                 |> List.fold (fun e (n, t) -> Map.add n (mono t) e) envAcc

@@ -3,36 +3,142 @@ module LLLang.Tool
 open System
 open System.IO
 open System.Diagnostics
+open System.Text.RegularExpressions
 open LLLang.Elaborator
 open LLLang.Compiler
 open LLLang.Manifest
+open LLLang.Platform
 open LLLang.ProjectLoader
-open LLLang.Lexer
-open LLLang.Parser
+open LLLang.FParsecParser
+open LLLang.ReverseTranspiler
 
 let private printErrors (es: LLError list) =
     for e in es do
         eprintfn "%s" e.Message
 
-/// Parse --target flag from args list. Returns (target, remaining args).
-let private parseTarget (args: string list) : Target * string list =
+/// Parse --target flag from args list. Returns (target override, remaining args).
+let private parseTarget (args: string list) : Result<Target option * string list, string> =
     match args with
     | "--target" :: t :: rest ->
-        let tgt =
-            match t.ToLower() with
-            | "ts" | "typescript" -> TypeScript
-            | "py" | "python"     -> Python
-            | "java" | "jvm"      -> Java
-            | _                   -> FSharp
-        tgt, rest
-    | _ -> FSharp, args
+        match tryParseTarget t with
+        | Some target -> Ok (Some target, rest)
+        | None ->
+            let known = knownTargetAliases () |> String.concat ", "
+            Error ("lllc: unknown target '" + t + "'. known aliases: " + known)
+    | _ -> Ok (None, args)
 
 /// Extension for each compilation target.
-let private targetExt = function
-    | FSharp     -> ".fs"
-    | TypeScript -> ".ts"
-    | Python     -> ".py"
-    | Java       -> ".java"
+let private targetExt (target: Target) = targetOutputExt target
+
+let private targetOrDefault (targetOpt: Target option) : Target =
+    targetOpt |> Option.defaultValue FSharp
+
+type private EmittedArtifact = {
+    Target : Target
+    OutDir : string
+    MainFilePath : string
+    ProjectFilePath : string option
+    JavaSourceFilePath : string option
+    JavaClassName : string option
+}
+
+let private templateOutputFileName (projectName: string) (templatePath: string) : string =
+    let fileName = Path.GetFileNameWithoutExtension(templatePath) // strip ".tmpl"
+    let ext = Path.GetExtension(fileName).ToLowerInvariant()
+    match ext with
+    | ".fsproj"
+    | ".csproj" -> projectName + ext
+    | _ -> fileName
+
+let private writeRuntimeTemplateIfAvailable (projectName: string) (target: Target) (outDir: string) (mainFileName: string) : string option =
+    match tryResolveRuntimeTemplate target with
+    | None -> None
+    | Some templatePath ->
+        let mainFileStem = Path.GetFileNameWithoutExtension(mainFileName)
+        let rendered =
+            File.ReadAllText(templatePath)
+                .Replace("{project_name}", projectName)
+                .Replace("{main_file}", mainFileName)
+                .Replace("{main_file_stem}", mainFileStem)
+        let outFile = templateOutputFileName projectName templatePath
+        let outPath = Path.Combine(outDir, outFile)
+        File.WriteAllText(outPath, rendered)
+        Some outPath
+
+let private tryExtractJavaPublicClassName (javaCode: string) : string option =
+    let m = Regex.Match(javaCode, @"public\s+class\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)")
+    if m.Success then Some m.Groups.["name"].Value else None
+
+let private withJavaCommandMetadata (artifact: EmittedArtifact) : EmittedArtifact =
+    match artifact.Target with
+    | Java ->
+        if not (File.Exists artifact.MainFilePath) then
+            artifact
+        else
+            let javaCode = File.ReadAllText(artifact.MainFilePath)
+            match tryExtractJavaPublicClassName javaCode with
+            | None -> artifact
+            | Some className ->
+                let expectedFileName = className + ".java"
+                let expectedPath = Path.Combine(artifact.OutDir, expectedFileName)
+                let javaSourcePath =
+                    if StringComparer.Ordinal.Equals(Path.GetFileName(artifact.MainFilePath), expectedFileName) then
+                        artifact.MainFilePath
+                    else
+                        let writeMirror =
+                            if not (File.Exists(expectedPath)) then true
+                            else
+                                let existing = File.ReadAllText(expectedPath)
+                                existing <> javaCode
+                        if writeMirror then
+                            File.WriteAllText(expectedPath, javaCode)
+                        expectedPath
+                {
+                    artifact with
+                        JavaSourceFilePath = Some javaSourcePath
+                        JavaClassName = Some className
+                }
+    | _ -> artifact
+
+let private renderSdkCommand (template: string) (artifact: EmittedArtifact) : string =
+    let shQuote (s: string) =
+        "'" + s.Replace("'", "'\"'\"'") + "'"
+    let projectFile = artifact.ProjectFilePath |> Option.defaultValue artifact.MainFilePath
+    let javaSourceFile = artifact.JavaSourceFilePath |> Option.defaultValue artifact.MainFilePath
+    let mainFileStem = Path.Combine(artifact.OutDir, Path.GetFileNameWithoutExtension(artifact.MainFilePath))
+    let mainJsFile = mainFileStem + ".js"
+    let mainBcFile = mainFileStem + ".bc"
+    let javaClassName =
+        artifact.JavaClassName
+        |> Option.defaultValue (Path.GetFileNameWithoutExtension javaSourceFile)
+    template
+        .Replace("{project_file}", projectFile)
+        .Replace("{main_file}", artifact.MainFilePath)
+        .Replace("{main_file_stem}", mainFileStem)
+        .Replace("{main_js_file}", mainJsFile)
+        .Replace("{main_bc_file}", mainBcFile)
+        .Replace("{java_source_file}", javaSourceFile)
+        .Replace("{java_class_name}", javaClassName)
+        .Replace("{out_dir}", artifact.OutDir)
+        .Replace("{project_file_q}", shQuote projectFile)
+        .Replace("{main_file_q}", shQuote artifact.MainFilePath)
+        .Replace("{main_file_stem_q}", shQuote mainFileStem)
+        .Replace("{main_js_file_q}", shQuote mainJsFile)
+        .Replace("{main_bc_file_q}", shQuote mainBcFile)
+        .Replace("{java_source_file_q}", shQuote javaSourceFile)
+        .Replace("{java_class_name_q}", shQuote javaClassName)
+        .Replace("{out_dir_q}", shQuote artifact.OutDir)
+
+let private printSdkSuggestions (artifact: EmittedArtifact) : unit =
+    let artifact = withJavaCommandMetadata artifact
+    match tryGetBuildCompileCommand artifact.Target with
+    | Some compileCmd ->
+        Console.WriteLine("  suggested compile: " + renderSdkCommand compileCmd artifact)
+    | None -> ()
+    match tryGetBuildRunCommand artifact.Target with
+    | Some runCmd ->
+        Console.WriteLine("  suggested run: " + renderSdkCommand runCmd artifact)
+    | None -> ()
 
 /// Build: compile file.lll → file.<ext>. Returns exit code.
 let private cmdBuild (path: string) (target: Target) : int =
@@ -42,8 +148,23 @@ let private cmdBuild (path: string) (target: Target) : int =
         | Ok out ->
             let outPath = Path.ChangeExtension(path, targetExt target)
             File.WriteAllText(outPath, out)
+            let outDir =
+                let d = Path.GetDirectoryName(outPath)
+                if String.IsNullOrWhiteSpace(d) then Directory.GetCurrentDirectory() else d
             let stem = Path.GetFileName(outPath)
-            printfn "Built %s" stem
+            let projectStem = Path.GetFileNameWithoutExtension(outPath)
+            let templatePath = writeRuntimeTemplateIfAvailable projectStem target outDir stem
+            Console.WriteLine("Built " + stem)
+            let artifact =
+                {
+                    Target = target
+                    OutDir = outDir
+                    MainFilePath = outPath
+                    ProjectFilePath = templatePath
+                    JavaSourceFilePath = None
+                    JavaClassName = None
+                }
+            printSdkSuggestions artifact
             0
         | Error es ->
             printErrors es
@@ -54,45 +175,58 @@ let private cmdBuild (path: string) (target: Target) : int =
         1
 
 /// Write output files for one target into bin/<platform>/.
-let private writeTargetOutput (rootDir: string) (name: string) (platform: string) (code: string) : unit =
+let private writeTargetOutput (rootDir: string) (name: string) (target: Target) (code: string) : EmittedArtifact =
+    let platform = targetPlatformName target
     let outDir = Path.Combine(rootDir, "bin", platform)
     Directory.CreateDirectory(outDir) |> ignore
-    match platform with
-    | "fsharp" ->
-        // Single-file path (kept for single-file lllc build file.lll flows).
-        let outPath = Path.Combine(outDir, name + ".fs")
+    let writeMainAndTemplate (ext: string) =
+        let outPath = Path.Combine(outDir, name + ext)
         File.WriteAllText(outPath, code)
-        let fsproj = $"""<Project Sdk="Microsoft.NET.Sdk">
+        let templatePath = writeRuntimeTemplateIfAvailable name target outDir (Path.GetFileName(outPath))
+        outPath, templatePath
+    match target with
+    | FSharp ->
+        // Single-file fallback path (multi-file F# output uses writeTargetOutputMultiFile).
+        let (outPath, templateProjectPath) = writeMainAndTemplate ".fs"
+        let projectPath = Path.Combine(outDir, name + ".fsproj")
+        if not (File.Exists(projectPath)) then
+            let fsproj = $"""<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>preview</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="{name}.fs" />
   </ItemGroup>
 </Project>
-"""
-        File.WriteAllText(Path.Combine(outDir, name + ".fsproj"), fsproj)
-        printfn "Built project '%s' [fsharp] → %s" name outPath
-    | "typescript" ->
-        let outPath = Path.Combine(outDir, name + ".ts")
-        File.WriteAllText(outPath, code)
-        printfn "Built project '%s' [typescript] → %s" name outPath
-    | "python" ->
-        let outPath = Path.Combine(outDir, name + ".py")
-        File.WriteAllText(outPath, code)
-        printfn "Built project '%s' [python] → %s" name outPath
-    | "java" ->
-        let outPath = Path.Combine(outDir, name + ".java")
-        File.WriteAllText(outPath, code)
-        printfn "Built project '%s' [java] → %s" name outPath
-    | other ->
-        eprintfn "lllc: unknown platform '%s', skipping" other
+        """
+            File.WriteAllText(projectPath, fsproj)
+        Console.WriteLine("Built project '" + name + "' [fsharp] -> " + outPath)
+        {
+            Target = target
+            OutDir = outDir
+            MainFilePath = outPath
+            ProjectFilePath = Some (templateProjectPath |> Option.defaultValue projectPath)
+            JavaSourceFilePath = None
+            JavaClassName = None
+        }
+    | _ ->
+        let (outPath, templateProjectPath) = writeMainAndTemplate (targetOutputExt target)
+        Console.WriteLine("Built project '" + name + "' [" + platform + "] -> " + outPath)
+        {
+            Target = target
+            OutDir = outDir
+            MainFilePath = outPath
+            ProjectFilePath = templateProjectPath
+            JavaSourceFilePath = None
+            JavaClassName = None
+        }
 
 /// Write multi-file F# output into bin/fsharp/ — one .fs per module plus Prelude.fs.
 /// Generates a .fsproj that lists every file in the correct compilation order.
-let private writeTargetOutputMultiFile (rootDir: string) (name: string) (files: (string * string) list) : unit =
+let private writeTargetOutputMultiFile (rootDir: string) (name: string) (files: (string * string) list) : EmittedArtifact =
     let outDir = Path.Combine(rootDir, "bin", "fsharp")
     Directory.CreateDirectory(outDir) |> ignore
     for (fileName, content) in files do
@@ -107,6 +241,7 @@ let private writeTargetOutputMultiFile (rootDir: string) (name: string) (files: 
         + "    <OutputType>Exe</OutputType>\n"
         + "    <TargetFramework>net10.0</TargetFramework>\n"
         + "    <LangVersion>preview</LangVersion>\n"
+        + "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
         + "  </PropertyGroup>\n"
         + "  <ItemGroup>\n"
         + compileItems + "\n"
@@ -114,41 +249,114 @@ let private writeTargetOutputMultiFile (rootDir: string) (name: string) (files: 
         + "</Project>\n"
     File.WriteAllText(Path.Combine(outDir, name + ".fsproj"), fsproj)
     let outPath = Path.Combine(outDir, name + ".fsproj")
-    printfn "Built project '%s' [fsharp] → %s (%d files)" name outPath (List.length files)
+    Console.WriteLine("Built project '" + name + "' [fsharp] -> " + outPath + " (" + string (List.length files) + " files)")
+    let mainFilePath =
+        match files |> List.tryFind (fun (fn, _) -> fn = "Main.fs") with
+        | Some (fn, _) -> Path.Combine(outDir, fn)
+        | None ->
+            match files with
+            | (fn, _) :: _ -> Path.Combine(outDir, fn)
+            | [] -> outPath
+    {
+        Target = FSharp
+        OutDir = outDir
+        MainFilePath = mainFilePath
+        ProjectFilePath = Some outPath
+        JavaSourceFilePath = None
+        JavaClassName = None
+    }
+
+let private writeSiblingFSharpFilesAndProject (outDir: string) (name: string) (files: (string * string) list) : EmittedArtifact =
+    Directory.CreateDirectory(outDir) |> ignore
+    for (fileName, content) in files do
+        File.WriteAllText(Path.Combine(outDir, fileName), content)
+    let compileItems =
+        files
+        |> List.map (fun (fn, _) -> "    <Compile Include=\"" + fn + "\" />")
+        |> String.concat "\n"
+    let fsproj =
+        "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
+        + "  <PropertyGroup>\n"
+        + "    <OutputType>Exe</OutputType>\n"
+        + "    <TargetFramework>net10.0</TargetFramework>\n"
+        + "    <LangVersion>preview</LangVersion>\n"
+        + "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
+        + "  </PropertyGroup>\n"
+        + "  <ItemGroup>\n"
+        + compileItems + "\n"
+        + "  </ItemGroup>\n"
+        + "</Project>\n"
+    let fsprojPath = Path.Combine(outDir, name + ".fsproj")
+    File.WriteAllText(fsprojPath, fsproj)
+    let mainFilePath =
+        match files |> List.tryFind (fun (fn, _) -> fn = "Main.fs") with
+        | Some (fn, _) -> Path.Combine(outDir, fn)
+        | None ->
+            match files with
+            | (fn, _) :: _ -> Path.Combine(outDir, fn)
+            | [] -> fsprojPath
+    {
+        Target = FSharp
+        OutDir = outDir
+        MainFilePath = mainFilePath
+        ProjectFilePath = Some fsprojPath
+        JavaSourceFilePath = None
+        JavaClassName = None
+    }
 
 /// Build project rooted at rootDir (has lll.toml or ll.toml). Returns exit code.
-let private cmdBuildProject (rootDir: string) : int =
+/// targetOverride, when present, compiles only that target and ignores manifest platforms.
+let private cmdBuildProject (rootDir: string) (targetOverride: Target option) : int =
     try
         match loadProject rootDir with
         | Error es -> printErrors es; 1
         | Ok proj ->
-            // Front-end runs ONCE; codegen fans out to each target.
-            match LLLang.Compiler.compileProjectToModules proj with
-            | Error es -> printErrors es; 1
-            | Ok tms ->
+            let compileForTarget (target: Target) =
+                match LLLang.Compiler.compileProjectToModulesForTarget target proj with
+                | Error es ->
+                    printErrors es
+                    false
+                | Ok tms ->
+                    let artifact =
+                        match target with
+                        | FSharp ->
+                            // Multi-file: Prelude.fs + one .fs per module, valid .fsproj.
+                            let files = LLLang.Codegen.emitProjectFiles tms
+                            writeTargetOutputMultiFile rootDir proj.Manifest.Name files
+                        | TypeScript ->
+                            let code = LLLang.CodegenTS.emitProjectModules tms
+                            writeTargetOutput rootDir proj.Manifest.Name TypeScript code
+                        | Python ->
+                            let code = LLLang.CodegenPy.emitProjectModules tms
+                            writeTargetOutput rootDir proj.Manifest.Name Python code
+                        | Java ->
+                            let code = LLLang.CodegenJava.emitProjectModules tms
+                            writeTargetOutput rootDir proj.Manifest.Name Java code
+                        | CSharp ->
+                            let code = LLLang.CodegenCSharp.emitProjectModules tms
+                            writeTargetOutput rootDir proj.Manifest.Name CSharp code
+                        | LLVM ->
+                            let code = LLLang.CodegenLLVM.emitProjectModules tms
+                            writeTargetOutput rootDir proj.Manifest.Name LLVM code
+                    printSdkSuggestions artifact
+                    true
+            let mutable exitCode = 0
+            match targetOverride with
+            | Some target ->
+                if not (compileForTarget target) then exitCode <- 1
+            | None ->
                 let platforms =
                     if proj.Manifest.Platform.IsEmpty then ["fsharp"]
-                    else proj.Manifest.Platform
-                let mutable exitCode = 0
+                    else normalizePlatforms proj.Manifest.Platform
                 for platform in platforms do
-                    match platform with
-                    | "fsharp" ->
-                        // Multi-file: Prelude.fs + one .fs per module, valid .fsproj.
-                        let files = LLLang.Codegen.emitProjectFiles tms
-                        writeTargetOutputMultiFile rootDir proj.Manifest.Name files
-                    | "typescript" ->
-                        let code = LLLang.CodegenTS.emitProjectModules tms
-                        writeTargetOutput rootDir proj.Manifest.Name platform code
-                    | "python" ->
-                        let code = LLLang.CodegenPy.emitProjectModules tms
-                        writeTargetOutput rootDir proj.Manifest.Name platform code
-                    | "java" ->
-                        let code = LLLang.CodegenJava.emitProjectModules tms
-                        writeTargetOutput rootDir proj.Manifest.Name platform code
-                    | other ->
-                        eprintfn "lllc: unknown platform '%s', skipping" other
+                    match tryParseTarget platform with
+                    | None ->
+                        Console.Error.WriteLine("lllc: unknown platform '" + platform + "', skipping")
                         exitCode <- 1
-                exitCode
+                    | Some target ->
+                        if not (compileForTarget target) then
+                            exitCode <- 1
+            exitCode
     with ex ->
         eprintfn "lllc: %s" ex.Message
         1
@@ -343,89 +551,384 @@ let private resolveRunImports (mainFilePath: string) (mainSrc: string) : Result<
             let files = sorted |> List.choose (fun p -> Map.tryFind p loadedMap)
             Ok files
 
-/// Run: compile file.lll → temp .fsx → dotnet fsi. Returns exit code.
-let private cmdRun (path: string) : int =
+/// Build one .lll file (with transitive imports) and emit next to the source.
+let private cmdBuildFile (path: string) (targetOverride: Target option) : int =
     try
         let absPath = Path.GetFullPath(path)
         let src = File.ReadAllText(absPath)
-        let imports = extractImports src
-        if imports.IsEmpty then
-            // Fast path: no imports, compile single file as before
-            match LLLang.Compiler.compile src with
-            | Ok fs ->
-                let tmp = Path.GetTempFileName() + ".fsx"
-                let stripped =
-                    fs.Split('\n')
-                    |> Array.filter (fun l ->
-                        let t = l.TrimStart()
-                        not (t.StartsWith("module ")) && not (t.StartsWith("[<EntryPoint>]")))
-                    |> String.concat "\n"
-                let withInvoke = stripped + "\nmain [||] |> int64 |> exit\n"
-                File.WriteAllText(tmp, withInvoke)
-                let psi = ProcessStartInfo("dotnet", $"fsi \"{tmp}\"")
-                psi.RedirectStandardOutput <- false
-                psi.RedirectStandardError  <- false
-                psi.UseShellExecute        <- false
-                use proc = Process.Start(psi)
-                proc.WaitForExit()
-                try File.Delete(tmp) with _ -> ()
-                proc.ExitCode
+        let target = targetOrDefault targetOverride
+        match resolveRunImports absPath src with
+        | Error msg ->
+            Console.Error.WriteLine("lllc: import resolution error: " + msg)
+            1
+        | Ok files ->
+            let rootDir =
+                let d = Path.GetDirectoryName(absPath)
+                if String.IsNullOrEmpty d then Directory.GetCurrentDirectory() else d
+            let stem = Path.GetFileNameWithoutExtension(absPath)
+            let fakeManifest : LLManifest =
+                { Name = Path.GetFileNameWithoutExtension(absPath)
+                  Version = "0.0.0"
+                  Entry = ""
+                  Deps = Map.empty
+                  Platform = [] }
+            let proj : LLProject = { Manifest = fakeManifest; RootDir = rootDir; Files = files }
+            match LLLang.Compiler.compileProjectToModulesForTarget target proj with
             | Error es ->
                 printErrors es
                 1
+            | Ok tms ->
+                let artifact =
+                    match target with
+                    | FSharp when List.length tms > 1 ->
+                        // Multi-module single-file builds must stay multi-file for valid F#.
+                        let filesOut = LLLang.Codegen.emitProjectFiles tms
+                        let built = writeSiblingFSharpFilesAndProject rootDir stem filesOut
+                        let outPath = Path.Combine(rootDir, stem + ".fs")
+                        Console.WriteLine("Built " + Path.GetFileName(outPath))
+                        built
+                    | _ ->
+                        let out =
+                            match target with
+                            | FSharp -> LLLang.Codegen.emitProjectModules tms
+                            | TypeScript -> LLLang.CodegenTS.emitProjectModules tms
+                            | Python -> LLLang.CodegenPy.emitProjectModules tms
+                            | Java -> LLLang.CodegenJava.emitProjectModules tms
+                            | CSharp -> LLLang.CodegenCSharp.emitProjectModules tms
+                            | LLVM -> LLLang.CodegenLLVM.emitProjectModules tms
+                        let outPath = Path.ChangeExtension(absPath, targetExt target)
+                        File.WriteAllText(outPath, out)
+                        let outDir =
+                            let d = Path.GetDirectoryName(outPath)
+                            if String.IsNullOrWhiteSpace(d) then Directory.GetCurrentDirectory() else d
+                        let stemOut = Path.GetFileNameWithoutExtension(outPath)
+                        let templatePath = writeRuntimeTemplateIfAvailable stemOut target outDir (Path.GetFileName(outPath))
+                        Console.WriteLine("Built " + Path.GetFileName(outPath))
+                        {
+                            Target = target
+                            OutDir = outDir
+                            MainFilePath = outPath
+                            ProjectFilePath = templatePath
+                            JavaSourceFilePath = None
+                            JavaClassName = None
+                        }
+                printSdkSuggestions artifact
+                0
+    with
+    | ex ->
+        Console.Error.WriteLine("lllc: " + ex.Message)
+        1
+
+/// Reverse: recover a minimal ll-lang module from generated target code.
+let private cmdReverse (args: string list) : int =
+    match args with
+    | ["--from"; rawTarget; path] ->
+        try
+            match tryParseTarget rawTarget with
+            | None ->
+                let known = knownTargetAliases () |> String.concat ", "
+                Console.Error.WriteLine("lllc: unknown reverse source target '" + rawTarget + "'. known aliases: " + known)
+                1
+            | Some target ->
+                let absPath = Path.GetFullPath(path)
+                let src = File.ReadAllText(absPath)
+                match reverseToLll target src with
+                | Error msg ->
+                    Console.Error.WriteLine("lllc: " + msg)
+                    1
+                | Ok lll ->
+                    let outPath =
+                        let dir = Path.GetDirectoryName(absPath)
+                        let stem = Path.GetFileNameWithoutExtension(absPath)
+                        let baseDir =
+                            if String.IsNullOrWhiteSpace(dir) then Directory.GetCurrentDirectory() else dir
+                        Path.Combine(baseDir, stem + ".reversed.lll")
+                    File.WriteAllText(outPath, lll)
+                    Console.WriteLine("Reversed " + Path.GetFileName(absPath) + " -> " + Path.GetFileName(outPath))
+                    0
+        with
+        | ex ->
+            Console.Error.WriteLine("lllc: " + ex.Message)
+            1
+    | _ ->
+        Console.Error.WriteLine("lllc: usage: lllc reverse --from fs|ts|py|java|cs|llvm|Platform.*.SDK <file>")
+        1
+
+let private runShellCommand (workingDir: string) (command: string) : int =
+    let psi = ProcessStartInfo("sh")
+    psi.WorkingDirectory <- workingDir
+    psi.UseShellExecute <- false
+    psi.RedirectStandardOutput <- false
+    psi.RedirectStandardError <- false
+    psi.ArgumentList.Add("-lc")
+    psi.ArgumentList.Add(command)
+    use proc = Process.Start(psi)
+    proc.WaitForExit()
+    proc.ExitCode
+
+let private inferredProjectFilePath (target: Target) (mainFilePath: string) : string option =
+    let outDir =
+        let d = Path.GetDirectoryName(mainFilePath)
+        if String.IsNullOrWhiteSpace(d) then Directory.GetCurrentDirectory() else d
+    let stem = Path.GetFileNameWithoutExtension(mainFilePath)
+    let fromTemplate =
+        match tryResolveRuntimeTemplate target with
+        | None -> None
+        | Some templatePath ->
+            Some (Path.Combine(outDir, templateOutputFileName stem templatePath))
+    match target, fromTemplate with
+    | FSharp, None ->
+        let fsproj = Path.Combine(outDir, stem + ".fsproj")
+        if File.Exists(fsproj) then Some fsproj else None
+    | _, _ -> fromTemplate
+
+let private cmdRunViaSdk (path: string) (target: Target) : int =
+    let buildExit = cmdBuildFile path (Some target)
+    if buildExit <> 0 then
+        buildExit
+    else
+        let absPath = Path.GetFullPath(path)
+        let outPath = Path.ChangeExtension(absPath, targetExt target)
+        let outDir =
+            let d = Path.GetDirectoryName(outPath)
+            if String.IsNullOrWhiteSpace(d) then Directory.GetCurrentDirectory() else d
+        let artifact =
+            {
+                Target = target
+                OutDir = outDir
+                MainFilePath = outPath
+                ProjectFilePath = inferredProjectFilePath target outPath
+                JavaSourceFilePath = None
+                JavaClassName = None
+            }
+            |> withJavaCommandMetadata
+        match tryGetBuildRunCommand target with
+        | None ->
+            Console.Error.WriteLine("lllc: SDK run command is not configured for target " + targetPlatformName target)
+            1
+        | Some cmd ->
+            let resolved = renderSdkCommand cmd artifact
+            Console.WriteLine("Running: " + resolved)
+            runShellCommand artifact.OutDir resolved
+
+/// Run: compile file.lll → temp .fsx → dotnet fsi. Returns exit code.
+let private cmdRun (path: string) (targetOverride: Target option) : int =
+    try
+        let target = targetOrDefault targetOverride
+        if target <> FSharp then
+            cmdRunViaSdk path target
         else
-            // Resolve imports and compile as mini-project
+            let absPath = Path.GetFullPath(path)
+            let src = File.ReadAllText(absPath)
+            let imports = extractImports src
+            if imports.IsEmpty then
+                // Fast path: no imports, compile single file as before
+                match LLLang.Compiler.compile src with
+                | Ok fs ->
+                    let tmp = Path.GetTempFileName() + ".fsx"
+                    let stripped =
+                        fs.Split('\n')
+                        |> Array.filter (fun l ->
+                            let t = l.TrimStart()
+                            not (t.StartsWith("module ")) && not (t.StartsWith("[<EntryPoint>]")))
+                        |> String.concat "\n"
+                    let withInvoke = stripped + "\nmain [||] |> int64 |> exit\n"
+                    File.WriteAllText(tmp, withInvoke)
+                    let psi = ProcessStartInfo("dotnet", $"fsi \"{tmp}\"")
+                    psi.RedirectStandardOutput <- false
+                    psi.RedirectStandardError  <- false
+                    psi.UseShellExecute        <- false
+                    match Process.Start(psi) with
+                    | null ->
+                        Console.Error.WriteLine("lllc: failed to start process")
+                        1
+                    | proc ->
+                        use p = proc
+                        p.WaitForExit()
+                        try File.Delete(tmp) with _ -> ()
+                        p.ExitCode
+                | Error es ->
+                    printErrors es
+                    1
+            else
+                // Resolve imports and compile as mini-project
+                match resolveRunImports absPath src with
+                | Error msg ->
+                    Console.Error.WriteLine("lllc: import resolution error: " + msg)
+                    1
+                | Ok files ->
+                    let fakeManifest : LLManifest = { Name = "run"; Version = "0.0.0"; Entry = ""; Deps = Map.empty; Platform = ["fsharp"] }
+                    let proj : LLProject = { Manifest = fakeManifest; RootDir = Path.GetDirectoryName(absPath); Files = files }
+                    match LLLang.Compiler.compileProjectToModules proj with
+                    | Error es ->
+                        printErrors es
+                        1
+                    | Ok tms ->
+                        let fs = LLLang.Codegen.emitProjectModules tms
+                        let tmp = Path.GetTempFileName() + ".fsx"
+                        // Strip module declarations and [<EntryPoint>] attributes.
+                        // For multi-module output, rename all `let main` except the last
+                        // occurrence so that fsi sees only one `main` binding.
+                        let lines = fs.Split('\n')
+                        // Find all top-level `let main` definitions.
+                        let mainLineIndices =
+                            lines
+                            |> Array.mapi (fun i l -> i, l)
+                            |> Array.filter (fun (_, l) -> l.TrimStart().StartsWith("let main"))
+                            |> Array.map fst
+                        let lastMainIdx = if mainLineIndices.Length > 0 then mainLineIndices[mainLineIndices.Length - 1] else -1
+                        let mutable mainCounter = 0
+                        let processed =
+                            lines
+                            |> Array.mapi (fun i l ->
+                                let t = l.TrimStart()
+                                if t.StartsWith("module ") || t.StartsWith("[<EntryPoint>]") then ""
+                                elif t.StartsWith("let main") && i <> lastMainIdx then
+                                    // Rename intermediate main to avoid duplicate definition
+                                    let renamed = "_dep_main_" + string mainCounter
+                                    mainCounter <- mainCounter + 1
+                                    let t2 = l.TrimStart()
+                                    let leading = l.Substring(0, l.Length - t2.Length)
+                                    if t2.StartsWith("let main (") then
+                                        leading + t2.Replace("let main (", "let " + renamed + " (")
+                                    elif t2.StartsWith("let main =") then
+                                        leading + t2.Replace("let main =", "let " + renamed + " =")
+                                    else l
+                                else l)
+                            |> String.concat "\n"
+                        let withInvoke = processed + "\nmain [||] |> int64 |> exit\n"
+                        File.WriteAllText(tmp, withInvoke)
+                        let psi = ProcessStartInfo("dotnet", $"fsi \"{tmp}\"")
+                        psi.RedirectStandardOutput <- false
+                        psi.RedirectStandardError  <- false
+                        psi.UseShellExecute        <- false
+                        use proc = Process.Start(psi)
+                        proc.WaitForExit()
+                        try File.Delete(tmp) with _ -> ()
+                        proc.ExitCode
+    with
+    | ex ->
+        Console.Error.WriteLine("lllc: " + ex.Message)
+        1
+
+let private fsStringLiteral (s: string) =
+    let escaped =
+        s
+            .Replace("\\", "\\\\")
+            .Replace("\"", "\\\"")
+            .Replace("\r", "\\r")
+            .Replace("\n", "\\n")
+            .Replace("\t", "\\t")
+    "\"" + escaped + "\""
+
+let private findSelfMainPath () : string option =
+    let cwd = Directory.GetCurrentDirectory()
+    let fromEnv =
+        let p = Environment.GetEnvironmentVariable("LLLC_SELF_MAIN")
+        if String.IsNullOrWhiteSpace p then None
+        else
+            let abs = Path.GetFullPath(p)
+            if File.Exists(abs) then Some abs else None
+
+    let fromCwdAncestors =
+        let rec loop (dir: string) =
+            let candidate = Path.Combine(dir, "lllcself", "src", "Main.lll")
+            if File.Exists(candidate) then Some candidate
+            else
+                let parent = Directory.GetParent(dir)
+                if parent = null || parent.FullName = dir then None
+                else loop parent.FullName
+        loop cwd
+
+    let fromBaseDirCandidates =
+        [
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "lllcself", "src", "Main.lll"))
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "lllcself", "src", "Main.lll"))
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "lllcself", "src", "Main.lll"))
+        ]
+        |> List.tryFind File.Exists
+
+    match fromEnv with
+    | Some p -> Some p
+    | None ->
+        match fromCwdAncestors with
+        | Some p -> Some p
+        | None -> fromBaseDirCandidates
+
+let private cmdRunSelf (toolArgs: string list) : int =
+    try
+        match findSelfMainPath () with
+        | None ->
+            Console.Error.WriteLine("lllc: cannot find lllcself/src/Main.lll")
+            1
+        | Some selfPath ->
+            let absPath = Path.GetFullPath(selfPath)
+            let src = File.ReadAllText(absPath)
             match resolveRunImports absPath src with
             | Error msg ->
-                eprintfn "lllc: import resolution error: %s" msg
+                Console.Error.WriteLine("lllc: import resolution error: " + msg)
                 1
             | Ok files ->
-                let fakeManifest : LLManifest = { Name = "run"; Version = "0.0.0"; Entry = ""; Deps = Map.empty; Platform = ["fsharp"] }
+                let fakeManifest : LLManifest = { Name = "lllcself"; Version = "0.0.0"; Entry = ""; Deps = Map.empty; Platform = ["fsharp"] }
                 let proj : LLProject = { Manifest = fakeManifest; RootDir = Path.GetDirectoryName(absPath); Files = files }
                 match LLLang.Compiler.compileProjectToModules proj with
                 | Error es ->
                     printErrors es
                     1
                 | Ok tms ->
-                    let fs = LLLang.Codegen.emitProjectModules tms
-                    let tmp = Path.GetTempFileName() + ".fsx"
-                    // Strip module declarations and [<EntryPoint>] attributes.
-                    // For multi-module output, rename all `let main` except the last
-                    // occurrence so that fsi sees only one `main` binding.
-                    let lines = fs.Split('\n')
-                    // Find all line indices where `let main (argv` appears
-                    let mainLineIndices =
-                        lines
-                        |> Array.mapi (fun i l -> i, l)
-                        |> Array.filter (fun (_, l) -> l.TrimStart().StartsWith("let main (argv"))
-                        |> Array.map fst
-                    let lastMainIdx = if mainLineIndices.Length > 0 then mainLineIndices[mainLineIndices.Length - 1] else -1
-                    let mutable mainCounter = 0
-                    let processed =
-                        lines
-                        |> Array.mapi (fun i l ->
-                            let t = l.TrimStart()
-                            if t.StartsWith("module ") || t.StartsWith("[<EntryPoint>]") then ""
-                            elif t.StartsWith("let main (argv") && i <> lastMainIdx then
-                                // Rename intermediate main to avoid duplicate definition
-                                let renamed = sprintf "_dep_main_%d" mainCounter
-                                mainCounter <- mainCounter + 1
-                                l.Replace("let main (", sprintf "let %s (" renamed)
-                            else l)
-                        |> String.concat "\n"
-                    let withInvoke = processed + "\nmain [||] |> int64 |> exit\n"
-                    File.WriteAllText(tmp, withInvoke)
-                    let psi = ProcessStartInfo("dotnet", $"fsi \"{tmp}\"")
-                    psi.RedirectStandardOutput <- false
-                    psi.RedirectStandardError  <- false
-                    psi.UseShellExecute        <- false
-                    use proc = Process.Start(psi)
-                    proc.WaitForExit()
-                    try File.Delete(tmp) with _ -> ()
-                    proc.ExitCode
-    with
-    | ex ->
-        eprintfn "lllc: %s" ex.Message
+                    let tempDir = Path.Combine(Path.GetTempPath(), "lllcself-" + Guid.NewGuid().ToString("N"))
+                    Directory.CreateDirectory(tempDir) |> ignore
+                    try
+                        let filesOut = LLLang.Codegen.emitProjectFiles tms
+                        for (fn, content) in filesOut do
+                            File.WriteAllText(Path.Combine(tempDir, fn), content)
+                        let compileItems =
+                            filesOut
+                            |> List.map (fun (fn, _) -> "    <Compile Include=\"" + fn + "\" />")
+                            |> String.concat "\n"
+                        let fsproj =
+                            "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
+                            + "  <PropertyGroup>\n"
+                            + "    <OutputType>Exe</OutputType>\n"
+                            + "    <TargetFramework>net10.0</TargetFramework>\n"
+                            + "    <LangVersion>preview</LangVersion>\n"
+                            + "    <OtherFlags>--strict-indentation-</OtherFlags>\n"
+                            + "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
+                            + "  </PropertyGroup>\n"
+                            + "  <ItemGroup>\n"
+                            + compileItems + "\n"
+                            + "  </ItemGroup>\n"
+                            + "</Project>\n"
+                        let fsprojPath = Path.Combine(tempDir, "lllcself.fsproj")
+                        File.WriteAllText(fsprojPath, fsproj)
+                        let psi = ProcessStartInfo("dotnet")
+                        psi.ArgumentList.Add("run")
+                        psi.ArgumentList.Add("--project")
+                        psi.ArgumentList.Add(fsprojPath)
+                        if not (List.isEmpty toolArgs) then
+                            psi.ArgumentList.Add("--")
+                            for a in toolArgs do
+                                psi.ArgumentList.Add(a)
+                        psi.RedirectStandardOutput <- false
+                        psi.RedirectStandardError  <- false
+                        psi.UseShellExecute        <- false
+                        psi.WorkingDirectory       <- tempDir
+                        match Process.Start(psi) with
+                        | null ->
+                            Console.Error.WriteLine("lllc: failed to start process")
+                            1
+                        | proc ->
+                            use p = proc
+                            p.WaitForExit()
+                            p.ExitCode
+                    finally
+                        let keepTemp =
+                            let v = Environment.GetEnvironmentVariable("LL_KEEP_SELF_TEMP")
+                            not (String.IsNullOrEmpty v) && (v = "1" || v.ToLowerInvariant() = "true")
+                        if not keepTemp then
+                            try Directory.Delete(tempDir, true) with _ -> ()
+    with ex ->
+        Console.Error.WriteLine("lllc: " + ex.Message)
         1
 
 /// Install dependencies listed in lll.toml (or ll.toml) into .ll-deps/. Returns exit code.
@@ -491,23 +994,40 @@ let private cmdNew (name: string) : int =
 
 [<EntryPoint>]
 let main (argv: string[]) : int =
+    for e in sdkRegistryErrors () do
+        Console.Error.WriteLine("lllc: sdk metadata warning: " + e)
     let args = List.ofArray argv
     match args with
     | "build" :: rest ->
-        let (target, rest2) = parseTarget rest
-        match rest2 with
-        | [path] when path.EndsWith(".lll") -> cmdBuild path target
-        | [dir] -> cmdBuildProject (Path.GetFullPath dir)
-        | [] ->
-            match findProjectRoot (Directory.GetCurrentDirectory()) with
-            | Some root -> cmdBuildProject root
-            | None ->
-                eprintfn "lllc: no lll.toml found. Use 'lllc new <name>' to create a project."
-                1
-        | _ ->
-            eprintfn "lllc: unrecognized build arguments"
+        match parseTarget rest with
+        | Error msg ->
+            Console.Error.WriteLine(msg)
             1
-    | ["run"; path] -> cmdRun path
+        | Ok (targetOverride, rest2) ->
+            match rest2 with
+            | [path] when path.EndsWith(".lll") -> cmdBuildFile path targetOverride
+            | [dir] -> cmdBuildProject (Path.GetFullPath dir) targetOverride
+            | [] ->
+                match findProjectRoot (Directory.GetCurrentDirectory()) with
+                | Some root -> cmdBuildProject root targetOverride
+                | None ->
+                    Console.Error.WriteLine("lllc: no lll.toml found. Use 'lllc new <name>' to create a project.")
+                    1
+            | _ ->
+                Console.Error.WriteLine("lllc: unrecognized build arguments")
+                1
+    | "run" :: rest ->
+        match parseTarget rest with
+        | Error msg ->
+            Console.Error.WriteLine(msg)
+            1
+        | Ok (targetOverride, rest2) ->
+            match rest2 with
+            | [path] -> cmdRun path targetOverride
+            | _ ->
+                Console.Error.WriteLine("lllc: usage: lllc run [--target fs|ts|py|java|cs|llvm] <file.lll>")
+                1
+    | "reverse" :: rest -> cmdReverse rest
     | ["new"; name] -> cmdNew name
     | "install" :: _ ->
         let root =
@@ -517,16 +1037,20 @@ let main (argv: string[]) : int =
         cmdInstall root
     | ["mcp"] -> Mcp.runServer (); 0
     | _ ->
-        eprintfn "Usage:"
-        eprintfn "  lllc build [--target fs|ts|py] <file.lll>  compile single file"
-        eprintfn "  lllc build [--target fs|ts|py] [dir]       compile project (reads lll.toml)"
-        eprintfn "  lllc run   <file.lll>                      compile and run single file"
-        eprintfn "  lllc new   <name>                          scaffold new project"
-        eprintfn "  lllc install                               install dependencies from lll.toml"
-        eprintfn "  lllc mcp                                   run MCP server (stdio transport)"
-        eprintfn ""
-        eprintfn "  --target fs   emit F# (default)"
-        eprintfn "  --target ts   emit TypeScript"
-        eprintfn "  --target py   emit Python"
-        eprintfn "  --target java emit Java"
+        Console.Error.WriteLine("Usage:")
+        Console.Error.WriteLine("  lllc build [--target fs|ts|py|java|cs|llvm] <file.lll>  compile single file")
+        Console.Error.WriteLine("  lllc build [--target fs|ts|py|java|cs|llvm] [dir]       compile project (reads lll.toml)")
+        Console.Error.WriteLine("  lllc run   [--target fs|ts|py|java|cs|llvm] <file.lll>  compile and run single file")
+        Console.Error.WriteLine("  lllc reverse --from <target> <file>        recover minimal ll-lang from generated target code")
+        Console.Error.WriteLine("  lllc self  <cmd> <file> [arg]              run self-hosted lllc tools (lll layer)")
+        Console.Error.WriteLine("  lllc new   <name>                          scaffold new project")
+        Console.Error.WriteLine("  lllc install                               install dependencies from lll.toml")
+        Console.Error.WriteLine("  lllc mcp                                   run MCP server (stdio transport)")
+        Console.Error.WriteLine("")
+        Console.Error.WriteLine("  --target fs   emit F# (default)")
+        Console.Error.WriteLine("  --target ts   emit TypeScript")
+        Console.Error.WriteLine("  --target py   emit Python")
+        Console.Error.WriteLine("  --target java emit Java")
+        Console.Error.WriteLine("  --target cs   emit C#")
+        Console.Error.WriteLine("  --target llvm emit LLVM IR")
         1

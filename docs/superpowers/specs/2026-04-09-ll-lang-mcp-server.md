@@ -1,5 +1,7 @@
 # ll-lang MCP Server — Design Spec
 
+> **Non-normative design document.** This spec may include planned tool/CLI surface that differs from the shipped MCP server. Treat it as roadmap text; for current behavior, rely on `docs/user-guide/09-mcp.md` and `src/LLLangTool/Mcp.fs`.
+
 **Status:** draft, implementation deferred
 **Date:** 2026-04-09
 **Author:** compiler team
@@ -69,8 +71,8 @@ cache.
 
 **Project root discovery.** Tools that take a path (`compile_file`,
 `check_file`, `run_file`, `project_info`) use the same walk-upward
-`ll.toml` search as `lllc build` (project/module spec §2). If no
-`ll.toml` is found, the tool falls back to single-file mode
+`lll.toml` search as `lllc build` (project/module spec §2). If no
+`lll.toml` is found, the tool falls back to single-file mode
 (project/module spec §8) — the same semantics a bare `lllc build
 foo.lll` would get. MCP never invents its own project notion.
 
@@ -89,7 +91,7 @@ records, not exceptions.
 | `lookup_error` | Given a code like `E003` or `E022`, return long-form explanation + minimal repro snippet from `spec/examples/invalid/`. |
 | `stdlib_search` | Substring / prefix match across the compiler's import-resolution scopes, in the order defined by project/module spec §3: built-in stdlib (`Std.*`), enabled `Platform.*` surface, and — when a project root is discovered — local modules and vendored deps. Returns `{ name, signature, module, scope, doc? }` where `scope ∈ {"stdlib","platform","local","vendor"}`. |
 | `grammar_lookup` | Given a rule name (`Expr`, `Pattern`, …), return the EBNF production from `spec/grammar.ebnf`. |
-| `project_info` | Walk upward from the supplied path (or CWD) to find `ll.toml` per project/module spec §2. Returns `{ root, manifest, modules[], deps[], platform_use[], errors[] }`: `manifest` is the parsed `[project]` table, `modules[]` lists each `.lll` file with its module path + imports + per-file error count, `deps[]` mirrors `ll.sum` entries (`{ path, version, sha256 }`), `platform_use[]` mirrors `[platform].use`. In single-file mode (no `ll.toml` found), `root` is null and only `modules[]` is populated. |
+| `project_info` | Walk upward from the supplied path (or CWD) to find `lll.toml` per project/module spec §2. Returns `{ root, manifest, modules[], deps[], platform_use[], errors[] }`: `manifest` is the parsed `[project]` table, `modules[]` lists each `.lll` file with its module path + imports + per-file error count, `deps[]` mirrors `ll.sum` entries (`{ path, version, sha256 }`), `platform_use[]` mirrors `[platform].use`. In single-file mode (no `lll.toml` found), `root` is null and only `modules[]` is populated. |
 
 **Deferred to v1** (explicitly not in v0):
 
@@ -270,7 +272,7 @@ the snippets in §2 and §9 is a research step, not a design change.
 Reconciled with sibling spec `2026-04-09-ll-lang-project-system.md` on
 2026-04-09. Areas checked: CLI surface (union with `mod`/`test`),
 subcommand routing, project root discovery, file layout
-(`ll.toml`/`vendor/`/`bin/`/`.llcache/`), process lifecycle vs
+(`lll.toml`/`vendor/`/`bin/`/`.llcache/`), process lifecycle vs
 `ProjectLoader`, dependency model (`ll.sum` in `project_info`),
 stdlib/Platform/local/vendor resolution order in `stdlib_search`,
 config file interaction (MCP has none — no collision), error model

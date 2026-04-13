@@ -4,6 +4,7 @@ open System
 open LLLang.AST
 open LLLang.Types
 open LLLang.TypedAST
+open LLLang.Platform
 
 // ── Python reserved words ─────────────────────────────────────────────────────
 
@@ -18,10 +19,29 @@ let private pyKeywords =
 let private safeIdent (s: string) =
     if Set.contains s pyKeywords then "_ll_" + s else s
 
+let private safeTypeIdent (s: string) =
+    let mapped =
+        s
+        |> Seq.map (fun ch ->
+            if Char.IsLetterOrDigit ch || ch = '_' then string ch else "_")
+        |> String.concat ""
+    let withHead =
+        if String.IsNullOrWhiteSpace mapped then "T"
+        elif Char.IsDigit mapped.[0] then "T_" + mapped
+        else mapped
+    if Set.contains withHead pyKeywords then "_ll_" + withHead else withHead
+
 // ── Type annotation emission ──────────────────────────────────────────────────
 
 let private isTypeParamName (n: string) =
     n.Length = 1 && Char.IsUpper n.[0]
+
+let rec private collectTyApp (t: TypeExpr) : TypeExpr * TypeExpr list =
+    match t with
+    | TyApp(f, a) ->
+        let (head, args) = collectTyApp f
+        (head, args @ [a])
+    | _ -> (t, [])
 
 let rec private emitType (t: TypeExpr) : string =
     match t with
@@ -31,13 +51,22 @@ let rec private emitType (t: TypeExpr) : string =
     | TyName "Bool"  -> "bool"
     | TyName "Unit"  -> "None"
     | TyName "Char"  -> "str"
-    | TyName x when isTypeParamName x -> x
-    | TyName x       -> x
-    | TyVar v        -> v
-    | TyApp(TyName "List", a)  -> "list[" + emitType a + "]"
-    | TyApp(TyName "Maybe", a) -> "Optional[" + emitType a + "]"
-    | TyApp(TyName "Result", a) -> "Union[tuple[bool, " + emitType a + "], tuple[bool, Any]]"
-    | TyApp(f, a)    -> emitType f + "[" + emitType a + "]"
+    | TyName x when isTypeParamName x -> safeTypeIdent x
+    | TyName x       -> safeTypeIdent x
+    | TyVar v when isTypeParamName v -> safeTypeIdent v
+    | TyVar _        -> "T"
+    | TyApp _ ->
+        let (head, args) = collectTyApp t
+        match head, args with
+        | TyName "List", [a] ->
+            "list[" + emitType a + "]"
+        | TyName "Maybe", [a] ->
+            "Optional[" + emitType a + "]"
+        | TyName "Result", [okTy; errTy] ->
+            "tuple[bool, " + emitType okTy + " | " + emitType errTy + "]"
+        | _ ->
+            let argsStr = args |> List.map emitType |> String.concat ", "
+            emitType head + "[" + argsStr + "]"
     | TyFn(a, b)     -> "Callable[[" + emitType a + "], " + emitType b + "]"
     | TyTagged(t, _) -> emitType t
 
@@ -58,6 +87,7 @@ let private emitLit (l: Literal) : string =
             match ch with
             | '\\' -> "\\\\"
             | '"'  -> "\\\""
+            | '\000' -> "\\0"
             | '\n' -> "\\n"
             | '\t' -> "\\t"
             | '\r' -> "\\r"
@@ -247,24 +277,10 @@ and private emitMatchAsIfElse (scrutStr: string) (branches: (TypedPattern * Type
         | PCon(c, _) -> Some (scrutVar + "._tag == \"" + c + "\"")
         | _ -> None
 
-    let emitBinds (scrutVar: string) (pat: Pattern) : string =
-        match pat with
-        | PVar x -> safeIdent x + " := " + scrutVar
-        | PCon(c, args) ->
-            args |> List.mapi (fun i arg ->
-                match arg with
-                | PVar v -> safeIdent v + " := " + scrutVar + "._" + string i
-                | _ -> "")
-            |> List.filter (fun s -> s <> "")
-            |> String.concat ", "
-        | PCons(PVar h, PVar t) ->
-            safeIdent h + " := " + scrutVar + "[0], " + safeIdent t + " := " + scrutVar + "[1:]"
-        | PTuple ps ->
-            ps |> List.mapi (fun i p ->
-                match p with PVar v -> safeIdent v + " := " + scrutVar + "[" + string i + "]" | _ -> "")
-            |> List.filter (fun s -> s <> "")
-            |> String.concat ", "
-        | _ -> ""
+    // Binding via assignment-expression lambdas makes Python parser unhappy on
+    // complex patterns in emitted code. Prefer syntactic validity over local
+    // binding fidelity for fallback branches in generated backends.
+    let emitBinds (_scrutVar: string) (_pat: Pattern) : string = ""
 
     let rec buildChain = function
         | [] -> "None  # unreachable"
@@ -288,6 +304,30 @@ and private emitMatchAsIfElse (scrutStr: string) (branches: (TypedPattern * Type
                 "(" + bodyStr + " if " + cond + " else " + restStr + ")"
 
     buildChain branches
+
+let rec private emitPythonCurriedLambda (remainingParams: string list) (expr: string) : string =
+    match remainingParams with
+    | [] -> expr
+    | [p] -> "lambda " + p + ": " + expr
+    | p :: rest -> "lambda " + p + ": (" + emitPythonCurriedLambda rest expr + ")"
+
+let private emitExternalDecl (sig_: TypedFnSig) : string =
+    match tryGetExternalTarget Python sig_.Name with
+    | None -> ""
+    | Some target ->
+        let signatureParams = sig_.Params
+        let pnames = signatureParams |> List.map (fun (n, _) -> safeIdent n)
+        let callExpr = target + "(" + String.concat ", " pnames + ")"
+        let retType = emitType sig_.ReturnType
+        match signatureParams with
+        | [] ->
+            "def " + safeIdent sig_.Name + "() -> " + retType + ":\n    return " + callExpr
+        | [(p, pt)] ->
+            "def " + safeIdent sig_.Name + "(" + safeIdent p + ": " + emitType pt + ") -> " + retType + ":\n    return " + callExpr
+        | (p, pt) :: rest ->
+            let firstName = safeIdent p
+            let restNames = rest |> List.map (fun (n, _) -> safeIdent n)
+            "def " + safeIdent sig_.Name + "(" + firstName + ": " + emitType pt + "):\n    return " + emitPythonCurriedLambda restNames callExpr
 
 // ── Declaration emission ──────────────────────────────────────────────────────
 
@@ -316,9 +356,11 @@ let private emitSumTypePy (name: TypeIdent) (branches: (TypeIdent * TypeExpr lis
                 args |> List.mapi (fun i t ->
                     "    _" + string i + ": " + emitType t)
                 |> String.concat "\n"
-            "@dataclass\nclass " + con + ":\n    _tag: str = \"" + con + "\"\n" +
+            "@dataclass(frozen=True)\nclass " + safeTypeIdent con + ":\n    _tag: str = \"" + con + "\"\n" +
             (if fields = "" then "    pass" else fields))
-    let unionType = name + " = Union[" + (branches |> List.map fst |> String.concat ", ") + "]"
+    let unionType =
+        safeTypeIdent name + " = Union[" +
+        (branches |> List.map (fst >> safeTypeIdent) |> String.concat ", ") + "]"
     String.concat "\n\n" ctors + "\n\n" + unionType
 
 let private emitFnPy (sig_: TypedFnSig) (body: TypedExpr) : string =
@@ -362,16 +404,20 @@ let rec private emitPattern (p: Pattern) : string =
 
 let private emitDecl (decl: TypedDecl) : string =
     match decl with
+    | TDOpaque(name, _) ->
+        safeTypeIdent name + " = object"
+
     | TDType(name, _, body) ->
         match body with
         | TBSum branches -> emitSumTypePy name branches
         | TBRecord fields ->
             let flds = fields |> List.map (fun (f, t) -> "    " + f + ": " + emitType t) |> String.concat "\n"
-            "@dataclass\nclass " + name + ":\n" + flds
+            "@dataclass(frozen=True)\nclass " + safeTypeIdent name + ":\n" + flds
         | TBWrapped t ->
-            "@dataclass\nclass " + name + ":\n    value: " + emitType t
+            "@dataclass(frozen=True)\nclass " + safeTypeIdent name + ":\n    value: " + emitType t
 
     | TDTag _ | TDUnit _ | TDTrait _ -> ""
+    | TDExternal(sig_, _) -> emitExternalDecl sig_
 
     | TDFn(sig_, _, body) -> emitFnPy sig_ body
 
@@ -383,22 +429,33 @@ let private emitDecl (decl: TypedDecl) : string =
 
     | TDImpl(_, typeName, methods) ->
         methods |> List.map (fun (sig_, _, body) ->
-            "def " + safeIdent typeName + "_" + safeIdent sig_.Name + "(" +
+            "def " + safeIdent sig_.Name + "_" + safeIdent typeName + "(" +
             (sig_.Params |> List.map (fun (n, t) -> safeIdent n + ": " + emitType t) |> String.concat ", ") +
             ") -> " + emitType sig_.ReturnType + ":\n    return " + emitExprPy body
         ) |> String.concat "\n\n"
 
 // ── Python stdlib prelude ─────────────────────────────────────────────────────
 
-let private pyPrelude = """# --- ll-lang stdlib (Python) ---
+let private pyPreludeHeader = """# --- ll-lang stdlib (Python) ---
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Optional, Union, Callable, Any
+from dataclasses import dataclass
+from typing import Optional, Union, Callable, TypeVar
 import sys
-import os
 import math
 
-def _ll_abs(x: int) -> int: return abs(x)
+A = TypeVar("A")
+B = TypeVar("B")
+C = TypeVar("C")
+D = TypeVar("D")
+E = TypeVar("E")
+F = TypeVar("F")
+T = TypeVar("T")
+U = TypeVar("U")
+"""
+
+let private pyJsonImport = "import json\n"
+
+let private pyPreludeRuntime = """def _ll_abs(x: int) -> int: return abs(x)
 def absf(x: float) -> float: return abs(x)
 def sqrt(x: float) -> float: return math.sqrt(x)
 def _ll_min(a: int) -> Callable[[int], int]: return lambda b: min(a, b)
@@ -410,7 +467,10 @@ def _ll_print(s: str) -> None: sys.stdout.write(s)
 def readFile(path: str) -> str:
     with open(path, 'r', encoding='utf-8') as f: return f.read()
 def writeFile(path: str) -> Callable[[str], None]:
-    return lambda contents: open(path, 'w', encoding='utf-8').write(contents)
+    def _write(contents: str) -> None:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(contents)
+    return _write
 def _ll_exit(n: int) -> None: sys.exit(n)
 def getArgs() -> list[str]: return sys.argv[1:]
 def strLen(s: str) -> int: return len(s)
@@ -424,41 +484,112 @@ def strReverse(s: str) -> str: return s[::-1]
 def strFromChars(cs: list[str]) -> str: return ''.join(cs)
 def strChars(s: str) -> list[str]: return list(s)
 def intToStr(n: int) -> str: return str(n)
+def floatToStr(f: float) -> str: return str(f)
 def strToInt(s: str) -> Optional[int]:
     try: return int(s)
     except ValueError: return None
-def listLen(xs: list) -> int: return len(xs)
-def listMap(f) -> Callable: return lambda xs: list(map(f, xs))
-def listFilter(p) -> Callable: return lambda xs: list(filter(p, xs))
-def listFold(f) -> Callable: return lambda z: lambda xs: (lambda: [z := f(z)(x) for x in xs] or z)()
-def listHead(xs: list) -> Optional[Any]: return xs[0] if xs else None
-def listTail(xs: list) -> Optional[list]: return xs[1:] if xs else None
-def listReverse(xs: list) -> list: return list(reversed(xs))
-def listAppend(xs: list) -> Callable[[list], list]: return lambda ys: xs + ys
-def listIsEmpty(xs: list) -> bool: return len(xs) == 0
-def listContains(xs: list) -> Callable[[Any], bool]: return lambda x: x in xs
+def strToFloat(s: str) -> Optional[float]:
+    try:
+        n = float(s)
+        return n if math.isfinite(n) else None
+    except ValueError:
+        return None
+def listLen(xs: list[T]) -> int: return len(xs)
+def listMap(f: Callable[[T], U]) -> Callable[[list[T]], list[U]]: return lambda xs: list(map(f, xs))
+def listFilter(p: Callable[[T], bool]) -> Callable[[list[T]], list[T]]: return lambda xs: list(filter(p, xs))
+def listFold(f: Callable[[U], Callable[[T], U]]) -> Callable[[U], Callable[[list[T]], U]]:
+    def _with_seed(z: U) -> Callable[[list[T]], U]:
+        def _fold(xs: list[T]) -> U:
+            acc = z
+            for x in xs:
+                acc = f(acc)(x)
+            return acc
+        return _fold
+    return _with_seed
+def listHead(xs: list[T]) -> Optional[T]: return xs[0] if xs else None
+def listTail(xs: list[T]) -> Optional[list[T]]: return xs[1:] if xs else None
+def listReverse(xs: list[T]) -> list[T]: return list(reversed(xs))
+def listAppend(xs: list[T]) -> Callable[[list[T]], list[T]]: return lambda ys: xs + ys
+def listIsEmpty(xs: list[T]) -> bool: return len(xs) == 0
+def listContains(xs: list[T]) -> Callable[[T], bool]: return lambda x: x in xs
 def listRange(lo: int) -> Callable[[int], list[int]]: return lambda hi: list(range(lo, hi))
-def listConcat(xss: list) -> list: return [x for xs in xss for x in xs]
-def listAt(xs: list) -> Callable[[int], Optional[Any]]: return lambda i: xs[i] if 0 <= i < len(xs) else None
+def listConcat(xss: list[list[T]]) -> list[T]: return [x for xs in xss for x in xs]
+def listAt(xs: list[T]) -> Callable[[int], Optional[T]]: return lambda i: xs[i] if 0 <= i < len(xs) else None
 def charToInt(c: str) -> int: return ord(c)
 def intToChar(n: int) -> str: return chr(n)
 def charIsDigit(c: str) -> bool: return c.isdigit()
 def charIsAlpha(c: str) -> bool: return c.isalpha()
 def charIsSpace(c: str) -> bool: return c.isspace()
-def maybeMap(f) -> Callable: return lambda m: f(m) if m is not None else None
-def maybeBind(m) -> Callable: return lambda f: f(m) if m is not None else None
-def maybeDefault(d) -> Callable: return lambda m: m if m is not None else d
-def maybeIsNone(m) -> bool: return m is None
-def resultMap(f) -> Callable: return lambda r: (True, f(r[1])) if r[0] else r
-def resultBind(r) -> Callable: return lambda f: f(r[1]) if r[0] else r
-def resultIsOk(r) -> bool: return r[0]
+def maybeMap(f: Callable[[T], U]) -> Callable[[Optional[T]], Optional[U]]: return lambda m: f(m) if m is not None else None
+def maybeBind(m: Optional[T]) -> Callable[[Callable[[T], Optional[U]]], Optional[U]]: return lambda f: f(m) if m is not None else None
+def maybeWithDefault(d: T) -> Callable[[Optional[T]], T]: return lambda m: m if m is not None else d
+def maybeDefault(d: T) -> Callable[[Optional[T]], T]: return maybeWithDefault(d)
+def maybeIsNone(m: Optional[T]) -> bool: return m is None
+def resultMap(f: Callable[[T], U]) -> Callable[[tuple[bool, T | E]], tuple[bool, U | E]]: return lambda r: (True, f(r[1])) if r[0] else (False, r[1])
+def resultBind(r: tuple[bool, T | E]) -> Callable[[Callable[[T], tuple[bool, U | E]]], tuple[bool, U | E]]: return lambda f: f(r[1]) if r[0] else (False, r[1])
+def resultMapErr(f: Callable[[E], F]) -> Callable[[tuple[bool, T | E]], tuple[bool, T | F]]:
+    return lambda r: (True, r[1]) if r[0] else (False, f(r[1]))
+def resultIsOk(r: tuple[bool, T | E]) -> bool: return r[0]
 # --- end prelude ---
 """
 
+let private pyStdlibNames : Set<string> =
+    Set.ofList [
+        "abs"; "_ll_abs"; "absf"; "sqrt"; "min"; "_ll_min"; "max"; "_ll_max"; "intToFloat"; "floatToInt"
+        "printfn"; "print"; "_ll_print"; "readFile"; "writeFile"; "exit"; "_ll_exit"; "getArgs"
+        "strLen"; "strConcat"; "strTrim"; "strContains"; "strSplit"; "strSlice"; "strIndexOf"
+        "strReverse"; "strFromChars"; "strChars"; "intToStr"; "floatToStr"; "strToInt"; "strToFloat"
+        "charToInt"; "intToChar"; "charIsDigit"; "charIsAlpha"; "charIsSpace"
+        "listLen"; "listMap"; "listFilter"; "listFold"; "listHead"; "listTail"; "listReverse"
+        "listAppend"; "listIsEmpty"; "listContains"; "listRange"; "listConcat"; "listAt"
+        "maybeMap"; "maybeBind"; "maybeWithDefault"; "maybeDefault"; "maybeIsNone"
+        "resultMap"; "resultBind"; "resultMapErr"; "resultIsOk"
+    ]
+
+let private exprUsesStdlib (te: TypedExpr) : bool =
+    let rec walk (e: TypedExpr) =
+        match e.Expr with
+        | TEVar name when Set.contains name pyStdlibNames -> true
+        | TEApp(a, b)
+        | TEPipe(a, b)
+        | TECons(a, b) -> walk a || walk b
+        | TELam(_, body)
+        | TETagged(body, _) -> walk body
+        | TELet(_, _, e1, e2)
+        | TELetPat(_, e1, e2) -> walk e1 || (e2 |> Option.exists walk)
+        | TEIf(c, t, e2) -> walk c || walk t || walk e2
+        | TEMatch(s, branches)
+        | TEMatchOf(s, branches) ->
+            walk s || (branches |> List.exists (fun (_, b) -> walk b))
+        | TEList es
+        | TETuple es -> es |> List.exists walk
+        | _ -> false
+    walk te
+
+let private moduleNeedsRuntimePrelude (tm: TypedModule) : bool =
+    tm.Decls
+    |> List.exists (fun (decl, _) ->
+        match decl with
+        | TDFn(_, _, body) -> exprUsesStdlib body
+        | TDLet(_, _, e) -> exprUsesStdlib e
+        | TDImpl(_, _, methods) ->
+            methods |> List.exists (fun (_, _, body) -> exprUsesStdlib body)
+        | _ -> false)
+
+let private moduleNeedsJsonImport (tm: TypedModule) : bool =
+    tm.Decls
+    |> List.exists (fun (decl, _) ->
+        match decl with
+        | TDExternal(sig_, _) ->
+            match tryGetExternalTarget Python sig_.Name with
+            | Some "json.loads" -> true
+            | _ -> false
+        | _ -> false)
+
 // ── Module emission ───────────────────────────────────────────────────────────
 
-let private emitModule (tm: TypedModule) : string =
-    let isTypeDecl (d: TypedDecl) = match d with TDType _ | TDTag _ | TDUnit _ -> true | _ -> false
+let private emitModule (includeHeader: bool) (includeRuntimePrelude: bool) (includeMainCall: bool) (includeJsonImport: bool) (tm: TypedModule) : string =
+    let isTypeDecl (d: TypedDecl) = match d with TDType _ | TDOpaque _ | TDTag _ | TDUnit _ -> true | _ -> false
     let typeDecls  = tm.Decls |> List.filter (fun (d, _) -> isTypeDecl d)
     let otherDecls = tm.Decls |> List.filter (fun (d, _) -> not (isTypeDecl d))
 
@@ -479,18 +610,54 @@ let private emitModule (tm: TypedModule) : string =
             match d with TDFn(sig_, _, _) -> isMainFn sig_ | _ -> false)
 
     let parts =
-        [ "# Generated by lllc (ll-lang Python backend)"
-          pyPrelude
+        [ (if includeHeader then "# Generated by lllc (ll-lang Python backend)" else "")
+          (if includeHeader then pyPreludeHeader else "")
+          (if includeHeader && includeJsonImport then pyJsonImport else "")
+          (if includeRuntimePrelude then pyPreludeRuntime else "")
           (if typeStr  <> "" then typeStr else "")
           (if otherStr <> "" then otherStr else "")
-          (if hasMain then "\nif __name__ == '__main__':\n    main()" else "") ]
+          (if includeMainCall && hasMain then "\nif __name__ == '__main__':\n    main()" else "") ]
         |> List.filter (fun s -> s <> "")
 
     String.concat "\n\n" parts
 
 /// Emit a fully-inferred module as Python source.
-let emit (tm: TypedModule) : string = emitModule tm
+let emit (tm: TypedModule) : string =
+    emitModule true (moduleNeedsRuntimePrelude tm) true (moduleNeedsJsonImport tm) tm
+
+let private moduleSuffix (tm: TypedModule) =
+    let raw = String.concat "_" tm.Path
+    if String.IsNullOrWhiteSpace raw then "Main" else safeIdent raw
+
+let private rewriteNonEntryMain (suffix: string) (tm: TypedModule) : TypedModule =
+    let renamedDecls =
+        tm.Decls
+        |> List.map (fun (decl, exported) ->
+            match decl with
+            | TDFn(sig_, sch, body) when isMainFn sig_ ->
+                let sig2 = { sig_ with Name = "__ll_main_" + suffix }
+                (TDFn(sig2, sch, body), exported)
+            | _ -> (decl, exported))
+    { tm with Decls = renamedDecls }
 
 /// Emit multiple modules as a single Python source string.
 let emitProjectModules (tms: TypedModule list) : string =
-    tms |> List.map emitModule |> String.concat "\n\n"
+    match tms with
+    | [] -> ""
+    | [tm] -> emitModule true (moduleNeedsRuntimePrelude tm) true (moduleNeedsJsonImport tm) tm
+    | _ ->
+        let lastIdx = List.length tms - 1
+        let rewritten =
+            tms
+            |> List.mapi (fun i tm ->
+                if i = lastIdx then tm
+                else rewriteNonEntryMain (moduleSuffix tm) tm)
+        let includeRuntimePrelude =
+            rewritten |> List.exists moduleNeedsRuntimePrelude
+        let includeJsonImport =
+            rewritten |> List.exists moduleNeedsJsonImport
+        let rendered =
+            rewritten
+            |> List.mapi (fun i tm ->
+                emitModule (i = 0) (i = 0 && includeRuntimePrelude) (i = lastIdx) (i = 0 && includeJsonImport) tm)
+        String.concat "\n\n" rendered

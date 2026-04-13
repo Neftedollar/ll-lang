@@ -1,0 +1,4 @@
+[build]
+compile = "dotnet build {project_file_q} -c Release"
+run = "dotnet run --project {project_file_q}"
+project-template = "runtime/project.csproj.tmpl"

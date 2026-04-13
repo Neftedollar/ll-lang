@@ -925,6 +925,15 @@ let private parseFnSig (c: Ctx) : Result<FnSig, string> =
             Ok { Name = name; Constraints = List.ofSeq constraints; Params = List.ofSeq parms; ReturnType = retType }
     | t -> Error $"Expected function name, got {t}"
 
+let private hasUntypedHole (ty: TypeExpr) : bool =
+    let rec go t =
+        match t with
+        | TyVar "?" -> true
+        | TyApp(a, b) | TyFn(a, b) -> go a || go b
+        | TyTagged(a, _) -> go a
+        | _ -> false
+    go ty
+
 let private parseFnBody (c: Ctx) : Result<Expr, string> =
     // fn body: either direct expr, or indented block, or match branches starting with |
     skipNewlines c
@@ -1103,6 +1112,47 @@ let private parseDecl (c: Ctx) : Result<Decl, string> =
                     match pat with
                     | PVar name -> Ok (recordAt c declIdx (DLet(name, expr)))
                     | _ -> Ok (recordAt c declIdx (DLetPat(pat, expr)))
+    | KwExternal ->
+        advance c
+        match parseFnSig c with
+        | Error e -> Error e
+        | Ok sig' ->
+            match sig'.ReturnType with
+            | None ->
+                Error $"Expected explicit return type in external declaration '{sig'.Name}'"
+            | Some retTy when hasUntypedHole retTy ->
+                Error $"Expected fully typed return type in external declaration '{sig'.Name}'"
+            | Some _ when sig'.Params |> List.exists (fun (_, ty) -> hasUntypedHole ty) ->
+                Error $"Expected fully typed params in external declaration '{sig'.Name}'"
+            | Some _ ->
+                if curTok c = Eq then
+                    Error $"External declaration '{sig'.Name}' must not have a body"
+                else
+                    Ok (recordAt c declIdx (DExternal sig'))
+    | KwOpaque ->
+        advance c
+        match curTok c with
+        | TypeId name | Ident name ->
+            advance c
+            let tparams = ResizeArray<TypeParam>()
+            let mutable cont = true
+            while cont && curTok c = LBrack do
+                let saved = c.Pos
+                advance c
+                match curTok c with
+                | TypeId p | Ident p ->
+                    advance c
+                    match skip c RBrack with
+                    | Ok () -> tparams.Add(TPBare p)
+                    | Error _ ->
+                        c.Pos <- saved
+                        cont <- false
+                | _ ->
+                    c.Pos <- saved
+                    cont <- false
+            Ok (recordAt c declIdx (DOpaque(name, List.ofSeq tparams)))
+        | t ->
+            Error $"Expected opaque type name, got {t}"
     | TypeId name ->
         // Type declaration: `Name TypeParams* = TypeBody`
         // No keyword prefix needed — uppercase start distinguishes type decls.

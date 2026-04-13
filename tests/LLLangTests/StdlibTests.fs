@@ -181,10 +181,16 @@ let ``emitted F# contains the prelude block`` () =
     Assert.Contains("let listMap", fs)
 
 [<Fact>]
-let ``Maybe-dependent prelude only emitted when user declares Maybe`` () =
+let ``emitted F# omits prelude when stdlib is unused`` () =
+    let fs = codegenSrc "module M\nlet x = 1"
+    Assert.DoesNotContain("ll-lang stdlib prelude", fs)
+    Assert.DoesNotContain("let listLen", fs)
+
+[<Fact>]
+let ``Maybe-dependent prelude emitted only when Maybe helper is used`` () =
     let withoutMaybe = codegenSrc "module M\nlet x = 1"
     Assert.DoesNotContain("let listHead", withoutMaybe)
-    let withMaybe = codegenSrc "module M\nMaybe A = Some A | None\nlet x = 1"
+    let withMaybe = codegenSrc "module M\nMaybe A = Some A | None\nlet m = listHead [1 2 3]"
     Assert.Contains("let listHead", withMaybe)
 
 // ---- Phase 6.5: Char / Str extensions ----
@@ -314,10 +320,10 @@ let ``emitted F# contains new core prelude bindings`` () =
     Assert.Contains("let listConcat", fs)
 
 [<Fact>]
-let ``listAt only emitted when user declares Maybe`` () =
+let ``listAt emitted only when Maybe helper is used`` () =
     let withoutMaybe = codegenSrc "module M\nlet x = 1"
     Assert.DoesNotContain("let listAt", withoutMaybe)
-    let withMaybe = codegenSrc "module M\nMaybe A = Some A | None\nlet x = 1"
+    let withMaybe = codegenSrc "module M\nMaybe A = Some A | None\nlet m = listAt [1 2 3] 0"
     Assert.Contains("let listAt", withMaybe)
 
 // ---- Phase 6.5: end-to-end runtime tests ----

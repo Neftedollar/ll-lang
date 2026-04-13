@@ -1,0 +1,3 @@
+[build]
+compile = "javac {java_source_file_q}"
+run = "javac {java_source_file_q} && java {java_class_name_q}"
