@@ -2180,6 +2180,13 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
                         m.Groups.["cond"].Value
                         m.Groups.["thenValue"].Value
                         m.Groups.["elseValue"].Value)
+        let javaMainVoidWrapperFns =
+            collect
+                (RegexOptions.Multiline ||| RegexOptions.Singleline)
+                @"(?:(?:public|private|protected)\s+)?static\s+void\s+(?<name>main)(?:<[^>]+>)?\((?<params>[^\)]*)\)\s*\{[\s\S]*?var\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?<value>-?\d+L?);\s*[\s\S]*?\}"
+                parseFnParamsByLastToken
+                (fun m ->
+                    normalizeRecoveredExpr m.Groups.["value"].Value)
         collect
             (RegexOptions.Multiline ||| RegexOptions.Singleline)
             @"(?:(?:public|private|protected)\s+)?static\s+[A-Za-z0-9_<>,\[\]\.? ]+\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)(?:<[^>]+>)?\((?<params>[^\)]*)\)\s*\{[\s\S]*?return\s+(?<value>[^;]+);\s*\}"
@@ -2190,6 +2197,7 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
              @ ifElseIfElseBlockFns
              @ ifElseBlockFns
              @ ifReturnThenFallbackReturnFns
+             @ javaMainVoidWrapperFns
              @ plain)
             |> recoverCurriedArrowFns parseFnParamsByLastToken
             |> List.sortBy (fun d -> d.Index)

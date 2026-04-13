@@ -27,6 +27,9 @@ let private sampleFunctionSrc =
 let private sampleTraitHeavySrc =
     "module Demo\ntrait Show T =\n  show(x T) Str\nBox = MkBox Int\nimpl Show Box =\n  show(x Box) Str = \"box\"\nuseShow(x Box) Str = show x\nmain() Int = 0\n"
 
+let private sampleExternalMainSrc =
+    "module Demo\nexternal console_log(msg Str) Unit\nmain() Int = 0\n"
+
 [<Fact>]
 let ``reverse parser recovers numeric lets from all primary platform targets`` () =
     for target in [FSharp; TypeScript; Python; CSharp; LLVM] do
@@ -1038,6 +1041,8 @@ let ``reverse boomerang matrix keeps core source slices recompilable per target`
 
     for target in nonLlvmTargets do
         assertBoomerangRecompile target "trait_show_impl" sampleTraitHeavySrc ["show_Box("; "useShow("]
+
+    assertBoomerangRecompile Java "external_console_log_main" sampleExternalMainSrc ["main(args) = 0"]
 
 [<Fact>]
 let ``reverse parser normalizes plain TypeScript template literals into ll strings`` () =

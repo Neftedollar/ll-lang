@@ -4895,6 +4895,28 @@ Evidence:
 - `reverse parser normalizes plain TypeScript template literals into ll strings`
 - `reverse parser collapses duplicate numeric tail in FSharp entrypoint bodies`
 
+## Post-7.10 hardening — Java reverse main-wrapper recovery (DONE)
+
+Closed a Java-only reverse gap where modules with `external` declarations and
+literal-only `main` bodies could fail reverse recovery because the Java backend
+emits:
+
+- `public static void main(String[] args) { var _ll_unused = <expr>; }`
+
+while reverse previously only matched `return`-style static methods.
+
+Hardening applied:
+
+1. Java reverse parser now recovers a safe subset of the backend `void main`
+   wrapper by extracting numeric-literal `_ll_unused` payloads.
+2. Boomerang matrix now includes a Java `external + main` slice to keep this
+   path pinned.
+
+Evidence:
+
+- `reverse boomerang matrix keeps core source slices recompilable per target`
+  (case: `external_console_log_main`)
+
 ## Current state and next work
 
 Bootstrap self-hosting blocker chain from 7.10d → 7.10r is now closed
