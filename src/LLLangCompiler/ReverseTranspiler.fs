@@ -620,6 +620,100 @@ let private normalizeRecoveredExpr (raw: string) : string option =
         |> normalizeSome @"\bnew\s+(?:Maybe\.)?Some(?:<[^>]+>)?\s*\(\s*\((?<arg>[^)]*)\)\s*\)"
         |> normalizeSome @"\bnew\s+(?:Maybe\.)?Some(?:<[^>]+>)?\s*\(\s*(?<arg>[^)]*)\s*\)"
 
+    let normalizeHostMaybeMatchWrappers (s: string) : string =
+        let tryExtractSomeCondVar (condRaw: string) : string option =
+            let cond = condRaw.Trim()
+            let tryVar pattern =
+                let m = Regex.Match(cond, pattern, RegexOptions.CultureInvariant)
+                if m.Success then Some m.Groups.["var"].Value else None
+
+            tryVar @"^\(?\s*(?<var>[A-Za-z_][A-Za-z0-9_]*)\??\._tag\s*==\s*[`""]Some[`""]\s*\)?$"
+            |> Option.orElseWith (fun () -> tryVar @"^\(?\s*(?<var>[A-Za-z_][A-Za-z0-9_]*)\s+instanceof\s+(?:Maybe\.)?Some(?:<[^>]+>)?\s*\)?$")
+            |> Option.orElseWith (fun () -> tryVar @"^\(?\s*(?<var>[A-Za-z_][A-Za-z0-9_]*)\s+is\s+Some(?:<[^>]+>)?\s*\)?$")
+
+        let tryExtractSomePayloadBinder (scrut: string) (thenRaw: string) : string option =
+            let thenExpr = thenRaw.Trim()
+            let bindIfVarEq (v: string) =
+                if String.Equals(v, scrut, StringComparison.Ordinal) then
+                    Some "n"
+                else
+                    None
+
+            let mDirect = Regex.Match(thenExpr, @"^\(?\s*(?<var>[A-Za-z_][A-Za-z0-9_]*)\._0(?:\(\))?\s*\)?$")
+            if mDirect.Success then
+                bindIfVarEq mDirect.Groups.["var"].Value
+            else
+                let mCast = Regex.Match(thenExpr, @"^\(?\s*\(\([^)]+\)\s*(?<var>[A-Za-z_][A-Za-z0-9_]*)\)\._0(?:\(\))?\s*\)?$")
+                if mCast.Success then
+                    bindIfVarEq mCast.Groups.["var"].Value
+                else
+                    let mLambda =
+                        Regex.Match(
+                            thenExpr,
+                            @"^\(lambda\s+(?<n>[A-Za-z_][A-Za-z0-9_]*):\s*(?<ret>[A-Za-z_][A-Za-z0-9_]*)\)\(\s*(?<var>[A-Za-z_][A-Za-z0-9_]*)\._0\s*\)$")
+                    if mLambda.Success
+                        && String.Equals(mLambda.Groups.["n"].Value, mLambda.Groups.["ret"].Value, StringComparison.Ordinal)
+                        && String.Equals(mLambda.Groups.["var"].Value, scrut, StringComparison.Ordinal) then
+                        Some mLambda.Groups.["n"].Value
+                    else
+                        None
+
+        let tryBuildMaybeMatch (condRaw: string) (thenRaw: string) (elseRaw: string) : string option =
+            match tryExtractSomeCondVar condRaw with
+            | None -> None
+            | Some scrut ->
+                match tryExtractSomePayloadBinder scrut thenRaw with
+                | None -> None
+                | Some bind ->
+                    let elseExpr = elseRaw.Trim()
+                    if String.IsNullOrWhiteSpace elseExpr then
+                        None
+                    else
+                        Some (sprintf "match %s | Some(%s) -> %s | None -> %s" scrut bind bind elseExpr)
+
+        let tryNormalizeMultilineIf (input: string) : string option =
+            let m =
+                Regex.Match(
+                    input.Trim(),
+                    @"(?ms)^\s*if\s+(?<cond>[^\r\n]+)\s*\r?\n\s*(?<then>.+?)\s*\r?\n\s*else\s+(?<else>.+)\s*$",
+                    RegexOptions.CultureInvariant)
+            if m.Success then
+                tryBuildMaybeMatch m.Groups.["cond"].Value m.Groups.["then"].Value m.Groups.["else"].Value
+            else
+                None
+
+        let tryNormalizeTernary (input: string) : string option =
+            let m =
+                Regex.Match(
+                    input.Trim(),
+                    @"^\(?\s*(?<cond>.+?)\s*\?\s*(?<then>.+?)\s*:\s*(?<else>.+?)\s*\)?$",
+                    RegexOptions.Singleline ||| RegexOptions.CultureInvariant)
+            if m.Success then
+                tryBuildMaybeMatch m.Groups.["cond"].Value m.Groups.["then"].Value m.Groups.["else"].Value
+            else
+                None
+
+        let tryNormalizePythonTernary (input: string) : string option =
+            let m =
+                Regex.Match(
+                    input.Trim(),
+                    @"^\(?\s*(?<then>.+?)\s+if\s+(?<cond>.+?)\s+else\s+(?<else>.+?)\s*\)?$",
+                    RegexOptions.Singleline ||| RegexOptions.CultureInvariant)
+            if m.Success then
+                tryBuildMaybeMatch m.Groups.["cond"].Value m.Groups.["then"].Value m.Groups.["else"].Value
+            else
+                None
+
+        match tryNormalizeMultilineIf s with
+        | Some normalized -> normalized
+        | None ->
+            match tryNormalizeTernary s with
+            | Some normalized -> normalized
+            | None ->
+                match tryNormalizePythonTernary s with
+                | Some normalized -> normalized
+                | None -> s
+
     let normalizePythonIntDiv (s: string) : string =
         let sb = System.Text.StringBuilder(s.Length)
         let mutable i = 0
@@ -1194,6 +1288,7 @@ let private normalizeRecoveredExpr (raw: string) : string option =
         |> stripHostCastWrappers
         |> normalizeHostConsoleWrappers
         |> normalizeHostMaybeConstructors
+        |> normalizeHostMaybeMatchWrappers
         |> normalizePythonIntDiv
     let v1 = normalizeCore v0b
     let v2 = Regex.Replace(v1, @"\b(-?\d+)L\b", "$1")
@@ -1974,6 +2069,24 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
                         m.Groups.["cond2"].Value
                         m.Groups.["then2"].Value
                         m.Groups.["elseValue"].Value)
+        let tsMatchIifeFns =
+            collect
+                (RegexOptions.Multiline ||| RegexOptions.Singleline)
+                @"(?ms)^\s*(?:export\s+)?const\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*\((?<params>[^)]*)\)\s*=>\s*\(\(\)\s*=>\s*\{\s*if\s*\(\s*(?<var>[A-Za-z_][A-Za-z0-9_]*)\?\._tag\s*===\s*[`""]Some[`""]\s*\)\s*\{\s*const\s+(?<bind>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*[^;]+;\s*return\s+(?<ret>[A-Za-z_][A-Za-z0-9_]*)\s*;\s*\}\s*if\s*\(\s*(?<var2>[A-Za-z_][A-Za-z0-9_]*)\?\._tag\s*===\s*[`""]None[`""]\s*\)\s*\{\s*return\s+(?<noneRet>[^\r\n;]+)\s*;\s*\}\s*throw\s+new\s+Error\([^\)]*\)\s*;\s*\}\)\(\)\s*;\s*$"
+                parseFnParamsByColonPrefix
+                (fun m ->
+                    let var1 = m.Groups.["var"].Value.Trim()
+                    let var2 = m.Groups.["var2"].Value.Trim()
+                    let bind = m.Groups.["bind"].Value.Trim()
+                    let ret = m.Groups.["ret"].Value.Trim()
+                    let noneRet = m.Groups.["noneRet"].Value.Trim()
+                    if String.IsNullOrWhiteSpace var1
+                       || not (String.Equals(var1, var2, StringComparison.Ordinal))
+                       || not (String.Equals(bind, ret, StringComparison.Ordinal))
+                       || String.IsNullOrWhiteSpace noneRet then
+                        None
+                    else
+                        Some (sprintf "match %s | Some(%s) -> %s | None -> %s" var1 bind ret noneRet))
         let arrowFns =
             collect
                 RegexOptions.Multiline
@@ -2006,6 +2119,7 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
          @ ifElseArrowBlockFns
          @ ifReturnThenFallbackReturnFns
          @ ifReturnThenFallbackReturnArrowFns
+         @ tsMatchIifeFns
          @ arrowFns
          @ arrowSingleParamFns
          @ arrowBlockFns
