@@ -601,6 +601,56 @@ let private normalizeRecoveredExpr (raw: string) : string option =
         |> toPrint @"\bconsole\.log\(\s*(?<arg>[^()]*)\s*\)"
         |> toPrint @"\bSystem\.out\.println\(\s*(?<arg>[^()]*)\s*\)"
 
+    let normalizeHostMaybeConstructors (s: string) : string =
+        let normalizeSome pattern (input: string) =
+            Regex.Replace(
+                input,
+                pattern,
+                MatchEvaluator(fun (m: Match) ->
+                    let arg = m.Groups.["arg"].Value.Trim()
+                    if String.IsNullOrWhiteSpace arg then
+                        m.Value
+                    else
+                        "Some (" + arg + ")"
+                )
+            )
+
+        s
+        |> fun x -> Regex.Replace(x, @"\bnew\s+(?:Maybe\.)?None(?:<[^>]+>)?\s*\(\s*\)", "None")
+        |> normalizeSome @"\bnew\s+(?:Maybe\.)?Some(?:<[^>]+>)?\s*\(\s*\((?<arg>[^)]*)\)\s*\)"
+        |> normalizeSome @"\bnew\s+(?:Maybe\.)?Some(?:<[^>]+>)?\s*\(\s*(?<arg>[^)]*)\s*\)"
+
+    let normalizePythonIntDiv (s: string) : string =
+        let sb = System.Text.StringBuilder(s.Length)
+        let mutable i = 0
+        let mutable inString = false
+        let mutable quote = '\000'
+        let mutable escaped = false
+        while i < s.Length do
+            let c = s.[i]
+            if inString then
+                sb.Append(c) |> ignore
+                if escaped then
+                    escaped <- false
+                elif c = '\\' then
+                    escaped <- true
+                elif c = quote then
+                    inString <- false
+                i <- i + 1
+            else
+                if c = '"' || c = '\'' || c = '`' then
+                    inString <- true
+                    quote <- c
+                    sb.Append(c) |> ignore
+                    i <- i + 1
+                elif i + 1 < s.Length && s.[i] = '/' && s.[i + 1] = '/' then
+                    sb.Append('/') |> ignore
+                    i <- i + 2
+                else
+                    sb.Append(c) |> ignore
+                    i <- i + 1
+        sb.ToString()
+
     let hasBalancedOuterParens (s: string) : bool =
         if String.IsNullOrWhiteSpace s || not (s.StartsWith("(") && s.EndsWith(")")) then
             false
@@ -1139,7 +1189,12 @@ let private normalizeRecoveredExpr (raw: string) : string option =
         |> stripTrailingStandaloneExitCode
         |> collapseLeadingDuplicateNumericLine
         |> fun s -> s.Trim().TrimEnd(';').Trim()
-    let v0b = v0 |> stripHostCastWrappers |> normalizeHostConsoleWrappers
+    let v0b =
+        v0
+        |> stripHostCastWrappers
+        |> normalizeHostConsoleWrappers
+        |> normalizeHostMaybeConstructors
+        |> normalizePythonIntDiv
     let v1 = normalizeCore v0b
     let v2 = Regex.Replace(v1, @"\b(-?\d+)L\b", "$1")
     let v3 =
@@ -2287,8 +2342,26 @@ let private renderFunctionDecl (fnDecl: ReverseFn) : string =
 
 let reverseToLll (target: Target) (src: string) : Result<string, string> =
     let moduleName = inferModuleName target src
-    let typeDecls = parseTypeDecls target src
+    let typeDeclsRaw = parseTypeDecls target src
     let decls = parseDecls target src
+    let fnsRaw = parseFunctions target src
+    let hasCtorMarker (text: string) =
+        Regex.IsMatch(text, @"\b(Some|None)\b")
+    let hasMaybeCtors =
+        decls |> List.exists (fun d -> hasCtorMarker d.Value)
+        || fnsRaw |> List.exists (fun f -> hasCtorMarker f.Body)
+    let hasMaybeType =
+        typeDeclsRaw
+        |> List.exists (fun t -> String.Equals(t.Name, "Maybe", StringComparison.Ordinal))
+    let synthesizedMaybeTypeDecl =
+        if hasMaybeCtors && not hasMaybeType then
+            [ { Index = Int32.MinValue; Name = "Maybe"; Body = "Maybe A = Some A | None" } ]
+        else
+            []
+    let typeDecls =
+        synthesizedMaybeTypeDecl @ typeDeclsRaw
+        |> List.sortBy (fun d -> d.Index)
+        |> dedupeTypes
     let declNames =
         decls
         |> List.map (fun d -> d.Name)
@@ -2298,7 +2371,7 @@ let reverseToLll (target: Target) (src: string) : Result<string, string> =
         |> List.map (fun d -> d.Name)
         |> Set.ofList
     let fns =
-        parseFunctions target src
+        fnsRaw
         |> List.filter (fun f -> not (Set.contains f.Name declNames) && not (Set.contains f.Name typeNames))
     if List.isEmpty typeDecls && List.isEmpty decls && List.isEmpty fns then
         Error $"reverse parser ({target}) could not recover type declarations, let-bindings, or function declarations"

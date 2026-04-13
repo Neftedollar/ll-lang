@@ -33,6 +33,9 @@ let private sampleExternalMainSrc =
 let private sampleMainOnlySrc =
     "module Demo\nmain() Int = 0\n"
 
+let private sampleMaybeCtorSrc =
+    "module Demo\nMaybe A = Some A | None\nsafeDiv(x Int)(y Int) Maybe[Int] = if y == 0\n  None\nelse Some (x / y)\nmain() Int = 0\n"
+
 [<Fact>]
 let ``reverse parser recovers numeric lets from all primary platform targets`` () =
     for target in [FSharp; TypeScript; Python; CSharp; LLVM] do
@@ -1048,6 +1051,9 @@ let ``reverse boomerang matrix keeps core source slices recompilable per target`
     for target in nonLlvmTargets do
         assertBoomerangRecompile target "external_console_log_main" sampleExternalMainSrc ["console_log("]
 
+    for target in nonLlvmTargets do
+        assertBoomerangRecompile target "maybe_ctor_if" sampleMaybeCtorSrc ["safeDiv("]
+
     assertBoomerangRecompile LLVM "main_i32_wrapper" sampleMainOnlySrc ["main("]
 
 [<Fact>]
@@ -1105,6 +1111,50 @@ let ``reverse parser recovers Java external wrapper and literal main wrapper`` (
     match parseModuleWithPos reversed with
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for Java wrapper recovery: {e}\n{reversed}")
+
+[<Fact>]
+let ``reverse parser normalizes host Maybe constructor wrappers across OO backends`` () =
+    let javaSrc = """
+public class Demo {
+    public static Object safeDiv(long x, long y) {
+        if (y == 0L) return new Maybe.None();
+        return new Maybe.Some((x / y));
+    }
+}
+"""
+    let csSrc = """
+public static class Demo {
+    public static object safeDiv(long x, long y) {
+        if (y == 0L) return new None<long>();
+        return new Some<long>((x / y));
+    }
+}
+"""
+    let pySrc = """
+def safeDiv(x: int, y: int):
+    if y == 0:
+        return None
+    return Some((x // y))
+"""
+
+    let javaRev =
+        match reverseToLll Java javaSrc with
+        | Ok l -> l
+        | Error msg -> Assert.Fail($"reverseToLll Java failed: {msg}"); ""
+    let csRev =
+        match reverseToLll CSharp csSrc with
+        | Ok l -> l
+        | Error msg -> Assert.Fail($"reverseToLll CSharp failed: {msg}"); ""
+    let pyRev =
+        match reverseToLll Python pySrc with
+        | Ok l -> l
+        | Error msg -> Assert.Fail($"reverseToLll Python failed: {msg}"); ""
+
+    for reversed in [javaRev; csRev; pyRev] do
+        Assert.Contains("Maybe A = Some A | None", reversed)
+        Assert.DoesNotContain("new Maybe.None", reversed)
+        Assert.DoesNotContain("new None<", reversed)
+        Assert.DoesNotContain("//", reversed)
 
 [<Fact>]
 let ``reverse parser strips host-only checked and cast wrappers in CSharp expressions`` () =

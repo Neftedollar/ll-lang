@@ -4952,6 +4952,27 @@ Evidence:
 - `reverse boomerang matrix keeps core source slices recompilable per target`
   (case: `main_i32_wrapper` on LLVM)
 
+## Post-7.10 hardening — ADT constructor reverse normalization (DONE)
+
+Closed a cross-backend reverse drift for ADT constructor emissions in OO /
+dynamic targets where generated host code used backend-native wrappers:
+
+- `new Maybe.None()` / `new None<T>()` / `new Maybe.Some(...)` /
+  `new Some<T>(...)` are normalized back to ll constructors
+  (`None`, `Some (...)`).
+- Python integer division emitted as `//` in host code is normalized back to
+  ll `/` in recovered expressions.
+- When recovered declarations/functions use `Some`/`None` but target reverse
+  cannot recover a concrete type declaration, reverse now synthesizes the
+  canonical fallback:
+  `Maybe A = Some A | None`
+
+Evidence:
+
+- `reverse boomerang matrix keeps core source slices recompilable per target`
+  (case: `maybe_ctor_if` across non-LLVM targets)
+- `reverse parser normalizes host Maybe constructor wrappers across OO backends`
+
 ## Current state and next work
 
 Bootstrap self-hosting blocker chain from 7.10d → 7.10r is now closed
