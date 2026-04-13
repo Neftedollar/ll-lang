@@ -175,6 +175,49 @@ let ``20-bootstrap-compiler.lll actually reads its source from 20a-bootstrap-inp
             File.Move(backupPath, inputPath, true)
 
 [<Fact>]
+let ``20-bootstrap-compiler.lll can self-compile its own source fixture and emit core pipeline markers`` () =
+    // Self-hosting parity smoke:
+    // run bootstrap compiler with its OWN source as input fixture.
+    // This is intentionally a structural guard (not byte-equality):
+    // if parser/elaborator/codegen regresses, the emitted output will
+    // usually lose one of these core markers long before finer-grained
+    // parity checks are inspected.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let bootstrapSourcePath =
+        Path.Combine(repoRoot, "spec/examples/valid/20-bootstrap-compiler.lll")
+    let backupPath = inputPath + ".bak"
+    use _lock = fixtureLockLease ()
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists bootstrapSourcePath, $"missing source: {bootstrapSourcePath}")
+    File.Move(inputPath, backupPath, true)
+    File.Copy(bootstrapSourcePath, inputPath)
+    try
+        let (exitCode, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.True((exitCode = 0), $"expected self-compile run to succeed; exit={exitCode}\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        Assert.DoesNotContain("readFile failed:", combined)
+        Assert.Contains("[<EntryPoint>]", stdout)
+        // Core parser/elaborator/codegen pipeline markers expected in
+        // compiler output compiled from the bootstrap source itself.
+        Assert.True(
+            stdout.Contains "let rec parseFnDecl" || stdout.Contains "and parseFnDecl",
+            $"expected emitted output to contain parseFnDecl marker; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec parseFnBody" || stdout.Contains "and parseFnBody",
+            $"expected emitted output to contain parseFnBody marker; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec parseExpr" || stdout.Contains "and parseExpr",
+            $"expected emitted output to contain parseExpr marker; stdout:\n{combined}")
+        Assert.True(
+            stdout.Contains "let rec emitPrelude" || stdout.Contains "and emitPrelude",
+            $"expected emitted output to contain emitPrelude marker; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete(inputPath)
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath, true)
+
+[<Fact>]
 let ``20-bootstrap-compiler.lll accepts stdlib builtin strConcat in fn body (Phase 7.9e)`` () =
     // Phase 7.9e: before the fix, `elaborate` started with an empty
     // `MkEnv []` env, so any fn body that called a stdlib builtin like
