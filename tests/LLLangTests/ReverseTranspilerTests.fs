@@ -1018,11 +1018,10 @@ let private assertBoomerangRecompile
 [<Fact>]
 let ``reverse boomerang matrix keeps core source slices recompilable per target`` () =
     let allTargets = [FSharp; TypeScript; Python; Java; CSharp; LLVM]
-    let arithRoundTripTargets = [FSharp; TypeScript; Python; Java; LLVM]
     let nonLlvmTargets = [FSharp; TypeScript; Python; Java; CSharp]
     let typedTargets = [FSharp; Java; CSharp; LLVM]
 
-    for target in arithRoundTripTargets do
+    for target in allTargets do
         assertBoomerangRecompile target "arith_fn" sampleFunctionSrc ["inc("]
 
     for target in allTargets do
@@ -1033,3 +1032,30 @@ let ``reverse boomerang matrix keeps core source slices recompilable per target`
 
     for target in typedTargets do
         assertBoomerangRecompile target "char_lets" sampleSrcWithChars ["let initial = 'N'"]
+
+[<Fact>]
+let ``reverse parser strips host-only checked and cast wrappers in CSharp expressions`` () =
+    let csSrc = """
+public static class Demo {
+    public static long inc(long x) {
+        return x + 1L;
+    }
+
+    public static long main(string[] args) {
+        return unchecked((int)(inc(41)));
+    }
+}
+"""
+    let reversed =
+        match reverseToLll CSharp csSrc with
+        | Ok lll -> lll
+        | Error msg -> Assert.Fail($"reverseToLll CSharp failed: {msg}"); ""
+
+    Assert.Contains("inc(", reversed)
+    Assert.Matches(@"main\(args\)\s*=\s*inc\s*(?:\(\s*41\s*\)|41)", reversed)
+    Assert.DoesNotContain("unchecked", reversed, StringComparison.OrdinalIgnoreCase)
+    Assert.DoesNotContain("(int)", reversed)
+
+    match parseModuleWithPos reversed with
+    | Ok _ -> ()
+    | Error e -> Assert.Fail($"reverse output parse failed for C# cast wrapper stripping: {e}\n{reversed}")

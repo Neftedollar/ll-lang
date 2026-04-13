@@ -4811,19 +4811,20 @@ asserts this contract for core source slices on every supported backend:
 
 Matrix coverage:
 
-- arithmetic fn slice on recoverable targets (`FSharp`, `TypeScript`,
-  `Python`, `Java`, `LLVM`): `sampleFunctionSrc`
 - all targets (`FSharp`, `TypeScript`, `Python`, `Java`, `CSharp`, `LLVM`):
+  - arithmetic fn slice (`sampleFunctionSrc`)
   - float literal lets (`sampleSrcWithFloats`)
 - non-LLVM targets:
   - bool/string lets (`sampleSrcWithBoolsAndStrings`)
 - typed targets (`FSharp`, `Java`, `CSharp`, `LLVM`):
   - char literal lets (`sampleSrcWithChars`)
 
-Current known drift (explicitly documented): C# reverse for some arithmetic
-function shapes can emit host-specific cast wrappers (`unchecked((int)... )`)
-that are not yet normalized to ll-lang surface syntax. This is tracked as
-follow-up normalization work, not a regression in existing covered slices.
+Additional guard:
+
+- C# reverse now strips host-only wrappers (`checked` / `unchecked` and
+  primitive cast prefixes like `(int)`), validated by a dedicated regression
+  test:
+  `reverse parser strips host-only checked and cast wrappers in CSharp expressions`
 
 Evidence:
 
@@ -4837,5 +4838,4 @@ and guarded by regression tests. The next iterations should focus on:
 
 1. tightening fixpoint parity checks (structure + formatting + diagnostics)
 2. reducing bootstrap/host behavioural drift in corner-case parser recovery
-3. normalizing reverse output to strip host-only cast wrappers before boomerang compile (C# drift)
-4. expanding boomerang parity from core slices to richer ADT/trait/FFI-heavy cases
+3. expanding boomerang parity from core slices to richer ADT/trait/FFI-heavy cases

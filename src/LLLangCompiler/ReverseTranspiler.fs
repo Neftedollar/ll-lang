@@ -301,6 +301,50 @@ let private normalizeRecoveredExpr (raw: string) : string option =
                 i <- i + 1
             if found >= 0 then Some found else None
 
+    let rec stripHostCastWrappers (raw: string) : string =
+        let t = raw.Trim()
+        let tryStripCheckedUnchecked (input: string) : string option =
+            let stripWrapper (name: string) =
+                if input.StartsWith(name, StringComparison.Ordinal) then
+                    let openIdx = name.Length
+                    if openIdx < input.Length && input.[openIdx] = '(' then
+                        match findMatchingParenAt input openIdx with
+                        | Some closeIdx when closeIdx = input.Length - 1 ->
+                            Some (input.Substring(openIdx + 1, closeIdx - openIdx - 1).Trim())
+                        | _ -> None
+                    else
+                        None
+                else
+                    None
+            match stripWrapper "unchecked" with
+            | Some inner -> Some inner
+            | None -> stripWrapper "checked"
+
+        let tryStripPrimitiveCast (input: string) : string option =
+            let m =
+                Regex.Match(
+                    input,
+                    @"^\(\s*(?<ty>sbyte|byte|short|ushort|int|uint|long|ulong|float|double|decimal|bool|char|string|Int16|Int32|Int64|UInt16|UInt32|UInt64|Single|Double|Decimal|Boolean|Char|String)\s*\)\s*(?<rest>.+)$",
+                    RegexOptions.CultureInvariant
+                )
+            if m.Success then
+                Some (m.Groups.["rest"].Value.Trim())
+            else
+                None
+
+        let t1 =
+            match tryStripCheckedUnchecked t with
+            | Some inner when not (String.IsNullOrWhiteSpace inner) -> inner
+            | _ -> t
+        let t2 =
+            match tryStripPrimitiveCast t1 with
+            | Some inner when not (String.IsNullOrWhiteSpace inner) -> inner
+            | _ -> t1
+        if StringComparer.Ordinal.Equals(t2, t) then
+            t
+        else
+            stripHostCastWrappers t2
+
     let splitTopLevelCommaArgs (s: string) : string list =
         let parts = ResizeArray<string>()
         let mutable start = 0
@@ -1042,7 +1086,8 @@ let private normalizeRecoveredExpr (raw: string) : string option =
             Some (String.concat "\n" (bindingLines @ [finalExpr]))
 
     let v0 = raw |> stripTrailingStandaloneExitCode |> fun s -> s.Trim().TrimEnd(';').Trim()
-    let v1 = normalizeCore v0
+    let v0b = stripHostCastWrappers v0
+    let v1 = normalizeCore v0b
     let v2 = Regex.Replace(v1, @"\b(-?\d+)L\b", "$1")
     let v3 =
         v2
