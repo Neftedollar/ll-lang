@@ -1,3 +1,4 @@
+[<Xunit.Collection("Bootstrap Fixture Serial")>]
 module LLLang.Tests.BootstrapCompilerTests
 
 open System.IO

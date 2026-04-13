@@ -40,6 +40,7 @@
     <Compile Include="PipelineRealTests.fs" />
     <Compile Include="HMInferRealTests.fs" />
     <Compile Include="CodegenRealTests.fs" />
+    <Compile Include="BootstrapTestCollections.fs" />
     <Compile Include="BootstrapCompilerTests.fs" />
     <Compile Include="ModuleSystemTests.fs" />
     <Compile Include="PlatformTests.fs" />
