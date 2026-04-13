@@ -4799,6 +4799,37 @@ Evidence:
 - `20-bootstrap-compiler.lll emits TError for unknown chars instead of silently dropping (Bug #7)`
 - `20-bootstrap-compiler.lll lexCharLit and lexCharEsc return TEnd at EOF instead of empty list (Bug #14)`
 
+## Post-7.10 hardening — reverse/transpile boomerang parity matrix (DONE)
+
+Cross-target boomerang parity is now pinned by a dedicated matrix test that
+asserts this contract for core source slices on every supported backend:
+
+1. `compileTarget target src` succeeds
+2. `reverseToLll target emitted` succeeds
+3. reversed source parses (`parseModuleWithPos`)
+4. `compileTarget target reversed` succeeds on the same backend
+
+Matrix coverage:
+
+- arithmetic fn slice on recoverable targets (`FSharp`, `TypeScript`,
+  `Python`, `Java`, `LLVM`): `sampleFunctionSrc`
+- all targets (`FSharp`, `TypeScript`, `Python`, `Java`, `CSharp`, `LLVM`):
+  - float literal lets (`sampleSrcWithFloats`)
+- non-LLVM targets:
+  - bool/string lets (`sampleSrcWithBoolsAndStrings`)
+- typed targets (`FSharp`, `Java`, `CSharp`, `LLVM`):
+  - char literal lets (`sampleSrcWithChars`)
+
+Current known drift (explicitly documented): C# reverse for some arithmetic
+function shapes can emit host-specific cast wrappers (`unchecked((int)... )`)
+that are not yet normalized to ll-lang surface syntax. This is tracked as
+follow-up normalization work, not a regression in existing covered slices.
+
+Evidence:
+
+- `reverse boomerang matrix keeps core source slices recompilable per target`
+  in `tests/LLLangTests/ReverseTranspilerTests.fs`
+
 ## Current state and next work
 
 Bootstrap self-hosting blocker chain from 7.10d → 7.10r is now closed
@@ -4806,4 +4837,5 @@ and guarded by regression tests. The next iterations should focus on:
 
 1. tightening fixpoint parity checks (structure + formatting + diagnostics)
 2. reducing bootstrap/host behavioural drift in corner-case parser recovery
-3. extending parity harnesses to reverse/transpile round-trips for target backends
+3. normalizing reverse output to strip host-only cast wrappers before boomerang compile (C# drift)
+4. expanding boomerang parity from core slices to richer ADT/trait/FFI-heavy cases

@@ -978,3 +978,58 @@ let ``lllc reverse command supports Platform.*.SDK aliases`` () =
         Assert.Contains("let name = \"Neo\"", outText)
     finally
         try Directory.Delete(tempDir, true) with _ -> ()
+
+let private assertBoomerangRecompile
+    (target: Target)
+    (caseName: string)
+    (src: string)
+    (expectedFragments: string list)
+    : unit =
+    let emitted =
+        match compileTarget target src with
+        | Ok code -> code
+        | Error es ->
+            Assert.Fail($"compileTarget {target} failed for {caseName}: {es}")
+            ""
+
+    let reversed =
+        match reverseToLll target emitted with
+        | Ok lll -> lll
+        | Error msg ->
+            Assert.Fail($"reverseToLll {target} failed for {caseName}: {msg}")
+            ""
+
+    for fragment in expectedFragments do
+        Assert.Contains(fragment, reversed)
+
+    match parseModuleWithPos reversed with
+    | Ok _ -> ()
+    | Error e ->
+        Assert.Fail($"reverse output parse failed for {target} ({caseName}): {e}\n{reversed}")
+
+    match compileTarget target reversed with
+    | Ok roundTrip ->
+        Assert.False(
+            String.IsNullOrWhiteSpace(roundTrip),
+            $"round-trip compile produced empty output for {target} ({caseName})")
+    | Error es ->
+        Assert.Fail($"round-trip compile failed for {target} ({caseName}): {es}\nreversed:\n{reversed}")
+
+[<Fact>]
+let ``reverse boomerang matrix keeps core source slices recompilable per target`` () =
+    let allTargets = [FSharp; TypeScript; Python; Java; CSharp; LLVM]
+    let arithRoundTripTargets = [FSharp; TypeScript; Python; Java; LLVM]
+    let nonLlvmTargets = [FSharp; TypeScript; Python; Java; CSharp]
+    let typedTargets = [FSharp; Java; CSharp; LLVM]
+
+    for target in arithRoundTripTargets do
+        assertBoomerangRecompile target "arith_fn" sampleFunctionSrc ["inc("]
+
+    for target in allTargets do
+        assertBoomerangRecompile target "float_lets" sampleSrcWithFloats ["let pi = 3.5"; "let ratio = -0.125"]
+
+    for target in nonLlvmTargets do
+        assertBoomerangRecompile target "bool_and_string_lets" sampleSrcWithBoolsAndStrings ["let ok = true"; "let name = \"Neo\""]
+
+    for target in typedTargets do
+        assertBoomerangRecompile target "char_lets" sampleSrcWithChars ["let initial = 'N'"]
