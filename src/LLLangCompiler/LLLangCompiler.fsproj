@@ -4,8 +4,6 @@
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>preview</LangVersion>
     <Nullable>enable</Nullable>
-    <!-- FS3261 is currently too noisy on .NET/F# preview nullability interop. -->
-    <NoWarn>$(NoWarn);FS3261</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Token.fs" />

@@ -353,7 +353,7 @@ All 10 phases complete. Upcoming work:
 - **Language quality** — structured `LLError` fields, lexer error recovery, parser module split
 - **Stdlib expansion** — more string/list/IO builtins, async IO primitives
 - **Package registry** — `lllc install` with a central package index
-- **LLVM / WASM target** — native executables
+- **LLVM parity + WASM target** — close remaining LLVM feature gaps, then native executables
 - **Language server** — LSP hover, go-to-definition, inline errors
 
 ## Design Philosophy

@@ -1,6 +1,6 @@
 # Compilation Targets
 
-ll-lang supports multiple output targets. The same source compiles to F#, TypeScript, Python, Java, C#, or LLVM IR.
+ll-lang supports multiple output targets. The same source compiles to F#, TypeScript, Python, Java, C#, or LLVM IR (subset backend).
 
 ## Selecting a Target
 

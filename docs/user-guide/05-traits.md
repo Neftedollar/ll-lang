@@ -92,19 +92,13 @@ impl Monad Maybe =
 fn transform[F: Functor](xs F[A])(f A->B) F[B] = map f xs
 ```
 
-## Known limitations in the current phase
+## Current limits
 
-The trait dispatch machinery in `HMInfer.fs` generalizes over rigid type vars
-correctly, and emits mangled impl method names in codegen. However:
+Trait calls are resolved automatically in the current compiler (including
+constrained generic call sites), and unresolved or ambiguous instances produce
+`E006 MissingImpl`.
 
-- There is no automatic instance resolution at call sites yet. If you write
-  `map (\x. x * 2) (Some 5)` the compiler does not automatically pick
-  `Maybe_map` — you must call `Maybe_map` by its mangled name, or use a
-  constrained generic like `transform`.
-- `E006 MissingImpl` fires when a constrained generic is instantiated at a
-  type that has no matching `impl`, but the constraint check is conservative.
-- No superclass relations (`trait Monad F : Functor F`). A `Monad` impl is
-  independent of its `Functor` impl in the current compiler.
+Remaining limitations:
 
-The `04-traits.lll` corpus file type-checks and compiles but does not yet
-exercise end-to-end dispatch at runtime.
+- No superclass relations (`trait Monad F : Functor F`) in trait declarations.
+- No default method bodies inside trait declarations.

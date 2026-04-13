@@ -19,7 +19,7 @@ jobs:
         run: ./tools/check-doc-contract.sh
         working-directory: .
       - name: Build
-        run: dotnet build
+        run: dotnet build --nologo -warnaserror
         working-directory: .
       - name: Test
         run: dotnet test --no-build --verbosity normal

@@ -18,7 +18,7 @@ The table:
 | `E004` | UnitMismatch        | Two numeric tags have the same base but different units |
 | `E005` | TagViolation        | Untagged value passed where tag required     |
 | `E006` | MissingImpl         | No `impl` found for a constrained type       |
-| `E007` | PlatformMismatch    | Platform module unavailable on target (reserved) |
+| `E007` | PlatformMismatch    | Platform module unavailable on selected target |
 | `E008` | InfiniteType        | Unification would produce an infinite type (occurs check) |
 | `E026` | UnknownExternalMapping | Unknown external declaration for selected target |
 
@@ -162,12 +162,18 @@ E006 MissingImpl Functor for Box
 **Fix:** add `impl Functor Box = fn map ... = ...` or call `doubled` with
 a type that already has an impl (e.g. `Maybe`).
 
-## E007 — PlatformMismatch (reserved)
+## E007 — PlatformMismatch
 
-Fires when a `Platform.*` module is imported on a target that doesn't
-implement it. The code is reserved in `spec/error-codes.md` but
-`Platform.*` is not implemented in the current phase, so this error is
-not emitted in practice.
+Fires when a `Platform.*` module is imported but the selected target does
+not support that module surface.
+
+**Compact output example:**
+```
+E007 2:1 PlatformMismatch module:Platform.DotNet.ASP target:python
+```
+
+**Fix:** switch to a target that supports the imported module, or remove the
+platform-specific import.
 
 ## E008 — InfiniteType
 
