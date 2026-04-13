@@ -82,6 +82,20 @@ let private runBootstrap () =
     let stderr = stderrTask.Result
     (proc.ExitCode, stdout, stderr)
 
+let private normalizeNewlines (s: string) =
+    s.Replace("\r\n", "\n").Replace("\r", "\n")
+
+let private firstDiffLine (expected: string) (actual: string) =
+    let exp = normalizeNewlines expected |> fun s -> s.Split('\n')
+    let act = normalizeNewlines actual |> fun s -> s.Split('\n')
+    let minLen = min exp.Length act.Length
+    let rec loop i =
+        if i >= minLen then
+            if exp.Length = act.Length then None else Some i
+        elif exp.[i] = act.[i] then loop (i + 1)
+        else Some i
+    loop 0
+
 /// Run `f` while holding the named mutex that guards the shared bootstrap
 /// fixture file. Times out after 30 s — enough for any normal test run.
 let private withFixtureLock (f: unit -> unit) =
@@ -212,6 +226,45 @@ let ``20-bootstrap-compiler.lll can self-compile its own source fixture and emit
         Assert.True(
             stdout.Contains "let rec emitPrelude" || stdout.Contains "and emitPrelude",
             $"expected emitted output to contain emitPrelude marker; stdout:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete(inputPath)
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath, true)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll self-compile output matches fixpoint snapshot compiler1-latest.fs`` () =
+    // Strict fixpoint regression gate:
+    // compiler output produced from bootstrap source must match the
+    // canonical snapshot checked into docs/compiler-dev/fixpoint-snapshots.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let bootstrapSourcePath =
+        Path.Combine(repoRoot, "spec/examples/valid/20-bootstrap-compiler.lll")
+    let snapshotPath =
+        Path.Combine(repoRoot, "docs/compiler-dev/fixpoint-snapshots/compiler1-latest.fs")
+    let backupPath = inputPath + ".bak"
+    use _lock = fixtureLockLease ()
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists bootstrapSourcePath, $"missing source: {bootstrapSourcePath}")
+    Assert.True(File.Exists(snapshotPath), $"missing snapshot: {snapshotPath}")
+    File.Move(inputPath, backupPath, true)
+    File.Copy(bootstrapSourcePath, inputPath)
+    try
+        let (exitCode, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.True((exitCode = 0), $"expected self-compile run to succeed; exit={exitCode}\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        let expected = File.ReadAllText(snapshotPath)
+        let expectedN = normalizeNewlines expected
+        let actualN = normalizeNewlines stdout
+        if expectedN <> actualN then
+            let diffLine = firstDiffLine expectedN actualN |> Option.defaultValue 0
+            let expLines = expectedN.Split('\n')
+            let actLines = actualN.Split('\n')
+            let expLine = if diffLine < expLines.Length then expLines.[diffLine] else "<EOF>"
+            let actLine = if diffLine < actLines.Length then actLines.[diffLine] else "<EOF>"
+            Assert.True(
+                false,
+                $"fixpoint snapshot mismatch at line {diffLine + 1}\nexpected: {expLine}\nactual:   {actLine}\nstdout bytes={actualN.Length} expected bytes={expectedN.Length}\ncombined:\n{combined}")
     finally
         if File.Exists inputPath then File.Delete(inputPath)
         if File.Exists backupPath then
