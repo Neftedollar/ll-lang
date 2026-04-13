@@ -1,6 +1,7 @@
 module LLLang.Tests.BootstrapCompilerTests
 
 open System.IO
+open System.Text.RegularExpressions
 open Xunit
 
 /// Named mutex that serialises access to the shared bootstrap fixture file
@@ -115,6 +116,9 @@ let private firstDiffLine (expected: string) (actual: string) =
         elif exp.[i] = act.[i] then loop (i + 1)
         else Some i
     loop 0
+
+let private countRegex (pattern: string) (input: string) : int =
+    Regex.Matches(input, pattern, RegexOptions.Multiline ||| RegexOptions.CultureInvariant).Count
 
 /// Run `f` while holding the named mutex that guards the shared bootstrap
 /// fixture file. Times out after 30 s — enough for any normal test run.
@@ -285,6 +289,73 @@ let ``20-bootstrap-compiler.lll self-compile output matches fixpoint snapshot co
             Assert.True(
                 false,
                 $"fixpoint snapshot mismatch at line {diffLine + 1}\nexpected: {expLine}\nactual:   {actLine}\nstdout bytes={actualN.Length} expected bytes={expectedN.Length}\ncombined:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete(inputPath)
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath, true)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll self-compile output satisfies structural fixpoint metrics contract`` () =
+    // Independent contract over the emitted compiler text shape.
+    // This guards accidental snapshot churn that preserves superficial
+    // behaviour but changes fixpoint structure/formatting.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let bootstrapSourcePath =
+        Path.Combine(repoRoot, "spec/examples/valid/20-bootstrap-compiler.lll")
+    let backupPath = inputPath + ".bak"
+    use _lock = fixtureLockLease ()
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    Assert.True(File.Exists bootstrapSourcePath, $"missing source: {bootstrapSourcePath}")
+    File.Move(inputPath, backupPath, true)
+    File.Copy(bootstrapSourcePath, inputPath)
+    try
+        let (exitCode, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.True((exitCode = 0), $"expected self-compile run to succeed; exit={exitCode}\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        let normalized = normalizeNewlines stdout
+        let lineCount = normalized.Split('\n').Length - 1
+        let byteCount = normalized.Length
+        let letCount = countRegex @"^let " normalized
+        let andCount = countRegex @"^and " normalized
+
+        Assert.Equal(602, lineCount)
+        Assert.Equal(56438, byteCount)
+        Assert.Equal(24, letCount)
+        Assert.Equal(240, andCount)
+
+        Assert.DoesNotContain("| ?", normalized)
+        Assert.Equal(1, countRegex @"^\[<EntryPoint>\]$" normalized)
+        Assert.True(
+            normalized.Contains("let rec parseExpr") || normalized.Contains("and parseExpr"),
+            $"expected parseExpr marker in self-compiled output; combined:\n{combined}")
+    finally
+        if File.Exists inputPath then File.Delete(inputPath)
+        if File.Exists backupPath then
+            File.Move(backupPath, inputPath, true)
+
+[<Fact>]
+let ``20-bootstrap-compiler.lll diagnostics contract: unbound var includes stable E002 payload`` () =
+    // Diagnostics parity guard: bootstrap should surface a stable,
+    // machine-detectable ll-lang error payload on semantic failure.
+    let inputPath =
+        Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
+    let backupPath = inputPath + ".bak"
+    let badProgram =
+        """module Probe.Bad
+main() = missingFn 1
+"""
+    use _lock = fixtureLockLease ()
+    Assert.True(File.Exists inputPath, $"missing fixture: {inputPath}")
+    File.Move(inputPath, backupPath, true)
+    File.WriteAllText(inputPath, badProgram)
+    try
+        let (_, stdout, stderr) = runBootstrap ()
+        let combined = stdout + stderr
+        Assert.Contains("E002 UnboundVar missingFn", combined)
+        Assert.DoesNotContain("Unhandled exception", combined)
+        Assert.DoesNotContain("Stack overflow", combined)
+        Assert.DoesNotContain("module Probe.Bad", stdout)
     finally
         if File.Exists inputPath then File.Delete(inputPath)
         if File.Exists backupPath then

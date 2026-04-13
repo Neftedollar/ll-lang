@@ -4831,11 +4831,31 @@ Evidence:
 - `reverse boomerang matrix keeps core source slices recompilable per target`
   in `tests/LLLangTests/ReverseTranspilerTests.fs`
 
+## Post-7.10 hardening — fixpoint metrics + diagnostics contract (DONE)
+
+Fixpoint parity is now guarded by an additional **snapshot-independent**
+contract layer in `BootstrapCompilerTests`:
+
+1. Self-compile output structural metrics are pinned:
+   - line count: `602`
+   - byte/char count (normalized newlines): `56438`
+   - top-level `let` count: `24`
+   - top-level `and` count: `240`
+2. Emitted output must not contain placeholder constructors (`| ?`).
+3. Exactly one `[<EntryPoint>]` marker is present.
+4. Semantic-failure diagnostics surface a stable payload for unbound names:
+   `E002 UnboundVar <name>`.
+
+Evidence:
+
+- `20-bootstrap-compiler.lll self-compile output satisfies structural fixpoint metrics contract`
+- `20-bootstrap-compiler.lll diagnostics contract: unbound var includes stable E002 payload`
+
 ## Current state and next work
 
 Bootstrap self-hosting blocker chain from 7.10d → 7.10r is now closed
 and guarded by regression tests. The next iterations should focus on:
 
-1. tightening fixpoint parity checks (structure + formatting + diagnostics)
-2. reducing bootstrap/host behavioural drift in corner-case parser recovery
-3. expanding boomerang parity from core slices to richer ADT/trait/FFI-heavy cases
+1. reducing bootstrap/host behavioural drift in corner-case parser recovery
+2. expanding boomerang parity from core slices to richer ADT/trait/FFI-heavy cases
+3. growing diagnostics parity beyond `E002` to positional/typed error classes
