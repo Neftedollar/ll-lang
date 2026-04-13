@@ -2159,7 +2159,27 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
                 @"define\s+i64\s+@(?<name>[A-Za-z_][A-Za-z0-9_]*)\((?<params>[^)]*)\)\s*\{[\s\S]*?ret\s+i64\s+(?<value>-?\d+)[\s\S]*?\}"
                 parseLlvmParams
                 (fun m -> normalizeRecoveredExpr m.Groups.["value"].Value)
-        (addFns @ subFns @ mulFns @ divFns @ callFns @ retArgFns @ retConstFns)
+        let mainI32RetConstFns =
+            collect
+                (RegexOptions.Multiline ||| RegexOptions.Singleline)
+                @"define\s+i32\s+@(?<name>main)\((?<params>[^)]*)\)\s*\{[\s\S]*?ret\s+i32\s+(?<value>-?\d+)[\s\S]*?\}"
+                parseLlvmParams
+                (fun m -> normalizeRecoveredExpr m.Groups.["value"].Value)
+        let mainI32TruncConstFns =
+            collect
+                (RegexOptions.Multiline ||| RegexOptions.Singleline)
+                @"define\s+i32\s+@(?<name>main)\((?<params>[^)]*)\)\s*\{[\s\S]*?trunc\s+i64\s+(?<value>-?\d+)\s+to\s+i32[\s\S]*?ret\s+i32\s+%\w+[\s\S]*?\}"
+                parseLlvmParams
+                (fun m -> normalizeRecoveredExpr m.Groups.["value"].Value)
+        (addFns
+         @ subFns
+         @ mulFns
+         @ divFns
+         @ callFns
+         @ retArgFns
+         @ retConstFns
+         @ mainI32RetConstFns
+         @ mainI32TruncConstFns)
         |> List.sortBy (fun d -> d.Index)
         |> dedupeFns
     | Java ->

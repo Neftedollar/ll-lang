@@ -30,6 +30,9 @@ let private sampleTraitHeavySrc =
 let private sampleExternalMainSrc =
     "module Demo\nexternal console_log(msg Str) Unit\nmain() Int = 0\n"
 
+let private sampleMainOnlySrc =
+    "module Demo\nmain() Int = 0\n"
+
 [<Fact>]
 let ``reverse parser recovers numeric lets from all primary platform targets`` () =
     for target in [FSharp; TypeScript; Python; CSharp; LLVM] do
@@ -1044,6 +1047,8 @@ let ``reverse boomerang matrix keeps core source slices recompilable per target`
 
     for target in nonLlvmTargets do
         assertBoomerangRecompile target "external_console_log_main" sampleExternalMainSrc ["console_log("]
+
+    assertBoomerangRecompile LLVM "main_i32_wrapper" sampleMainOnlySrc ["main("]
 
 [<Fact>]
 let ``reverse parser normalizes plain TypeScript template literals into ll strings`` () =

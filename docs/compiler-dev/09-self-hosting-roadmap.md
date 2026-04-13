@@ -4937,6 +4937,21 @@ Evidence:
   (case: `external_console_log_main` across non-LLVM targets)
 - `reverse parser recovers Java external wrapper and literal main wrapper`
 
+## Post-7.10 hardening — LLVM i32 main wrapper recovery (DONE)
+
+Closed an LLVM reverse recoverability gap for backend-emitted entrypoint shape:
+
+- `define i32 @main() { ... trunc i64 <n> to i32 ... ret i32 ... }`
+
+Reverse parser now recovers this wrapper into ll `main(...) = <n>` instead of
+failing with "could not recover ... declarations" when no other recoverable
+LLVM `i64` function forms are present.
+
+Evidence:
+
+- `reverse boomerang matrix keeps core source slices recompilable per target`
+  (case: `main_i32_wrapper` on LLVM)
+
 ## Current state and next work
 
 Bootstrap self-hosting blocker chain from 7.10d → 7.10r is now closed
