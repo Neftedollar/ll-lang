@@ -1489,9 +1489,10 @@ let ``20-bootstrap-compiler.lll emits tuple literal expressions (Phase 7.10q)`` 
         if File.Exists backupPath then
             File.Move(backupPath, inputPath, true)
 
-// Phase 7.10r blocker tests — skipped until each blocker is resolved.
-// These document the remaining gaps between compiler_1.fs (F# host output)
-// and compiler_2.fs (bootstrap output) that must be closed for the fixpoint.
+// Phase 7.10r historical blocker tests.
+// These used to be planned/blocked checks and are now active regressions
+// guarding fixpoint parity between compiler_1.fs (host output) and
+// compiler_2.fs (bootstrap output).
 
 [<Fact>]
 let ``20y-bootstrap-input-prelude.lll: bootstrap prelude contains listFold and listReverse (Phase 7.10r blocker 1)`` () =

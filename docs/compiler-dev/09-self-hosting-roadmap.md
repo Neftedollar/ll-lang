@@ -4736,49 +4736,74 @@ which only surfaces once the parser stops
 mis-rebasing arm-body let-ins into top-level
 decl position.
 
-**Next blocker:** **Phase 7.10g** — the
-bootstrap's `parseExpr` / `parseFnDecl` does
-**not** handle clause-sugar fn bodies at the top
-level. A decl like
+## Phase 7.10g — clause-sugar fn-body desugaring (DONE)
 
-```
-fn lexChars(cs List[Char]) List[Token] =
-  | c :: rest -> ...
-  | _ -> [TEnd]
-```
+This blocker is now closed.
 
-enters `parseFnDecl`, which calls `parseExpr`
-on the body; `parseExpr` has no `TBar :: _ ->`
-dispatch, so it falls through to `parseCompare
--> parseAddSub -> parseApp -> parseAtom`, which
-sees the leading `TBar` as an unknown atom and
-returns `(EInt 0, toks)` with zero tokens
-consumed. Every clause-sugar fn in the bootstrap
-gets silently rewritten to `fn f args = 0`.
-(Verified by running the bootstrap on an
-isolated fixture — the emitted F# for `fn f
-(c Char) Token = | _ -> TA` is `let f c = 0L`.)
-This is why only two `lexChars` errors surface:
-most fns with `lexChars` references are
-themselves clause-sugar fns, so their entire
-body gets replaced with `EInt 0` and the
-`lexChars` reference vanishes along with it;
-the two surviving references are in the two
-fns whose bodies are NOT clause-sugar and DO
-reach the elaborator intact.
+`parseFnDecl` now routes bodies through `parseFnBody`, which:
 
-The fix for 7.10g is a parser extension: add a
-`TBar :: _ ->` dispatch in `parseFnDecl` (or,
-more precisely, a clause-sugar desugarer
-between `parseFnDecl` and `parseExpr`) that
-rewrites `| pat -> body ...` fn bodies into an
-`EMatch` scrutinising the last fn param —
-mirroring the host compiler's Phase 4
-elaborator clause-sugar desugaring. Estimated
-at ~30 lines; the desugarer already exists in
-spirit (see `lastParamTypeName` at line 1595
-which already knows how to find the last
-param, and `parseArms` at line 974 which
-already knows how to build the two parallel
-arm lists from a `TBar`-led stream).
+1. `skipNewlines` on body entry
+2. dispatches `TBar :: _` to `parseArms`
+3. desugars to `EMatch (lastParamVar parms) pats bodies`
+4. falls back to `parseExpr` for non-clause bodies
 
+This matches the host rule: clause-sugar scrutinee is the **last**
+curried parameter.
+
+Evidence:
+
+- Source: `spec/examples/valid/20-bootstrap-compiler.lll` (`parseFnBody`,
+  `lastParamVar`).
+- Regression: `20-bootstrap-compiler.lll desugars clause-sugar fn bodies
+  (Phase 7.10g)` in `tests/LLLangTests/BootstrapCompilerTests.fs`.
+
+## Phase 7.10q — tuple literals in bootstrap frontend/backend (DONE)
+
+Tuple literals are now first-class in the bootstrap path:
+
+1. lexer emits `TComma`
+2. parser recognises `(e1, e2)` and builds `ETuple2`
+3. let-in tuple destructuring uses `TComma`
+4. checker/infer/emitter thread `ETuple2` through
+
+Evidence:
+
+- Fixture: `20x-bootstrap-input-tuple.lll`
+- Regression: `20-bootstrap-compiler.lll emits tuple literal expressions
+  (Phase 7.10q)`
+
+## Phase 7.10r — parity blockers closed (DONE)
+
+The three historical blocker slices marked as 7.10r are now covered by
+active regression tests (not skipped):
+
+1. Prelude completeness (`listFold`, `listReverse`, and related builtins)
+2. Mutual-recursive grouping parity (`let rec ... and ...`)
+3. Multi-line formatting parity of grouped function emission
+
+Evidence (all in `tests/LLLangTests/BootstrapCompilerTests.fs`):
+
+- `20y-bootstrap-input-prelude.lll: bootstrap prelude contains listFold and listReverse (Phase 7.10r blocker 1)`
+- `20y-bootstrap-input-mutrec.lll: mutually recursive fns across type boundary produce correct let-rec grouping (Phase 7.10r blocker 2)`
+- `20y-bootstrap-input-fmt.lll: each fn in a multi-fn module is emitted on its own separate line (Phase 7.10r blocker 3)`
+
+## Post-7.10 hardening — lexer EOF/unknown-char paths (DONE)
+
+Two bootstrap lexer correctness bugs closed in the same test suite:
+
+1. Bug #7: unknown chars are surfaced as `TError` (no silent drop)
+2. Bug #14: `lexCharLit` / `lexCharEsc` return `TEnd` at EOF (no empty-token desync)
+
+Evidence:
+
+- `20-bootstrap-compiler.lll emits TError for unknown chars instead of silently dropping (Bug #7)`
+- `20-bootstrap-compiler.lll lexCharLit and lexCharEsc return TEnd at EOF instead of empty list (Bug #14)`
+
+## Current state and next work
+
+Bootstrap self-hosting blocker chain from 7.10d → 7.10r is now closed
+and guarded by regression tests. The next iterations should focus on:
+
+1. tightening fixpoint parity checks (structure + formatting + diagnostics)
+2. reducing bootstrap/host behavioural drift in corner-case parser recovery
+3. extending parity harnesses to reverse/transpile round-trips for target backends
