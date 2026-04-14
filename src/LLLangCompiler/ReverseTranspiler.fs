@@ -2327,7 +2327,7 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
                     let phiMatch =
                         Regex.Match(
                             fnBody,
-                            @"%\w+\s*=\s*phi\s+i64\s+\[\s*%(?<payload>[A-Za-z_][A-Za-z0-9_]*)\s*,\s*%match_body_[0-9]+\s*\],\s*\[\s*(?<none1>-?\d+)\s*,\s*%match_body_[0-9]+\s*\],\s*\[\s*(?<none2>-?\d+)\s*,\s*%match_fail_[0-9]+\s*\]",
+                            @"%\w+\s*=\s*phi\s+i64\s+\[\s*%(?<payload>[A-Za-z_][A-Za-z0-9_]*)\s*,\s*%match_body_[0-9]+\s*\],\s*\[\s*(?<none1>(?:-?\d+|%[A-Za-z_][A-Za-z0-9_]*))\s*,\s*%match_body_[0-9]+\s*\],\s*\[\s*(?<none2>(?:-?\d+|%[A-Za-z_][A-Za-z0-9_]*))\s*,\s*%match_fail_[0-9]+\s*\]",
                             RegexOptions.Singleline
                         )
                     if not scrutMatch.Success || not hasTag1 || not hasTag2 || not phiMatch.Success then
@@ -2335,19 +2335,33 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
                     else
                         let scrut = scrutMatch.Groups.["scrut"].Value.Trim()
                         let payload = phiMatch.Groups.["payload"].Value.Trim()
-                        let none1 = phiMatch.Groups.["none1"].Value.Trim()
-                        let none2 = phiMatch.Groups.["none2"].Value.Trim()
-                        let noneExpr =
-                            if String.IsNullOrWhiteSpace none2 || String.Equals(none1, none2, StringComparison.Ordinal) then
-                                none1
+                        let rawNone1 = phiMatch.Groups.["none1"].Value.Trim()
+                        let rawNone2 = phiMatch.Groups.["none2"].Value.Trim()
+                        let normalizePhiValue (v: string) =
+                            let t = v.Trim()
+                            if Regex.IsMatch(t, @"^-?\d+$") then
+                                Some t
+                            elif t.StartsWith("%", StringComparison.Ordinal) then
+                                normalizeRecoveredName (t.Substring(1))
                             else
-                                none1
+                                None
+                        let none1 = normalizePhiValue rawNone1
+                        let none2 = normalizePhiValue rawNone2
+                        let noneExpr =
+                            match none1, none2 with
+                            | Some n1, Some n2 when String.Equals(n1, n2, StringComparison.Ordinal) -> Some n1
+                            | Some n1, _ -> Some n1
+                            | _ -> None
+                        let noneExprText =
+                            match noneExpr with
+                            | Some n -> n
+                            | None -> ""
                         if String.IsNullOrWhiteSpace scrut
                            || String.IsNullOrWhiteSpace payload
-                           || String.IsNullOrWhiteSpace noneExpr then
+                           || String.IsNullOrWhiteSpace noneExprText then
                             None
                         else
-                            Some (sprintf "match %s | Some(n) -> n | None -> %s" scrut noneExpr))
+                            Some (sprintf "match %s | Some(n) -> n | None -> %s" scrut noneExprText))
         let addFns =
             collect
                 (RegexOptions.Multiline ||| RegexOptions.Singleline)

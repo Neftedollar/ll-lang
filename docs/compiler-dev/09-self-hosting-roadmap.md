@@ -4990,12 +4990,16 @@ targets:
 - LLVM `phi`-based lowering over `Some/None` tag checks is recovered into
   canonical ll match form (`match m | Some(n) -> n | None -> ...`) instead
   of leaking backend SSA temporary names into reversed code.
+- `None` branch recovery now accepts both literal and SSA-parameter `phi`
+  inputs (for example `%arg1`), so recovered ll keeps source-level fallback
+  variables (`| None -> fallback`) instead of backend temporaries.
 
 Evidence:
 
 - `reverse boomerang matrix keeps core source slices recompilable per target`
   (case: `maybe_match_unpack` for `FSharp`, `TypeScript`, `Python`, `Java`,
   `CSharp`, `LLVM`)
+  and `maybe_match_unpack_fallback` for the same target set.
 - `reverse parser normalizes host Maybe match wrappers for TS Py Java`
 - `reverse parser normalizes CSharp lifted Maybe match wrapper`
 

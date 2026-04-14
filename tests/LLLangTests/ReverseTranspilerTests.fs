@@ -39,6 +39,9 @@ let private sampleMaybeCtorSrc =
 let private sampleMaybeMatchSrc =
     "module Demo\nMaybe A = Some A | None\nunpack(m Maybe[Int]) Int =\n  match m\n    | Some n -> n\n    | None -> 0\nmain() Int = unpack (Some 7)\n"
 
+let private sampleMaybeMatchFallbackSrc =
+    "module Demo\nMaybe A = Some A | None\nunpackOr(m Maybe[Int])(fallback Int) Int =\n  match m\n    | Some n -> n\n    | None -> fallback\nmain() Int = unpackOr None 7\n"
+
 [<Fact>]
 let ``reverse parser recovers numeric lets from all primary platform targets`` () =
     for target in [FSharp; TypeScript; Python; CSharp; LLVM] do
@@ -1202,6 +1205,24 @@ public class Demo {
         Assert.DoesNotContain("._0", reversed)
         Assert.DoesNotContain("instanceof", reversed)
         Assert.DoesNotContain("?_tag", reversed)
+
+[<Fact>]
+let ``reverse parser normalizes LLVM Maybe match wrapper with fallback arg`` () =
+    let emitted =
+        match compileTarget LLVM sampleMaybeMatchFallbackSrc with
+        | Ok code -> code
+        | Error es -> Assert.Fail($"compileTarget LLVM failed: {es}"); ""
+
+    let reversed =
+        match reverseToLll LLVM emitted with
+        | Ok l -> l
+        | Error msg -> Assert.Fail($"reverseToLll LLVM failed: {msg}"); ""
+
+    Assert.Contains("unpackOr(arg0)(arg1) = match arg0 | Some(n) -> n | None -> arg1", reversed)
+    Assert.DoesNotContain("= t", reversed)
+    match parseModuleWithPos reversed with
+    | Ok _ -> ()
+    | Error e -> Assert.Fail($"reverse output parse failed for LLVM match fallback normalization: {e}\n{reversed}")
 
 [<Fact>]
 let ``reverse parser normalizes CSharp lifted Maybe match wrapper`` () =
