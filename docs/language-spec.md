@@ -1,521 +1,395 @@
 # ll-lang Language Specification
 
-**Version:** 1.0.0 (release-contract tracked)  **Extension:** `.lll`  **Encoding:** UTF-8, ASCII-only operators  **Tests:** see CI
+**Status:** canonical language spec  
+**Current stable line:** `1.x`  
+**Planned next line:** `v2`  
+**Extension:** `.lll`  
+**Encoding:** UTF-8 source, ASCII-only operator surface
 
----
+## 1. Authority and versioning
 
-## 1. Overview
+This document is the single source of truth for ll-lang language behavior.
 
-ll-lang is a statically-typed functional language compiled to F# (default), TypeScript, Python, Java, C#, and LLVM IR. Optimized for LLM code generation: minimal keywords, zero ceremony, maximum token efficiency.
+It is versioned in three buckets:
 
-**Properties:**
-- 15 keywords — declarations use the uppercase/lowercase convention, not reserved words
-- Hindley-Milner inference — annotate function parameters; everything else is inferred
-- Compiled = works — tag violations, unbound variables, non-exhaustive matches, unit mismatches are compile-time errors
-- LLM-readable errors — compact one-line format: `E001 12:5 TypeMismatch expected:UserId got:Int`
-- Pure functional — no mutable state, no exceptions, no null
-- Bootstrap complete — `compiler₁.fs == compiler₂.fs` (self-hosted, 2900+ LOC bootstrap compiler)
-- Token-efficient — 8–17% more compact than F# on real code; 1.3–5.9× more compact than TypeScript/Python/Java on type definitions
+- **Stable `1.x`** — behavior covered by the shipped release contract.
+- **Planned `v2`** — intended target architecture and language direction.
+- **Deferred** — explicitly outside the `v2` commitment.
 
----
+If another document disagrees with this one:
 
-## 2. Lexical Structure
+- use this document for current language behavior
+- treat older design documents as motivation or backlog unless they are updated
 
-**Indentation:** Significant. 2 or 4 spaces, consistent per file. Never tabs. Lexer emits synthetic `INDENT`/`DEDENT` tokens.
+Supporting specs for `v2` live in:
 
-**Comments:** `-- text to end of line`
+- [v2-type-system](/Users/roman/Documents/dev/tens/code/ll-lang/spec/v2-type-system.md)
+- [v2-project-system](/Users/roman/Documents/dev/tens/code/ll-lang/spec/v2-project-system.md)
+- [v2-self-hosting](/Users/roman/Documents/dev/tens/code/ll-lang/spec/v2-self-hosting.md)
+- [v2-llm-tooling](/Users/roman/Documents/dev/tens/code/ll-lang/spec/v2-llm-tooling.md)
 
-**Keywords (15):** `match  if  else  import  export  module  trait  impl  external  opaque  tag  unit  true  false  let`
+The release contract for `1.0` is defined separately in
+[release-contract-1.0.md](/Users/roman/Documents/dev/tens/code/ll-lang/docs/release-contract-1.0.md).
 
-The word `let` is reserved for local bindings inside expressions (`let x = e`) and at top-level. The words `fn`, `type`, `in`, `then`, `with` are not keywords; bare declaration forms are idiomatic.
+## 2. Stable `1.x`
 
-**Identifiers:**
-- Value/function: `[a-z_][a-zA-Z0-9_]*` — `x`, `mapSize`, `_unused`
-- Type/constructor/module: `[A-Z][a-zA-Z0-9_]*` — `Int`, `Some`, `Std`
-- `external` declarations may use mixed-case foreign symbol names (for example `JSON_parse`)
+### 2.1 Product definition
 
-**Literals:** `42` (Int), `3.14` (Float), `"hello"` (Str), `true`/`false` (Bool), `'a'` (Char)
+`1.x` is a statically-typed functional language compiled to:
 
----
+- F# (`fs`, default)
+- TypeScript (`ts`)
+- Python (`py`)
+- Java (`java`)
+- C# (`cs`)
 
-## 3. Types
+LLVM (`llvm`) exists but remains experimental in `1.x`.
 
-### Primitives
+The stable `1.x` surface includes:
 
-`Int`  `Float`  `Str`  `Bool`  `Char`  `Unit`
+- lexer, parser, elaborator, HM inference, diagnostics, and forward codegen
+- CLI workflows: `build`, `check`, `run`, `new`, `install`, `mcp`
+- project mode via `lll.toml`
+- module system with deterministic topo loading
+- structured error-code contract
 
-### Composite
+### 2.2 Lexical structure
 
-```lll
-[1 2 3]          -- List[Int]
-[1; 2; 3]        -- List[Int]  (explicit-separator variant)
-1, "hello"       -- (Int, Str) tuple  (comma forms tuples)
-Int -> Int -> Bool  -- function type (right-associative)
-List[A]  RBMap[K][V]  -- parametric: brackets apply type args
-```
+**Indentation**
+
+- Significant indentation.
+- Files must use spaces, not tabs.
+- Indentation must be consistent per file.
+- The lexer emits synthetic `INDENT` and `DEDENT` tokens.
+
+**Comments**
+
+- `--` starts a line comment and runs to end of line.
+
+**Keywords**
+
+The current lexer reserves:
+
+`match  if  else  import  export  module  trait  impl  external  opaque  tag  unit  true  false  let`
 
 Notes:
-- Space-separated lists (`[a b c]`) parse compact atoms.
-- Explicit separators (`;` or newline inside `[...]`) parse full element expressions.
 
-### User-defined
+- `let` is valid in local and top-level bindings.
+- Bare declaration forms remain idiomatic even where older docs used `fn` or `type`.
+
+**Identifiers**
+
+- values/functions: `[a-z_][a-zA-Z0-9_]*`
+- types/constructors/modules: `[A-Z][a-zA-Z0-9_]*`
+- some `external` names may use mixed-case host symbols, such as `JSON_parse`
+
+**Literals**
+
+- `42` — `Int`
+- `3.14` — `Float`
+- `"hello"` — `Str`
+- `true`, `false` — `Bool`
+- `'a'` — `Char`
+
+### 2.3 Types
+
+**Primitive types**
+
+`Int  Float  Str  Bool  Char  Unit`
+
+**Composite types**
 
 ```lll
--- Sum type (ADT)
-Shape = Circle Float | Rect Float Float | Empty
+[1 2 3]            -- List[Int]
+[1; 2; 3]          -- List[Int]
+1, "hello"         -- (Int, Str)
+Int -> Int -> Bool -- right-associative function type
+List[A]            -- parametric type application
+RBMap[K][V]        -- nested type application
+```
+
+List rules:
+
+- `[a b c]` is the compact list form
+- `[a; b; c]` is the explicit-separator form
+- commas inside brackets do not form lists
+
+**User-defined types**
+
+```lll
 Maybe A = Some A | None
 Result A E = Ok A | Err E
 
--- Multi-line sum
-Token =
-  | KwIf | KwElse | KwMatch
-  | Ident Str | IntLit Int
+Shape =
+  | Circle Float
+  | Rect Float Float
+  | Empty
 
--- Record
 Point = x Float, y Float
-
--- Phantom type (distinct at compile time, same at runtime)
-Email[state] = Str
 ```
 
-### Tags and units
+### 2.4 Tags and units
 
-`tag T` — zero-cost semantic label. `value[T]` applies it. Tagged types are distinct (`Str[UserId] ≠ Str[Email]`). E005 on mismatch.
+Stable `1.x` supports:
 
-`unit T` — physical unit. Numeric tags participate in algebra:
+- semantic tags via `tag`
+- numeric unit algebra via `unit`
 
 ```lll
-tag UserId;  tag Email
-unit m;  unit s
+tag UserId
+unit m
+unit s
 
-uid = "user-42"[UserId]         -- Str[UserId]
-speed(d Float[m])(t Float[s]) = d / t  -- return: Float[m/s]
+uid = "user-42"[UserId]
+speed(d Float[m])(t Float[s]) = d / t
 ```
 
-Unit rules: `Float[m] + Float[m]` → `Float[m]` (same required, E004 if different); `/` and `*` compose units.
+Contract:
 
----
+- tagged values are distinct types
+- tag mismatch is a compile-time error (`E005`)
+- incompatible units are a compile-time error (`E004`)
+- numeric `*` and `/` compose units algebraically
 
-## 4. Declarations
+### 2.5 Declarations
 
-| Pattern | Meaning |
-|---------|---------|
-| `Uppercase A = ...` | Type declaration |
-| `lowercase(p T)(q T) = expr` | Function declaration |
-| `lowercase = expr` | Value binding (top-level: `let` optional) |
-| `external name(p T) Ret` | Foreign function declaration (no body) |
-| `opaque Type[A]` | Opaque host type (runtime-erased handle) |
-| `tag Name` | Tag declaration |
-| `unit Name` | Unit declaration |
-| `trait Name T = ...` | Trait declaration |
-| `impl Trait Type = ...` | Trait implementation |
-| `module Path.Name` | Module header |
-| `import Path.Name` | Import |
-| `export { name, ... }` | Module export list (canonical) |
-| `export decl` | Per-decl export (legacy compatibility) |
+Canonical `1.x` declaration forms:
 
 ```lll
--- Function: each param in its own parens; return type inferred
+module My.App
+
+import Std.Map
+
+export { main, helper }
+
+Maybe A = Some A | None
+
 add(a Int)(b Int) = a + b
-add(a Int)(b Int) Int = a + b  -- explicit return (optional)
 
--- Multi-line body via indent
-clamp(x Int)(lo Int)(hi Int) =
-  if x < lo
-    lo
-  else if x > hi
-    hi
-  else x
+main() =
+  _ = printfn "hello"
+  0
 
--- No-arg function
-main() = 0
--- Call sites may use either `main` or `main()` (equivalent)
-
--- Local bindings: last expr is the return value
-process(xs List[Int]) =
-  doubled = listMap (\x. x * 2) xs
-  listLen doubled
-
--- External/opaque FFI surface
+external console_log(msg Str) Unit
 opaque Any
-opaque Promise[A]
-opaque Response
-external fetch(url Str) Promise[Response]
-external JSON_parse(s Str) Any
-
--- Trait and impl
-trait Show A =
-  show(a A) Str
-
-impl Show Int =
-  show(n Int) Str = intToStr n
 ```
 
-### External mapping status
+Stable declaration categories:
 
-`external` is backend-aware in codegen and validated during compilation.
-Unknown declarations now produce `E026 UnknownExternalMapping` before emit.
+- module header
+- imports
+- explicit export list
+- top-level value bindings
+- top-level function bindings
+- ADTs and record-like product types
+- `external`
+- `opaque`
+- `tag`
+- `unit`
 
-| Backend | Known mappings |
-|---------|----------------|
-| F# (`Codegen.fs`) | `console_log`, `JSON_parse` |
-| Python (`CodegenPy.fs`) | `console_log`, `JSON_parse` |
-| TypeScript (`CodegenTS.fs`) | `console_log`, `JSON_parse`, `fetch` |
-| Java (`CodegenJava.fs`) | `console_log` |
-| C# (`CodegenCSharp.fs`) | `console_log`, `JSON_parse` |
-| LLVM (`CodegenLLVM.fs`) | `console_log` |
+Legacy compatibility:
 
-At the compile stage, each backend target checks whether every `external` name is
-known. If a mapping is missing, compilation fails with:
-`E026 line:col UnknownExternalMapping target:<target> name:<name>`.
+- per-declaration `export decl` is still accepted
+- no-arg call sites may use either `main` or `main()`
 
----
+### 2.6 Expressions
 
-## 5. Expressions
+Stable `1.x` expression forms:
 
-| Form | Syntax | Example |
-|------|--------|---------|
-| Literal | `42`, `"hi"`, `true` | — |
-| Variable | `x` | — |
-| Constructor | `Some`, `Circle` | — |
-| Application | juxtaposition | `add 3 4`, `mapLookup cmp k m` |
-| Zero-arg call suffix | `f()` | Equivalent to `f` |
-| Pipe | `expr -> f -> g` | `xs -> listMap f -> listLen` |
-| Symbolic bind | `m >>= f` | `5 >>= (\n. n + 1)` |
-| Symbolic sequence | `a >> b` | `x >> y` |
-| Symbolic choice | `a <|> b` | `preferred <|> fallback` |
-| Arithmetic | `+  -  *  /  ^` | `a * b + c` |
-| Comparison | `==  !=  <  >  <=  >=` | `x == 0` |
-| Boolean not | `!expr` | `!isReady` |
-| Cons | `x :: xs` | `1 :: [2 3]` |
-| List | `[a b c]` or `[a; b; c]` | `[1 2 3]`, `[1; 2; 3]` |
-| Tuple | `a, b` | `x, y` |
-| Tagged | `value[Tag]` | `"u1"[UserId]` |
-| Lambda | `\x. body` | `\a. \b. a + b` |
-| If | `if c` / indent / `body` / `else alt` | see below |
-| Match | `match e` / indent / `\| P -> e` | see below |
-| Local binding | `x = expr` (in block) | `y = f 5` |
+- literals
+- variables
+- constructors
+- application by juxtaposition
+- `f()` zero-arg call suffix
+- arithmetic and comparison operators
+- `!expr`
+- `if`
+- `match`
+- lambdas
+- local layout bindings
+- tuples
+- lists
+- cons `::`
+- tagged values `value[Tag]`
+- fixed symbolic operators `|>`, `>>=`, `>>`, `<|>`
 
-**If:**
+Examples:
 
 ```lll
-if x < 0
-  0 - x
-else x
-```
+double(x Int) = x * 2
 
-**Match:**
+process(xs List[Int]) =
+  ys = xs |> listMap (\x. x * 2)
+  listLen ys
 
-```lll
-match shape
-  | Circle r -> 3.14159 * r * r
-  | Rect w h -> w * h
-  | Empty -> 0.0
-```
-
-**Clause sugar** — function body starting with `|` implicitly matches the last parameter:
-
-```lll
 area(s Shape) =
   | Circle r -> 3.14159 * r * r
   | Rect w h -> w * h
   | Empty -> 0.0
-```
 
-**Lambda multi-param shorthand:** `\acc k v. acc + k`
-
-**Fixed symbolic operators (built-in, non-overloadable):**
-
-- `m >>= f` lowers to function application `f m`
-- `a >> b` lowers to `b`
-- `a <|> b` lowers to `a`
-
-These are fixed language operators (not user-defined operator declarations).
-
-**Trailing lambda application (equivalent sugar):**
-
-```lll
-stateBind xs \x.
-  stateBind ys \y.
-    combine x y
-```
-
-Equivalent parenthesized form:
-
-```lll
-stateBind xs (\x.
-  stateBind ys (\y.
-    combine x y
-  )
-)
-```
-
-**Sequential effects:** bind unused result to `_`:
-
-```lll
 main() =
   _ = printfn "step 1"
   _ = printfn "step 2"
   0
 ```
 
----
+Current fixed-operator semantics:
 
-## 6. Patterns
+- `x |> f` pipes `x` into `f`
+- `m >>= f` lowers as built-in bind-style chaining
+- `a >> b` sequences and returns `b`
+- `a <|> b` is built-in choice syntax
 
-| Pattern | Syntax | Example |
-|---------|--------|---------|
-| Wildcard | `_` | `| _ -> 0` |
-| Variable | `x` | `| x -> x + 1` |
-| Literal | `42`, `"hi"` | `| 0 -> "zero"` |
-| Constructor | `Ctor fields` | `| Some v -> v` |
-| Nested | `Ctor (Ctor2 x) y` | `| Node (Red) l k v r -> ...` |
-| Cons | `h :: t` | `| h :: t -> h` |
-| Nil | `[]` | `| [] -> 0` |
-| Tuple | `a, b` | `| x, y -> x + y` |
+These operators are fixed language forms, not user-defined operator declarations.
 
-All matches must be exhaustive (E003 if not). Use `| _ -> ...` for catch-all.
+### 2.7 Patterns
 
----
+Stable `1.x` pattern forms:
 
-## 7. Type System
+- wildcard `_`
+- variable
+- literal
+- constructor pattern
+- nested constructor pattern
+- cons pattern `h :: t`
+- empty list `[]`
+- tuple pattern
 
-**Hindley-Milner (Algorithm W) with let-generalization.**
+All matches must be exhaustive. Missing coverage is `E003`.
 
-- Annotate: function parameters `(name Type)` — always required
-- Omit: return types, local bindings, lambda params when inferable
+### 2.8 Type checking and inference
 
-```lll
--- params annotated, return inferred
-mapSize(m RBMap[K][V]) =
-  match m
-    | Leaf -> 0
-    | Node _ left _ _ right -> 1 + mapSize left + mapSize right
-```
+Stable `1.x` uses Hindley-Milner-style inference.
 
-**Parametric types** — type params after the name:
+Practical contract:
 
-```lll
-Maybe A = Some A | None         -- bare type variable
-Email[state] = Str              -- phantom bracket param
-mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) = ...
-```
+- function parameters are annotated in canonical examples and APIs
+- return types are usually inferable and may be omitted
+- local bindings are inferred
+- diagnostics carry compact machine-readable error codes
 
-**Trait constraints** — `[F: Trait]` before parameters:
+The stable `1.x` error-code set covered by the release contract is:
 
-```lll
-transform[F: Functor](xs F[A])(f A -> B) = map f xs
-printVal[A: Show](x A) = printfn (show x)
-```
+- `E001` `TypeMismatch`
+- `E002` `UnboundVar`
+- `E003` `NonExhaustiveMatch`
+- `E004` `UnitMismatch`
+- `E005` `TagViolation`
+- `E007` `PlatformMismatch`
+- `E008` `InfiniteType`
+- `E020` `ModulePathMismatch`
+- `E024` `ModuleCycle`
+- `E025` `NoProjectForImport`
+- `E026` `UnknownExternalMapping`
 
-**Higher-kinded types** — traits range over type constructors (`F` has kind `* → *`):
+### 2.9 Module and project system
 
-```lll
-trait Functor F =
-  map(f A -> B)(fa F[A]) F[B]
-```
+Stable `1.x` project shape:
 
-**No null, no exceptions** — use `Maybe A` and `Result A E`.
+- `lll.toml` manifest at project root
+- `src/` source tree
+- module-path to file-path validation
+- project load/build via topo-sorted module graph
 
----
-
-## 8. Module System
-
-Every `.lll` file starts with a module declaration on line 1:
-
-```lll
-module Std.Map
-
-import Std.List
-
-export { mapInsert, mapLookup }
-
-mapInsert(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) = ...
-mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) = ...
-```
-
-Module path (`Std.Map`) must match file path under `src/` (`src/Map.lll`).
-
-`import` brings names from imported modules into scope.  
-`export { ... }` defines the module's explicit public surface.
-Visibility rule in current compiler:
-- if a module declares `export { ... }`, only listed names are import-visible;
-- if a module has no export list, imports see all top-level names (compatibility fallback);
-- legacy `export decl` is accepted for compatibility, but visibility gating is driven by module export lists.
-
-**`lll.toml`** — project manifest at the project root (legacy `ll.toml` is still accepted):
+Canonical manifest example:
 
 ```toml
 [project]
 name = "myapp"
 version = "1.0.0"
-
-[deps]
-std = { path = "../stdlib" }
-
-[platform]
-use = ["fsharp", "typescript"]   -- emit to multiple targets at once
+entry = "src/Main.lll"
 ```
 
-**CLI:**
+Stable CLI/project workflows:
 
-```bash
-lllc new myapp       # scaffold: lll.toml + src/Main.lll
-lllc build           # compile project (topo-sorted)
-lllc build --target ts  # compile to TypeScript
-lllc install         # resolve direct+transitive deps into vendor/ + rewrite ll.sum
-lllc mod tidy        # same as install (canonical dependency sync)
-lllc mod add dep=https://repo#ref
-lllc mod why dep     # explain dependency chain + local direct importers
-lllc run src/Main.lll
-lllc mcp             # start MCP server (stdio, 10 tools)
-```
+- `lllc new`
+- `lllc check`
+- `lllc build`
+- `lllc run`
+- `lllc install`
+- `lllc mcp`
 
----
+Dependency-management expansion beyond this baseline is planned for `v2`.
 
-## 9. Compilation Targets
+### 2.10 Backends
 
-| Flag | Target | Output style |
-|------|--------|-------------|
-| `--target fs` (default) | F# | Discriminated unions |
-| `--target ts` | TypeScript | Sealed interfaces |
-| `--target py` | Python | `@dataclass` + `Union` |
-| `--target java` | Java 21 | Sealed interfaces + records |
-| `--target cs` | C# | Compile-safe MVP skeleton backend |
-| `--target llvm` | LLVM IR | Deterministic IR stub backend (experimental subset in 1.0) |
+Stable `1.x` backends:
 
-1.0 compatibility guarantees for stable vs experimental surface are defined in
-`docs/release-contract-1.0.md`.
+- `fs`
+- `ts`
+- `py`
+- `java`
+- `cs`
 
----
+Experimental in `1.x`:
 
-## 10. Error Codes
+- `llvm`
+- `reverse`
 
-Format: `EXXX line:col ErrorKind details`  — one line, regex-parseable.
+### 2.11 Stdlib and tooling
 
-| Code | Name | Cause |
-|------|------|-------|
-| `E001` | `TypeMismatch` | Expected type A, got B |
-| `E002` | `UnboundVar` | Identifier not in scope |
-| `E003` | `NonExhaustiveMatch` | Match missing constructors |
-| `E004` | `UnitMismatch` | Incompatible units |
-| `E005` | `TagViolation` | Wrong or missing tag |
-| `E007` | `PlatformMismatch` | Module requires unsupported target |
-| `E008` | `InfiniteType` | Occurs-check failure |
-| `E026` | `UnknownExternalMapping` | External name has no backend mapping |
-| `E020` | `ModulePathMismatch` | `module` header does not match file path under `src/` |
-| `E024` | `ModuleCycle` | Circular module dependency |
-| `E025` | `NoProjectForImport` | Non-`Std.*` import used in single-file mode (no `lll.toml`) |
+Stable `1.x` includes:
 
-```
-E001 12:5  TypeMismatch   expected:Str[UserId] got:Str   hint:wrap:UserId
-E003 15:1  NonExhaustiveMatch  type:Shape missing:Empty
-E008 3:1   InfiniteType   var:a cycle:a=List[a]
-```
+- prelude functions always in scope
+- self-hosted stdlib modules under `stdlib/src`
+- embedded MCP server
 
-Invalid example files declare `-- expect: E003` on line 1; the test runner asserts exactly that code.
+Canonical reference docs:
 
----
+- [stdlib-reference.md](/Users/roman/Documents/dev/tens/code/ll-lang/docs/stdlib-reference.md)
+- [09-mcp.md](/Users/roman/Documents/dev/tens/code/ll-lang/docs/user-guide/09-mcp.md)
+- [09-llm-prompting.md](/Users/roman/Documents/dev/tens/code/ll-lang/docs/user-guide/09-llm-prompting.md)
 
-## 11. Standard Library
+## 3. Planned `v2`
 
-Self-hosted modules live under `stdlib/src`. Prelude is always in scope; additional modules are imported via `import Std.X`.
+`v2` is the first release where the canonical compiler/toolchain path is fully
+owned by ll-lang.
 
-**Prelude (always in scope):**
+High-level commitments:
 
-Core (no type dependencies):
-```
-abs          : Int -> Int
-absf         : Float -> Float
-sqrt         : Float -> Float
-min          : Int -> Int -> Int
-max          : Int -> Int -> Int
-listLen      : List[A] -> Int
-listMap      : (A -> B) -> List[A] -> List[B]
-listFilter   : (A -> Bool) -> List[A] -> List[A]
-listFold     : (B -> A -> B) -> B -> List[A] -> B
-listReverse  : List[A] -> List[A]
-listAppend   : List[A] -> List[A] -> List[A]
-listConcat   : List[List[A]] -> List[A]
-listIsEmpty  : List[A] -> Bool
-strLen       : Str -> Int
-strConcat    : Str -> Str -> Str
-strTrim      : Str -> Str
-strContains  : Str -> Str -> Bool
-strSplit     : Str -> Str -> List[Str]
-strSlice     : Str -> Int -> Int -> Str
-strIndexOf   : Str -> Str -> Int
-strChars     : Str -> List[Char]
-strFromChars : List[Char] -> Str
-strReverse   : Str -> Str
-intToStr     : Int -> Str
-floatToStr   : Float -> Str
-intToChar    : Int -> Char
-charToInt    : Char -> Int
-charIsDigit  : Char -> Bool
-charIsAlpha  : Char -> Bool
-charIsSpace  : Char -> Bool
-print        : Str -> Unit
-printfn      : Str -> Unit
-readFile     : Str -> Str
-writeFile    : Str -> Str -> Unit
-fileExists   : Str -> Bool
-exit         : Int -> Unit
-```
+- pure ll-lang core for canonical compiler, stdlib, project resolver, and CLI logic
+- F# retained only as isolated stage0 bootstrap
+- small strict language core preserved
+- explicit `Lazy`
+- stronger project/dependency model
+- stdlib designed specifically for compiler authoring and LLM use
+- LLM leverage concentrated in MCP, docs, diagnostics, and benchmarks
 
-Maybe-dependent (requires `Maybe A = Some A | None` in scope):
-```
-listHead        : List[A] -> Maybe[A]
-listTail        : List[A] -> Maybe[List[A]]
-listAt          : List[A] -> Int -> Maybe[A]
-maybeMap        : (A -> B) -> Maybe[A] -> Maybe[B]
-maybeBind       : Maybe[A] -> (A -> Maybe[B]) -> Maybe[B]
-maybeWithDefault: A -> Maybe[A] -> A
-strToInt        : Str -> Maybe[Int]
-strToFloat      : Str -> Maybe[Float]
-```
+`v2` does **not** require:
 
-Result-dependent (requires `Result A E = Ok A | Err E` in scope):
-```
-resultMap    : (A -> B) -> Result[A][E] -> Result[B][E]
-resultBind   : Result[A][E] -> (A -> Result[B][E]) -> Result[B][E]
-resultMapErr : (E -> F) -> Result[A][E] -> Result[A][F]
-```
+- full HKT/typeclass inference as a release blocker
+- S-expression primary syntax
+- language-level prompt directives
 
-**Stdlib modules:** `Std.Maybe`, `Std.Map` (red-black tree), `Std.State`, `Std.Parsec`, `Std.Toml`, `Std.Json`, `Std.Lexer`, `Std.Parser`, `Std.Elaborator`, `Std.Codegen`, `Std.CodegenTS`, `Std.CodegenPy`, `Std.CodegenJava`, `Std.CodegenLLVM`, `Std.Render`, `Std.Test`, `Std.Compiler`.
+`v2` details are defined by the companion specs:
 
----
+- [v2-type-system](/Users/roman/Documents/dev/tens/code/ll-lang/spec/v2-type-system.md)
+- [v2-project-system](/Users/roman/Documents/dev/tens/code/ll-lang/spec/v2-project-system.md)
+- [v2-self-hosting](/Users/roman/Documents/dev/tens/code/ll-lang/spec/v2-self-hosting.md)
+- [v2-llm-tooling](/Users/roman/Documents/dev/tens/code/ll-lang/spec/v2-llm-tooling.md)
 
-## 12. Reserved Words and Operators
+## 4. Deferred beyond `v2`
 
-**Keywords (15):** `match  if  else  import  export  module  trait  impl  external  opaque  tag  unit  true  false  let`
+Explicitly deferred research tracks:
 
-**Operators:**
-```
-+  -  *  /  ^         arithmetic
-==  !=  <  >  <=  >=  comparison
-->                    pipe / type arrow / match branch
-|>                    pipe (alias of `->` in expression context)
->>=  >>  <|>          fixed symbolic operators
-\  .                  lambda
-,                     tuple
-|                     sum type / match arm
-::                    cons
-=                     binding / definition
-_                     wildcard
-[ ]  ( )              brackets / grouping
-```
+- full HKT/typeclass engine with constrained inference
+- effect rows / capability system
+- S-expression IR or macro notation as a first-class language layer
+- reverse parsing as a release-critical path
+- optimizer-heavy IR work beyond self-hosting and backend sanity
 
-**Anti-patterns:**
+These may be revisited in a later roadmap, but they are not part of the `v2`
+baseline.
 
-| Do NOT | Do instead |
-|--------|-----------|
-| `type Maybe A = ...` | `Maybe A = Some A \| None` |
-| `fn add(a Int)(b Int) = ...` | `add(a Int)(b Int) = a + b` |
-| `if cond then body` | `if cond` / indent / `body` |
-| `match x with \| ...` | `match x` / indent / `\| ...` |
-| `let x = 1 in ...` | bare `x = 1` layout-based local bindings |
-| `[1, 2, 3]` | `[1 2 3]` or `[1; 2; 3]` (commas make tuples) |
-| mutable state | thread state through return values |
-| throw/raise exceptions | return `Result A E` or `Maybe A` |
-| Unicode operators | ASCII only: `->` not `→` |
+## 5. Documentation map
+
+Use these documents together:
+
+- current stable release guarantees:
+  [release-contract-1.0.md](/Users/roman/Documents/dev/tens/code/ll-lang/docs/release-contract-1.0.md)
+- compiler contributor entrypoint:
+  [compiler-dev/README.md](/Users/roman/Documents/dev/tens/code/ll-lang/docs/compiler-dev/README.md)
+- `v2` architecture north star:
+  [12-v2-language-architecture.md](/Users/roman/Documents/dev/tens/code/ll-lang/docs/compiler-dev/12-v2-language-architecture.md)
+- tracked `v2` execution plan:
+  [13-v2-implementation-roadmap.md](/Users/roman/Documents/dev/tens/code/ll-lang/docs/compiler-dev/13-v2-implementation-roadmap.md)

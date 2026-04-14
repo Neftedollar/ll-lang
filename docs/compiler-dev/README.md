@@ -15,7 +15,11 @@ front-end.
 6. [Code generation](06-codegen.md) — F# emission, `[<EntryPoint>]`, temp-project `dotnet run` execution path
 7. [Testing](07-testing.md) — xUnit layout, helpers, corpus drivers
 8. [Adding an error code](08-adding-an-error-code.md) — end-to-end walkthrough
-9. [Self-hosting roadmap](09-self-hosting-roadmap.md) — Phase 7 plan
+9. [Self-hosting roadmap](09-self-hosting-roadmap.md) — historical Phase 7 record
+10. [MCP server](10-mcp-server.md) — embedded compiler tooling for LLM clients
+11. [Multi-target codegen](11-multi-target-codegen.md) — backend contracts and target semantics
+12. [v2 language architecture](12-v2-language-architecture.md) — target design for pure ll-lang core
+13. [v2 implementation roadmap](13-v2-implementation-roadmap.md) — tracked execution plan with done/not-done checklists
 
 ## Repository layout
 

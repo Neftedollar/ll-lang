@@ -1,5 +1,10 @@
 # Self-hosting roadmap
 
+> Historical note: this document records the Phase 7 path that got ll-lang to the current bootstrap fixpoint.
+> The forward-looking `v2` architecture and tracked execution plan now live in
+> [`12-v2-language-architecture.md`](12-v2-language-architecture.md) and
+> [`13-v2-implementation-roadmap.md`](13-v2-implementation-roadmap.md).
+
 > **Status (2026-04-13): COMPLETE.** Phase 7.10 bootstrap fixpoint achieved.
 > `compiler₁.fs == compiler₂.fs` (602 lines, 264 bindings, byte-identical).
 > See `docs/compiler-dev/fixpoint-snapshots/compiler1-latest.fs`.
