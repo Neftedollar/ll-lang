@@ -1,0 +1,107 @@
+module Lllcself.Main
+
+import Std.Compiler
+
+-- Self-hosted ll-lang CLI.
+-- Commands:
+--   compile <file>  -> emit F#
+--   check   <file>  -> emit compact diagnostics JSON
+--   next    <file>  -> emit nearest blocking stage JSON
+--   render  <file>  -> emit canonical ll-lang source
+--   tokens  <file>  -> emit token estimate JSON
+--   symbol  <file> <name> -> lookup top-level symbol kind JSON
+--
+-- With a single bare path argument, defaults to `compile <file>`.
+
+usageText =
+  "usage: lllcself <command> <file> [arg]\ncommands: compile | check | next | render | tokens | symbol"
+
+encodeJsonEscape(c Char) =
+  match c
+    | '\n' -> "\\n"
+    | '\t' -> "\\t"
+    | '\r' -> "\\r"
+    | '\\' -> "\\\\"
+    | '"' -> "\\\""
+    | _ -> strFromChars [c]
+
+escapeJson(s Str) =
+  listFold (\acc c. strConcat acc (encodeJsonEscape c)) "" (strChars s)
+
+jsonStr(s Str) =
+  strConcat "\"" (strConcat (escapeJson s) "\"")
+
+ioError(msg Str) =
+  p1 = "{\"ok\":false,\"stage\":\"io\",\"primary_error\":"
+  p2 = strConcat p1 (jsonStr msg)
+  strConcat p2 ",\"secondary_count\":0}"
+
+runCheck(path Str) =
+  if fileExists path
+    src = readFile path
+    _ = print (checkCompact src)
+    0
+  else
+    _ = print (ioError (strConcat "File not found: " path))
+    1
+
+runCompile(path Str) =
+  if fileExists path
+    src = readFile path
+    _ = print (compile src)
+    0
+  else
+    _ = print (ioError (strConcat "File not found: " path))
+    1
+
+runRender(path Str) =
+  if fileExists path
+    src = readFile path
+    _ = print (renderCompact src)
+    0
+  else
+    _ = print (ioError (strConcat "File not found: " path))
+    1
+
+runTokens(path Str) =
+  if fileExists path
+    src = readFile path
+    _ = print (tokenEstimate src)
+    0
+  else
+    _ = print (ioError (strConcat "File not found: " path))
+    1
+
+runNext(path Str) =
+  if fileExists path
+    src = readFile path
+    _ = print (nextBlocker src)
+    0
+  else
+    _ = print (ioError (strConcat "File not found: " path))
+    1
+
+runSymbol(path Str)(name Str) =
+  if fileExists path
+    src = readFile path
+    _ = print (lookupSymbol src name)
+    0
+  else
+    _ = print (ioError (strConcat "File not found: " path))
+    1
+
+runArgs(args List[Str]) =
+  match args
+    | "check" :: path :: [] -> runCheck path
+    | "compile" :: path :: [] -> runCompile path
+    | "next" :: path :: [] -> runNext path
+    | "render" :: path :: [] -> runRender path
+    | "tokens" :: path :: [] -> runTokens path
+    | "symbol" :: path :: name :: [] -> runSymbol path name
+    | path :: [] -> runCompile path
+    | _ ->
+      _ = printfn usageText
+      1
+
+main() =
+  runArgs getArgs

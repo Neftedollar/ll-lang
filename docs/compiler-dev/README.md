@@ -12,7 +12,7 @@ front-end.
 3. [Parser](03-parser.md) — recursive descent, expression precedence, quirks
 4. [Elaborator](04-elaborator.md) — declared-type checking, E001-E005, exhaustiveness
 5. [H-M inference](05-hm-inference.md) — Algorithm W, `Subst`, unify, generalize/instantiate, occurs check
-6. [Code generation](06-codegen.md) — F# emission, `[<EntryPoint>]`, `dotnet fsi` fix-ups
+6. [Code generation](06-codegen.md) — F# emission, `[<EntryPoint>]`, temp-project `dotnet run` execution path
 7. [Testing](07-testing.md) — xUnit layout, helpers, corpus drivers
 8. [Adding an error code](08-adding-an-error-code.md) — end-to-end walkthrough
 9. [Self-hosting roadmap](09-self-hosting-roadmap.md) — Phase 7 plan

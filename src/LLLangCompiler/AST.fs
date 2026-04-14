@@ -156,10 +156,33 @@ type Decl =
     | DTrait of TypeIdent * Ident list * FnSig list
     | DImpl of TypeIdent * TypeIdent * (FnSig * Expr) list
 
+/// Names introduced by a declaration that can participate in module exports.
+/// For sum types this is constructor names (not the type name).
+let declExportNames (decl: Decl) : string list =
+    match decl with
+    | DFn(sigRecord, _) -> [sigRecord.Name]
+    | DExternal sigRecord -> [sigRecord.Name]
+    | DLet(name, _) -> [name]
+    | DLetPat(pat, _) ->
+        let rec names p =
+            match p with
+            | PVar n -> [n]
+            | PCon(_, ps) -> ps |> List.collect names
+            | PTuple ps -> ps |> List.collect names
+            | PCons(h, t) -> names h @ names t
+            | PLit _ | PWild -> []
+        names pat
+    | DType(_, _, TBSum ctors) -> ctors |> List.map fst
+    | DImpl(_, implType, fns) ->
+        fns |> List.map (fun (sigRecord, _) -> sigRecord.Name + "_" + implType)
+    | DTrait(_, _, sigs) -> sigs |> List.map (fun s -> s.Name)
+    | DTag _ | DUnit _ | DOpaque _ | DType(_, _, TBRecord _) | DType(_, _, TBWrapped _) -> []
+
 // ---- Module ---------------------------------------------------------
 
 type LLModule = {
     Path: string list                          // ["Examples"; "Basics"]
     Imports: string list list                  // [["Std"; "List"]; ...]
+    Exports: string list option                // None => all-visible fallback
     Decls: (Decl * bool) list                  // (decl, isExported)
 }

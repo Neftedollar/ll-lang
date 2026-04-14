@@ -1,0 +1,56 @@
+module Std.Math
+
+clampInt(lo Int)(hi Int)(x Int) =
+  if x < lo
+    lo
+  else if x > hi
+    hi
+  else
+    x
+
+clampFloat(lo Float)(hi Float)(x Float) =
+  if x < lo
+    lo
+  else if x > hi
+    hi
+  else
+    x
+
+betweenInt(lo Int)(hi Int)(x Int) =
+  if x < lo
+    false
+  else
+    x <= hi
+
+betweenFloat(lo Float)(hi Float)(x Float) =
+  if x < lo
+    false
+  else
+    x <= hi
+
+signInt(x Int) =
+  if x > 0
+    1
+  else if x < 0
+    0 - 1
+  else
+    0
+
+signFloat(x Float) =
+  if x > 0.0
+    1.0
+  else if x < 0.0
+    0.0 - 1.0
+  else
+    0.0
+
+-- ---- Self-checks -------------------------------------------------------------
+
+check(label Str)(ok Bool) =
+  if ok
+    _ = printfn (strConcat "OK " label)
+    0
+  else
+    _ = printfn (strConcat "FAIL " label)
+    1
+

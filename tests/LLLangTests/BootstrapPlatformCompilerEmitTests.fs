@@ -84,12 +84,12 @@ let ``stdlib Compiler.lll emits compiler artifacts for every Platform.*.SDK targ
         let compilerSrcPath = Path.Combine(tempRoot, compilerRel)
 
         let targets =
-            [ ("Platform.FSharp.SDK", ".fs", "module Std.Compiler", "ll-lang stdlib prelude")
+            [ ("Platform.FSharp.SDK", ".fs", "module Std.Compiler", "open LLLang.Prelude")
               ("Platform.Java.SDK", ".java", "ll-lang Java backend", "public class")
               ("Platform.CSharp.SDK", ".cs", "ll-lang C# backend", "public static class")
-              ("Platform.Python.SDK", ".py", "ll-lang Python backend", "def main")
-              ("Platform.TypeScript.SDK", ".ts", "ll-lang TypeScript backend", "function main")
-              ("Platform.LLVM.SDK", ".ll", "ll-lang LLVM backend", "define i32 @main") ]
+              ("Platform.Python.SDK", ".py", "ll-lang Python backend", "def isNone")
+              ("Platform.TypeScript.SDK", ".ts", "ll-lang TypeScript backend", "const isNone")
+              ("Platform.LLVM.SDK", ".ll", "ll-lang LLVM backend", "define i1 @isNone") ]
 
         for (target, ext, markerA, markerB) in targets do
             let outPath = LLLang.Tests.TestCompat.changeExtensionOrInput compilerSrcPath ext

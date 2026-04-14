@@ -1,6 +1,6 @@
 [project]
 name = "platform-demo"
-version = "0.8.0"
+version = "1.0.0"
 
 [platform]
 use = ["Platform.IO"]

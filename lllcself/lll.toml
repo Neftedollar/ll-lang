@@ -1,0 +1,5 @@
+[project]
+name = "lllcself"
+
+[deps]
+std = { path = "../stdlib" }

@@ -1,0 +1,46 @@
+module Std.Test
+
+TestResult = Pass Str | Fail Str
+
+assertTrue(label Str)(cond Bool) =
+  if cond
+    Pass label
+  else
+    Fail label
+
+assertEqInt(label Str)(expected Int)(actual Int) =
+  if expected == actual
+    Pass label
+  else
+    Fail (strConcat label (strConcat " expected=" (strConcat (intToStr expected) (strConcat " actual=" (intToStr actual)))))
+
+assertEqStr(label Str)(expected Str)(actual Str) =
+  if expected == actual
+    Pass label
+  else
+    Fail (strConcat label (strConcat " expected=" (strConcat expected (strConcat " actual=" actual))))
+
+assertEqBool(label Str)(expected Bool)(actual Bool) =
+  if expected == actual
+    Pass label
+  else
+    Fail label
+
+renderResult(r TestResult) =
+  match r
+    | Pass label -> strConcat "OK " label
+    | Fail msg -> strConcat "FAIL " msg
+
+run(results List[TestResult]) =
+  listFold
+    (\fails r.
+      _ = printfn (renderResult r)
+      match r
+        | Pass _ -> fails
+        | Fail _ -> fails + 1
+    )
+    0
+    results
+
+-- ---- Self-checks -------------------------------------------------------------
+

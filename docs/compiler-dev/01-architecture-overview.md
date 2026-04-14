@@ -30,8 +30,8 @@ returns `Result<_, LLError list>`.
    (Codegen.fs | CodegenTS.fs | CodegenPy.fs | CodegenJava.fs | CodegenCSharp.fs | CodegenLLVM.fs)
         │
         ▼
-  .fs/.ts/.py/.java  →  dotnet fsi   (lllc run, F# only)
-                     →  dotnet build (lllc build --target fs)
+  .fs/.ts/.py/.java  →  dotnet run --project <tmp fsproj> (lllc run, F# only)
+                     →  dotnet build                      (lllc build --target fs)
 ```
 
 Entry points:
@@ -234,7 +234,7 @@ tools over stdio:
 |------|-------------|
 | `compile_file` | Full pipeline → `{ok, errors[], fsharp?}` |
 | `check_file` | Lex→parse→elaborate→infer (no codegen) → `{ok, errors[]}` |
-| `run_file` | Compile + `dotnet fsi` → `{exit_code, stdout, stderr, errors[]}` |
+| `run_file` | Compile + temp-project `dotnet run` → `{exit_code, stdout, stderr, errors[]}` |
 | `list_errors` | All E001–E025 codes with names and descriptions |
 | `lookup_error` | One code → description + minimal repro from `spec/examples/invalid/` |
 | `stdlib_search` | Substring search over ~50 stdlib entries → `[{name, signature, module, scope}]` |
@@ -261,12 +261,13 @@ The `lllc` driver. Seven commands:
 - `build <file.lll>` — single-file mode (default target: F#).
 - `build --target ts|py|java <file.lll>` — single-file, named target.
 - `build [dir]` — project mode (reads `lll.toml`, writes `bin/<name>.fs`; multi-target via `[platform] use`).
-- `run <file.lll>` — writes a temp `.fsx` (stripping `module` and
-  `[<EntryPoint>]`, appending `main [||] |> exit`) and shells out to
-  `dotnet fsi`.
+- `run <file.lll>` — canonical run path: resolves imports, compiles to
+  temp multi-file F# project (`Prelude.fs` + modules + `.fsproj`), then
+  shells out to `dotnet run --project ...`.
 - `check <file.lll>` — lex → parse → elaborate → infer without emitting output. Fast type-check.
 - `new <name>` — scaffold project directory structure.
-- `install` — fetch source-based dependencies declared in `lll.toml` into `.ll-deps/`.
+- `install` — sync source-based dependencies declared in `lll.toml` into `vendor/` and rewrite `ll.sum`.
+- `mod tidy|add|why` — dependency management helpers (`vendor/` + `ll.sum` workflow).
 - `mcp` — launch MCP stdio server (blocks until stdin closes).
 
 ## F# compile order
@@ -345,10 +346,10 @@ Source-based dependencies. `lll.toml` declares them:
 ```toml
 [deps]
 std = { path = "../stdlib" }
-json = "https://github.com/user/ll-json#v0.8.0"
+json = "https://github.com/user/ll-json#v1.0.0"
 ```
 
-`lllc install` copies dep sources into `.ll-deps/`. `ProjectLoader.fs` resolves imports by searching `src/` then `.ll-deps/*/src/`.
+`lllc install`/`lllc mod tidy` sync dep sources into `vendor/` and rewrite `ll.sum`. `ProjectLoader.fs` resolves imports by searching `src/` then `vendor/*/src/`.
 
 Platform SDKs are a future extension (`[sdk]` table in a dep's `lll.toml`). See `docs/superpowers/specs/2026-04-10-ll-lang-platform-sdk.md` for the design.
 

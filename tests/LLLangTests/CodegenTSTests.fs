@@ -55,6 +55,20 @@ let ``TS: maybeWithDefault builtin is lowered to typed helper`` () =
     Assert.DoesNotContain("maybeWithDefault(", ts)
 
 [<Fact>]
+let ``TS: symbolic operators lower without raw symbolic identifiers`` () =
+    let src =
+        "module M\n"
+        + "main() Int =\n"
+        + "  x = 5 >>= (\\n. n + 1)\n"
+        + "  y = x <|> 0\n"
+        + "  z = y >> 7\n"
+        + "  z\n"
+    let ts = tsSrc src
+    Assert.DoesNotContain(">>=", ts)
+    Assert.DoesNotContain("<|>", ts)
+    Assert.DoesNotContain(" >> ", ts)
+
+[<Fact>]
 let ``TS: parametric type emits generic syntax`` () =
     let src = "module M\nMaybe A = Some A | None"
     let ts = tsSrc src

@@ -56,7 +56,8 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
               ("impl_method",
                "module Case.Impl\n\ntrait Show T =\n  show(x T) Str\nBox = MkBox Int\nimpl Show Box =\n  show(x Box) Str = \"box\"\nuseShow(x Box) Str = show x\nmain() Int = 0\n")
               ("constrained_dispatch",
-               "module Case.Constrained\n\ntrait Functor F =\n  map(f A->B)(fa F[A]) F[B]\nMaybe A = Some A | None\nimpl Functor Maybe =\n  map(f A->B)(fa Maybe[A]) Maybe[B] =\n    | Some a -> Some (f a)\n    | None -> None\ntransform[F: Functor](xs F[Int])(f Int->Int) F[Int] = map f xs\nmain() Int = 0\n") ]
+               "module Case.Constrained\n\ntrait Functor F =\n  map(f A->B)(fa F[A]) F[B]\nMaybe A = Some A | None\nimpl Functor Maybe =\n  map(f A->B)(fa Maybe[A]) Maybe[B] =\n    | Some a -> Some (f a)\n    | None -> None\ntransform[F: Functor](xs F[Int])(f Int->Int) F[Int] = map f xs\nmain() Int = 0\n")
+              ]
 
         let targets =
             [ ("fs", ".fs")

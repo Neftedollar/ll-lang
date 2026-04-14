@@ -115,8 +115,6 @@ public static class LlLangProject
 
     public static Maybe<long> doubleInMaybe(long x) => new Some<long>((x * 2L));
 
-    public static long __ll_main_Std_Maybe() => 0L;
-
     public interface Token { }
     public sealed record KwLet() : Token;
     public sealed record KwTag() : Token;
@@ -185,7 +183,7 @@ public static class LlLangProject
 
     public static Token classifyIdent(string s) => default!;
 
-    public static long parseIntStr(string s) => 0L;
+    public static long parseIntStr(string s) => ((Func<long>)(() => { var __ll_match = strToInt(s); return ((__ll_match is Some<long>) ? ((Func<long>)(() => { var __ll_case_0 = ((Some<long>)__ll_match); var n = __ll_case_0._0; return n; }))() : ((__ll_match is None<long>) ? ((Func<long>)(() => { var __ll_case_1 = ((None<long>)__ll_match); return 0L; }))() : 0L)); }))();
 
     public static List<Token> lexId(List<char> cs) => ((Func<List<Token>>)(() => { var idChars = takeIdCont(cs); return ((Func<List<Token>>)(() => { var leftover = dropIdCont(cs); return ((Func<List<Token>>)(() => { var tok = classifyIdent(strFromChars(idChars)); return (listAppend<Token>(new List<Token> { tok }))(lexChars(leftover)); }))(); }))(); }))();
 
@@ -228,8 +226,6 @@ public static class LlLangProject
     public static List<Token> stripNewlines(List<Token> ts) => new List<Token>();
 
     public static Func<string, Func<string, object>> checkTokens(string label) => src => expected => ((Func<object>)(() => { var got = showTokens(stripNewlines(tokenize(src))); return ((got == expected) ? printfn((strConcat("OK "))(label)) : ((Func<object>)(() => { var p1 = (strConcat("FAIL "))(label); return ((Func<object>)(() => { var p2 = strConcat(p1)("\n  expected: "); return ((Func<object>)(() => { var p3 = strConcat(p2)(expected); return ((Func<object>)(() => { var p4 = strConcat(p3)("\n  got:      "); return ((Func<object>)(() => { var p5 = strConcat(p4)(got); return printfn(p5); }))(); }))(); }))(); }))(); }))()); }))();
-
-    public static long __ll_main_Std_Lexer() => 0L;
 
     public interface Pattern { }
     public sealed record PVar(string _0) : Pattern;
@@ -404,52 +400,6 @@ public static class LlLangProject
 
     public static Func<List<Token>, Func<long, object>> parserCheckModule(string label) => toks => expectedDeclCount => null;
 
-    public static long __ll_main_Std_Parser() => 0L;
-
-    public static Func<List<string>, string> joinWith(string sep) => items => "";
-
-    public static string encodeStrEscape(char c) => "";
-
-    public static string escapeStr(string s) => ((listFold<char,string>(acc => c => strConcat(acc)(encodeStrEscape(c))))(""))(strChars(s));
-
-    public static string emitCharLit(char c) => "";
-
-    public static string emitType(TypeExpr t) => "";
-
-    public static string emitTypeAtom(TypeExpr t) => "";
-
-    public static string emitParam(Param p) => "";
-
-    public static string emitParams(List<Param> ps) => joinWith("")(listMap<Param,string>(emitParam)(ps));
-
-    public static string emitCtor(Constructor c) => "";
-
-    public static bool isAtomicExpr(Expr e) => false;
-
-    public static string emitExprAtom(Expr e) => (isAtomicExpr(e) ? ((emitExpr(e))?.ToString() ?? "") : ((strConcat("(")(strConcat(emitExpr(e))(")")))?.ToString() ?? ""));
-
-    public static string emitPattern(Pattern p) => "";
-
-    public static string emitPatternAtom(Pattern p) => "";
-
-    public static Expr gatherAppHead(Expr e) => default!;
-
-    public static List<object> gatherAppArgs(Expr e) => new List<object>();
-
-    public static List<object> gatherLamNames(Expr e) => new List<object>();
-
-    public static Expr gatherLamBody(Expr e) => default!;
-
-    public static Func<List<Expr>, string> emitArms(List<Pattern> pats) => bodies => "";
-
-    public static string emitExpr(Expr e) => "";
-
-    public static string emitDecl(Decl d) => "";
-
-    public static string emitDecls(List<Decl> ds) => joinWith("\n\n")(listMap<Decl,string>(emitDecl)(ds));
-
-    public static string renderModule(Module m) => "";
-
     public interface ElabError { }
     public sealed record MkError(string _0) : ElabError;
 
@@ -526,21 +476,39 @@ public static class LlLangProject
 
     public static long __ll_main_Std_Elaborator() => 0L;
 
+    public static Func<List<string>, string> joinWith(string sep) => items => "";
+
     public static bool isFsKeyword(string s) => false;
 
     public static string safeIdent(string s) => (isFsKeyword(s) ? ((strConcat("__ll_")(s))?.ToString() ?? "") : ((s)?.ToString() ?? ""));
+
+    public static string encodeStrEscape(char c) => "";
+
+    public static string escapeStr(string s) => ((listFold<char,string>(acc => c => strConcat(acc)(encodeStrEscape(c))))(""))(strChars(s));
 
     public static string mapOp(string op) => ((op == "==") ? (("=")?.ToString() ?? "") : ((((op == "!=") ? (("<>")?.ToString() ?? "") : ((op)?.ToString() ?? "")))?.ToString() ?? ""));
 
     public static bool isTypeParam(string s) => false;
 
+    public static string emitType(TypeExpr t) => "";
+
     public static TypeExpr collectTyAppHead(TypeExpr t) => default!;
 
     public static List<object> collectTyAppArgs(TypeExpr t) => new List<object>();
 
+    public static string emitPattern(Pattern p) => "";
+
     public static Func<List<Pattern>, string> emitConPattern(string c) => args => "";
 
     public static Pattern patListHead(List<Pattern> xs) => default!;
+
+    public static string emitCharLit(char c) => ((c == '\n') ? (("'\\n'")?.ToString() ?? "") : ((((c == '\t') ? (("'\\t'")?.ToString() ?? "") : ((((c == '\\') ? (("'\\\\'")?.ToString() ?? "") : ((((c == '\'') ? (("'\\''")?.ToString() ?? "") : (((strConcat(strConcat("'")(strFromChars(new List<char> { c }))))("'"))?.ToString() ?? "")))?.ToString() ?? "")))?.ToString() ?? "")))?.ToString() ?? ""));
+
+    public static string emitExpr(Expr e) => "";
+
+    public static Expr gatherAppHead(Expr e) => default!;
+
+    public static List<object> gatherAppArgs(Expr e) => new List<object>();
 
     public static bool isUpperStart(string s) => false;
 
@@ -550,17 +518,25 @@ public static class LlLangProject
 
     public static Func<List<Expr>, string> emitConApp(string c) => args => "";
 
+    public static Func<List<Expr>, string> emitArms(List<Pattern> pats) => bodies => "";
+
     public static string emitTypeParam(string s) => strConcat("'")(s);
 
     public static string emitTypeParams(List<string> tvars) => "";
 
     public static string emitCtorArgs(List<TypeExpr> args) => (joinWith(" * "))(listMap<TypeExpr,string>(emitType)(args));
 
+    public static string emitCtor(Constructor c) => "";
+
     public static string emitCtors(List<Constructor> cs) => joinWith("\n")(listMap<Constructor,string>(emitCtor)(cs));
 
     public static string emitParamName(Param p) => "";
 
     public static string emitParamStr(List<Param> ps) => "";
+
+    public static string emitDecl(Decl d) => "";
+
+    public static string emitDecls(List<Decl> ds) => joinWith("\n\n")(listMap<Decl,string>(emitDecl)(ds));
 
     public static string emitPrelude() => "// --- ll-lang stdlib prelude (auto-generated) ---\nlet listLen (xs: 'a list) : int64 = int64 (List.length xs)\nlet listMap f xs = List.map f xs\nlet listFilter p xs = List.filter p xs\nlet listFold f z xs = List.fold f z xs\nlet listReverse xs = List.rev xs\nlet listAppend xs ys = List.append xs ys\nlet listConcat xss = List.concat xss\nlet listIsEmpty xs = List.isEmpty xs\nlet strLen (s: string) : int64 = int64 s.Length\nlet strConcat (a: string) (b: string) = a + b\nlet strChars (s: string) = s |> Seq.toList\nlet strFromChars (cs: char list) = System.String(cs |> List.toArray)\nlet intToStr (n: int64) = string n\nlet charToInt (c: char) = int64 (int c)\nlet printfn (s: string) = System.Console.WriteLine(s)\nlet print (s: string) = System.Console.Write(s)\nlet listHead xs = match xs with [] -> None | x :: _ -> Some x\nlet listTail xs = match xs with [] -> None | _ :: t -> Some t\n// --- end prelude ---";
 
@@ -576,47 +552,9 @@ public static class LlLangProject
 
     public static string showErrors(List<ElabError> errs) => ((listFold<ElabError,string>(acc => e => ((Func<string>)(() => { var msg = errMsg(e); return ((strLen(acc) == 0L) ? ((msg)?.ToString() ?? "") : ((strConcat(acc)(strConcat("\n")(msg)))?.ToString() ?? "")); }))()))(""))(errs);
 
-    public static string encodeJsonEscape(char c) => "";
-
-    public static string escapeJson(string s) => ((listFold<char,string>(acc => c => strConcat(acc)(encodeJsonEscape(c))))(""))(strChars(s));
-
-    public static string jsonStr(string s) => strConcat("\"")(strConcat(escapeJson(s))("\""));
-
-    public static string firstError(List<ElabError> errs) => "";
-
-    public static long secondaryErrorCount(List<ElabError> errs) => 0L;
-
-    public static string declPrimaryName(Decl d) => "";
-
-    public static string declKindTag(Decl d) => "";
-
-    public static Func<List<Decl>, string> findSymbolKind(string name) => decls => "";
-
-    public static bool hasLexErrors(List<Token> tokens) => false;
-
-    public static string firstLexError(List<Token> tokens) => "";
-
-    public static long countAllTokens(List<Token> tokens) => 0L;
-
-    public static long countCodeTokens(List<Token> tokens) => 0L;
-
-    public static string checkCompact(string src) => "";
-
-    public static string nextBlocker(string src) => "";
-
-    public static Func<string, string> lookupSymbol(string src) => name => "";
-
-    public static string compileCompact(string src) => "";
-
-    public static string renderCompact(string src) => ((Func<string>)(() => { var tokens = tokenize(src); return ((Func<string>)(() => { var ast = parseModule(tokens); return renderModule(ast); }))(); }))();
-
-    public static string tokenEstimate(string src) => ((Func<string>)(() => { var tokens = tokenize(src); return ((Func<string>)(() => { var p1 = "{\"ok\":true,\"source_bytes\":"; return ((Func<string>)(() => { var p2 = strConcat(p1)(intToStr(strLen(src))); return ((Func<string>)(() => { var p3 = strConcat(p2)(",\"lexer_tokens\":"); return ((Func<string>)(() => { var p4 = strConcat(p3)(intToStr(countAllTokens(tokens))); return ((Func<string>)(() => { var p5 = strConcat(p4)(",\"non_layout_tokens\":"); return strConcat(p5)(strConcat(intToStr(countCodeTokens(tokens)))("}")); }))(); }))(); }))(); }))(); }))(); }))();
-
-    public static string compile(string src) => "";
+    public static string compile(string src) => ((Func<string>)(() => { var tokens = tokenize(src); return ((Func<string>)(() => { var ast = parseModule(tokens); return ((Func<string>)(() => { var errors = elaborate(ast); return (listIsEmpty<ElabError>(errors) ? ((emitModule(ast))?.ToString() ?? "") : ((showErrors(errors))?.ToString() ?? "")); }))(); }))(); }))();
 
     public static Func<string, Func<string, object>> compilerCheckContains(string label) => got => needle => (strContains(needle)(got) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat("\n  missing:  "))(strConcat(needle)((strConcat("\n  in output:\n"))(got)))))));
 
     public static Func<string, Func<string, object>> checkHasError(string label) => got => needle => (strContains(needle)(got) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat("\n  expected error containing: "))(strConcat(needle)((strConcat("\n  got: "))(got)))))));
-
-    public static int Main(string[] args) => 0;
 }

@@ -102,6 +102,31 @@ let private builtinEnv : TypeEnv =
         "resultBind",   TyFn(resultOf tA tE, TyFn(TyFn(tA, resultOf tB tE), resultOf tB tE))
         "resultMapErr", TyFn(TyFn(tE, tF), TyFn(resultOf tA tE, resultOf tA tF))
     ]
+    // Compact symbolic operators used by parser/state/result-heavy code.
+    // These are fixed built-ins (not user-defined operator declarations).
+    // Without higher-kinded constraints we still keep operator typing simple.
+    // We nevertheless force bind/sequence/choice to stay on one carrier `m`.
+    // TODO(selfhost:operators):
+    // blocker: no higher-kinded constraints / dictionary elaboration for
+    //   operator-driven abstractions (`>>=`, `>>`, `<|>`).
+    // works-now: both parsers accept symbolic operators with stable precedence;
+    //   elaboration/codegen preserve operator surface end-to-end; `>>=` now
+    //   requires a function RHS and same-carrier return (`m >>= (a -> m) -> m`);
+    //   `>>`/`<|>` are constrained to one carrier (`m -> m -> m`).
+    // next-step: introduce constrained operator typing (Monad/Alt-like
+    //   evidence encoding) with principled inference boundaries.
+    // works-now: all backends lower symbolic operators without emitting raw
+    //   symbolic identifiers (`>>=` lowers to application, `>>` returns rhs,
+    //   `<|>` returns lhs), so codegen is stable cross-target.
+    // known-gap: semantics are intentionally minimal and not trait-evidence
+    //   driven (no true Monad/Alt dispatch yet).
+    // coverage-note: HM and codegen tests pin symbolic-chain mismatch
+    //   diagnostics and backend lowering output.
+    let symbolic = [
+        "<|>", TyFn(TyVar "m", TyFn(TyVar "m", TyVar "m"))
+        ">>=", TyFn(TyVar "m", TyFn(TyFn(TyVar "a", TyVar "m"), TyVar "m"))
+        ">>",  TyFn(TyVar "m", TyFn(TyVar "m", TyVar "m"))
+    ]
     // Str
     let str = [
         "strLen",      TyFn(tStr, tInt)
@@ -147,6 +172,7 @@ let private builtinEnv : TypeEnv =
         "listAt",      TyFn(listOf tA, TyFn(tInt, maybeOf tA))
     ]
     Map.ofList (arith @ cmp @ io @ math @ list @ maybe @ result @ str
+                @ symbolic
                 @ strChar @ fileIO @ proc @ listExtra)
 
 /// Build a right-associative chain of TyFn from a list of parameter types plus a return type.

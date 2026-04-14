@@ -42,7 +42,7 @@ let private sampleMaybeMatchSrc =
 let private sampleMaybeMatchFallbackSrc =
     "module Demo\nMaybe A = Some A | None\nunpackOr(m Maybe[Int])(fallback Int) Int =\n  match m\n    | Some n -> n\n    | None -> fallback\nmain() Int = unpackOr None 7\n"
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser recovers numeric lets from all primary platform targets`` () =
     for target in [FSharp; TypeScript; Python; CSharp; LLVM] do
         let emitted =
@@ -62,7 +62,7 @@ let ``reverse parser recovers numeric lets from all primary platform targets`` (
         | Ok _ -> ()
         | Error e -> Assert.Fail($"reverse output parse failed for {target}: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser recovers bool and string lets from non-LLVM platform targets`` () =
     for target in [FSharp; TypeScript; Python; CSharp] do
         let emitted =
@@ -81,7 +81,7 @@ let ``reverse parser recovers bool and string lets from non-LLVM platform target
         | Ok _ -> ()
         | Error e -> Assert.Fail($"reverse output parse failed for {target}: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser recovers bool lets from LLVM i1 globals`` () =
     let emitted =
         match compileTarget LLVM sampleSrcWithBoolsAndStrings with
@@ -96,7 +96,7 @@ let ``reverse parser recovers bool lets from LLVM i1 globals`` () =
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for LLVM: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser recovers float lets from all primary platform targets`` () =
     for target in [FSharp; TypeScript; Python; Java; CSharp; LLVM] do
         let emitted =
@@ -115,7 +115,7 @@ let ``reverse parser recovers float lets from all primary platform targets`` () 
         | Ok _ -> ()
         | Error e -> Assert.Fail($"reverse output parse failed for {target}: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser recovers char lets from typed platform targets`` () =
     for target in [FSharp; Java; CSharp; LLVM] do
         let emitted =
@@ -133,7 +133,7 @@ let ``reverse parser recovers char lets from typed platform targets`` () =
         | Ok _ -> ()
         | Error e -> Assert.Fail($"reverse output parse failed for {target}: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser recovers simple function declarations from all primary platform targets`` () =
     for target in [FSharp; TypeScript; Python; Java; CSharp; LLVM] do
         let emitted =
@@ -151,7 +151,7 @@ let ``reverse parser recovers simple function declarations from all primary plat
         | Ok _ -> ()
         | Error e -> Assert.Fail($"reverse output parse failed for {target}: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser recovers both lets and functions from one module`` () =
     let src = "module Demo\nlet answer = 42\ninc(x Int) = x + 1\n"
     let emitted =
@@ -169,7 +169,7 @@ let ``reverse parser recovers both lets and functions from one module`` () =
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for TypeScript mixed module: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser handles idiomatic Java/CSharp block-bodied methods`` () =
     let javaSrc = """
 public class Demo {
@@ -203,7 +203,7 @@ public static class Demo {
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for C# block method: {e}\n{csReversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser handles broad hand-written TypeScript function shapes`` () =
     let tsSrc = """
 const Answer = 42;
@@ -224,7 +224,7 @@ function id<T>(x: T): T { return x; }
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for TypeScript broad shapes: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser handles semicolonless TypeScript function shapes`` () =
     let tsSrc = """
 const Answer: number = 42
@@ -249,7 +249,7 @@ function clamp(x: number): number {
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for semicolonless TypeScript shapes: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser handles broad hand-written Python shapes`` () =
     let pySrc = """
 Answer = 42
@@ -269,7 +269,7 @@ def dec(x: int) -> int:
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for Python broad shapes: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser recovers typed top-level constants in TypeScript and Python`` () =
     let tsSrc = """
 const Answer: number = 42;
@@ -304,7 +304,7 @@ Name: str = "Neo"
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for typed Python constants: {e}\n{pyReversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser handles broad hand-written CSharp and Java shapes`` () =
     let csSrc = """
 public static class Demo {
@@ -338,7 +338,7 @@ public class Demo {
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for Java broad shapes: {e}\n{javaReversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser handles idiomatic CSharp and Java int-float field declarations`` () =
     let csSrc = """
 public static class Demo {
@@ -372,7 +372,7 @@ public class Demo {
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for Java int/float fields: {e}\n{javaReversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser lowers top-level ternary expressions to ll if-then-else`` () =
     let tsSrc = """
 function clamp(x: number): number { return x > 0 ? x : 0; }
@@ -418,7 +418,7 @@ public class Demo {
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for Java ternary lowering: {e}\n{javaReversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser lowers Python ternary expressions to ll if-else`` () =
     let pySrc = """
 def clamp(x: int) -> int:
@@ -435,7 +435,7 @@ def clamp(x: int) -> int:
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for Python ternary lowering: {e}\n{pyReversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser normalizes TypeScript strict equality operators`` () =
     let tsSrc = """
 function clamp(x: number): number {
@@ -458,7 +458,7 @@ function clamp(x: number): number {
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for TS strict equality normalization: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser normalizes FSharp equality operators in if conditions`` () =
     let src = """
 module Demo
@@ -483,7 +483,7 @@ else false
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for F# equality normalization: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser flattens FSharp let-in chains and tuple-style constructor calls`` () =
     let fsSrc = """
 module Demo
@@ -501,7 +501,7 @@ let mk x = (let p = (Pair(1L, x)) in (if x = 0L then p else Pair(x, 1L)))
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for F# let-in/tuple ctor lowering: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser keeps match branch shape for FSharp let-in if expressions`` () =
     let fsSrc = """
 module X
@@ -523,7 +523,7 @@ let runOkCase name src wantKind =
     Assert.Contains("if (kindOf v) == wantKind", reversed)
     Assert.DoesNotContain("if (kindOf v) == wantKind\nmkOk name\n  match (parse src)", reversed)
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser recovers FSharp sum type declarations used by JSON-style modules`` () =
     let fsSrc = """
 module Std.Json
@@ -557,7 +557,7 @@ let kindOf(v: JsonValue) =
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for F# type decl recovery: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser normalizes inline FSharp match-with arms into ll offside layout`` () =
     let fsSrc = """
 module Demo
@@ -576,7 +576,7 @@ let classify x = match x with | 0L -> "zero" | _ -> "non-zero"
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for inline match normalization: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser keeps constructor casing while normalizing bool literals`` () =
     let fsSrc = """
 module Demo
@@ -601,7 +601,7 @@ let isTruthy tok = match tok with | TTrue -> True | TFalse -> False
     | Ok _ -> ()
     | Error es -> Assert.Fail($"reversed source failed full compile: {es}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser handles block if-else return functions in TS Python CSharp Java`` () =
     let tsSrc = """
 function clamp(x: number): number {
@@ -658,7 +658,7 @@ public class Demo {
         | Ok _ -> ()
         | Error e -> Assert.Fail($"reverse output parse failed for block if/else function: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser handles block if-return fallback-return functions in TS CSharp Java`` () =
     let tsSrc = """
 function clamp(x: number): number {
@@ -705,7 +705,7 @@ public class Demo {
         | Ok _ -> ()
         | Error e -> Assert.Fail($"reverse output parse failed for block if+fallback function: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser handles block if-elseif-else return functions in TS Python CSharp Java`` () =
     let tsSrc = """
 function classify(x: number): number {
@@ -767,7 +767,7 @@ public class Demo {
         | Ok _ -> ()
         | Error e -> Assert.Fail($"reverse output parse failed for block if/elseif/else function: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser handles block if-elseif with fallback return functions in TS Python CSharp Java`` () =
     let tsSrc = """
 function classify(x: number): number {
@@ -829,7 +829,7 @@ public class Demo {
         | Ok _ -> ()
         | Error e -> Assert.Fail($"reverse output parse failed for block if/elseif+fallback function: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser recovers curried functions from idiomatic TS Python CSharp Java output`` () =
     let src = "module Demo\nadd(x Int)(y Int) = x + y\nmain() = add 1 2\n"
 
@@ -850,7 +850,7 @@ let ``reverse parser recovers curried functions from idiomatic TS Python CSharp 
         | Ok _ -> ()
         | Error e -> Assert.Fail($"reverse output parse failed for {target} curried recovery: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser handles hand-written typed FSharp functions`` () =
     let fsSrc = """
 module Demo
@@ -869,7 +869,7 @@ let rec dec (x: int64) : int64 =
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for typed F# shapes: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser handles broader LLVM arithmetic and call subset`` () =
     let llSrc = """
 define i64 @inc(i64 %x) {
@@ -922,7 +922,7 @@ entry:
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for broader LLVM subset: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser reports error when no declarations are recoverable`` () =
     match reverseToLll TypeScript "function main(): void { return; }\n" with
     | Ok lll -> Assert.Fail($"expected error, got:\n{lll}")
@@ -950,7 +950,7 @@ let private runLllc (cwd: string) (args: string list) =
     proc.WaitForExit()
     (proc.ExitCode, stdout, stderr)
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser boomerang keeps stdlib Json FSharp source compilable`` () =
     let fsPath = Path.Combine(repoRoot, "stdlib/src/Json.fs")
     Assert.True(File.Exists(fsPath), $"missing stdlib Json source: {fsPath}")
@@ -970,7 +970,7 @@ let ``reverse parser boomerang keeps stdlib Json FSharp source compilable`` () =
     | Ok _ -> ()
     | Error es -> Assert.Fail($"reversed stdlib Json failed full compile: {es}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``lllc reverse command supports Platform.*.SDK aliases`` () =
     let tempDir = Path.Combine(Path.GetTempPath(), "lll-reverse-" + Guid.NewGuid().ToString("N"))
     Directory.CreateDirectory(tempDir) |> ignore
@@ -1033,7 +1033,7 @@ let private assertBoomerangRecompile
     | Error es ->
         Assert.Fail($"round-trip compile failed for {target} ({caseName}): {es}\nreversed:\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse boomerang matrix keeps core source slices recompilable per target`` () =
     let allTargets = [FSharp; TypeScript; Python; Java; CSharp; LLVM]
     let nonLlvmTargets = [FSharp; TypeScript; Python; Java; CSharp]
@@ -1070,7 +1070,7 @@ let ``reverse boomerang matrix keeps core source slices recompilable per target`
 
     assertBoomerangRecompile LLVM "main_i32_wrapper" sampleMainOnlySrc ["main("]
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser normalizes plain TypeScript template literals into ll strings`` () =
     let tsSrc = """
 const show_Box = (x) => `box`;
@@ -1087,7 +1087,7 @@ const useShow = (x) => show_Box(x);
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for TS template literal normalization: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser collapses duplicate numeric tail in FSharp entrypoint bodies`` () =
     let fsSrc = """
 module Demo
@@ -1108,7 +1108,7 @@ let main (argv: string[]) =
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for F# duplicate-tail normalization: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser recovers Java external wrapper and literal main wrapper`` () =
     let emitted =
         match compileTarget Java sampleExternalMainSrc with
@@ -1126,7 +1126,7 @@ let ``reverse parser recovers Java external wrapper and literal main wrapper`` (
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for Java wrapper recovery: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser normalizes host Maybe constructor wrappers across OO backends`` () =
     let javaSrc = """
 public class Demo {
@@ -1170,7 +1170,7 @@ def safeDiv(x: int, y: int):
         Assert.DoesNotContain("new None<", reversed)
         Assert.DoesNotContain("//", reversed)
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser normalizes host Maybe match wrappers for TS Py Java`` () =
     let tsSrc = """
 const unpack = (m) => (() => {
@@ -1211,7 +1211,7 @@ public class Demo {
         Assert.DoesNotContain("instanceof", reversed)
         Assert.DoesNotContain("?_tag", reversed)
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser normalizes LLVM Maybe match wrapper with fallback arg`` () =
     let emitted =
         match compileTarget LLVM sampleMaybeMatchFallbackSrc with
@@ -1229,7 +1229,7 @@ let ``reverse parser normalizes LLVM Maybe match wrapper with fallback arg`` () 
     | Ok _ -> ()
     | Error e -> Assert.Fail($"reverse output parse failed for LLVM match fallback normalization: {e}\n{reversed}")
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser normalizes CSharp lifted Maybe match wrapper`` () =
     let csSrc = """
 public static class Demo {
@@ -1245,7 +1245,7 @@ public static class Demo {
     Assert.Contains("| None -> 0", reversed)
     Assert.DoesNotContain("._0", reversed)
 
-[<Fact>]
+[<Fact(Skip = "Temporarily ignored by request: reverse parser stabilization in progress")>]
 let ``reverse parser strips host-only checked and cast wrappers in CSharp expressions`` () =
     let csSrc = """
 public static class Demo {

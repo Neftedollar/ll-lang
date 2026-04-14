@@ -9,7 +9,7 @@ let private repoRoot =
 
 let private runMapLll () =
     let lllPath =
-        Path.Combine(repoRoot, "stdlib/src/Map.lll")
+        Path.Combine(repoRoot, "stdlib/smoke/MapSmoke.lll")
     let llcDll =
         Path.Combine(repoRoot, "src/LLLangTool/bin/Debug/net10.0/lllc.dll")
     let psi = System.Diagnostics.ProcessStartInfo("dotnet", $"\"{llcDll}\" run \"{lllPath}\"")

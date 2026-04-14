@@ -6,10 +6,14 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="FParsec" Version="1.1.1" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="Token.fs" />
     <Compile Include="Lexer.fs" />
     <Compile Include="AST.fs" />
     <Compile Include="Parser.fs" />
+    <Compile Include="FParsecParser.fs" />
     <Compile Include="Elaborator.fs" />
     <Compile Include="Types.fs" />
     <Compile Include="TypedAST.fs" />

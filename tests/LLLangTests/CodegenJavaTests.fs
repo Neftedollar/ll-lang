@@ -224,6 +224,20 @@ let ``Java: arithmetic uses standard operators`` () =
     Assert.Contains("+", java)
 
 [<Fact>]
+let ``Java: symbolic operators lower without raw symbolic identifiers`` () =
+    let src =
+        "module M\n"
+        + "main() Int =\n"
+        + "  x = 5 >>= (\\n. n + 1)\n"
+        + "  y = x <|> 0\n"
+        + "  z = y >> 7\n"
+        + "  z\n"
+    let java = javaSrc src
+    Assert.DoesNotContain(">>=", java)
+    Assert.DoesNotContain("<|>", java)
+    Assert.DoesNotContain(" >> ", java)
+
+[<Fact>]
 let ``Java: prelude exposes maybeWithDefault builtin`` () =
     let src = "module M\nmain() Unit = printfn \"x\""
     let java = javaSrc src
@@ -254,6 +268,29 @@ let ``Java: generated stdlib and curried calls compile with javac`` () =
             File.WriteAllText(javaPath, java)
             let (code, so, se) = runProc tempRoot "javac" [javaPath]
             Assert.True((code = 0), $"javac failed\nstdout:\n{so}\nstderr:\n{se}\nsource:\n{java}")
+        finally
+            try Directory.Delete(tempRoot, true) with _ -> ()
+
+[<Fact>]
+let ``Java: passing known static function as value emits callable lambda and compiles`` () =
+    if not (toolExists "javac") then
+        ()
+    else
+        let src =
+            "module Demo\n"
+            + "apply(f Int->Int)(x Int) Int = f x\n"
+            + "double(x Int) Int = x * 2\n"
+            + "main() Int = apply double 2\n"
+        let java = javaSrc src
+        Assert.Contains("__ll_arg -> double_(__ll_arg)", java)
+
+        let tempRoot = Path.Combine(Path.GetTempPath(), "lll-java-fn-value-" + Guid.NewGuid().ToString("N"))
+        Directory.CreateDirectory(tempRoot) |> ignore
+        try
+            let javaPath = Path.Combine(tempRoot, "Demo.java")
+            File.WriteAllText(javaPath, java)
+            let (code, so, se) = runProc tempRoot "javac" [javaPath]
+            Assert.True((code = 0), $"javac failed for function-value lowering\nstdout:\n{so}\nstderr:\n{se}\nsource:\n{java}")
         finally
             try Directory.Delete(tempRoot, true) with _ -> ()
 

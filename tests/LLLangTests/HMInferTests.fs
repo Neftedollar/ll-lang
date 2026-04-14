@@ -340,6 +340,47 @@ let ``pipe e -> f types as f e`` () =
     Assert.Equal(TyName "Int", (schemeOf tm "y").Body)
 
 [<Fact>]
+let ``bind operator accepts functional rhs`` () =
+    let tm = inferOk "module M\nlet y = 5 >>= (\\x. x + 1)"
+    Assert.Equal(TyName "Int", (schemeOf tm "y").Body)
+
+[<Fact>]
+let ``bind operator rejects non-functional rhs`` () =
+    let src = "module M\nlet bad = 5 >>= 1"
+    match tokenize src |> Result.bind parseModuleWithPos with
+    | Error e -> failwith $"parse: {e}"
+    | Ok (m, pm) ->
+        match elaborate pm m with
+        | Ok _ -> Assert.True(false, "expected elaborator error for non-functional >>= rhs")
+        | Error errs ->
+            Assert.Contains(errs, fun e -> e.Code = E001)
+
+[<Fact>]
+let ``bind operator requires rhs to return same carrier`` () =
+    let errs = inferErrs "module M\nlet bad = 5 >>= (\\x. \"s\")"
+    Assert.Contains(errs, fun e -> e.Code = E001)
+
+[<Fact>]
+let ``sequencing operator requires same carrier`` () =
+    let errs = inferErrs "module M\nlet bad = 1 >> \"x\""
+    Assert.Contains(errs, fun e -> e.Code = E001)
+
+[<Fact>]
+let ``choice operator requires same carrier`` () =
+    let errs = inferErrs "module M\nlet bad = 1 <|> \"x\""
+    Assert.Contains(errs, fun e -> e.Code = E001)
+
+[<Fact>]
+let ``pipe chain with inline lambdas infers Int`` () =
+    let tm = inferOk "module M\nlet y = 1 |> (\\x. x + 1) |> (\\x. x * 2)"
+    Assert.Equal(TyName "Int", (schemeOf tm "y").Body)
+
+[<Fact>]
+let ``mixed symbolic chain reports mismatch when carriers diverge`` () =
+    let errs = inferErrs "module M\nlet bad = (1 |> (\\x. x + 1)) <|> \"x\""
+    Assert.Contains(errs, fun e -> e.Code = E001)
+
+[<Fact>]
 let ``list of ints infers List Int`` () =
     let tm = inferOk "module M\nlet xs = [1 2 3]"
     let sch = schemeOf tm "xs"
@@ -861,6 +902,19 @@ let ``infer cons expression type mismatch yields E001`` () =
     // 1 :: ["a"]  — Int head + List Str -> mismatch
     let errs = inferErrs "module M\nlet xs = 1 :: [\"a\"]"
     Assert.Contains(errs, fun e -> e.Code = E001)
+
+[<Fact>]
+let ``constructor can be passed as function argument without eta-wrapper`` () =
+    let src =
+        "module M\n" +
+        "Maybe A = Some A | None\n" +
+        "wrapAll(xs List[Int]) List[Maybe[Int]] = listMap Some xs\n"
+    let tm = inferOk src
+    let sch = schemeOf tm "wrapAll"
+    let listInt = TyApp(TyName "List", TyName "Int")
+    let maybeInt = TyApp(TyName "Maybe", TyName "Int")
+    let listMaybeInt = TyApp(TyName "List", maybeInt)
+    Assert.Equal(TyFn(listInt, listMaybeInt), sch.Body)
 
 // --- Phase 7.1.5: match as expression ---
 

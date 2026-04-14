@@ -363,7 +363,7 @@ ll-lang provides an MCP server (`lllc mcp`) with 10 tools. Use them for instant 
 | `check_source` | Validate source string directly (fastest) | `{ "source": "module T\nadd(a Int)(b Int) = a + b" }` |
 | `compile_file` | Full compile, optionally get generated output | `{ "path": "...", "include_output": true, "target": "fs" }` |
 | `compile_source` | Compile source string, get generated code | `{ "source": "...", "target": "ts" }` |
-| `run_file` | Compile and execute via dotnet fsi | `{ "path": "..." }` |
+| `run_file` | Compile and execute via temporary F# project (`dotnet run`) | `{ "path": "..." }` |
 | `list_errors` | List all error codes | `{}` |
 | `lookup_error` | Get explanation + repro for error code | `{ "code": "E003" }` |
 | `stdlib_search` | Search stdlib by name or type signature | `{ "query": "list" }` |

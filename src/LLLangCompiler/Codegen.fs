@@ -42,6 +42,13 @@ let private fsKeywords =
 let private safeIdent (s: string) =
     if Set.contains s fsKeywords then "__ll_" + s else s
 
+let private isSymbolicName (s: string) =
+    s |> Seq.exists (fun c -> not (System.Char.IsLetterOrDigit c) && c <> '_')
+
+let private emitVarRef (name: string) =
+    if isSymbolicName name then "(" + name + ")"
+    else safeIdent name
+
 // ---- Type emission -----------------------------------------------------------
 
 /// Single uppercase letter is a type parameter (A, B, C...) that the parser
@@ -85,6 +92,17 @@ let private emitTypeParams (ps: TypeParam list) : string =
 let private emitOpaqueDecl (name: TypeIdent) (ps: TypeParam list) : string =
     let tpStr = emitTypeParams ps
     "type " + name + tpStr + " = obj"
+
+let rec private stripTaggedType (t: TypeExpr) : TypeExpr =
+    match t with
+    | TyTagged(inner, _) -> stripTaggedType inner
+    | _ -> t
+
+let private emitUnionCaseFieldType (t: TypeExpr) : string =
+    let rendered = emitType t
+    match stripTaggedType t with
+    | TyFn _ -> "(" + rendered + ")"
+    | _ -> rendered
 
 let private emitExternalDecl (sig_: TypedFnSig) : string =
     let pnames = sig_.Params |> List.map (fst >> safeIdent)
@@ -147,6 +165,21 @@ let private tryAsBinOp (te: TypedExpr) : (string * TypedExpr * TypedExpr) option
         | _ -> None
     | _ -> None
 
+/// Recognize symbolic fixed operators that are lowered by backend semantics
+/// rather than emitted as raw identifiers.
+let private tryAsSymbolicOp (te: TypedExpr) : (string * TypedExpr * TypedExpr) option =
+    match te.Expr with
+    | TEApp(outer, right) ->
+        match outer.Expr with
+        | TEApp(inner, left) ->
+            match inner.Expr with
+            | TEVar (">>=" as op)
+            | TEVar (">>" as op)
+            | TEVar ("<|>" as op) -> Some (op, left, right)
+            | _ -> None
+        | _ -> None
+    | _ -> None
+
 // ---- Pattern emission --------------------------------------------------------
 
 let rec private emitPattern (p: Pattern) : string =
@@ -169,6 +202,14 @@ let rec private emitPattern (p: Pattern) : string =
 
 and private emitExpr (indent: int) (te: TypedExpr) : string =
     let ind = String.replicate indent " "
+    match tryAsSymbolicOp te with
+    | Some (">>=", left, right) ->
+        "(" + emitExpr indent right + " (" + emitExpr indent left + "))"
+    | Some (">>", _, right) ->
+        "(" + emitExpr indent right + ")"
+    | Some ("<|>", left, _) ->
+        "(" + emitExpr indent left + ")"
+    | _ ->
     // Recognize fully-applied binary operators (`((+) a b)` etc.) up-front so
     // the main match only has to deal with plain application shapes.
     match tryAsBinOp te with
@@ -177,7 +218,7 @@ and private emitExpr (indent: int) (te: TypedExpr) : string =
     | None ->
     match te.Expr with
     | TELit l  -> emitLit l
-    | TEVar x  -> safeIdent x
+    | TEVar x  -> emitVarRef x
     | TECon c  -> safeIdent c
 
     | TEApp(f, a) ->
@@ -330,13 +371,13 @@ let private emitTypeDeclWithKeyword (keyword: string) (allowMaybeAlias: bool) (n
                 branches |> List.map (fun (con, args) ->
                     match args with
                     | [] -> "    | " + con
-                    | _  -> "    | " + con + " of " + (args |> List.map emitType |> String.concat " * "))
+                    | _  -> "    | " + con + " of " + (args |> List.map emitUnionCaseFieldType |> String.concat " * "))
             header + "\n" + String.concat "\n" arms
         | TBRecord fields ->
             let flds = fields |> List.map (fun (f, t) -> f + ": " + emitType t) |> String.concat "; "
             header + " { " + flds + " }"
         | TBWrapped t ->
-            header + "\n    | " + name + " of " + emitType t
+            header + "\n    | " + name + " of " + emitUnionCaseFieldType t
 
 /// Group type declarations so F# can resolve forward and mutually-recursive references.
 /// Invariant: every TDType that references another type in the same module either
@@ -834,13 +875,19 @@ let emitProjectFiles (tms: TypedModule list) : (string * string) list =
     let preludeFile = ("Prelude.fs", preludeContent)
 
     let moduleFiles =
-        tms |> List.map (fun tm ->
+        let lastIdx = max 0 (List.length tms - 1)
+        tms
+        |> List.mapi (fun idx tm ->
             let moduleName = String.concat "." tm.Path
-            let fileName   = (List.last tm.Path) + ".fs"
+            let fileName = (List.last tm.Path) + ".fs"
+            let precedingModules =
+                tms
+                |> List.take idx
+                |> List.map (fun m -> String.concat "." m.Path)
             let opens = precedingModules |> List.map (fun m -> "open " + m) |> String.concat "\n"
-            let header     = "module " + moduleName + "\n\nopen LLLang.Prelude" + (if opens = "" then "" else "\n" + opens)
-            precedingModules <- precedingModules @ [moduleName]
+            let header = "module " + moduleName + "\n\nopen LLLang.Prelude" + (if opens = "" then "" else "\n" + opens)
             let isTypeDecl (d: TypedDecl) = match d with TDType _ | TDOpaque _ -> true | _ -> false
+            let isLast = idx = lastIdx
             let renamedDecls =
                 tm.Decls
                 |> List.map (fun (d, exported) ->
@@ -852,7 +899,7 @@ let emitProjectFiles (tms: TypedModule list) : (string * string) list =
                         let renamed = "__test_main_" + (List.last tm.Path)
                         (TDLet(renamed, ty, e), exported)
                     | _ -> (d, exported))
-            let typeDecls  = renamedDecls |> List.filter (fun (d, _) -> isTypeDecl d)
+            let typeDecls = renamedDecls |> List.filter (fun (d, _) -> isTypeDecl d)
             let otherDecls = renamedDecls |> List.filter (fun (d, _) -> not (isTypeDecl d))
             let typeStr = emitTypeDecls typeDecls
             let otherStr =
@@ -862,7 +909,7 @@ let emitProjectFiles (tms: TypedModule list) : (string * string) list =
                 |> String.concat "\n\n"
             let parts =
                 [ header
-                  (if typeStr  = "" then "" else typeStr)
+                  (if typeStr = "" then "" else typeStr)
                   (if otherStr = "" then "" else otherStr) ]
                 |> List.filter (fun s -> s <> "")
             let content = String.concat "\n\n" parts

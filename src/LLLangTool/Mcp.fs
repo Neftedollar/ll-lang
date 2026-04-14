@@ -437,7 +437,7 @@ let projectInfoTool (args: ProjectInfoArgs) : Task<Result<Content list, McpError
 let runServer () =
     let server = mcpServer {
         name "ll-lang"
-        version "0.8.0"
+        version "1.0.0"
 
         tool (TypedTool.define<CompileFileArgs>
             "compile_file"

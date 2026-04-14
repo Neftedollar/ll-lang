@@ -94,7 +94,7 @@ Type-check a file **without** running codegen. Faster than `compile_file`.
 
 ### `run_file`
 
-Compile and run a `.lll` file via `dotnet fsi`. Captures stdout + stderr.
+Compile and run a `.lll` file via temporary F# project execution (`dotnet run`). Captures stdout + stderr.
 
 **Input:** `{ "path": "/abs/path/to/foo.lll" }`
 
@@ -192,7 +192,7 @@ Walk up from a path to find `lll.toml` and return project metadata.
   "root": "/abs/path/to/myapp",
   "manifest_path": "/abs/path/to/myapp/lll.toml",
   "manifest_kind": "lll.toml",
-  "manifest": { "name": "myapp", "version": "0.8.0" },
+  "manifest": { "name": "myapp", "version": "1.0.0" },
   "modules": [
     { "path": "/abs/path/to/myapp/src/Greet.lll", "module": "Myapp.Greet" },
     { "path": "/abs/path/to/myapp/src/Main.lll",  "module": "Myapp.Main" }
@@ -239,4 +239,4 @@ Set up the alias per [01-installation.md](01-installation.md) or use `dotnet run
 The server looks for `spec/grammar.ebnf` relative to the binary. When running via `dotnet run`, the binary lives in `bin/Debug/net10.0/` — the grammar file search walks up 6 levels and should find `spec/`. If it doesn't, set the working directory to the repo root.
 
 ### `run_file` is slow
-`lllc run` starts a fresh `dotnet fsi` session each time. Cold start is 2–5 s. For faster iteration, use `compile_file` + `dotnet run` on the generated `.fs` file.
+`lllc run` builds and executes a fresh temporary project each time. For faster iteration, use `compile_file` + `dotnet run --project <generated .fsproj>`.

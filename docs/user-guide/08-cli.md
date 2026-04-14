@@ -12,7 +12,13 @@ Usage:
   lllc check [--target fs|ts|py|java|cs|llvm] <file.lll>   type-check single file (no codegen)
   lllc check [--target fs|ts|py|java|cs|llvm] [dir]        type-check project (no codegen)
   lllc run   [--target fs|ts|py|java|cs|llvm] <file.lll>   compile and run single file
+  lllc self  <cmd> <file> [arg]                             run self-hosted lllc tool layer
   lllc new   <name>         scaffold new project
+  lllc install                                               sync deps into vendor/ + ll.sum
+  lllc mod tidy                                              same as install
+  lllc mod add <name>=<source>                              add dep and install
+  lllc mod why <dep>                                         explain dependency chain
+  lllc mcp                                                   run MCP server (stdio)
   lllc reverse --from <target> <file>   [experimental] recover minimal ll-lang from generated code
 ```
 
@@ -118,12 +124,10 @@ lllc run hello.lll
 ```
 
 1. Same pipeline as `build`.
-2. Writes the emitted F# to a temporary `.fsx` file.
-3. Strips the `module` header and `[<EntryPoint>]` attribute (F# interactive does not honor them).
-4. Appends `main [||] |> int64 |> exit` so `fn main()` actually executes.
-5. Shells out to `dotnet fsi <tmp>.fsx`.
-6. Waits for `fsi` to exit and propagates its exit code.
-7. Deletes the temp file.
+2. Materializes a temporary multi-file F# project (`.fs` files + `.fsproj`).
+3. Executes `dotnet run -c Release -v q --project <tmp>.fsproj`.
+4. Propagates the child process exit code.
+5. Deletes the temp directory.
 
 Your ll-lang `fn main()` becomes the F# entry point:
 
@@ -144,6 +148,18 @@ Example TypeScript run path:
 lllc run --target ts hello.lll
 # internally: npx tsc hello.ts --target es2022 --module esnext && node hello.js
 ```
+
+---
+
+## `lllc self <cmd> <file> [arg]` — run self-hosted compiler layer
+
+```bash
+lllc self check src/Main.lll
+lllc self compile src/Main.lll
+lllc self symbol src/Main.lll lookupName
+```
+
+`lllc self` compiles and runs the `lllcself` ll-lang project and delegates subcommands to its CLI (`check`, `compile`, `render`, `tokens`, `next`, `symbol`).
 
 ---
 
@@ -207,13 +223,15 @@ E002 0:0 UnboundVar foo
 E003 0:0 NonExhaustiveMatch Shape missing:Empty
 ```
 
-### `dotnet fsi` is slow
+### `lllc run` cold start
 
-`lllc run` starts a fresh F# interactive session each time. Cold-start is typically 2–5 s. For faster iteration, use `lllc build` + `dotnet run`.
+`lllc run` builds and executes a fresh temporary project each run. For tight edit loops, prefer `lllc build` + `dotnet run --project <your .fsproj>`.
 
 ### Nullness warnings on build
 
-The compiler projects enable `<Nullable>enable</Nullable>` under `LangVersion=preview`. A few `FS3261` warnings from `File.ReadAllText` and `Process.Start` are harmless pre-existing warnings.
+The compiler projects enable `<Nullable>enable</Nullable>` under `LangVersion=preview`.
+Current baseline is warning-free (`0 Warning(s)` on `dotnet build src/LLLangTool/LLLangTool.fsproj`).
+Treat new nullness warnings as regressions to fix rather than suppress.
 
 ---
 

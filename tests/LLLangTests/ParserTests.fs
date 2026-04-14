@@ -78,6 +78,14 @@ let ``parse application: f x`` () =
 let ``parse application: f x y is left-assoc`` () =
     Assert.Equal(EApp(EApp(EVar "f", EVar "x"), EVar "y"), parseExprStr "f x y")
 
+[<Fact>]
+let ``parse zero-arg call suffix: f()`` () =
+    Assert.Equal(EVar "f", parseExprStr "f()")
+
+[<Fact>]
+let ``parse zero-arg call suffix before next arg: f() x`` () =
+    Assert.Equal(EApp(EVar "f", EVar "x"), parseExprStr "f() x")
+
 // --- Pipe ---
 
 [<Fact>]
@@ -85,9 +93,60 @@ let ``parse pipe: x -> f`` () =
     Assert.Equal(EPipe(EVar "x", EVar "f"), parseExprStr "x -> f")
 
 [<Fact>]
+let ``parse pipe: x |> f`` () =
+    Assert.Equal(EPipe(EVar "x", EVar "f"), parseExprStr "x |> f")
+
+[<Fact>]
 let ``parse pipe chain: x -> f -> g`` () =
     // left-associative: (x -> f) -> g
     Assert.Equal(EPipe(EPipe(EVar "x", EVar "f"), EVar "g"), parseExprStr "x -> f -> g")
+
+[<Fact>]
+let ``parse bind: m >>= f`` () =
+    let expected = EApp(EApp(EVar ">>=", EVar "m"), EVar "f")
+    Assert.Equal(expected, parseExprStr "m >>= f")
+
+[<Fact>]
+let ``parse choice: p1 <|> p2`` () =
+    let expected = EApp(EApp(EVar "<|>", EVar "p1"), EVar "p2")
+    Assert.Equal(expected, parseExprStr "p1 <|> p2")
+
+[<Fact>]
+let ``parse sequencing: a >> b`` () =
+    let expected = EApp(EApp(EVar ">>", EVar "a"), EVar "b")
+    Assert.Equal(expected, parseExprStr "a >> b")
+
+[<Fact>]
+let ``parse precedence: pipe binds tighter than bind`` () =
+    let expected =
+        EApp(
+            EApp(EVar ">>=", EPipe(EVar "x", EVar "f")),
+            EVar "g")
+    Assert.Equal(expected, parseExprStr "x |> f >>= g")
+
+[<Fact>]
+let ``parse precedence: bind binds tighter than choice`` () =
+    let expected =
+        EApp(
+            EApp(EVar "<|>", EApp(EApp(EVar ">>=", EVar "a"), EVar "b")),
+            EVar "c")
+    Assert.Equal(expected, parseExprStr "a >>= b <|> c")
+
+[<Fact>]
+let ``parse associativity: choice is left-associative`` () =
+    let expected =
+        EApp(
+            EApp(EVar "<|>", EApp(EApp(EVar "<|>", EVar "a"), EVar "b")),
+            EVar "c")
+    Assert.Equal(expected, parseExprStr "a <|> b <|> c")
+
+[<Fact>]
+let ``parse associativity: bind and sequence chain left`` () =
+    let expected =
+        EApp(
+            EApp(EVar ">>=", EApp(EApp(EVar ">>", EVar "a"), EVar "b")),
+            EVar "c")
+    Assert.Equal(expected, parseExprStr "a >> b >>= c")
 
 [<Fact>]
 let ``parse pipe precedence: multiplication/addition are tighter than pipe`` () =
@@ -126,6 +185,35 @@ let ``parse lambda: \x. x`` () =
 [<Fact>]
 let ``parse lambda two params: \x y. x`` () =
     Assert.Equal(ELam(["x"; "y"], EVar "x"), parseExprStr "\\x y. x")
+
+[<Fact>]
+let ``parse trailing lambda as final application arg`` () =
+    let expected = EApp(EApp(EVar "f", EVar "x"), ELam(["y"], EVar "y"))
+    Assert.Equal(expected, parseExprStr "f x \\y. y")
+
+[<Fact>]
+let ``parse trailing lambda without prior args`` () =
+    let expected = EApp(EVar "f", ELam(["x"], EVar "x"))
+    Assert.Equal(expected, parseExprStr "f \\x. x")
+
+[<Fact>]
+let ``parse trailing lambda after grouped arg`` () =
+    let expected = EApp(EApp(EVar "f", EApp(EVar "g", EVar "x")), ELam(["y"], EVar "y"))
+    Assert.Equal(expected, parseExprStr "f (g x) \\y. y")
+
+[<Fact>]
+let ``parse trailing lambda indented body`` () =
+    let expected =
+        EApp(
+            EApp(EVar "stateBind", EVar "x"),
+            ELam(["y"], EApp(EApp(EVar "stateBind", EVar "y"), ELam(["z"], EVar "z"))))
+    Assert.Equal(expected, parseExprStr "stateBind x \\y.\n  stateBind y \\z. z")
+
+[<Fact>]
+let ``parse trailing lambda matches parenthesized lambda AST`` () =
+    let inlineForm = parseExprStr "stateBind x \\y.\n  stateBind y \\z. z"
+    let parenForm = parseExprStr "stateBind x (\\y.\n  stateBind y (\\z. z))"
+    Assert.Equal(parenForm, inlineForm)
 
 // --- If/Else ---
 
@@ -220,7 +308,7 @@ let ``parse simple fn declaration`` () =
 let ``strict parser: keyword prefixes do not shadow identifiers`` () =
     let src =
         "module M\nfnName(x Int) Int = x\nexported(y Int) Int = y\n"
-    match parseModuleWithPosStrict src with
+    match LLLang.FParsecParser.parseModuleWithPosStrict src with
     | Error e -> failwith $"Parse error: {e}"
     | Ok (m, _) ->
         let fnNames =
@@ -250,7 +338,7 @@ let ``strict parser: clause-arm body keeps args after multiline parenthesized ar
             (h, args @ [a])
         | _ -> (e, [])
 
-    match parseModuleWithPosStrict src with
+    match LLLang.FParsecParser.parseModuleWithPosStrict src with
     | Error e -> failwith $"Parse error: {e}"
     | Ok (m, _) ->
         match m.Decls with
@@ -275,7 +363,7 @@ let ``strict parser: multiline parenthesized arg does not eat next let-body line
         "\n" +
         "  0\n"
 
-    match parseModuleWithPosStrict src with
+    match LLLang.FParsecParser.parseModuleWithPosStrict src with
     | Error e -> failwith $"Parse error: {e}"
     | Ok (m, _) ->
         match m.Decls with
@@ -294,7 +382,7 @@ let ``strict parser: multiline parenthesized arg does not eat next let-body line
 [<Fact>]
 let ``strict parser: unary bang desugars to equality with false`` () =
     let src = "module M\nneg(b Bool) Bool = !b\n"
-    match parseModuleWithPosStrict src with
+    match LLLang.FParsecParser.parseModuleWithPosStrict src with
     | Error e -> failwith $"Parse error: {e}"
     | Ok (m, _) ->
         match m.Decls with
@@ -306,7 +394,7 @@ let ``strict parser: unary bang desugars to equality with false`` () =
 [<Fact>]
 let ``strict parser: subtraction inside call arg remains binary minus`` () =
     let src = "module M\nstep(n Int) Int = g (n - 1)\n"
-    match parseModuleWithPosStrict src with
+    match LLLang.FParsecParser.parseModuleWithPosStrict src with
     | Error e -> failwith $"Parse error: {e}"
     | Ok (m, _) ->
         match m.Decls with
@@ -317,6 +405,25 @@ let ``strict parser: subtraction inside call arg remains binary minus`` () =
                     EApp(EApp(EVar "-", EVar "n"), ELit (LInt 1L)))
             Assert.Equal(expected, body)
         | _ -> failwith "Expected first declaration to be function step"
+
+[<Fact>]
+let ``strict parser: constructor arg supports tuple pattern`` () =
+    let src =
+        "module M\n" +
+        "fstOpt(v Maybe[Int]) Int =\n" +
+        "  match v\n" +
+        "    | Some (a, b) -> a\n" +
+        "    | _ -> 0\n"
+    match LLLang.FParsecParser.parseModuleWithPosStrict src with
+    | Error e -> failwith $"Parse error: {e}"
+    | Ok (m, _) ->
+        match m.Decls with
+        | (DFn(_, body), _) :: _ ->
+            match body with
+            | EMatchOf(_, [ (PCon("Some", [PTuple [PVar "a"; PVar "b"]]), EVar "a")
+                            ; (PWild, ELit (LInt 0L)) ]) -> ()
+            | _ -> failwith $"Unexpected function body: {body}"
+        | _ -> failwith "Expected first declaration to be function fstOpt"
 
 [<Fact>]
 let ``strict parser: impl block stops at top-level dedent`` () =
@@ -330,7 +437,7 @@ let ``strict parser: impl block stops at top-level dedent`` () =
         "    | Some a -> Some (f a)\n" +
         "    | None -> None\n" +
         "useMap(xs Maybe[Int]) Maybe[Int] = map (\\x. x) xs\n"
-    match parseModuleWithPosStrict src with
+    match LLLang.FParsecParser.parseModuleWithPosStrict src with
     | Error e -> failwith $"Parse error: {e}"
     | Ok (m, _) ->
         let fnNames =
@@ -348,7 +455,7 @@ let ``strict parser: external allows mixed-case foreign symbol names`` () =
         "opaque Any\n" +
         "external JSON_parse(s Str) Any\n" +
         "let raw = JSON_parse \"{}\"\n"
-    match parseModuleWithPosStrict src with
+    match LLLang.FParsecParser.parseModuleWithPosStrict src with
     | Error e -> failwith $"Parse error: {e}"
     | Ok (m, _) ->
         let extName =
@@ -485,7 +592,7 @@ let ``parse external and opaque declarations`` () =
 [<Fact>]
 let ``strict parser rejects external with untyped parameter`` () =
     let src = "module M\nexternal fetch(url) Str\n"
-    match parseModuleWithPosStrict src with
+    match LLLang.FParsecParser.parseModuleWithPosStrict src with
     | Ok _ -> failwith "Expected parse failure for untyped external param"
     | Error e ->
         Assert.Contains("external declaration requires fully typed parameters", e)
@@ -495,6 +602,37 @@ let ``parse import`` () =
     let src = "module M\nimport Std.List"
     let m = parseModuleStr src
     Assert.Equal<string list list>([["Std"; "List"]], m.Imports)
+
+[<Fact>]
+let ``parse module export list`` () =
+    let src =
+        "module M\n" +
+        "export { pub, Some }\n" +
+        "Maybe = Some Int | None\n" +
+        "pub() Int = 1\n" +
+        "hidden() Int = 2\n"
+    let m = parseModuleStr src
+    Assert.Equal<string list>(["Some"; "pub"], m.Exports |> Option.defaultValue [])
+    let exportedDeclNames =
+        m.Decls
+        |> List.collect (fun (decl, exported) ->
+            if exported then declExportNames decl else [])
+        |> List.sort
+    Assert.Equal<string list>(["None"; "Some"; "pub"], exportedDeclNames)
+
+[<Fact>]
+let ``parse module export list rejects unknown name`` () =
+    let src =
+        "module M\n" +
+        "export { missing }\n" +
+        "value() Int = 1\n"
+    match tokenize src with
+    | Error e -> failwith $"Lex error: {e}"
+    | Ok toks ->
+        match parseModule toks with
+        | Ok _ -> failwith "Expected parse failure for unknown export list name"
+        | Error e ->
+            Assert.Contains("Unknown export name 'missing'", e)
 
 [<Fact>]
 let ``parse module path`` () =
@@ -596,6 +734,24 @@ let ``list literal: semicolon separators are accepted for compatibility`` () =
     | e -> failwith $"Expected EList with 3 elems, got {e}"
 
 [<Fact>]
+let ``list literal: semicolon separators keep ctor applications as separate elements`` () =
+    match parseExprStr "[TNum 1; TNum 2]" with
+    | EList [EApp(ECon "TNum", ELit (LInt 1L)); EApp(ECon "TNum", ELit (LInt 2L))] -> ()
+    | e -> failwith $"Expected EList [TNum 1; TNum 2], got {e}"
+
+[<Fact>]
+let ``list literal: semicolon separators keep lowercase applications as separate elements`` () =
+    match parseExprStr "[f 1; g 2]" with
+    | EList [EApp(EVar "f", ELit (LInt 1L)); EApp(EVar "g", ELit (LInt 2L))] -> ()
+    | e -> failwith $"Expected EList [f 1; g 2], got {e}"
+
+[<Fact>]
+let ``list literal: multiline indented elements parse as list items`` () =
+    match parseExprStr "[\n  1\n  2\n  3\n]" with
+    | EList [ELit (LInt 1L); ELit (LInt 2L); ELit (LInt 3L)] -> ()
+    | e -> failwith $"Expected EList [1; 2; 3] from multiline layout, got {e}"
+
+[<Fact>]
 let ``arithmetic precedence: mul binds tighter than add`` () =
     // a + b * c should be a + (b * c), i.e. EApp(EApp("+", a), EApp(EApp("*", b), c))
     match parseExprStr "a + b * c" with
@@ -660,6 +816,15 @@ let ``parse tuple pattern: (a, b)`` () =
     match fst m.Decls[0] with
     | DFn(_, EMatch [(PTuple [PVar "a"; PVar "b"], EVar "a")]) -> ()
     | d -> failwith $"Expected DFn with match on PTuple [a; b], got {d}"
+
+[<Fact>]
+let ``parse constructor pattern arg: Some (a, b)`` () =
+    let src = "module M\nfstOpt(v) =\n  | Some (a, b) -> a\n  | _ -> 0"
+    let m = parseModuleStr src
+    match fst m.Decls[0] with
+    | DFn(_, EMatch [ (PCon("Some", [PTuple [PVar "a"; PVar "b"]]), EVar "a")
+                      ; (PWild, ELit (LInt 0L)) ]) -> ()
+    | d -> failwith $"Expected tuple arg in Some-pattern, got {d}"
 
 [<Fact>]
 let ``parse tuple pattern: (a, _)`` () =

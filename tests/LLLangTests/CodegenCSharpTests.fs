@@ -53,6 +53,20 @@ let ``CSharp: arithmetic function body emits real expression`` () =
     Assert.Contains("y => (x + y)", cs)
 
 [<Fact>]
+let ``CSharp: symbolic operators lower without raw symbolic identifiers`` () =
+    let src =
+        "module M\n"
+        + "main() Int =\n"
+        + "  x = 5 >>= (\\n. n + 1)\n"
+        + "  y = x <|> 0\n"
+        + "  z = y >> 7\n"
+        + "  z\n"
+    let cs = csSrc src
+    Assert.DoesNotContain(">>=", cs)
+    Assert.DoesNotContain("<|>", cs)
+    Assert.DoesNotContain(" >> ", cs)
+
+[<Fact>]
 let ``CSharp: prelude includes null-based Maybe helper runtime`` () =
     let src = "module M\nMaybe A = Some A | None\nf(m Maybe[Int]) Int = maybeWithDefault 0 m"
     let cs = csSrc src

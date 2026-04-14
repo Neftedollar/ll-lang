@@ -10,7 +10,6 @@
     <Compile Include="Maybe.fs" />
     <Compile Include="Lexer.fs" />
     <Compile Include="Parser.fs" />
-    <Compile Include="Render.fs" />
     <Compile Include="Elaborator.fs" />
     <Compile Include="Codegen.fs" />
     <Compile Include="Compiler.fs" />

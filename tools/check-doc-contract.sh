@@ -28,7 +28,7 @@ check_pattern() {
   rm -f "${tmp}"
 }
 
-check_pattern '\blllc\s+mod\b' "remove stale CLI command family: lllc mod"
+check_pattern '\.ll-deps\b' "replace legacy dependency path .ll-deps with vendor/ + ll.sum"
 check_pattern '\binstall_package\b|\blist_targets\b' "remove stale MCP tool names"
 check_pattern '\b12\s+keywords\b|\b12-keyword\b' "keyword count drift (language no longer 12-keyword)"
 check_pattern '\b`fn`,\s*`type`,\s*`let`\b' "outdated phrasing: let is now a keyword"

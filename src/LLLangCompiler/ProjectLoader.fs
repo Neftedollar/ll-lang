@@ -114,9 +114,9 @@ let findManifest (dir: string) : string option =
 
 // ---- Dep loading -----------------------------------------------------------
 
-/// Load .lll files from .ll-deps/{depName}/src/ for all installed deps.
+/// Load .lll files from vendor/{depName}/src/ for all installed deps.
 let private loadDepFiles (rootDir: string) (manifest: LLManifest) : LoadedFile list =
-    let depBaseDir = Path.Combine(rootDir, ".ll-deps")
+    let depBaseDir = Path.Combine(rootDir, "vendor")
     [ for KeyValue(depName, _source) in manifest.Deps do
         let depDir = Path.Combine(depBaseDir, depName)
         if Directory.Exists(depDir) then
@@ -197,7 +197,7 @@ let loadProject (rootDir: string) : Result<LLProject, LLError list> =
 
     if not errors.IsEmpty then Error errors
     else
-    // 4b. Merge dep files (from .ll-deps/) with main project files
+    // 4b. Merge dep files (from vendor/) with main project files
     let depFiles = loadDepFiles rootDir manifest
     let allLoadedFiles = depFiles @ loadedFiles
 

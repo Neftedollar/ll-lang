@@ -7,12 +7,12 @@ import Std.Compiler
 
 -- ---- JSON Value type ----
 JsonVal =
-  | JNull
-  | JBool Bool
-  | JNum Int
-  | JStr Str
-  | JArr (List[JsonVal])
-  | JObj (List[JsonVal])
+  | MJNull
+  | MJBool Bool
+  | MJNum Int
+  | MJStr Str
+  | MJArr (List[JsonVal])
+  | MJObj (List[JsonVal])
 
 -- Parser result
 JVal = MkJVal JsonVal (List[Char])
@@ -49,7 +49,7 @@ skipSpace(cs List[Char]) =
 parseValue(cs List[Char]) =
   cs1 = skipSpace cs
   match cs1
-    | [] -> MkJVal JNull []
+    | [] -> MkJVal MJNull []
     | '{' :: _ -> parseObject cs1
     | '[' :: _ -> parseArray cs1
     | '"' :: _ -> parseStringVal cs1
@@ -60,22 +60,22 @@ parseValue(cs List[Char]) =
     | c :: _ ->
       if charIsDigit c
         parseNumber cs1
-      else MkJVal JNull cs1
+      else MkJVal MJNull cs1
 
 parseTrue(cs List[Char]) =
   match cs
-    | 't' :: 'r' :: 'u' :: 'e' :: rest -> MkJVal (JBool true) rest
-    | _ -> MkJVal JNull cs
+    | 't' :: 'r' :: 'u' :: 'e' :: rest -> MkJVal (MJBool true) rest
+    | _ -> MkJVal MJNull cs
 
 parseFalse(cs List[Char]) =
   match cs
-    | 'f' :: 'a' :: 'l' :: 's' :: 'e' :: rest -> MkJVal (JBool false) rest
-    | _ -> MkJVal JNull cs
+    | 'f' :: 'a' :: 'l' :: 's' :: 'e' :: rest -> MkJVal (MJBool false) rest
+    | _ -> MkJVal MJNull cs
 
 parseNullVal(cs List[Char]) =
   match cs
-    | 'n' :: 'u' :: 'l' :: 'l' :: rest -> MkJVal JNull rest
-    | _ -> MkJVal JNull cs
+    | 'n' :: 'u' :: 'l' :: 'l' :: rest -> MkJVal MJNull rest
+    | _ -> MkJVal MJNull cs
 
 negateIf(n Int)(val Int) =
   if n == 0
@@ -101,11 +101,11 @@ parseNumber(cs List[Char]) =
   digits = crDigits parseResult
   rest = crRest parseResult
   if listIsEmpty digits
-    MkJVal (JNum 0) cs
+    MkJVal (MJNum 0) cs
   else
     numStr = strFromChars (listReverse digits)
     val = strToIntWithDefault numStr
-    MkJVal (JNum (negateIf isNeg val)) rest
+    MkJVal (MJNum (negateIf isNeg val)) rest
 
 strToIntWithDefault(s Str) =
   match strToInt s
@@ -125,8 +125,8 @@ parseStringVal(cs List[Char]) =
   match cs
     | '"' :: rest ->
       let (chars, remaining) = parseStringChars rest []
-      MkJVal (JStr (strFromChars (listReverse chars))) remaining
-    | _ -> MkJVal JNull cs
+      MkJVal (MJStr (strFromChars (listReverse chars))) remaining
+    | _ -> MkJVal MJNull cs
 
 parseStringChars(cs List[Char])(acc List[Char]) =
   match cs
@@ -148,8 +148,8 @@ parseArray(cs List[Char]) =
   match cs
     | '[' :: rest ->
       let (items, remaining) = parseArrayItems (skipSpace rest) []
-      MkJVal (JArr (listReverse items)) remaining
-    | _ -> MkJVal JNull cs
+      MkJVal (MJArr (listReverse items)) remaining
+    | _ -> MkJVal MJNull cs
 
 parseArrayItems(cs List[Char])(acc List[JsonVal]) =
   match skipSpace cs
@@ -168,8 +168,8 @@ parseObject(cs List[Char]) =
   match cs
     | '{' :: rest ->
       let (pairs, remaining) = parseObjectPairs (skipSpace rest) []
-      MkJVal (JObj (listReverse pairs)) remaining
-    | _ -> MkJVal JNull cs
+      MkJVal (MJObj (listReverse pairs)) remaining
+    | _ -> MkJVal MJNull cs
 
 parseObjectPairs(cs List[Char])(acc List[JsonVal]) =
   cs1 = skipSpace cs
@@ -187,9 +187,9 @@ parseObjectPairs(cs List[Char])(acc List[JsonVal]) =
       val = match jval | MkJVal v _ -> v
       rest4 = match jval | MkJVal _ r -> r
       match skipSpace rest4
-        | ';' :: rest5 -> parseObjectPairs (skipSpace rest5) (JStr key :: val :: acc)
-        | '}' :: rest6 -> (JStr key :: val :: acc, rest6)
-        | _ -> (JStr key :: val :: acc, rest4)
+        | ';' :: rest5 -> parseObjectPairs (skipSpace rest5) (MJStr key :: val :: acc)
+        | '}' :: rest6 -> (MJStr key :: val :: acc, rest6)
+        | _ -> (MJStr key :: val :: acc, rest4)
     | _ -> (acc, cs)
 
 parseKeyString(cs List[Char]) =
@@ -202,13 +202,13 @@ parseKeyString(cs List[Char]) =
 -- ---- JSON helpers ----
 jsonGet(obj JsonVal)(key Str) =
   match obj
-    | JObj pairs -> jsonGetPairs pairs key
-    | _ -> JNull
+    | MJObj pairs -> jsonGetPairs pairs key
+    | _ -> MJNull
 
 jsonGetPairs(pairs List[JsonVal])(key Str) =
   match pairs
-    | [] -> JNull
-    | JStr k :: v :: rest ->
+    | [] -> MJNull
+    | MJStr k :: v :: rest ->
       if k == key
         v
       else
@@ -217,29 +217,29 @@ jsonGetPairs(pairs List[JsonVal])(key Str) =
 
 jsonGetStr(v JsonVal) =
   match v
-    | JStr s -> s
+    | MJStr s -> s
     | _ -> ""
 
 jsonGetInt(v JsonVal) =
   match v
-    | JNum n -> n
+    | MJNum n -> n
     | _ -> 0
 
 jsonGetBool(v JsonVal) =
   match v
-    | JBool b -> b
+    | MJBool b -> b
     | _ -> false
 
 -- ---- JSON Serializer ----
 jsonSerialize(v JsonVal) =
   match v
-    | JNull -> "null"
-    | JBool true -> "true"
-    | JBool false -> "false"
-    | JNum n -> intToStr n
-    | JStr s -> jsonEncStr s
-    | JArr xs -> jsonEncArr xs
-    | JObj pairs -> jsonEncObj pairs
+    | MJNull -> "null"
+    | MJBool true -> "true"
+    | MJBool false -> "false"
+    | MJNum n -> intToStr n
+    | MJStr s -> jsonEncStr s
+    | MJArr xs -> jsonEncArr xs
+    | MJObj pairs -> jsonEncObj pairs
 
 jsonEncStr(s Str) =
   strConcat "\"" (strConcat (jsonEsc s) "\"")
@@ -272,8 +272,8 @@ jsonJoin(items List[Str])(sep Str) =
 jsonJoinObj(pairs List[JsonVal]) =
   match pairs
     | [] -> ""
-    | JStr k :: v :: [] -> strConcat (jsonEncStr k) (strConcat ":" (jsonSerialize v))
-    | JStr k :: v :: rest -> strConcat (jsonEncStr k) (strConcat ":" (strConcat (jsonSerialize v) (strConcat "," (jsonJoinObj rest))))
+    | MJStr k :: v :: [] -> strConcat (jsonEncStr k) (strConcat ":" (jsonSerialize v))
+    | MJStr k :: v :: rest -> strConcat (jsonEncStr k) (strConcat ":" (strConcat (jsonSerialize v) (strConcat "," (jsonJoinObj rest))))
     | _ :: rest -> jsonJoinObj rest
 
 -- ---- JSON-RPC types ----
@@ -286,34 +286,34 @@ parseRequest(json JsonVal) =
   MkRequest method params id
 
 makeResponse(id Int)(result JsonVal) =
-  JObj [JStr "jsonrpc"; JStr "2.0"; JStr "id"; JNum id; JStr "result"; result]
+  MJObj [MJStr "jsonrpc"; MJStr "2.0"; MJStr "id"; MJNum id; MJStr "result"; result]
 
 makeError(id Int)(message Str) =
-  JObj [JStr "jsonrpc"; JStr "2.0"; JStr "id"; JNum id; JStr "error"; JObj [JStr "message"; JStr message; JStr "code"; JNum m32603]]
+  MJObj [MJStr "jsonrpc"; MJStr "2.0"; MJStr "id"; MJNum id; MJStr "error"; MJObj [MJStr "message"; MJStr message; MJStr "code"; MJNum m32603]]
 
 makeMethodError(id Int)(message Str) =
-  JObj [JStr "jsonrpc"; JStr "2.0"; JStr "id"; JNum id; JStr "error"; JObj [JStr "message"; JStr message; JStr "code"; JNum m32601]]
+  MJObj [MJStr "jsonrpc"; MJStr "2.0"; MJStr "id"; MJNum id; MJStr "error"; MJObj [MJStr "message"; MJStr message; MJStr "code"; MJNum m32601]]
 
 -- ---- MCP handlers ----
 
 -- Tool schema helpers
 toolSchema(name Str)(desc Str)(props List[JsonVal])(required List[JsonVal]) =
-  JObj [JStr "name"; JStr name; JStr "description"; JStr desc; JStr "inputSchema"; JObj [JStr "type"; JStr "object"; JStr "properties"; JObj props; JStr "required"; JArr required]]
+  MJObj [MJStr "name"; MJStr name; MJStr "description"; MJStr desc; MJStr "inputSchema"; MJObj [MJStr "type"; MJStr "object"; MJStr "properties"; MJObj props; MJStr "required"; MJArr required]]
 
 handleInitialize(params JsonVal) =
-  JObj [JStr "protocolVersion"; JStr "2024-11-05"; JStr "capabilities"; JObj [JStr "tools"; JObj []]; JStr "serverInfo"; JObj [JStr "name"; JStr "lllcself"; JStr "version"; JStr "0.8.0"]]
+  MJObj [MJStr "protocolVersion"; MJStr "2024-11-05"; MJStr "capabilities"; MJObj [MJStr "tools"; MJObj []]; MJStr "serverInfo"; MJObj [MJStr "name"; MJStr "lllcself"; MJStr "version"; MJStr "1.0.0"]]
 
 handleToolsList(params JsonVal) =
   tools = [
-    toolSchema "compile_source" "Compile ll-lang source string." [JStr "source"; JObj [JStr "type"; JStr "string"; JStr "description"; JStr "ll-lang source code"]] [JStr "source"];
-    toolSchema "check_source" "Type-check ll-lang source." [JStr "source"; JObj [JStr "type"; JStr "string"; JStr "description"; JStr "ll-lang source code"]] [JStr "source"];
-    toolSchema "compile_file" "Compile a .lll file." [JStr "path"; JObj [JStr "type"; JStr "string"; JStr "description"; JStr "Path to .lll file"]] [JStr "path"];
-    toolSchema "check_file" "Type-check a .lll file." [JStr "path"; JObj [JStr "type"; JStr "string"; JStr "description"; JStr "Path to .lll file"]] [JStr "path"];
-    toolSchema "stdlib_search" "Search stdlib by name or signature." [JStr "query"; JObj [JStr "type"; JStr "string"; JStr "description"; JStr "Search query"]] [JStr "query"];
-    toolSchema "list_errors" "List all error codes." [] [];
-    toolSchema "lookup_error" "Get error details for E001 etc." [JStr "code"; JObj [JStr "type"; JStr "string"; JStr "description"; JStr "Error code"]] [JStr "code"]
+    (toolSchema "compile_source" "Compile ll-lang source string." [MJStr "source"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "ll-lang source code"]] [MJStr "source"]);
+    (toolSchema "check_source" "Type-check ll-lang source." [MJStr "source"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "ll-lang source code"]] [MJStr "source"]);
+    (toolSchema "compile_file" "Compile a .lll file." [MJStr "path"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Path to .lll file"]] [MJStr "path"]);
+    (toolSchema "check_file" "Type-check a .lll file." [MJStr "path"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Path to .lll file"]] [MJStr "path"]);
+    (toolSchema "stdlib_search" "Search stdlib by name or signature." [MJStr "query"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Search query"]] [MJStr "query"]);
+    (toolSchema "list_errors" "List all error codes." [] []);
+    (toolSchema "lookup_error" "Get error details for E001 etc." [MJStr "code"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Error code"]] [MJStr "code"])
   ]
-  JObj [JStr "tools"; JArr tools]
+  MJObj [MJStr "tools"; MJArr tools]
 
 dispatchTool(method Str)(params JsonVal) =
   match method
@@ -324,18 +324,18 @@ dispatchTool(method Str)(params JsonVal) =
     | "stdlib_search" -> handleStdlibSearch params
     | "list_errors" -> handleListErrors params
     | "lookup_error" -> handleLookupError params
-    | _ -> JObj [JStr "error"; JStr (strConcat "Unknown method: " method)]
+    | _ -> MJObj [MJStr "error"; MJStr (strConcat "Unknown method: " method)]
 
 -- Tool implementations
 handleCompileSource(params JsonVal) =
   source = jsonGetStr (jsonGet params "source")
   result = compile source
-  JObj [JStr "ok"; JBool true; JStr "errors"; JArr []; JStr "target"; JStr "fsharp"; JStr "fs"; JStr result]
+  MJObj [MJStr "ok"; MJBool true; MJStr "errors"; MJArr []; MJStr "target"; MJStr "fsharp"; MJStr "fs"; MJStr result]
 
 handleCheckSource(params JsonVal) =
   source = jsonGetStr (jsonGet params "source")
   result = checkCompact source
-  JObj [JStr "ok"; JBool true; JStr "result"; JStr result]
+  MJObj [MJStr "ok"; MJBool true; MJStr "result"; MJStr result]
 
 checkExistsCompile(path Str) =
   compile (readFile path)
@@ -344,17 +344,17 @@ checkExistsCheck(path Str) =
   checkCompact (readFile path)
 
 notFoundErr(path Str) =
-  JObj [JStr "ok"; JBool false; JStr "errors"; JArr [JObj [JStr "code"; JStr "E000"; JStr "message"; JStr (strConcat "File not found: " path)]]]
+  MJObj [MJStr "ok"; MJBool false; MJStr "errors"; MJArr [MJObj [MJStr "code"; MJStr "E000"; MJStr "message"; MJStr (strConcat "File not found: " path)]]]
 
 handleCompileFile(params JsonVal) =
   path = jsonGetStr (jsonGet params "path")
   exists = fileExists path
-  match exists | true -> JObj [JStr "ok"; JBool true; JStr "errors"; JArr []; JStr "target"; JStr "fsharp"; JStr "fs"; JStr (checkExistsCompile path)] | false -> notFoundErr path
+  match exists | true -> MJObj [MJStr "ok"; MJBool true; MJStr "errors"; MJArr []; MJStr "target"; MJStr "fsharp"; MJStr "fs"; MJStr (checkExistsCompile path)] | false -> notFoundErr path
 
 handleCheckFile(params JsonVal) =
   path = jsonGetStr (jsonGet params "path")
   exists = fileExists path
-  match exists | true -> JObj [JStr "ok"; JBool true; JStr "result"; JStr (checkExistsCheck path)] | false -> notFoundErr path
+  match exists | true -> MJObj [MJStr "ok"; MJBool true; MJStr "result"; MJStr (checkExistsCheck path)] | false -> notFoundErr path
 
 -- Stdlib entries
 stdlibEntries = [
@@ -382,7 +382,7 @@ stdlibEntries = [
 handleStdlibSearch(params JsonVal) =
   query = jsonGetStr (jsonGet params "query")
   matches = filterStdlib query stdlibEntries
-  JObj [JStr "tools"; JArr matches]
+  MJObj [MJStr "tools"; MJArr matches]
 
 filterStdlib(q Str)(entries List[Triple]) =
   match entries
@@ -397,7 +397,7 @@ filterStdlib(q Str)(entries List[Triple]) =
           filterStdlib q rest
 
 entryJson(name Str)(sig Str)(modul Str) =
-  JObj [JStr "name"; JStr name; JStr "signature"; JStr sig; JStr "module"; JStr modul; JStr "scope"; JStr "stdlib"]
+  MJObj [MJStr "name"; MJStr name; MJStr "signature"; MJStr sig; MJStr "module"; MJStr modul; MJStr "scope"; MJStr "stdlib"]
 
 -- Error codes
 errorCodes = [
@@ -416,21 +416,21 @@ errorCodes = [
 
 handleListErrors(params JsonVal) =
   items = listMap errorToEntry errorCodes
-  JArr items
+  MJArr items
 
 errorToEntry(triple Triple) =
   match triple
     | MkTriple code name desc ->
-      JObj [JStr "code"; JStr code; JStr "name"; JStr name; JStr "description"; JStr desc]
+      MJObj [MJStr "code"; MJStr code; MJStr "name"; MJStr name; MJStr "description"; MJStr desc]
 
 handleLookupError(params JsonVal) =
   code = jsonGetStr (jsonGet params "code")
   found = findError code errorCodes
   match found
     | Some (MkTriple c name desc) ->
-      JObj [JStr "found"; JBool true; JStr "code"; JStr c; JStr "name"; JStr name; JStr "description"; JStr desc]
+      MJObj [MJStr "found"; MJBool true; MJStr "code"; MJStr c; MJStr "name"; MJStr name; MJStr "description"; MJStr desc]
     | None ->
-      JObj [JStr "found"; JBool false; JStr "code"; JStr code]
+      MJObj [MJStr "found"; MJBool false; MJStr "code"; MJStr code]
 
 findError(code Str)(errors List[Triple]) =
   match errors
@@ -495,7 +495,7 @@ processOneRequest(json JsonVal) =
         if method == "tools/call"
           handleToolCall params
         else
-          JObj [JStr "error"; JStr (strConcat "Unknown method: " method)]
+          MJObj [MJStr "error"; MJStr (strConcat "Unknown method: " method)]
   makeResponse id result
 
 handleToolCall(params JsonVal) =

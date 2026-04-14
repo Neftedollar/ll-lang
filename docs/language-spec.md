@@ -1,6 +1,6 @@
 # ll-lang Language Specification
 
-**Version:** 1.0 (Phase 10)  **Extension:** `.lll`  **Encoding:** UTF-8, ASCII-only operators  **Tests:** see CI
+**Version:** 1.0.0 (release-contract tracked)  **Extension:** `.lll`  **Encoding:** UTF-8, ASCII-only operators  **Tests:** see CI
 
 ---
 
@@ -48,11 +48,15 @@ The word `let` is reserved for local bindings inside expressions (`let x = e`) a
 
 ```lll
 [1 2 3]          -- List[Int]
-[1; 2; 3]        -- List[Int]  (semicolon-separated variant)
+[1; 2; 3]        -- List[Int]  (explicit-separator variant)
 1, "hello"       -- (Int, Str) tuple  (comma forms tuples)
 Int -> Int -> Bool  -- function type (right-associative)
 List[A]  RBMap[K][V]  -- parametric: brackets apply type args
 ```
+
+Notes:
+- Space-separated lists (`[a b c]`) parse compact atoms.
+- Explicit separators (`;` or newline inside `[...]`) parse full element expressions.
 
 ### User-defined
 
@@ -107,7 +111,8 @@ Unit rules: `Float[m] + Float[m]` → `Float[m]` (same required, E004 if differe
 | `impl Trait Type = ...` | Trait implementation |
 | `module Path.Name` | Module header |
 | `import Path.Name` | Import |
-| `export decl` | Export |
+| `export { name, ... }` | Module export list (canonical) |
+| `export decl` | Per-decl export (legacy compatibility) |
 
 ```lll
 -- Function: each param in its own parens; return type inferred
@@ -124,6 +129,7 @@ clamp(x Int)(lo Int)(hi Int) =
 
 -- No-arg function
 main() = 0
+-- Call sites may use either `main` or `main()` (equivalent)
 
 -- Local bindings: last expr is the return value
 process(xs List[Int]) =
@@ -173,7 +179,11 @@ known. If a mapping is missing, compilation fails with:
 | Variable | `x` | — |
 | Constructor | `Some`, `Circle` | — |
 | Application | juxtaposition | `add 3 4`, `mapLookup cmp k m` |
+| Zero-arg call suffix | `f()` | Equivalent to `f` |
 | Pipe | `expr -> f -> g` | `xs -> listMap f -> listLen` |
+| Symbolic bind | `m >>= f` | `5 >>= (\n. n + 1)` |
+| Symbolic sequence | `a >> b` | `x >> y` |
+| Symbolic choice | `a <|> b` | `preferred <|> fallback` |
 | Arithmetic | `+  -  *  /  ^` | `a * b + c` |
 | Comparison | `==  !=  <  >  <=  >=` | `x == 0` |
 | Boolean not | `!expr` | `!isReady` |
@@ -213,6 +223,32 @@ area(s Shape) =
 ```
 
 **Lambda multi-param shorthand:** `\acc k v. acc + k`
+
+**Fixed symbolic operators (built-in, non-overloadable):**
+
+- `m >>= f` lowers to function application `f m`
+- `a >> b` lowers to `b`
+- `a <|> b` lowers to `a`
+
+These are fixed language operators (not user-defined operator declarations).
+
+**Trailing lambda application (equivalent sugar):**
+
+```lll
+stateBind xs \x.
+  stateBind ys \y.
+    combine x y
+```
+
+Equivalent parenthesized form:
+
+```lll
+stateBind xs (\x.
+  stateBind ys (\y.
+    combine x y
+  )
+)
+```
 
 **Sequential effects:** bind unused result to `_`:
 
@@ -292,19 +328,27 @@ module Std.Map
 
 import Std.List
 
-export mapInsert(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) = ...
+export { mapInsert, mapLookup }
+
+mapInsert(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) = ...
+mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) = ...
 ```
 
 Module path (`Std.Map`) must match file path under `src/` (`src/Map.lll`).
 
-`import` brings exported names into scope. `export` marks declarations public; all others are private.
+`import` brings names from imported modules into scope.  
+`export { ... }` defines the module's explicit public surface.
+Visibility rule in current compiler:
+- if a module declares `export { ... }`, only listed names are import-visible;
+- if a module has no export list, imports see all top-level names (compatibility fallback);
+- legacy `export decl` is accepted for compatibility, but visibility gating is driven by module export lists.
 
 **`lll.toml`** — project manifest at the project root (legacy `ll.toml` is still accepted):
 
 ```toml
 [project]
 name = "myapp"
-version = "0.8.0"
+version = "1.0.0"
 
 [deps]
 std = { path = "../stdlib" }
@@ -319,7 +363,10 @@ use = ["fsharp", "typescript"]   -- emit to multiple targets at once
 lllc new myapp       # scaffold: lll.toml + src/Main.lll
 lllc build           # compile project (topo-sorted)
 lllc build --target ts  # compile to TypeScript
-lllc install         # fetch source-based dependencies
+lllc install         # resolve direct+transitive deps into vendor/ + rewrite ll.sum
+lllc mod tidy        # same as install (canonical dependency sync)
+lllc mod add dep=https://repo#ref
+lllc mod why dep     # explain dependency chain + local direct importers
 lllc run src/Main.lll
 lllc mcp             # start MCP server (stdio, 10 tools)
 ```
@@ -435,7 +482,7 @@ resultBind   : Result[A][E] -> (A -> Result[B][E]) -> Result[B][E]
 resultMapErr : (E -> F) -> Result[A][E] -> Result[A][F]
 ```
 
-**Stdlib modules:** `Std.Maybe`, `Std.Map` (red-black tree), `Std.Toml`, `Std.Json`, `Std.Lexer`, `Std.Parser`, `Std.Elaborator`, `Std.Codegen`, `Std.CodegenTS`, `Std.CodegenPy`, `Std.CodegenJava`, `Std.CodegenLLVM`, `Std.Render`, `Std.Test`, `Std.Compiler`.
+**Stdlib modules:** `Std.Maybe`, `Std.Map` (red-black tree), `Std.State`, `Std.Parsec`, `Std.Toml`, `Std.Json`, `Std.Lexer`, `Std.Parser`, `Std.Elaborator`, `Std.Codegen`, `Std.CodegenTS`, `Std.CodegenPy`, `Std.CodegenJava`, `Std.CodegenLLVM`, `Std.Render`, `Std.Test`, `Std.Compiler`.
 
 ---
 
@@ -448,6 +495,8 @@ resultMapErr : (E -> F) -> Result[A][E] -> Result[A][F]
 +  -  *  /  ^         arithmetic
 ==  !=  <  >  <=  >=  comparison
 ->                    pipe / type arrow / match branch
+|>                    pipe (alias of `->` in expression context)
+>>=  >>  <|>          fixed symbolic operators
 \  .                  lambda
 ,                     tuple
 |                     sum type / match arm

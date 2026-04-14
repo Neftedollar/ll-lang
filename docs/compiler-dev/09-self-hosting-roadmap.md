@@ -2574,7 +2574,7 @@ let main (argv: string[]) =
   * **Bootstrap fixpoint** — compiling 20-bootstrap-compiler.lll
     through itself via the emitted F# source and verifying the
     output is byte-identical. That's Phase 7.10's job.
-  * **`dotnet fsi` invocation** of the emitted F# — the runtime
+  * **Temp-project `dotnet run` invocation** of the emitted F# — the runtime
     test asserts substrings of the emitted string only.
   * **Full expression coverage** — only what the hardcoded test
     module needs is wired through. Records, `DTag` / `DImport`
@@ -2602,7 +2602,7 @@ Phase 7.9b proves four-stage stitching with F# source output.
 Next tick: **Phase 7.10** — bootstrap fixpoint. Compile the
 4-stage bootstrap compiler `20-bootstrap-compiler.lll` through
 itself: feed the file to its own codegen pass, run the emitted F#
-through `dotnet fsi`, and verify the resulting program reproduces
+through temp-project `dotnet run`, and verify the resulting program reproduces
 the same F# source for the same input — closing the self-hosting
 loop.
 
@@ -5017,3 +5017,34 @@ For 1.0-focused iterations, prioritize core ll-lang surface:
 1. language/core diagnostics polish and consistency across elaboration + HM
 2. stable target quality (`fs/ts/py/java/cs`) and idiomatic codegen hardening
 3. project/MCP ergonomics and docs clarity for stable 1.0 workflows
+
+## Self-host TODO register (active)
+
+Current deferred items are tracked inline in code with `TODO(selfhost:...)`.
+The active buckets are:
+
+- `selfhost:resolver` — deterministic transitive `vendor/ll.sum` sync is live;
+  `mod add/tidy/why` flow is canonical in CLI; conflict diagnostics include
+  declaring roots and transitive `via` chains; same-repo semver git-tag
+  conflicts deterministically converge to the highest tag (including
+  direct-vs-transitive clashes via restartable selection); same-repo non-semver
+  git refs also converge deterministically (lexical ref ordering), while
+  `ll.sum` can still pin an explicit winner; `ll.sum` hashing ignores vendored
+  `.git` metadata for repeatable lock output; remaining gap is full
+  MVS/version selection for broader multi-source policy.
+- `selfhost:operators` — symbolic operators are parsed and elaborated with
+  stable precedence; `>>=` / `>>` / `<|>` are constrained to a single carrier
+  shape (`m >>= (a -> m) -> m`, `m -> m -> m`), but full Monad/Alt evidence-
+  based constrained typing is still pending.
+- `selfhost:imports` — import env assembly now uses declared module imports
+  only (global sibling leakage removed in `compileProjectToModulesForTarget`);
+  module-level export lists (`export { ... }`) now define import-visible API;
+  modules without export list remain all-visible as compatibility fallback;
+  legacy `export decl` is accepted for compatibility (does not gate visibility
+  without a module export list).
+  Remaining gap is finalized constructor/type visibility policy across modules.
+
+`selfhost:typing` was closed by preserving imported scheme quantification
+through the elaboration boundary and adding a cross-module regression test for
+polymorphic import reuse (`id` at `Int` and `Str` in the same downstream
+module).

@@ -39,7 +39,7 @@ platform-fsharp/
 ```toml
 [project]
 name = "platform-fsharp"
-version = "0.8.0"
+version = "1.0.0"
 
 [sdk]
 target   = "fsharp"              # canonical target name
@@ -99,19 +99,19 @@ This replaces the hardcoded `.fsproj` generation in `Program.fs` line 68-77.
 ```toml
 [project]
 name = "myapp"
-version = "0.8.0"
+version = "1.0.0"
 
 [deps]
-json = "https://github.com/user/ll-json#v0.8.0"
+json = "https://github.com/user/ll-json#v1.0.0"
 
 [platform]
 use = ["fsharp", "typescript"]
 
 [platform.fsharp]
-sdk = "https://github.com/ll-lang/platform-fsharp#v0.8.0"
+sdk = "https://github.com/ll-lang/platform-fsharp#v1.0.0"
 
 [platform.typescript]
-sdk = "https://github.com/ll-lang/platform-typescript#v0.8.0"
+sdk = "https://github.com/ll-lang/platform-typescript#v1.0.0"
 ```
 
 ### 3.2 Resolution rules
@@ -333,7 +333,7 @@ platform-fsharp/
 ```toml
 [project]
 name = "platform-fsharp"
-version = "0.8.0"
+version = "1.0.0"
 
 [sdk]
 target   = "fsharp"

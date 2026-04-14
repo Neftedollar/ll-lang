@@ -134,6 +134,21 @@ let ``TEApp binary inequality emits F# <> operator`` () =
     Assert.Contains("(a <> b)", codegenSrc "module M\nneq(a Int)(b Int) Bool = a != b")
 
 [<Fact>]
+let ``symbolic operators lower without raw symbolic identifiers in FSharp backend`` () =
+    let src =
+        "module M\n"
+        + "main() Int =\n"
+        + "  x = 5 >>= (\\n. n + 1)\n"
+        + "  y = x <|> 0\n"
+        + "  z = y >> 7\n"
+        + "  z\n"
+    let fs = codegenSrc src
+    Assert.DoesNotContain(">>=", fs)
+    Assert.DoesNotContain("<|>", fs)
+    Assert.DoesNotContain(" >> ", fs)
+    Assert.Contains("let main (argv: string[]) =", fs)
+
+[<Fact>]
 let ``TELam emits fun syntax`` () =
     Assert.Contains("(fun x -> x)", codegenSrc "module M\nlet f = \\x. x")
 

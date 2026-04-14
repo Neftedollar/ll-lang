@@ -2,11 +2,20 @@
 
 # --- ll-lang stdlib (Python) ---
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Optional, Union, Callable, Any
+from dataclasses import dataclass
+from typing import Optional, Union, Callable, TypeVar
 import sys
-import os
 import math
+
+A = TypeVar("A")
+B = TypeVar("B")
+C = TypeVar("C")
+D = TypeVar("D")
+E = TypeVar("E")
+F = TypeVar("F")
+T = TypeVar("T")
+U = TypeVar("U")
+
 
 def _ll_abs(x: int) -> int: return abs(x)
 def absf(x: float) -> float: return abs(x)
@@ -20,7 +29,10 @@ def _ll_print(s: str) -> None: sys.stdout.write(s)
 def readFile(path: str) -> str:
     with open(path, 'r', encoding='utf-8') as f: return f.read()
 def writeFile(path: str) -> Callable[[str], None]:
-    return lambda contents: open(path, 'w', encoding='utf-8').write(contents)
+    def _write(contents: str) -> None:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(contents)
+    return _write
 def _ll_exit(n: int) -> None: sys.exit(n)
 def getArgs() -> list[str]: return sys.argv[1:]
 def strLen(s: str) -> int: return len(s)
@@ -44,50 +56,61 @@ def strToFloat(s: str) -> Optional[float]:
         return n if math.isfinite(n) else None
     except ValueError:
         return None
-def listLen(xs: list) -> int: return len(xs)
-def listMap(f) -> Callable: return lambda xs: list(map(f, xs))
-def listFilter(p) -> Callable: return lambda xs: list(filter(p, xs))
-def listFold(f) -> Callable: return lambda z: lambda xs: (lambda: [z := f(z)(x) for x in xs] or z)()
-def listHead(xs: list) -> Optional[Any]: return xs[0] if xs else None
-def listTail(xs: list) -> Optional[list]: return xs[1:] if xs else None
-def listReverse(xs: list) -> list: return list(reversed(xs))
-def listAppend(xs: list) -> Callable[[list], list]: return lambda ys: xs + ys
-def listIsEmpty(xs: list) -> bool: return len(xs) == 0
-def listContains(xs: list) -> Callable[[Any], bool]: return lambda x: x in xs
+def listLen(xs: list[T]) -> int: return len(xs)
+def listMap(f: Callable[[T], U]) -> Callable[[list[T]], list[U]]: return lambda xs: list(map(f, xs))
+def listFilter(p: Callable[[T], bool]) -> Callable[[list[T]], list[T]]: return lambda xs: list(filter(p, xs))
+def listFold(f: Callable[[U], Callable[[T], U]]) -> Callable[[U], Callable[[list[T]], U]]:
+    def _with_seed(z: U) -> Callable[[list[T]], U]:
+        def _fold(xs: list[T]) -> U:
+            acc = z
+            for x in xs:
+                acc = f(acc)(x)
+            return acc
+        return _fold
+    return _with_seed
+def listHead(xs: list[T]) -> Optional[T]: return xs[0] if xs else None
+def listTail(xs: list[T]) -> Optional[list[T]]: return xs[1:] if xs else None
+def listReverse(xs: list[T]) -> list[T]: return list(reversed(xs))
+def listAppend(xs: list[T]) -> Callable[[list[T]], list[T]]: return lambda ys: xs + ys
+def listIsEmpty(xs: list[T]) -> bool: return len(xs) == 0
+def listContains(xs: list[T]) -> Callable[[T], bool]: return lambda x: x in xs
 def listRange(lo: int) -> Callable[[int], list[int]]: return lambda hi: list(range(lo, hi))
-def listConcat(xss: list) -> list: return [x for xs in xss for x in xs]
-def listAt(xs: list) -> Callable[[int], Optional[Any]]: return lambda i: xs[i] if 0 <= i < len(xs) else None
+def listConcat(xss: list[list[T]]) -> list[T]: return [x for xs in xss for x in xs]
+def listAt(xs: list[T]) -> Callable[[int], Optional[T]]: return lambda i: xs[i] if 0 <= i < len(xs) else None
 def charToInt(c: str) -> int: return ord(c)
 def intToChar(n: int) -> str: return chr(n)
 def charIsDigit(c: str) -> bool: return c.isdigit()
 def charIsAlpha(c: str) -> bool: return c.isalpha()
 def charIsSpace(c: str) -> bool: return c.isspace()
-def maybeMap(f) -> Callable: return lambda m: f(m) if m is not None else None
-def maybeBind(m) -> Callable: return lambda f: f(m) if m is not None else None
-def maybeDefault(d) -> Callable: return lambda m: m if m is not None else d
-def maybeIsNone(m) -> bool: return m is None
-def resultMap(f) -> Callable: return lambda r: (True, f(r[1])) if r[0] else r
-def resultBind(r) -> Callable: return lambda f: f(r[1]) if r[0] else r
-def resultIsOk(r) -> bool: return r[0]
+def maybeMap(f: Callable[[T], U]) -> Callable[[Optional[T]], Optional[U]]: return lambda m: f(m) if m is not None else None
+def maybeBind(m: Optional[T]) -> Callable[[Callable[[T], Optional[U]]], Optional[U]]: return lambda f: f(m) if m is not None else None
+def maybeWithDefault(d: T) -> Callable[[Optional[T]], T]: return lambda m: m if m is not None else d
+def maybeDefault(d: T) -> Callable[[Optional[T]], T]: return maybeWithDefault(d)
+def maybeIsNone(m: Optional[T]) -> bool: return m is None
+def resultMap(f: Callable[[T], U]) -> Callable[[tuple[bool, T | E]], tuple[bool, U | E]]: return lambda r: (True, f(r[1])) if r[0] else (False, r[1])
+def resultBind(r: tuple[bool, T | E]) -> Callable[[Callable[[T], tuple[bool, U | E]]], tuple[bool, U | E]]: return lambda f: f(r[1]) if r[0] else (False, r[1])
+def resultMapErr(f: Callable[[E], F]) -> Callable[[tuple[bool, T | E]], tuple[bool, T | F]]:
+    return lambda r: (True, r[1]) if r[0] else (False, f(r[1]))
+def resultIsOk(r: tuple[bool, T | E]) -> bool: return r[0]
 # --- end prelude ---
 
 
-@dataclass
+@dataclass(frozen=True)
 class Some:
     _tag: str = "Some"
-    _0: Any
+    _0: A
 
-@dataclass
+@dataclass(frozen=True)
 class _ll_None:
     _tag: str = "None"
     pass
 
 Maybe = Union[Some, _ll_None]
 
-def isNone(m: Optional[Any]) -> bool:
+def isNone(m: Optional[A]) -> bool:
     return (False if m._tag == "Some" else True)
 
-def isSome(m: Optional[Any]) -> bool:
+def isSome(m: Optional[A]) -> bool:
     return (True if m._tag == "Some" else False)
 
 def check(label: str):
@@ -98,244 +121,242 @@ def check(label: str):
 def doubleInMaybe(x: int) -> Optional[int]:
     return Some((x * 2))
 
-__ll_main_Std_Maybe: int = (lambda r1: (lambda ok1: (lambda _tmp: (lambda r2: (lambda ok2: (lambda _tmp: (lambda r3: (lambda ok3: (lambda _tmp: (lambda d1: (lambda d2: (lambda _tmp: (lambda _tmp: 0)(((check)("5 isSome/isNone"))(((isNone)(None) if (isSome)(Some(1)) else False))))(((check)("4 maybeWithDefault"))(((d2 == 99) if (d1 == 7) else False))))(((maybeWithDefault)(99))(None)))(((maybeWithDefault)(99))(Some(7))))(((check)("3 maybeBind Some"))(ok3)))(((v == 20) if r3._tag == "Some" else False)))(((maybeBind)(Some(10)))(doubleInMaybe)))(((check)("2 maybeMap None"))(ok2)))((False if r2._tag == "Some" else True)))(((maybeMap)(lambda x: (x + 1)))(None)))(((check)("1 maybeMap Some"))(ok1)))(((v == 42) if r1._tag == "Some" else False)))(((maybeMap)(lambda x: (x + 1)))(Some(41)))
-
-@dataclass
+@dataclass(frozen=True)
 class KwLet:
     _tag: str = "KwLet"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class KwTag:
     _tag: str = "KwTag"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class KwUnit:
     _tag: str = "KwUnit"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class KwTrait:
     _tag: str = "KwTrait"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class KwImpl:
     _tag: str = "KwImpl"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class KwImport:
     _tag: str = "KwImport"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class KwExport:
     _tag: str = "KwExport"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class KwModule:
     _tag: str = "KwModule"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class KwIf:
     _tag: str = "KwIf"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class KwElse:
     _tag: str = "KwElse"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class KwTrue:
     _tag: str = "KwTrue"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class KwFalse:
     _tag: str = "KwFalse"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class KwMatch:
     _tag: str = "KwMatch"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Ident:
     _tag: str = "Ident"
     _0: str
 
-@dataclass
+@dataclass(frozen=True)
 class TypeId:
     _tag: str = "TypeId"
     _0: str
 
-@dataclass
+@dataclass(frozen=True)
 class IntLit:
     _tag: str = "IntLit"
     _0: int
 
-@dataclass
+@dataclass(frozen=True)
 class FloatLit:
     _tag: str = "FloatLit"
     _0: str
 
-@dataclass
+@dataclass(frozen=True)
 class StrLit:
     _tag: str = "StrLit"
     _0: str
 
-@dataclass
+@dataclass(frozen=True)
 class CharLit:
     _tag: str = "CharLit"
     _0: str
 
-@dataclass
+@dataclass(frozen=True)
 class Arrow:
     _tag: str = "Arrow"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Backslash:
     _tag: str = "Backslash"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Dot:
     _tag: str = "Dot"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Comma:
     _tag: str = "Comma"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Colon:
     _tag: str = "Colon"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class ColonColon:
     _tag: str = "ColonColon"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Eq:
     _tag: str = "Eq"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Bar:
     _tag: str = "Bar"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class LBrack:
     _tag: str = "LBrack"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class RBrack:
     _tag: str = "RBrack"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class LParen:
     _tag: str = "LParen"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class RParen:
     _tag: str = "RParen"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Plus:
     _tag: str = "Plus"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Minus:
     _tag: str = "Minus"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Star:
     _tag: str = "Star"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Slash:
     _tag: str = "Slash"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Caret:
     _tag: str = "Caret"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Lt:
     _tag: str = "Lt"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Gt:
     _tag: str = "Gt"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Le:
     _tag: str = "Le"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Ge:
     _tag: str = "Ge"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class EqEq:
     _tag: str = "EqEq"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Neq:
     _tag: str = "Neq"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Underscore:
     _tag: str = "Underscore"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Newline:
     _tag: str = "Newline"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Indent:
     _tag: str = "Indent"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Dedent:
     _tag: str = "Dedent"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class Eof:
     _tag: str = "Eof"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class TError:
     _tag: str = "TError"
     _0: str
@@ -355,22 +376,22 @@ def isIdCont(c: str) -> bool:
     return (True if (isIdStart)(c) else (True if (charIsDigit)(c) else (c == "_")))
 
 def takeIdCont(cs: list[str]) -> list[str]:
-    return ((((listAppend)([c]))((takeIdCont)(rest)) if (isIdCont)(c) else []) if len(cs) > 0 else [])
+    return ((lambda c, rest: (((listAppend)([c]))((takeIdCont)(rest)) if (isIdCont)(c) else []))(cs[0], cs[1:]) if len(cs) > 0 else [])
 
 def dropIdCont(cs: list[str]) -> list[str]:
-    return (((dropIdCont)(rest) if (isIdCont)(c) else cs) if len(cs) > 0 else [])
+    return ((lambda c, rest: ((dropIdCont)(rest) if (isIdCont)(c) else cs))(cs[0], cs[1:]) if len(cs) > 0 else [])
 
 def takeDigit(cs: list[str]) -> list[str]:
-    return ((((listAppend)([c]))((takeDigit)(rest)) if (charIsDigit)(c) else []) if len(cs) > 0 else [])
+    return ((lambda c, rest: (((listAppend)([c]))((takeDigit)(rest)) if (charIsDigit)(c) else []))(cs[0], cs[1:]) if len(cs) > 0 else [])
 
 def dropDigit(cs: list[str]) -> list[str]:
-    return (((dropDigit)(rest) if (charIsDigit)(c) else cs) if len(cs) > 0 else [])
+    return ((lambda c, rest: ((dropDigit)(rest) if (charIsDigit)(c) else cs))(cs[0], cs[1:]) if len(cs) > 0 else [])
 
 def classifyIdent(s: str) -> Token:
     return (KwLet if s == "let" else (KwTag if s == "tag" else (KwUnit if s == "unit" else (KwTrait if s == "trait" else (KwImpl if s == "impl" else (KwImport if s == "import" else (KwExport if s == "export" else (KwModule if s == "module" else (KwIf if s == "if" else (KwElse if s == "else" else (KwTrue if s == "true" else (KwFalse if s == "false" else (KwMatch if s == "match" else (lambda cs: ((TypeId(s) if (isUpperChar)(c) else Ident(s)) if len(cs) > 0 else Ident(s)))((strChars)(s)))))))))))))))
 
 def parseIntStr(s: str) -> int:
-    return (n if (strToInt)(s)._tag == "Some" else 0)
+    return ((lambda n: n)((strToInt)(s)._0) if (strToInt)(s)._tag == "Some" else 0)
 
 def lexId(cs: list[str]) -> list[Token]:
     return (lambda idChars: (lambda leftover: (lambda tok: ((listAppend)([tok]))((lexChars)(leftover)))((classifyIdent)((strFromChars)(idChars))))((dropIdCont)(cs)))((takeIdCont)(cs))
@@ -378,23 +399,23 @@ def lexId(cs: list[str]) -> list[Token]:
 def lexNum(cs: list[str]) -> list[Token]:
     return (lambda digits: (lambda rest0: (((lambda fracDigits: (lambda rest2: (lambda intPart: (lambda fracPart: (lambda floatStr: ((listAppend)([FloatLit(floatStr)]))((lexChars)(rest2)))(((strConcat)(((strConcat)(intPart))(".")))(fracPart)))((strFromChars)(fracDigits)))((strFromChars)(digits)))((dropDigit)([c2] + rest1)))((takeDigit)([c2] + rest1)) if (charIsDigit)(c2) else (lambda n: ((listAppend)([IntLit(n)]))((lexChars)(rest0)))((parseIntStr)((strFromChars)(digits)))) if len(rest0) > 0 else (lambda n: ((listAppend)([IntLit(n)]))((lexChars)(rest0)))((parseIntStr)((strFromChars)(digits)))))((dropDigit)(cs)))((takeDigit)(cs))
 
-def takeStrBody(cs: list[str]) -> Tuple[list[str]][list[str]]:
-    return (([], []) if len(cs) == 0 else (([], rest) if (c == "\"") else ((takeStrBodyEsc)(rest) if (c == "\\") else (lambda pair: ([c] + body, leftover))((takeStrBody)(rest)))))
+def takeStrBody(cs: list[str]) -> Tuple[list[str], list[str]]:
+    return (([], []) if len(cs) == 0 else (lambda c, rest: (([], rest) if (c == "\"") else ((takeStrBodyEsc)(rest) if (c == "\\") else (lambda pair: (lambda body, leftover: ([c] + body, leftover))(pair[0], pair[1]))((takeStrBody)(rest)))))(cs[0], cs[1:]))
 
-def takeStrBodyEsc(cs: list[str]) -> Tuple[list[str]][list[str]]:
-    return (([], []) if len(cs) == 0 else (lambda pair: ([(decodeEscape)(esc)] + body, leftover))((takeStrBody)(rest)))
+def takeStrBodyEsc(cs: list[str]) -> Tuple[list[str], list[str]]:
+    return (([], []) if len(cs) == 0 else (lambda esc, rest: (lambda pair: (lambda body, leftover: ([(decodeEscape)(esc)] + body, leftover))(pair[0], pair[1]))((takeStrBody)(rest)))(cs[0], cs[1:]))
 
 def decodeEscape(c: str) -> str:
     return ("\n" if c == "n" else ("\t" if c == "t" else ("\r" if c == "r" else ("\\" if c == "\\" else ("'" if c == "'" else ("\"" if c == "\"" else ("\0" if c == "0" else c)))))))
 
 def lexStr(cs: list[str]) -> list[Token]:
-    return (lambda pair: ((listAppend)([StrLit((strFromChars)(body))]))((lexChars)(leftover)))((takeStrBody)(cs))
+    return (lambda pair: (lambda body, leftover: ((listAppend)([StrLit((strFromChars)(body))]))((lexChars)(leftover)))(pair[0], pair[1]))((takeStrBody)(cs))
 
 def lexCharLit(cs: list[str]) -> list[Token]:
-    return ([Eof] if len(cs) == 0 else (([Eof] if len(rest) == 0 else (((listAppend)([CharLit((decodeEscape)(esc))]))((lexChars)(rest3)) if len(rest2) > 0 else (lexChars)(cs))) if (ch == "\\") else (((listAppend)([CharLit(ch)]))((lexChars)(rest2)) if len(rest) > 0 else (lexChars)(cs))))
+    return ([Eof] if len(cs) == 0 else (lambda ch, rest: (([Eof] if len(rest) == 0 else (lambda esc, rest2: (((listAppend)([CharLit((decodeEscape)(esc))]))((lexChars)(rest3)) if len(rest2) > 0 else (lexChars)(cs)))(rest[0], rest[1:])) if (ch == "\\") else (((listAppend)([CharLit(ch)]))((lexChars)(rest2)) if len(rest) > 0 else (lexChars)(cs))))(cs[0], cs[1:]))
 
 def skipLineComment(cs: list[str]) -> list[Token]:
-    return ([Eof] if len(cs) == 0 else (((listAppend)([Newline]))((lexChars)(rest)) if (c == "\n") else (skipLineComment)(rest)))
+    return ([Eof] if len(cs) == 0 else (lambda c, rest: (((listAppend)([Newline]))((lexChars)(rest)) if (c == "\n") else (skipLineComment)(rest)))(cs[0], cs[1:]))
 
 def lexEqOrEqEq(cs: list[str]) -> list[Token]:
     return (((listAppend)([EqEq]))((lexChars)(rest)) if len(cs) > 0 else ((listAppend)([Eq]))((lexChars)(cs)))
@@ -418,19 +439,19 @@ def lexUnderOrIdent(cs: list[str]) -> list[Token]:
     return (((lambda idChars: (lambda leftover: (lambda tok: ((listAppend)([tok]))((lexChars)(leftover)))((classifyIdent)((strFromChars)(idChars))))((dropIdCont)(cs)))(((listAppend)(["_"]))((takeIdCont)(cs))) if (isIdCont)(c) else ((listAppend)([Underscore]))((lexChars)(cs))) if len(cs) > 0 else ((listAppend)([Underscore]))((lexChars)(cs)))
 
 def lexChars(cs: list[str]) -> list[Token]:
-    return ([Eof] if len(cs) == 0 else (((listAppend)([Newline]))((lexChars)(rest)) if (c == "\n") else ((lexChars)(rest) if (charIsSpace)(c) else ((lexMinusOrArrow)(rest) if (c == "-") else ((lexId)(cs) if (isIdStart)(c) else ((lexUnderOrIdent)(rest) if (c == "_") else ((lexNum)(cs) if (charIsDigit)(c) else ((lexStr)(rest) if (c == "\"") else ((lexCharLit)(rest) if (c == "'") else ((lexEqOrEqEq)(rest) if (c == "=") else ((lexNeq)(rest) if (c == "!") else ((lexLtOrLe)(rest) if (c == "<") else ((lexGtOrGe)(rest) if (c == ">") else ((lexColonOrCons)(rest) if (c == ":") else (((listAppend)([LParen]))((lexChars)(rest)) if (c == "(") else (((listAppend)([RParen]))((lexChars)(rest)) if (c == ")") else (((listAppend)([LBrack]))((lexChars)(rest)) if (c == "[") else (((listAppend)([RBrack]))((lexChars)(rest)) if (c == "]") else (((listAppend)([Bar]))((lexChars)(rest)) if (c == "|") else (((listAppend)([Plus]))((lexChars)(rest)) if (c == "+") else (((listAppend)([Star]))((lexChars)(rest)) if (c == "*") else (((listAppend)([Slash]))((lexChars)(rest)) if (c == "/") else (((listAppend)([Caret]))((lexChars)(rest)) if (c == "^") else (((listAppend)([Dot]))((lexChars)(rest)) if (c == ".") else (((listAppend)([Comma]))((lexChars)(rest)) if (c == ",") else (((listAppend)([Backslash]))((lexChars)(rest)) if (c == "\\") else ((listAppend)([TError(c)]))((lexChars)(rest))))))))))))))))))))))))))))
+    return ([Eof] if len(cs) == 0 else (lambda c, rest: (((listAppend)([Newline]))((lexChars)(rest)) if (c == "\n") else ((lexChars)(rest) if (charIsSpace)(c) else ((lexMinusOrArrow)(rest) if (c == "-") else ((lexId)(cs) if (isIdStart)(c) else ((lexUnderOrIdent)(rest) if (c == "_") else ((lexNum)(cs) if (charIsDigit)(c) else ((lexStr)(rest) if (c == "\"") else ((lexCharLit)(rest) if (c == "'") else ((lexEqOrEqEq)(rest) if (c == "=") else ((lexNeq)(rest) if (c == "!") else ((lexLtOrLe)(rest) if (c == "<") else ((lexGtOrGe)(rest) if (c == ">") else ((lexColonOrCons)(rest) if (c == ":") else (((listAppend)([LParen]))((lexChars)(rest)) if (c == "(") else (((listAppend)([RParen]))((lexChars)(rest)) if (c == ")") else (((listAppend)([LBrack]))((lexChars)(rest)) if (c == "[") else (((listAppend)([RBrack]))((lexChars)(rest)) if (c == "]") else (((listAppend)([Bar]))((lexChars)(rest)) if (c == "|") else (((listAppend)([Plus]))((lexChars)(rest)) if (c == "+") else (((listAppend)([Star]))((lexChars)(rest)) if (c == "*") else (((listAppend)([Slash]))((lexChars)(rest)) if (c == "/") else (((listAppend)([Caret]))((lexChars)(rest)) if (c == "^") else (((listAppend)([Dot]))((lexChars)(rest)) if (c == ".") else (((listAppend)([Comma]))((lexChars)(rest)) if (c == ",") else (((listAppend)([Backslash]))((lexChars)(rest)) if (c == "\\") else ((listAppend)([TError(c)]))((lexChars)(rest))))))))))))))))))))))))))))(cs[0], cs[1:]))
 
 def tokenize(src: str) -> list[Token]:
     return (lexChars)((strChars)(src))
 
 def showToken(t: Token) -> str:
-    return ("KwLet" if t._tag == "KwLet" else ("KwTag" if t._tag == "KwTag" else ("KwUnit" if t._tag == "KwUnit" else ("KwTrait" if t._tag == "KwTrait" else ("KwImpl" if t._tag == "KwImpl" else ("KwImport" if t._tag == "KwImport" else ("KwExport" if t._tag == "KwExport" else ("KwModule" if t._tag == "KwModule" else ("KwIf" if t._tag == "KwIf" else ("KwElse" if t._tag == "KwElse" else ("KwTrue" if t._tag == "KwTrue" else ("KwFalse" if t._tag == "KwFalse" else ("KwMatch" if t._tag == "KwMatch" else (((strConcat)("Ident:"))(s) if t._tag == "Ident" else (((strConcat)("TypeId:"))(s) if t._tag == "TypeId" else (((strConcat)("Int:"))((intToStr)(n)) if t._tag == "IntLit" else (((strConcat)("Float:"))(s) if t._tag == "FloatLit" else (((strConcat)("Str:"))(s) if t._tag == "StrLit" else (((strConcat)("Char:"))((strFromChars)([c])) if t._tag == "CharLit" else ("Arrow" if t._tag == "Arrow" else ("Backslash" if t._tag == "Backslash" else ("Dot" if t._tag == "Dot" else ("Comma" if t._tag == "Comma" else ("Colon" if t._tag == "Colon" else ("ColonColon" if t._tag == "ColonColon" else ("Eq" if t._tag == "Eq" else ("Bar" if t._tag == "Bar" else ("LBrack" if t._tag == "LBrack" else ("RBrack" if t._tag == "RBrack" else ("LParen" if t._tag == "LParen" else ("RParen" if t._tag == "RParen" else ("Plus" if t._tag == "Plus" else ("Minus" if t._tag == "Minus" else ("Star" if t._tag == "Star" else ("Slash" if t._tag == "Slash" else ("Caret" if t._tag == "Caret" else ("Lt" if t._tag == "Lt" else ("Gt" if t._tag == "Gt" else ("Le" if t._tag == "Le" else ("Ge" if t._tag == "Ge" else ("EqEq" if t._tag == "EqEq" else ("Neq" if t._tag == "Neq" else ("Underscore" if t._tag == "Underscore" else ("Newline" if t._tag == "Newline" else ("Indent" if t._tag == "Indent" else ("Dedent" if t._tag == "Dedent" else ("Eof" if t._tag == "Eof" else ((strConcat)("Error:"))((strFromChars)([c])))))))))))))))))))))))))))))))))))))))))))))))))
+    return ("KwLet" if t._tag == "KwLet" else ("KwTag" if t._tag == "KwTag" else ("KwUnit" if t._tag == "KwUnit" else ("KwTrait" if t._tag == "KwTrait" else ("KwImpl" if t._tag == "KwImpl" else ("KwImport" if t._tag == "KwImport" else ("KwExport" if t._tag == "KwExport" else ("KwModule" if t._tag == "KwModule" else ("KwIf" if t._tag == "KwIf" else ("KwElse" if t._tag == "KwElse" else ("KwTrue" if t._tag == "KwTrue" else ("KwFalse" if t._tag == "KwFalse" else ("KwMatch" if t._tag == "KwMatch" else ((lambda s: ((strConcat)("Ident:"))(s))(t._0) if t._tag == "Ident" else ((lambda s: ((strConcat)("TypeId:"))(s))(t._0) if t._tag == "TypeId" else ((lambda n: ((strConcat)("Int:"))((intToStr)(n)))(t._0) if t._tag == "IntLit" else ((lambda s: ((strConcat)("Float:"))(s))(t._0) if t._tag == "FloatLit" else ((lambda s: ((strConcat)("Str:"))(s))(t._0) if t._tag == "StrLit" else ((lambda c: ((strConcat)("Char:"))((strFromChars)([c])))(t._0) if t._tag == "CharLit" else ("Arrow" if t._tag == "Arrow" else ("Backslash" if t._tag == "Backslash" else ("Dot" if t._tag == "Dot" else ("Comma" if t._tag == "Comma" else ("Colon" if t._tag == "Colon" else ("ColonColon" if t._tag == "ColonColon" else ("Eq" if t._tag == "Eq" else ("Bar" if t._tag == "Bar" else ("LBrack" if t._tag == "LBrack" else ("RBrack" if t._tag == "RBrack" else ("LParen" if t._tag == "LParen" else ("RParen" if t._tag == "RParen" else ("Plus" if t._tag == "Plus" else ("Minus" if t._tag == "Minus" else ("Star" if t._tag == "Star" else ("Slash" if t._tag == "Slash" else ("Caret" if t._tag == "Caret" else ("Lt" if t._tag == "Lt" else ("Gt" if t._tag == "Gt" else ("Le" if t._tag == "Le" else ("Ge" if t._tag == "Ge" else ("EqEq" if t._tag == "EqEq" else ("Neq" if t._tag == "Neq" else ("Underscore" if t._tag == "Underscore" else ("Newline" if t._tag == "Newline" else ("Indent" if t._tag == "Indent" else ("Dedent" if t._tag == "Dedent" else ("Eof" if t._tag == "Eof" else (lambda c: ((strConcat)("Error:"))((strFromChars)([c])))(t._0))))))))))))))))))))))))))))))))))))))))))))))))
 
 def showTokens(ts: list[Token]) -> str:
     return (((listFold)(lambda acc: lambda t: (lambda s: (s if ((strLen)(acc) == 0) else ((strConcat)(((strConcat)(acc))(" ")))(s)))((showToken)(t))))(""))(ts)
 
 def stripNewlines(ts: list[Token]) -> list[Token]:
-    return ([] if len(ts) == 0 else ((stripNewlines)(rest) if len(ts) > 0 else [t] + (stripNewlines)(rest)))
+    return ([] if len(ts) == 0 else ((stripNewlines)(rest) if len(ts) > 0 else (lambda t, rest: [t] + (stripNewlines)(rest))(ts[0], ts[1:])))
 
 def checkTokens(label: str):
     def _f_src(src: str):
@@ -439,139 +460,137 @@ def checkTokens(label: str):
         return _f_expected
     return _f_src
 
-__ll_main_Std_Lexer: int = (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda _tmp: 0)((((checkTokens)("12 cons pattern"))("x :: xs"))("Ident:x ColonColon Ident:xs Eof")))((((checkTokens)("11 comparison ops"))("!= <= >="))("Neq Le Ge Eof")))((((checkTokens)("10 all keywords"))("let tag unit trait impl import export module if else true false match"))("KwLet KwTag KwUnit KwTrait KwImpl KwImport KwExport KwModule KwIf KwElse KwTrue KwFalse KwMatch Eof")))((((checkTokens)("9 char literal"))("'a'"))("Char:a Eof")))((((checkTokens)("8 float"))("3.14"))("Float:3.14 Eof")))((((checkTokens)("7 comment"))("x -- comment"))("Ident:x Eof")))((((checkTokens)("6 mixed match"))("match x | Some v -> v"))("KwMatch Ident:x Bar TypeId:Some Ident:v Arrow Ident:v Eof")))((((checkTokens)("5 operators"))("== -> |"))("EqEq Arrow Bar Eof")))((((checkTokens)("4 string"))("\"hello\""))("Str:hello Eof")))((((checkTokens)("3 integer"))("42"))("Int:42 Eof")))((((checkTokens)("2 identifiers"))("foo Bar"))("Ident:foo TypeId:Bar Eof")))((((checkTokens)("1 keywords"))("match if else"))("KwMatch KwIf KwElse Eof"))
-
-@dataclass
+@dataclass(frozen=True)
 class PVar:
     _tag: str = "PVar"
     _0: str
 
-@dataclass
+@dataclass(frozen=True)
 class PWild:
     _tag: str = "PWild"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class PCon:
     _tag: str = "PCon"
     _0: str
     _1: list[Pattern]
 
-@dataclass
+@dataclass(frozen=True)
 class PLitInt:
     _tag: str = "PLitInt"
     _0: int
 
-@dataclass
+@dataclass(frozen=True)
 class PLitStr:
     _tag: str = "PLitStr"
     _0: str
 
-@dataclass
+@dataclass(frozen=True)
 class PCons:
     _tag: str = "PCons"
     _0: Pattern
     _1: Pattern
 
-@dataclass
+@dataclass(frozen=True)
 class PNil:
     _tag: str = "PNil"
     pass
 
 Pattern = Union[PVar, PWild, PCon, PLitInt, PLitStr, PCons, PNil]
 
-@dataclass
+@dataclass(frozen=True)
 class EInt:
     _tag: str = "EInt"
     _0: int
 
-@dataclass
+@dataclass(frozen=True)
 class EStr:
     _tag: str = "EStr"
     _0: str
 
-@dataclass
+@dataclass(frozen=True)
 class EBool:
     _tag: str = "EBool"
     _0: bool
 
-@dataclass
+@dataclass(frozen=True)
 class EChar:
     _tag: str = "EChar"
     _0: str
 
-@dataclass
+@dataclass(frozen=True)
 class EFloat:
     _tag: str = "EFloat"
     _0: str
 
-@dataclass
+@dataclass(frozen=True)
 class EVar:
     _tag: str = "EVar"
     _0: str
 
-@dataclass
+@dataclass(frozen=True)
 class ECon:
     _tag: str = "ECon"
     _0: str
 
-@dataclass
+@dataclass(frozen=True)
 class EApp:
     _tag: str = "EApp"
     _0: Expr
     _1: Expr
 
-@dataclass
+@dataclass(frozen=True)
 class EIf:
     _tag: str = "EIf"
     _0: Expr
     _1: Expr
     _2: Expr
 
-@dataclass
+@dataclass(frozen=True)
 class EMatch:
     _tag: str = "EMatch"
     _0: Expr
     _1: list[Pattern]
     _2: list[Expr]
 
-@dataclass
+@dataclass(frozen=True)
 class ELam:
     _tag: str = "ELam"
     _0: str
     _1: Expr
 
-@dataclass
+@dataclass(frozen=True)
 class ELet:
     _tag: str = "ELet"
     _0: str
     _1: Expr
     _2: Expr
 
-@dataclass
+@dataclass(frozen=True)
 class EList:
     _tag: str = "EList"
     _0: list[Expr]
 
-@dataclass
+@dataclass(frozen=True)
 class EBinOp:
     _tag: str = "EBinOp"
     _0: str
     _1: Expr
     _2: Expr
 
-@dataclass
+@dataclass(frozen=True)
 class ETuple:
     _tag: str = "ETuple"
     _0: Expr
     _1: Expr
 
-@dataclass
+@dataclass(frozen=True)
 class ENil:
     _tag: str = "ENil"
     pass
 
-@dataclass
+@dataclass(frozen=True)
 class ECons:
     _tag: str = "ECons"
     _0: Expr
@@ -579,18 +598,18 @@ class ECons:
 
 Expr = Union[EInt, EStr, EBool, EChar, EFloat, EVar, ECon, EApp, EIf, EMatch, ELam, ELet, EList, EBinOp, ETuple, ENil, ECons]
 
-@dataclass
+@dataclass(frozen=True)
 class TyName:
     _tag: str = "TyName"
     _0: str
 
-@dataclass
+@dataclass(frozen=True)
 class TyApp:
     _tag: str = "TyApp"
     _0: TypeExpr
     _1: TypeExpr
 
-@dataclass
+@dataclass(frozen=True)
 class TyFn:
     _tag: str = "TyFn"
     _0: TypeExpr
@@ -598,7 +617,7 @@ class TyFn:
 
 TypeExpr = Union[TyName, TyApp, TyFn]
 
-@dataclass
+@dataclass(frozen=True)
 class MkParam:
     _tag: str = "MkParam"
     _0: str
@@ -606,7 +625,7 @@ class MkParam:
 
 Param = Union[MkParam]
 
-@dataclass
+@dataclass(frozen=True)
 class MkCon:
     _tag: str = "MkCon"
     _0: str
@@ -614,7 +633,7 @@ class MkCon:
 
 Constructor = Union[MkCon]
 
-@dataclass
+@dataclass(frozen=True)
 class DFn:
     _tag: str = "DFn"
     _0: str
@@ -622,24 +641,24 @@ class DFn:
     _2: Optional[TypeExpr]
     _3: Expr
 
-@dataclass
+@dataclass(frozen=True)
 class DType:
     _tag: str = "DType"
     _0: str
     _1: list[str]
     _2: list[Constructor]
 
-@dataclass
+@dataclass(frozen=True)
 class DImport:
     _tag: str = "DImport"
     _0: list[str]
 
-@dataclass
+@dataclass(frozen=True)
 class DExport:
     _tag: str = "DExport"
     _0: Decl
 
-@dataclass
+@dataclass(frozen=True)
 class DLet:
     _tag: str = "DLet"
     _0: str
@@ -647,7 +666,7 @@ class DLet:
 
 Decl = Union[DFn, DType, DImport, DExport, DLet]
 
-@dataclass
+@dataclass(frozen=True)
 class MkModule:
     _tag: str = "MkModule"
     _0: list[str]
@@ -667,22 +686,22 @@ def skipBrackTypeArgs(toks: list[Token]) -> list[Token]:
 def skipBrackTypeBody(toks: list[Token]) -> list[Token]:
     return (rest if len(toks) > 0 else ((lambda rest2: (skipBrackTypeBody)(rest2))((skipBrackTypeBody)(rest)) if len(toks) > 0 else ((skipBrackTypeBody)(rest) if len(toks) > 0 else [])))
 
-def parseTypeExpr(toks: list[Token]) -> Tuple[TypeExpr][list[Token]]:
+def parseTypeExpr(toks: list[Token]) -> Tuple[TypeExpr, list[Token]]:
     return ((lambda rest2: (TyName(name), rest2))((skipBrackTypeArgs)(rest)) if len(toks) > 0 else ((TyName(name), rest) if len(toks) > 0 else (TyName("?"), toks)))
 
-def parseReturnType(toks: list[Token]) -> Tuple[Optional[TypeExpr]][list[Token]]:
+def parseReturnType(toks: list[Token]) -> Tuple[Optional[TypeExpr], list[Token]]:
     return ((lambda rest2: (Some(TyName(name)), rest2))((skipBrackTypeArgs)(rest)) if len(toks) > 0 else (None, toks))
 
-def parseParamGroups(toks: list[Token]) -> Tuple[list[Param]][list[Token]]:
+def parseParamGroups(toks: list[Token]) -> Tuple[list[Param], list[Token]]:
     return (([], rest) if len(toks) > 0 else ((lambda rest2: (lambda rest3: (lambda _tmp: ([MkParam(pname, TyName(tname))] + ps, rest4))((parseParamGroups)(rest3)))((r if len(rest2) > 0 else rest2)))((skipBrackTypeArgs)(rest)) if len(toks) > 0 else ((lambda rest2: (lambda rest3: (lambda _tmp: ([MkParam(((strConcat)("_"))(pname), TyName(tname))] + ps, rest4))((parseParamGroups)(rest3)))((r if len(rest2) > 0 else rest2)))((skipBrackTypeArgs)(rest)) if len(toks) > 0 else ((lambda _tmp: ([MkParam(pname, TyName("?"))] + ps, rest2))((parseParamGroups)(rest)) if len(toks) > 0 else ([], toks)))))
 
-def parseTypeParams(toks: list[Token]) -> Tuple[list[str]][list[Token]]:
+def parseTypeParams(toks: list[Token]) -> Tuple[list[str], list[Token]]:
     return (((lambda _tmp: ([s] + ps, rest2))((parseTypeParams)(rest)) if ((strLen)(s) == 1) else ([], toks)) if len(toks) > 0 else ([], toks))
 
-def parseConArgs(toks: list[Token]) -> Tuple[list[TypeExpr]][list[Token]]:
+def parseConArgs(toks: list[Token]) -> Tuple[list[TypeExpr], list[Token]]:
     return ((lambda _tmp: (lambda _tmp: ([arg] + args, rest2))((parseConArgs)(rest)))((parseTypeExpr)(toks)) if len(toks) > 0 else ([], toks))
 
-def parseCon(toks: list[Token]) -> Tuple[Constructor][list[Token]]:
+def parseCon(toks: list[Token]) -> Tuple[Constructor, list[Token]]:
     return ((lambda _tmp: (MkCon(name, args), rest2))((parseConArgs)(rest)) if len(toks) > 0 else (MkCon("?", []), toks))
 
 def parseConsTail(acc: list[Constructor]):
@@ -690,46 +709,46 @@ def parseConsTail(acc: list[Constructor]):
         return (lambda toks2: ((lambda rest2: (lambda _tmp: ((parseConsTail)(((listAppend)(acc))([c])))(rest3))((parseCon)(rest2)))((skipNewlines)(rest)) if len(toks2) > 0 else (acc, toks)))((skipNewlines)(toks))
     return _f_toks
 
-def parseConList(toks: list[Token]) -> Tuple[list[Constructor]][list[Token]]:
+def parseConList(toks: list[Token]) -> Tuple[list[Constructor], list[Token]]:
     return (lambda toks2: (lambda toks3: (lambda _tmp: ((parseConsTail)([c]))(rest))((parseCon)(toks3)))(((skipNewlines)(r) if len(toks2) > 0 else toks2)))((skipNewlines)(toks))
 
-def parseTypeDecl(toks: list[Token]) -> Tuple[Decl][list[Token]]:
+def parseTypeDecl(toks: list[Token]) -> Tuple[Decl, list[Token]]:
     return ((lambda _tmp: (lambda rest3: (lambda _tmp: (DType(name, prms, ctors), rest4))((parseConList)(rest3)))(((skipNewlines)(r) if len((skipNewlines)(rest2)) > 0 else (skipNewlines)(rest2))))((parseTypeParams)(rest)) if len(toks) > 0 else (DType("?", [], []), toks))
 
-def parsePrimaryPat(toks: list[Token]) -> Tuple[Pattern][list[Token]]:
+def parsePrimaryPat(toks: list[Token]) -> Tuple[Pattern, list[Token]]:
     return ((PLitInt(n), rest) if len(toks) > 0 else ((PLitStr(s), rest) if len(toks) > 0 else ((PWild, rest) if len(toks) > 0 else ((PNil, rest) if len(toks) > 0 else ((PVar(s), rest) if len(toks) > 0 else ((lambda _tmp: (PCon(name, args), rest2))((parsePatArgs)(rest)) if len(toks) > 0 else (PWild, toks)))))))
 
-def parsePatArgs(toks: list[Token]) -> Tuple[list[Any]][list[Token]]:
+def parsePatArgs(toks: list[Token]) -> Tuple[list[T], list[Token]]:
     return ((parsePatArgsCons)(toks) if len(toks) > 0 else ((parsePatArgsCons)(toks) if len(toks) > 0 else ((parsePatArgsCons)(toks) if len(toks) > 0 else ((parsePatArgsCons)(toks) if len(toks) > 0 else ([], toks)))))
 
-def parsePatArgsCons(toks: list[Token]) -> Tuple[list[Pattern]][list[Token]]:
+def parsePatArgsCons(toks: list[Token]) -> Tuple[list[Pattern], list[Token]]:
     return (lambda _tmp: (lambda _tmp: (((listAppend)([p]))(ps), rest2))((parsePatArgs)(rest)))((parsePrimaryPat)(toks))
 
-def parsePat(toks: list[Token]) -> Tuple[Pattern][list[Token]]:
+def parsePat(toks: list[Token]) -> Tuple[Pattern, list[Token]]:
     return (lambda _tmp: ((lambda _tmp: (PCons(p, tail), rest3))((parsePat)(rest2)) if len(rest) > 0 else (p, rest)))((parsePrimaryPat)(toks))
 
-def parseArmBody(toks: list[Token]) -> Any:
+def parseArmBody(toks: list[Token]) -> T:
     return (lambda toks2: ((parseIf)(rest) if len(toks2) > 0 else ((parseLetIn)(rest) if len(toks2) > 0 else ((parseLetIn)(toks2) if len(toks2) > 0 else (parseCompare)(toks2)))))((skipNewlines)(toks))
 
 def skipArrow(toks: list[Token]) -> list[Token]:
     return (r if len(toks) > 0 else toks)
 
-def parseArm(toks: list[Token]) -> Tuple[Tuple[Pattern][Expr]][list[Token]]:
+def parseArm(toks: list[Token]) -> Tuple[Tuple[Pattern, Expr], list[Token]]:
     return ((lambda _tmp: (lambda rest3: (lambda _tmp: ((p, body), rest4))((parseArmBody)(rest3)))((skipArrow)(rest2)))((parsePat)(rest)) if len(toks) > 0 else ((PWild, EInt(0)), toks))
 
-def parseArms(toks: list[Token]) -> Tuple[Tuple[list[Pattern]][list[Expr]]][list[Token]]:
+def parseArms(toks: list[Token]) -> Tuple[Tuple[list[Pattern], list[Expr]], list[Token]]:
     return (lambda toks2: ((lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda _tmp: (([p] + ps, [b] + bs), rest2))(morePB))((parseArms)(rest)))(pb))((parseArm)(toks2)) if len(toks2) > 0 else (([], []), toks2)))((skipNewlines)(toks))
 
-def parseMatch(toks: list[Token]) -> Tuple[Expr][list[Token]]:
+def parseMatch(toks: list[Token]) -> Tuple[Expr, list[Token]]:
     return (lambda _tmp: (lambda _tmp: (lambda _tmp: (EMatch(scrut, pats, bodies), rest2))(armLists))((parseArms)(rest)))((parseExpr)(toks))
 
-def parseIf(toks: list[Token]) -> Tuple[Expr][list[Token]]:
+def parseIf(toks: list[Token]) -> Tuple[Expr, list[Token]]:
     return (lambda _tmp: (lambda rest2: (lambda _tmp: (lambda rest3a: (lambda rest4: (lambda _tmp: (EIf(cond, thenE, elseE), rest5))((parseExpr)(rest4)))(((skipNewlines)(r) if len(rest3a) > 0 else rest3a)))((skipNewlines)(rest3)))((parseExpr)(rest2)))((skipNewlines)(rest)))((parseExpr)(toks))
 
 def skipKwIn(toks: list[Token]) -> list[Token]:
     return ((skipNewlines)(r) if len(toks) > 0 else (skipNewlines)(toks))
 
-def parseLetIn(toks: list[Token]) -> Tuple[Expr][list[Token]]:
+def parseLetIn(toks: list[Token]) -> Tuple[Expr, list[Token]]:
     return ((lambda rest0: (lambda _tmp: (lambda rest3: (lambda _tmp: (ELet(a, e1, ELet(b, ETuple(e1, e2), e2)), rest4))((parseExpr)(rest3)))((skipKwIn)(rest2)))((parseExpr)(rest0)))((skipNewlines)(rest)) if len(toks) > 0 else ((lambda rest0: (lambda _tmp: (lambda rest3: (lambda _tmp: (ELet(name, e1, e2), rest4))((parseExpr)(rest3)))((skipKwIn)(rest2)))((parseExpr)(rest0)))((skipNewlines)(rest)) if len(toks) > 0 else (EInt(0), toks)))
 
 def parseLamParams(acc: list[str]):
@@ -739,16 +758,16 @@ def parseLamParams(acc: list[str]):
 
 def wrapLamParams(parms: list[str]):
     def _f_body(body: Expr):
-        return (ELam(p, ((wrapLamParams)(rest))(body)) if len(parms) > 0 else body)
+        return ((lambda p, rest: ELam(p, ((wrapLamParams)(rest))(body)))(parms[0], parms[1:]) if len(parms) > 0 else body)
     return _f_body
 
-def parseLam(toks: list[Token]) -> Tuple[Expr][list[Token]]:
+def parseLam(toks: list[Token]) -> Tuple[Expr, list[Token]]:
     return (lambda _tmp: ((lambda _tmp: (((wrapLamParams)(parms))(body), rest3))((parseExpr)(rest2)) if len(rest) > 0 else (EInt(0), toks)))(((parseLamParams)([]))(toks))
 
-def parseExpr(toks: list[Token]) -> Tuple[Expr][list[Token]]:
+def parseExpr(toks: list[Token]) -> Tuple[Expr, list[Token]]:
     return ((parseIf)(rest) if len(toks) > 0 else ((parseMatch)(rest) if len(toks) > 0 else ((parseLetIn)(rest) if len(toks) > 0 else ((parseLetIn)(toks) if len(toks) > 0 else ((parseLam)(rest) if len(toks) > 0 else (parseCompare)(toks))))))
 
-def parseCompare(toks: list[Token]) -> Any:
+def parseCompare(toks: list[Token]) -> T:
     return (lambda _tmp: ((parseCompareTail)(e))(rest))((parseCons)(toks))
 
 def parseCompareTail(lhs: Expr):
@@ -756,10 +775,10 @@ def parseCompareTail(lhs: Expr):
         return ((lambda _tmp: ((parseCompareTail)(EBinOp("==", lhs, rhs)))(rest2))((parseCons)(r)) if len(toks) > 0 else ((lambda _tmp: ((parseCompareTail)(EBinOp("!=", lhs, rhs)))(rest2))((parseCons)(r)) if len(toks) > 0 else ((lambda _tmp: ((parseCompareTail)(EBinOp("<", lhs, rhs)))(rest2))((parseCons)(r)) if len(toks) > 0 else ((lambda _tmp: ((parseCompareTail)(EBinOp(">", lhs, rhs)))(rest2))((parseCons)(r)) if len(toks) > 0 else ((lambda _tmp: ((parseCompareTail)(EBinOp("<=", lhs, rhs)))(rest2))((parseCons)(r)) if len(toks) > 0 else ((lambda _tmp: ((parseCompareTail)(EBinOp(">=", lhs, rhs)))(rest2))((parseCons)(r)) if len(toks) > 0 else (lhs, toks)))))))
     return _f_toks
 
-def parseCons(toks: list[Token]) -> Tuple[Expr][list[Token]]:
+def parseCons(toks: list[Token]) -> Tuple[Expr, list[Token]]:
     return (lambda _tmp: ((lambda _tmp: (ECons(head, tail), rest3))((parseCons)(rest2)) if len(rest) > 0 else (head, rest)))((parseAddSub)(toks))
 
-def parseAddSub(toks: list[Token]) -> Any:
+def parseAddSub(toks: list[Token]) -> T:
     return (lambda _tmp: ((parseAddSubTail)(e))(rest))((parseMulDiv)(toks))
 
 def parseAddSubTail(lhs: Expr):
@@ -767,7 +786,7 @@ def parseAddSubTail(lhs: Expr):
         return ((lambda _tmp: ((parseAddSubTail)(EBinOp("+", lhs, r)))(rest2))((parseMulDiv)(rest)) if len(toks) > 0 else ((lambda _tmp: ((parseAddSubTail)(EBinOp("-", lhs, r)))(rest2))((parseMulDiv)(rest)) if len(toks) > 0 else (lhs, toks)))
     return _f_toks
 
-def parseMulDiv(toks: list[Token]) -> Any:
+def parseMulDiv(toks: list[Token]) -> T:
     return (lambda _tmp: ((parseMulDivTail)(e))(rest))((parseApp)(toks))
 
 def parseMulDivTail(lhs: Expr):
@@ -775,7 +794,7 @@ def parseMulDivTail(lhs: Expr):
         return ((lambda _tmp: ((parseMulDivTail)(EBinOp("*", lhs, r)))(rest2))((parseApp)(rest)) if len(toks) > 0 else ((lambda _tmp: ((parseMulDivTail)(EBinOp("/", lhs, r)))(rest2))((parseApp)(rest)) if len(toks) > 0 else (lhs, toks)))
     return _f_toks
 
-def parseApp(toks: list[Token]) -> Any:
+def parseApp(toks: list[Token]) -> T:
     return (lambda _tmp: ((parseAppTail)(e))(rest))((parseAtom)(toks))
 
 def parseAppTail(lhs: Expr):
@@ -783,10 +802,10 @@ def parseAppTail(lhs: Expr):
         return (((lambda _tmp: ((parseAppTail)(EApp(lhs, arg)))(rest))((parseAtom)(toks)) if (isAtomStart)(t) else (lhs, toks)) if len(toks) > 0 else (lhs, toks))
     return _f_toks
 
-def parseListLit(toks: list[Token]) -> Tuple[Expr][list[Token]]:
+def parseListLit(toks: list[Token]) -> Tuple[Expr, list[Token]]:
     return ((ENil, rest) if len(toks) > 0 else (lambda _tmp: ((ECons(e, ENil), rest2) if len(rest) > 0 else ((lambda _tmp: (ECons(e, tail), rest3))((parseListLit)(rest2)) if len(rest) > 0 else (lambda _tmp: (ECons(e, tail), rest2))((parseListLit)(rest)))))((parseListElem)(toks)))
 
-def parseListElem(toks: list[Token]) -> Any:
+def parseListElem(toks: list[Token]) -> T:
     return ((parseApp)(toks) if len(toks) > 0 else (parseAtom)(toks))
 
 def parseAtomParenTail(e: Expr):
@@ -794,7 +813,7 @@ def parseAtomParenTail(e: Expr):
         return ((lambda rest2: (lambda _tmp: ((ETuple(e, e2), rest4) if len(rest3) > 0 else (ETuple(e, e2), rest3)))((parseExpr)(rest2)))((skipNewlines)(rest)) if len(toks) > 0 else ((e, rest) if len(toks) > 0 else (e, toks)))
     return _f_toks
 
-def parseAtom(toks: list[Token]) -> Tuple[Expr][list[Token]]:
+def parseAtom(toks: list[Token]) -> Tuple[Expr, list[Token]]:
     return ((EInt(n), rest) if len(toks) > 0 else ((EFloat(s), rest) if len(toks) > 0 else ((EStr(s), rest) if len(toks) > 0 else ((EChar(c), rest) if len(toks) > 0 else ((EBool(True), rest) if len(toks) > 0 else ((EBool(False), rest) if len(toks) > 0 else ((EVar(s), rest) if len(toks) > 0 else ((ECon(s), rest) if len(toks) > 0 else ((ENil, rest) if len(toks) > 0 else ((parseListLit)(rest) if len(toks) > 0 else ((lambda _tmp: ((parseAtomParenTail)(e))(rest2))((parseExpr)(rest)) if len(toks) > 0 else (EInt(0), toks))))))))))))
 
 def lastParamVar(prms: list[Param]) -> Expr:
@@ -805,10 +824,10 @@ def parseFnBody(prms: list[Param]):
         return (lambda toks2: ((lambda _tmp: (lambda _tmp: (lambda scrut: (EMatch(scrut, pats, bodies), rest))((lastParamVar)(prms)))(armLists))((parseArms)(toks2)) if len(toks2) > 0 else (parseExpr)(toks2)))((skipNewlines)(toks))
     return _f_toks
 
-def parseFnDecl(toks: list[Token]) -> Tuple[Decl][list[Token]]:
+def parseFnDecl(toks: list[Token]) -> Tuple[Decl, list[Token]]:
     return ((lambda _tmp: (lambda _tmp: (lambda rest4: (lambda _tmp: (DFn(name, prms, retTy, body), rest5))(((parseFnBody)(prms))(rest4)))(((skipNewlines)(r) if len((skipNewlines)(rest3)) > 0 else (skipNewlines)(rest3))))((parseReturnType)(rest2)))((parseParamGroups)(rest)) if len(toks) > 0 else (DFn("?", [], None, EInt(0)), toks))
 
-def parseLetDecl(toks: list[Token]) -> Tuple[Decl][list[Token]]:
+def parseLetDecl(toks: list[Token]) -> Tuple[Decl, list[Token]]:
     return ((lambda rest0: (lambda _tmp: (DLet(name, body), rest2))((parseExpr)(rest0)))((skipNewlines)(rest)) if len(toks) > 0 else (DLet("?", EInt(0)), toks))
 
 def parseImportPath(acc: list[str]):
@@ -816,10 +835,10 @@ def parseImportPath(acc: list[str]):
         return (((parseImportPath)(((listAppend)(acc))([seg])))(rest) if len(toks) > 0 else (acc, toks))
     return _f_toks
 
-def parseImportDecl(toks: list[Token]) -> Tuple[Decl][list[Token]]:
+def parseImportDecl(toks: list[Token]) -> Tuple[Decl, list[Token]]:
     return ((lambda _tmp: (DImport(segs), rest2))(((parseImportPath)([head]))(rest)) if len(toks) > 0 else (DImport([]), toks))
 
-def parseOneDecl(toks: list[Token]) -> Tuple[Decl][list[Token]]:
+def parseOneDecl(toks: list[Token]) -> Tuple[Decl, list[Token]]:
     return ((parseTypeDecl)(toks) if len(toks) > 0 else ((parseLetDecl)(toks) if len(toks) > 0 else ((parseFnDecl)(toks) if len(toks) > 0 else ((parseImportDecl)(toks) if len(toks) > 0 else ((lambda _tmp: (DExport(inner), rest2))((parseOneDecl)(rest)) if len(toks) > 0 else (DLet("?", EInt(0)), toks))))))
 
 def parseDecls(toks: list[Token]) -> list[Decl]:
@@ -830,7 +849,7 @@ def parseModulePath(acc: list[str]):
         return (((parseModulePath)(((listAppend)(acc))([seg])))(rest) if len(toks) > 0 else (acc, toks))
     return _f_toks
 
-def parseModuleHeader(toks: list[Token]) -> Tuple[list[str]][list[Token]]:
+def parseModuleHeader(toks: list[Token]) -> Tuple[list[str], list[Token]]:
     return ((lambda _tmp: (segs, rest2))(((parseModulePath)([head]))(rest)) if len(toks) > 0 else ([], toks))
 
 def parseModule(toks: list[Token]) -> Module:
@@ -840,10 +859,10 @@ def boolToStr(b: bool) -> str:
     return ("true" if b else "false")
 
 def showExpr(e: Expr) -> str:
-    return (((strConcat)("EInt "))((intToStr)(n)) if e._tag == "EInt" else (((strConcat)("EStr "))(s) if e._tag == "EStr" else (((strConcat)("EBool "))((boolToStr)(b)) if e._tag == "EBool" else (((strConcat)("EChar "))((strFromChars)([c])) if e._tag == "EChar" else (((strConcat)("EFloat "))(s) if e._tag == "EFloat" else (((strConcat)("EVar "))(s) if e._tag == "EVar" else (((strConcat)("ECon "))(s) if e._tag == "ECon" else ("ENil" if e._tag == "ENil" else (((strConcat)(((strConcat)("ECons("))((showExpr)(h))))(((strConcat)(" "))(((strConcat)((showExpr)(t)))(")"))) if e._tag == "ECons" else (((strConcat)(((strConcat)("EApp("))((showExpr)(f))))(((strConcat)(" "))(((strConcat)((showExpr)(x)))(")"))) if e._tag == "EApp" else (((strConcat)("EIf("))(((strConcat)((showExpr)(c)))(((strConcat)(" "))(((strConcat)((showExpr)(a)))(((strConcat)(" "))(((strConcat)((showExpr)(b)))(")")))))) if e._tag == "EIf" else (((strConcat)("EBinOp("))(((strConcat)(op))(((strConcat)(" "))(((strConcat)((showExpr)(l)))(((strConcat)(" "))(((strConcat)((showExpr)(r)))(")")))))) if e._tag == "EBinOp" else (((strConcat)("ETuple("))(((strConcat)((showExpr)(a)))(((strConcat)(" "))(((strConcat)((showExpr)(b)))(")")))) if e._tag == "ETuple" else (((strConcat)("ELet "))(((strConcat)(n))(((strConcat)("=("))(((strConcat)((showExpr)(e1)))(((strConcat)(") in ("))(((strConcat)((showExpr)(e2)))(")")))))) if e._tag == "ELet" else (((strConcat)("ELam "))(((strConcat)(n))(((strConcat)("."))((showExpr)(b)))) if e._tag == "ELam" else (((strConcat)("EMatch("))(((strConcat)((showExpr)(s)))("...)")) if e._tag == "EMatch" else "EList(...)"))))))))))))))))
+    return ((lambda n: ((strConcat)("EInt "))((intToStr)(n)))(e._0) if e._tag == "EInt" else ((lambda s: ((strConcat)("EStr "))(s))(e._0) if e._tag == "EStr" else ((lambda b: ((strConcat)("EBool "))((boolToStr)(b)))(e._0) if e._tag == "EBool" else ((lambda c: ((strConcat)("EChar "))((strFromChars)([c])))(e._0) if e._tag == "EChar" else ((lambda s: ((strConcat)("EFloat "))(s))(e._0) if e._tag == "EFloat" else ((lambda s: ((strConcat)("EVar "))(s))(e._0) if e._tag == "EVar" else ((lambda s: ((strConcat)("ECon "))(s))(e._0) if e._tag == "ECon" else ("ENil" if e._tag == "ENil" else ((lambda h, t: ((strConcat)(((strConcat)("ECons("))((showExpr)(h))))(((strConcat)(" "))(((strConcat)((showExpr)(t)))(")"))))(e._0, e._1) if e._tag == "ECons" else ((lambda f, x: ((strConcat)(((strConcat)("EApp("))((showExpr)(f))))(((strConcat)(" "))(((strConcat)((showExpr)(x)))(")"))))(e._0, e._1) if e._tag == "EApp" else ((lambda c, a, b: ((strConcat)("EIf("))(((strConcat)((showExpr)(c)))(((strConcat)(" "))(((strConcat)((showExpr)(a)))(((strConcat)(" "))(((strConcat)((showExpr)(b)))(")")))))))(e._0, e._1, e._2) if e._tag == "EIf" else ((lambda op, l, r: ((strConcat)("EBinOp("))(((strConcat)(op))(((strConcat)(" "))(((strConcat)((showExpr)(l)))(((strConcat)(" "))(((strConcat)((showExpr)(r)))(")")))))))(e._0, e._1, e._2) if e._tag == "EBinOp" else ((lambda a, b: ((strConcat)("ETuple("))(((strConcat)((showExpr)(a)))(((strConcat)(" "))(((strConcat)((showExpr)(b)))(")")))))(e._0, e._1) if e._tag == "ETuple" else ((lambda n, e1, e2: ((strConcat)("ELet "))(((strConcat)(n))(((strConcat)("=("))(((strConcat)((showExpr)(e1)))(((strConcat)(") in ("))(((strConcat)((showExpr)(e2)))(")")))))))(e._0, e._1, e._2) if e._tag == "ELet" else ((lambda n, b: ((strConcat)("ELam "))(((strConcat)(n))(((strConcat)("."))((showExpr)(b)))))(e._0, e._1) if e._tag == "ELam" else ((lambda s, pats, bodies: ((strConcat)("EMatch("))(((strConcat)((showExpr)(s)))("...)")))(e._0, e._1, e._2) if e._tag == "EMatch" else (lambda es: "EList(...)")(e._0)))))))))))))))))
 
 def showPattern(p: Pattern) -> str:
-    return (((strConcat)("PVar "))(s) if p._tag == "PVar" else ("PWild" if p._tag == "PWild" else (((strConcat)("PCon "))(name) if p._tag == "PCon" else (((strConcat)("PLitInt "))((intToStr)(n)) if p._tag == "PLitInt" else (((strConcat)("PLitStr "))(s) if p._tag == "PLitStr" else (((strConcat)("PCons("))(((strConcat)((showPattern)(h)))(((strConcat)(" "))(((strConcat)((showPattern)(t)))(")")))) if p._tag == "PCons" else "PNil"))))))
+    return ((lambda s: ((strConcat)("PVar "))(s))(p._0) if p._tag == "PVar" else ("PWild" if p._tag == "PWild" else ((lambda name, args: ((strConcat)("PCon "))(name))(p._0, p._1) if p._tag == "PCon" else ((lambda n: ((strConcat)("PLitInt "))((intToStr)(n)))(p._0) if p._tag == "PLitInt" else ((lambda s: ((strConcat)("PLitStr "))(s))(p._0) if p._tag == "PLitStr" else ((lambda h, t: ((strConcat)("PCons("))(((strConcat)((showPattern)(h)))(((strConcat)(" "))(((strConcat)((showPattern)(t)))(")")))))(p._0, p._1) if p._tag == "PCons" else "PNil"))))))
 
 def showMaybeTy(m: Optional[TypeExpr]) -> str:
     return ("Some" if m._tag == "Some" else "None")
@@ -852,7 +871,7 @@ def joinDot(segs: list[str]) -> str:
     return (((listFold)(lambda acc: lambda s: (s if ((strLen)(acc) == 0) else ((strConcat)(((strConcat)(acc))(".")))(s))))(""))(segs)
 
 def showDecl(d: Decl) -> str:
-    return (((strConcat)("DFn "))(((strConcat)(name))(((strConcat)(" body=("))(((strConcat)((showExpr)(body)))(")")))) if d._tag == "DFn" else (((strConcat)("DType "))(name) if d._tag == "DType" else ((lambda path: ((strConcat)("DImport "))(path))((joinDot)(segs)) if d._tag == "DImport" else (((strConcat)("DExport("))(((strConcat)((showDecl)(inner)))(")")) if d._tag == "DExport" else ((strConcat)("DLet "))(((strConcat)(name))(((strConcat)("=("))(((strConcat)((showExpr)(body)))(")"))))))))
+    return ((lambda name, prms, retTy, body: ((strConcat)("DFn "))(((strConcat)(name))(((strConcat)(" body=("))(((strConcat)((showExpr)(body)))(")")))))(d._0, d._1, d._2, d._3) if d._tag == "DFn" else ((lambda name, prms, ctors: ((strConcat)("DType "))(name))(d._0, d._1, d._2) if d._tag == "DType" else ((lambda segs: (lambda path: ((strConcat)("DImport "))(path))((joinDot)(segs)))(d._0) if d._tag == "DImport" else ((lambda inner: ((strConcat)("DExport("))(((strConcat)((showDecl)(inner)))(")")))(d._0) if d._tag == "DExport" else (lambda name, body: ((strConcat)("DLet "))(((strConcat)(name))(((strConcat)("=("))(((strConcat)((showExpr)(body)))(")")))))(d._0, d._1)))))
 
 def parserCheckExpr(label: str):
     def _f_toks(toks: list[Token]):
@@ -871,104 +890,32 @@ def parserCheckDecl(label: str):
 def parserCheckModule(label: str):
     def _f_toks(toks: list[Token]):
         def _f_expectedDeclCount(expectedDeclCount: int):
-            return (lambda m: (lambda n: ((printfn)(((strConcat)("OK "))(label)) if (n == expectedDeclCount) else (lambda p1: (lambda p2: (lambda p3: (lambda p4: (lambda p5: (printfn)(p5))(((strConcat)(p4))((intToStr)(n))))(((strConcat)(p3))(" decls, got ")))(((strConcat)(p2))((intToStr)(expectedDeclCount))))(((strConcat)(p1))(" expected ")))(((strConcat)("FAIL "))(label))))((listLen)(decls)))((parseModule)(toks))
+            return (lambda m: (lambda path, decls: (lambda n: ((printfn)(((strConcat)("OK "))(label)) if (n == expectedDeclCount) else (lambda p1: (lambda p2: (lambda p3: (lambda p4: (lambda p5: (printfn)(p5))(((strConcat)(p4))((intToStr)(n))))(((strConcat)(p3))(" decls, got ")))(((strConcat)(p2))((intToStr)(expectedDeclCount))))(((strConcat)(p1))(" expected ")))(((strConcat)("FAIL "))(label))))((listLen)(decls)))(m._0, m._1))((parseModule)(toks))
         return _f_expectedDeclCount
     return _f_toks
 
-__ll_main_Std_Parser: int = (lambda t1: (lambda _tmp: (lambda t2: (lambda _tmp: (lambda t3: (lambda _tmp: (lambda t4: (lambda _tmp: (lambda t5: (lambda _tmp: (lambda t6: (lambda _tmp: (lambda t7: (lambda _tmp: (lambda t8: (lambda _tmp: (lambda t9: (lambda _tmp: (lambda t10: (lambda _tmp: (lambda t11: (lambda _tmp: (lambda t12: (lambda _tmp: (lambda t13: (lambda _tmp: (lambda t14: (lambda _tmp: (lambda t15: (lambda _tmp: (lambda t16: (lambda _tmp: (lambda t17: (lambda _tmp: (lambda t18: (lambda _tmp: (lambda t19: (lambda _tmp: (lambda t20: (lambda _tmp: (lambda t21: (lambda _tmp: (lambda t22: (lambda _tmp: (lambda t23: (lambda _tmp: (lambda t24: (lambda _tmp: (lambda t25: (lambda _tmp: 0)((((parserCheckExpr)("25 tuple"))(t25))("ETuple(EVar a EVar b)")))([LParen] + [Ident("a")] + [Comma] + [Ident("b")] + [RParen] + [Eof] + []))((((parserCheckExpr)("24 paren grouping"))(t24))("EVar x")))([LParen] + [Ident("x")] + [RParen] + [Eof] + []))((((parserCheckExpr)("23 precedence"))(t23))("EBinOp(+ EInt 1 EBinOp(* EInt 2 EInt 3))")))([IntLit(1)] + [Plus] + [IntLit(2)] + [Star] + [IntLit(3)] + [Eof] + []))((((parserCheckExpr)("22 multiply"))(t22))("EBinOp(* EInt 2 EInt 3)")))([IntLit(2)] + [Star] + [IntLit(3)] + [Eof] + []))((((parserCheckExpr)("21 nested app"))(t21))("EApp(EApp(EVar f EVar x) EVar y)")))([Ident("f")] + [Ident("x")] + [Ident("y")] + [Eof] + []))((((parserCheckModule)("20 module"))(t20))(2)))([KwModule] + [TypeId("Test")] + [Newline] + [TypeId("Foo")] + [Eq] + [TypeId("Bar")] + [Newline] + [Ident("f")] + [LParen] + [Ident("x")] + [TypeId("Int")] + [RParen] + [Eq] + [Ident("x")] + [Eof] + []))((((parserCheckDecl)("19 let decl"))(t19))("DLet x=(EInt 99)")))([KwLet] + [Ident("x")] + [Eq] + [IntLit(99)] + [Eof] + []))((((parserCheckDecl)("18 import"))(t18))("DImport Std.Lexer")))([KwImport] + [TypeId("Std")] + [Dot] + [TypeId("Lexer")] + [Eof] + []))((((parserCheckDecl)("17 type decl"))(t17))("DType Maybe")))([TypeId("Maybe")] + [TypeId("A")] + [Eq] + [TypeId("Some")] + [TypeId("A")] + [Bar] + [TypeId("None")] + [Eof] + []))((((parserCheckDecl)("16 fn decl"))(t16))("DFn add body=(EBinOp(+ EVar a EVar b))")))([Ident("add")] + [LParen] + [Ident("a")] + [TypeId("Int")] + [RParen] + [LParen] + [Ident("b")] + [TypeId("Int")] + [RParen] + [Eq] + [Ident("a")] + [Plus] + [Ident("b")] + [Eof] + []))((((parserCheckExpr)("15 match"))(t15))("EMatch(EVar x...)")))([KwMatch] + [Ident("x")] + [Newline] + [Bar] + [TypeId("Some")] + [Ident("v")] + [Arrow] + [Ident("v")] + [Newline] + [Bar] + [TypeId("None")] + [Arrow] + [IntLit(0)] + [Eof] + []))((((parserCheckExpr)("14 cons"))(t14))("ECons(EVar x EVar xs)")))([Ident("x")] + [ColonColon] + [Ident("xs")] + [Eof] + []))((((parserCheckExpr)("13 empty list"))(t13))("ENil")))([LBrack] + [RBrack] + [Eof] + []))((((parserCheckExpr)("12 constructor app"))(t12))("EApp(ECon Some EInt 42)")))([TypeId("Some")] + [IntLit(42)] + [Eof] + []))((((parserCheckExpr)("11 lambda"))(t11))("ELam x.EVar x")))([Backslash] + [Ident("x")] + [Dot] + [Ident("x")] + [Eof] + []))((((parserCheckExpr)("10 let"))(t10))("ELet x=(EInt 42) in (EVar x)")))([Ident("x")] + [Eq] + [IntLit(42)] + [Newline] + [Ident("x")] + [Eof] + []))((((parserCheckExpr)("9 if-else"))(t9))("EIf(EBool true EInt 1 EInt 2)")))([KwIf] + [KwTrue] + [Newline] + [IntLit(1)] + [Newline] + [KwElse] + [IntLit(2)] + [Eof] + []))((((parserCheckExpr)("8 comparison"))(t8))("EBinOp(== EVar x EInt 42)")))([Ident("x")] + [EqEq] + [IntLit(42)] + [Eof] + []))((((parserCheckExpr)("7 addition"))(t7))("EBinOp(+ EInt 1 EInt 2)")))([IntLit(1)] + [Plus] + [IntLit(2)] + [Eof] + []))((((parserCheckExpr)("6 bool false"))(t6))("EBool false")))([KwFalse] + [Eof] + []))((((parserCheckExpr)("5 bool true"))(t5))("EBool true")))([KwTrue] + [Eof] + []))((((parserCheckExpr)("4 string literal"))(t4))("EStr hello")))([StrLit("hello")] + [Eof] + []))((((parserCheckExpr)("3 application"))(t3))("EApp(EVar f EVar x)")))([Ident("f")] + [Ident("x")] + [Eof] + []))((((parserCheckExpr)("2 variable"))(t2))("EVar x")))([Ident("x")] + [Eof] + []))((((parserCheckExpr)("1 int literal"))(t1))("EInt 42")))([IntLit(42)] + [Eof] + [])
-
-def joinWith(sep: str):
-    def _f_items(items: list[str]):
-        return ("" if len(items) == 0 else (x if len(items) > 0 else ((strConcat)(x))(((strConcat)(sep))(((joinWith)(sep))(rest)))))
-    return _f_items
-
-def encodeStrEscape(c: str) -> str:
-    return ("\\n" if c == "\n" else ("\\t" if c == "\t" else ("\\r" if c == "\r" else ("\\\\" if c == "\\" else ("\\\"" if c == "\"" else (strFromChars)([c]))))))
-
-def escapeStr(s: str) -> str:
-    return (((listFold)(lambda acc: lambda c: ((strConcat)(acc))((encodeStrEscape)(c))))(""))((strChars)(s))
-
-def emitCharLit(c: str) -> str:
-    return ("'\\n'" if c == "\n" else ("'\\t'" if c == "\t" else ("'\\\\'" if c == "\\" else ("'\\''" if c == "'" else ((strConcat)(((strConcat)("'"))((strFromChars)([c]))))("'")))))
-
-def emitType(t: TypeExpr) -> str:
-    return (name if t._tag == "TyName" else (((strConcat)((emitType)(head)))(((strConcat)("["))(((strConcat)((emitType)(arg)))("]"))) if t._tag == "TyApp" else ((strConcat)((emitTypeAtom)(a)))(((strConcat)(" -> "))((emitType)(b)))))
-
-def emitTypeAtom(t: TypeExpr) -> str:
-    return (((strConcat)("("))(((strConcat)((emitType)(t)))(")")) if t._tag == "TyFn" else (emitType)(t))
-
-def emitParam(p: Param) -> str:
-    return ((strConcat)("("))(((strConcat)(name))(((strConcat)(" "))(((strConcat)((emitType)(ty)))(")"))))
-
-def emitParams(ps: list[Param]) -> str:
-    return ((joinWith)(""))(((listMap)(emitParam))(ps))
-
-def emitCtor(c: Constructor) -> str:
-    return (name if len(args) == 0 else ((strConcat)(name))(((strConcat)(" "))(((joinWith)(" "))(((listMap)(emitTypeAtom))(args)))))
-
-def isAtomicExpr(e: Expr) -> bool:
-    return (True if e._tag == "EInt" else (True if e._tag == "EStr" else (True if e._tag == "EBool" else (True if e._tag == "EChar" else (True if e._tag == "EFloat" else (True if e._tag == "EVar" else (True if e._tag == "ECon" else (True if e._tag == "ENil" else False))))))))
-
-def emitExprAtom(e: Expr) -> str:
-    return ((emitExpr)(e) if (isAtomicExpr)(e) else ((strConcat)("("))(((strConcat)((emitExpr)(e)))(")")))
-
-def emitPattern(p: Pattern) -> str:
-    return (name if p._tag == "PVar" else ("_" if p._tag == "PWild" else ("[]" if p._tag == "PNil" else ((intToStr)(n) if p._tag == "PLitInt" else (((strConcat)("\""))(((strConcat)((escapeStr)(s)))("\"")) if p._tag == "PLitStr" else (((strConcat)((emitPatternAtom)(h)))(((strConcat)(" :: "))((emitPattern)(t))) if p._tag == "PCons" else (name if len(args) == 0 else ((strConcat)(name))(((strConcat)(" "))(((joinWith)(" "))(((listMap)(emitPatternAtom))(args)))))))))))
-
-def emitPatternAtom(p: Pattern) -> str:
-    return (((strConcat)("("))(((strConcat)((emitPattern)(p)))(")")) if p._tag == "PCon" else (((strConcat)("("))(((strConcat)((emitPattern)(p)))(")")) if p._tag == "PCons" else (emitPattern)(p)))
-
-def gatherAppHead(e: Expr) -> Expr:
-    return ((gatherAppHead)(f) if e._tag == "EApp" else e)
-
-def gatherAppArgs(e: Expr) -> list[Any]:
-    return (((listAppend)((gatherAppArgs)(f)))([a]) if e._tag == "EApp" else [])
-
-def gatherLamNames(e: Expr) -> list[Any]:
-    return ([name] + (gatherLamNames)(body) if e._tag == "ELam" else [])
-
-def gatherLamBody(e: Expr) -> Expr:
-    return ((gatherLamBody)(body) if e._tag == "ELam" else e)
-
-def emitArms(pats: list[Pattern]):
-    def _f_bodies(bodies: list[Expr]):
-        return ("" if len(pats) == 0 else ("" if len(bodies) == 0 else (lambda arm: (lambda rest: (arm if rest == "" else ((strConcat)(arm))(((strConcat)("\n"))(rest))))(((emitArms)(restPats))(restBodies)))(((strConcat)("  | "))(((strConcat)((emitPattern)(p)))(((strConcat)(" -> "))((emitExpr)(b)))))))
-    return _f_bodies
-
-def emitExpr(e: Expr) -> str:
-    return ((intToStr)(n) if e._tag == "EInt" else (((strConcat)("\""))(((strConcat)((escapeStr)(s)))("\"")) if e._tag == "EStr" else (("true" if b else "false") if e._tag == "EBool" else ((emitCharLit)(c) if e._tag == "EChar" else (s if e._tag == "EFloat" else (name if e._tag == "EVar" else (name if e._tag == "ECon" else ("[]" if e._tag == "ENil" else ((lambda head: (lambda args: ((strConcat)((emitExprAtom)(head)))(((strConcat)(" "))(((joinWith)(" "))(((listMap)(emitExprAtom))(args)))))((gatherAppArgs)(e)))((gatherAppHead)(e)) if e._tag == "EApp" else (((strConcat)("if "))(((strConcat)((emitExpr)(cond)))(((strConcat)("\n  "))(((strConcat)((emitExpr)(thenExpr)))(((strConcat)("\nelse "))((emitExpr)(elseExpr)))))) if e._tag == "EIf" else ((lambda arms: ((strConcat)("match "))(((strConcat)((emitExpr)(scrut)))(((strConcat)("\n"))(arms))))(((emitArms)(pats))(bodies)) if e._tag == "EMatch" else ((lambda params: (lambda body: ((strConcat)("\\"))(((strConcat)(((joinWith)(" "))(params)))(((strConcat)(". "))((emitExpr)(body)))))((gatherLamBody)(e)))((gatherLamNames)(e)) if e._tag == "ELam" else (((strConcat)("let "))(((strConcat)(name))(((strConcat)(" = "))(((strConcat)((emitExpr)(rhs)))(((strConcat)("\n"))((emitExpr)(body)))))) if e._tag == "ELet" else (((strConcat)("["))(((strConcat)(((joinWith)(" "))(((listMap)(emitExpr))(items))))("]")) if e._tag == "EList" else (((strConcat)("("))(((strConcat)((emitExpr)(lhs)))(((strConcat)(" "))(((strConcat)(op))(((strConcat)(" "))(((strConcat)((emitExpr)(rhs)))(")")))))) if e._tag == "EBinOp" else (((strConcat)("("))(((strConcat)((emitExpr)(a)))(((strConcat)(", "))(((strConcat)((emitExpr)(b)))(")")))) if e._tag == "ETuple" else ((strConcat)((emitExprAtom)(h)))(((strConcat)(" :: "))((emitExpr)(t)))))))))))))))))))
-
-def emitDecl(d: Decl) -> str:
-    return (((strConcat)(name))(((strConcat)((emitParams)(params)))(((strConcat)(" = "))((emitExpr)(body)))) if d._tag == "DFn" else ((lambda header: ((strConcat)(header))(((strConcat)(" = "))(((joinWith)(" | "))(((listMap)(emitCtor))(ctors)))))((name if len(tvars) == 0 else ((strConcat)(name))(((strConcat)(" "))(((joinWith)(" "))(tvars))))) if d._tag == "DType" else (((strConcat)("import "))(((joinWith)("."))(segs)) if d._tag == "DImport" else (((strConcat)("export "))((emitDecl)(inner)) if d._tag == "DExport" else ((strConcat)("let "))(((strConcat)(name))(((strConcat)(" = "))((emitExpr)(body))))))))
-
-def emitDecls(ds: list[Decl]) -> str:
-    return ((joinWith)("\n\n"))(((listMap)(emitDecl))(ds))
-
-def renderModule(m: Module) -> str:
-    return ((emitDecls)(decls) if len(path) == 0 else ((strConcat)("module "))(((strConcat)(((joinWith)("."))(path)))(((strConcat)("\n\n"))((emitDecls)(decls)))))
-
-@dataclass
+@dataclass(frozen=True)
 class MkError:
     _tag: str = "MkError"
     _0: str
 
 ElabError = Union[MkError]
 
-@dataclass
+@dataclass(frozen=True)
 class MkEnv:
     _tag: str = "MkEnv"
     _0: list[str]
 
 Env = Union[MkEnv]
 
-def errMsg(e: ElabError) -> Any:
-    return msg
+def errMsg(e: ElabError) -> T:
+    return (lambda msg: msg)(e._0)
 
 emptyEnv: Env = MkEnv([])
 
 def envAdd(name: str):
     def _f_env(env: Env):
-        return MkEnv(((listAppend)(xs))([name]))
+        return (lambda xs: MkEnv(((listAppend)(xs))([name])))(env._0)
     return _f_env
 
 def envAddAll(names: list[str]):
@@ -985,25 +932,25 @@ def strOrEq(target: str):
 
 def envHas(name: str):
     def _f_env(env: Env):
-        return (((listFold)(lambda acc: lambda x: (((strOrEq)(name))(acc))(x)))(False))(xs)
+        return (lambda xs: (((listFold)(lambda acc: lambda x: (((strOrEq)(name))(acc))(x)))(False))(xs))(env._0)
     return _f_env
 
-def patBinders(p: Pattern) -> list[Any]:
-    return ([name] if p._tag == "PVar" else ([] if p._tag == "PWild" else ([] if p._tag == "PNil" else ([] if p._tag == "PLitInt" else ([] if p._tag == "PLitStr" else (((listAppend)((patBinders)(h)))((patBinders)(t)) if p._tag == "PCons" else (patBindersList)(args)))))))
+def patBinders(p: Pattern) -> list[T]:
+    return ((lambda name: [name])(p._0) if p._tag == "PVar" else ([] if p._tag == "PWild" else ([] if p._tag == "PNil" else ([] if p._tag == "PLitInt" else ([] if p._tag == "PLitStr" else ((lambda h, t: ((listAppend)((patBinders)(h)))((patBinders)(t)))(p._0, p._1) if p._tag == "PCons" else (lambda args: (patBindersList)(args))(p._1)))))))
 
-def patBindersList(ps: list[Pattern]) -> list[Any]:
-    return ([] if len(ps) == 0 else ((listAppend)((patBinders)(p)))((patBindersList)(rest)))
+def patBindersList(ps: list[Pattern]) -> list[T]:
+    return ([] if len(ps) == 0 else (lambda p, rest: ((listAppend)((patBinders)(p)))((patBindersList)(rest)))(ps[0], ps[1:]))
 
-def paramName(p: Param) -> Any:
-    return n
+def paramName(p: Param) -> T:
+    return (lambda n: n)(p._0)
 
-def paramNames(ps: list[Param]) -> list[Any]:
+def paramNames(ps: list[Param]) -> list[T]:
     return ((listMap)(lambda p: (paramName)(p)))(ps)
 
-def conName(c: Constructor) -> Any:
-    return n
+def conName(c: Constructor) -> T:
+    return (lambda n: n)(c._0)
 
-def conNames(cs: list[Constructor]) -> list[Any]:
+def conNames(cs: list[Constructor]) -> list[T]:
     return ((listMap)(lambda c: (conName)(c)))(cs)
 
 def listContains(name: str):
@@ -1013,18 +960,18 @@ def listContains(name: str):
 
 def findDuplicatesAcc(xs: list[str]):
     def _f_seen(seen: list[str]):
-        return ([] if len(xs) == 0 else ([x] + ((findDuplicatesAcc)(rest))(seen) if ((listContains)(x))(seen) else ((findDuplicatesAcc)(rest))([x] + seen)))
+        return ([] if len(xs) == 0 else (lambda x, rest: ([x] + ((findDuplicatesAcc)(rest))(seen) if ((listContains)(x))(seen) else ((findDuplicatesAcc)(rest))([x] + seen)))(xs[0], xs[1:]))
     return _f_seen
 
 def findDuplicates(xs: list[str]) -> list[str]:
     return ((findDuplicatesAcc)(xs))([])
 
-def declName(d: Decl) -> Optional[Any]:
-    return (Some(name) if d._tag == "DFn" else (Some(name) if d._tag == "DLet" else (Some(name) if d._tag == "DType" else (None if d._tag == "DImport" else (declName)(inner)))))
+def declName(d: Decl) -> Optional[T]:
+    return ((lambda name: Some(name))(d._0) if d._tag == "DFn" else ((lambda name: Some(name))(d._0) if d._tag == "DLet" else ((lambda name: Some(name))(d._0) if d._tag == "DType" else (None if d._tag == "DImport" else (lambda inner: (declName)(inner))(d._0)))))
 
 def addDeclName(acc: list[str]):
     def _f_d(d: Decl):
-        return (((listAppend)(acc))([name]) if (declName)(d)._tag == "Some" else acc)
+        return ((lambda name: ((listAppend)(acc))([name]))((declName)(d)._0) if (declName)(d)._tag == "Some" else acc)
     return _f_d
 
 def collectDeclNames(decls: list[Decl]) -> list[str]:
@@ -1032,7 +979,7 @@ def collectDeclNames(decls: list[Decl]) -> list[str]:
 
 def collectDecl(d: Decl):
     def _f_env(env: Env):
-        return (((envAdd)(name))(env) if d._tag == "DFn" else (((envAdd)(name))(env) if d._tag == "DLet" else (((envAddAll)((conNames)(ctors)))(env) if d._tag == "DType" else (env if d._tag == "DImport" else ((collectDecl)(inner))(env)))))
+        return ((lambda name: ((envAdd)(name))(env))(d._0) if d._tag == "DFn" else ((lambda name: ((envAdd)(name))(env))(d._0) if d._tag == "DLet" else ((lambda ctors: ((envAddAll)((conNames)(ctors)))(env))(d._2) if d._tag == "DType" else (env if d._tag == "DImport" else (lambda inner: ((collectDecl)(inner))(env))(d._0)))))
     return _f_env
 
 def collectDecls(decls: list[Decl]):
@@ -1042,14 +989,14 @@ def collectDecls(decls: list[Decl]):
 
 def checkExpr(env: Env):
     def _f_e(e: Expr):
-        return ([] if e._tag == "EInt" else ([] if e._tag == "EStr" else ([] if e._tag == "EBool" else ([] if e._tag == "EChar" else ([] if e._tag == "EFloat" else ([] if e._tag == "ENil" else (([] if ((envHas)(name))(env) else [MkError(((strConcat)("Unbound variable: "))(name))]) if e._tag == "EVar" else (([] if ((envHas)(name))(env) else [MkError(((strConcat)("Unbound constructor: "))(name))]) if e._tag == "ECon" else (((listAppend)(((checkExpr)(env))(f)))(((checkExpr)(env))(x)) if e._tag == "EApp" else (((listAppend)(((checkExpr)(env))(l)))(((checkExpr)(env))(r)) if e._tag == "EBinOp" else (((listAppend)(((listAppend)(((checkExpr)(env))(cnd)))(((checkExpr)(env))(thn))))(((checkExpr)(env))(els)) if e._tag == "EIf" else ((lambda env2: ((checkExpr)(env2))(body))(((envAdd)(param))(env)) if e._tag == "ELam" else ((lambda rhsErrs: (lambda env2: (lambda bodyErrs: ((listAppend)(rhsErrs))(bodyErrs))(((checkExpr)(env2))(body)))(((envAdd)(name))(env)))(((checkExpr)(env))(rhs)) if e._tag == "ELet" else ((lambda scrutErrs: (lambda armErrs: ((listAppend)(scrutErrs))(armErrs))((((checkArms)(env))(pats))(bodies)))(((checkExpr)(env))(scrut)) if e._tag == "EMatch" else ((((listFold)(lambda acc: lambda item: ((listAppend)(acc))(((checkExpr)(env))(item))))([]))(items) if e._tag == "EList" else (((listAppend)(((checkExpr)(env))(h)))(((checkExpr)(env))(t)) if e._tag == "ECons" else ((listAppend)(((checkExpr)(env))(a)))(((checkExpr)(env))(b))))))))))))))))))
+        return ([] if e._tag == "EInt" else ([] if e._tag == "EStr" else ([] if e._tag == "EBool" else ([] if e._tag == "EChar" else ([] if e._tag == "EFloat" else ([] if e._tag == "ENil" else ((lambda name: ([] if ((envHas)(name))(env) else [MkError(((strConcat)("Unbound variable: "))(name))]))(e._0) if e._tag == "EVar" else ((lambda name: ([] if ((envHas)(name))(env) else [MkError(((strConcat)("Unbound constructor: "))(name))]))(e._0) if e._tag == "ECon" else ((lambda f, x: ((listAppend)(((checkExpr)(env))(f)))(((checkExpr)(env))(x)))(e._0, e._1) if e._tag == "EApp" else ((lambda l, r: ((listAppend)(((checkExpr)(env))(l)))(((checkExpr)(env))(r)))(e._1, e._2) if e._tag == "EBinOp" else ((lambda cnd, thn, els: ((listAppend)(((listAppend)(((checkExpr)(env))(cnd)))(((checkExpr)(env))(thn))))(((checkExpr)(env))(els)))(e._0, e._1, e._2) if e._tag == "EIf" else ((lambda param, body: (lambda env2: ((checkExpr)(env2))(body))(((envAdd)(param))(env)))(e._0, e._1) if e._tag == "ELam" else ((lambda name, rhs, body: (lambda rhsErrs: (lambda env2: (lambda bodyErrs: ((listAppend)(rhsErrs))(bodyErrs))(((checkExpr)(env2))(body)))(((envAdd)(name))(env)))(((checkExpr)(env))(rhs)))(e._0, e._1, e._2) if e._tag == "ELet" else ((lambda scrut, pats, bodies: (lambda scrutErrs: (lambda armErrs: ((listAppend)(scrutErrs))(armErrs))((((checkArms)(env))(pats))(bodies)))(((checkExpr)(env))(scrut)))(e._0, e._1, e._2) if e._tag == "EMatch" else ((lambda items: (((listFold)(lambda acc: lambda item: ((listAppend)(acc))(((checkExpr)(env))(item))))([]))(items))(e._0) if e._tag == "EList" else ((lambda h, t: ((listAppend)(((checkExpr)(env))(h)))(((checkExpr)(env))(t)))(e._0, e._1) if e._tag == "ECons" else (lambda a, b: ((listAppend)(((checkExpr)(env))(a)))(((checkExpr)(env))(b)))(e._0, e._1)))))))))))))))))
     return _f_e
 
 def checkArmsCons(env: Env):
     def _f_p(p: Pattern):
         def _f_restPats(restPats: list[Pattern]):
             def _f_bodies(bodies: list[Expr]):
-                return ([] if len(bodies) == 0 else (lambda armEnv: (lambda armErrs: (lambda restErrs: ((listAppend)(armErrs))(restErrs))((((checkArms)(env))(restPats))(restBodies)))(((checkExpr)(armEnv))(b)))(((envAddAll)((patBinders)(p)))(env)))
+                return ([] if len(bodies) == 0 else (lambda b, restBodies: (lambda armEnv: (lambda armErrs: (lambda restErrs: ((listAppend)(armErrs))(restErrs))((((checkArms)(env))(restPats))(restBodies)))(((checkExpr)(armEnv))(b)))(((envAddAll)((patBinders)(p)))(env)))(bodies[0], bodies[1:]))
             return _f_bodies
         return _f_restPats
     return _f_p
@@ -1057,13 +1004,13 @@ def checkArmsCons(env: Env):
 def checkArms(env: Env):
     def _f_pats(pats: list[Pattern]):
         def _f_bodies(bodies: list[Expr]):
-            return ([] if len(pats) == 0 else ((((checkArmsCons)(env))(p))(restPats))(bodies))
+            return ([] if len(pats) == 0 else (lambda p, restPats: ((((checkArmsCons)(env))(p))(restPats))(bodies))(pats[0], pats[1:]))
         return _f_bodies
     return _f_pats
 
 def checkDecl(env: Env):
     def _f_d(d: Decl):
-        return ((lambda bodyEnv: ((checkExpr)(bodyEnv))(body))(((envAddAll)((paramNames)(params)))(env)) if d._tag == "DFn" else (((checkExpr)(env))(body) if d._tag == "DLet" else ([] if d._tag == "DType" else ([] if d._tag == "DImport" else ((checkDecl)(env))(inner)))))
+        return ((lambda params, body: (lambda bodyEnv: ((checkExpr)(bodyEnv))(body))(((envAddAll)((paramNames)(params)))(env)))(d._1, d._3) if d._tag == "DFn" else ((lambda body: ((checkExpr)(env))(body))(d._1) if d._tag == "DLet" else ([] if d._tag == "DType" else ([] if d._tag == "DImport" else (lambda inner: ((checkDecl)(env))(inner))(d._0)))))
     return _f_d
 
 def checkDecls(env: Env):
@@ -1080,7 +1027,7 @@ def checkDuplicates(decls: list[Decl]) -> list[ElabError]:
 builtinNames: list[str] = ["abs"] + ["absf"] + ["sqrt"] + ["min"] + ["max"] + ["listLen"] + ["listMap"] + ["listFilter"] + ["listFold"] + ["listReverse"] + ["listAppend"] + ["listConcat"] + ["listIsEmpty"] + ["listHead"] + ["listTail"] + ["listAt"] + ["strLen"] + ["strConcat"] + ["strTrim"] + ["strContains"] + ["strChars"] + ["strFromChars"] + ["strReverse"] + ["strSlice"] + ["strIndexOf"] + ["strSplit"] + ["strToInt"] + ["charToInt"] + ["intToChar"] + ["intToStr"] + ["charIsDigit"] + ["charIsAlpha"] + ["charIsSpace"] + ["print"] + ["printfn"] + ["readFile"] + ["writeFile"] + ["fileExists"] + ["exit"] + ["getArgs"] + ["maybeMap"] + ["maybeBind"] + ["maybeWithDefault"] + ["true"] + ["false"] + []
 
 def elaborate(m: Module) -> list[ElabError]:
-    return (lambda builtinEnv: (lambda env: (lambda dupErrs: (lambda bodyErrs: ((listAppend)(dupErrs))(bodyErrs))(((checkDecls)(env))(decls)))((checkDuplicates)(decls)))(((collectDecls)(decls))(builtinEnv)))(((envAddAll)(builtinNames))(emptyEnv))
+    return (lambda decls: (lambda builtinEnv: (lambda env: (lambda dupErrs: (lambda bodyErrs: ((listAppend)(dupErrs))(bodyErrs))(((checkDecls)(env))(decls)))((checkDuplicates)(decls)))(((collectDecls)(decls))(builtinEnv)))(((envAddAll)(builtinNames))(emptyEnv)))(m._1)
 
 def assertNoErrors(label: str):
     def _f_errs(errs: list[ElabError]):
@@ -1115,7 +1062,7 @@ __ll_main_Std_Elaborator: int = (lambda colorCtors1: (lambda decls1: (lambda m1:
 
 def joinWith(sep: str):
     def _f_items(items: list[str]):
-        return ("" if len(items) == 0 else (x if len(items) > 0 else ((strConcat)(x))(((strConcat)(sep))(((joinWith)(sep))(rest)))))
+        return ("" if len(items) == 0 else (x if len(items) > 0 else (lambda x, rest: ((strConcat)(x))(((strConcat)(sep))(((joinWith)(sep))(rest))))(items[0], items[1:])))
     return _f_items
 
 def isFsKeyword(s: str) -> bool:
@@ -1137,16 +1084,16 @@ def isTypeParam(s: str) -> bool:
     return ((lambda n: ((True if (n <= 90) else False) if (n >= 65) else False))((charToInt)(c)) if len((strChars)(s)) > 0 else False)
 
 def emitType(t: TypeExpr) -> str:
-    return ("int64" if t._tag == "TyName" else ("string" if t._tag == "TyName" else ("bool" if t._tag == "TyName" else ("char" if t._tag == "TyName" else ("float" if t._tag == "TyName" else ("unit" if t._tag == "TyName" else ((((strConcat)("'"))(n) if (isTypeParam)(n) else n) if t._tag == "TyName" else (((strConcat)((emitType)(a)))(" list") if t._tag == "TyApp" else ((lambda head: (lambda args: (((strConcat)((emitType)(a)))(((strConcat)(" "))((emitType)(head))) if len(args) > 0 else (lambda inner: ((strConcat)((emitType)(head)))(((strConcat)("<"))(((strConcat)(inner))(">"))))(((joinWith)(", "))(((listMap)(emitType))(args)))))((collectTyAppArgs)(TyApp(f, a))))((collectTyAppHead)(TyApp(f, a))) if t._tag == "TyApp" else ((strConcat)((emitType)(a)))(((strConcat)(" -> "))((emitType)(b))))))))))))
+    return ("int64" if t._tag == "TyName" else ("string" if t._tag == "TyName" else ("bool" if t._tag == "TyName" else ("char" if t._tag == "TyName" else ("float" if t._tag == "TyName" else ("unit" if t._tag == "TyName" else ((lambda n: (((strConcat)("'"))(n) if (isTypeParam)(n) else n))(t._0) if t._tag == "TyName" else ((lambda a: ((strConcat)((emitType)(a)))(" list"))(t._1) if t._tag == "TyApp" else ((lambda f, a: (lambda head: (lambda args: (((strConcat)((emitType)(a)))(((strConcat)(" "))((emitType)(head))) if len(args) > 0 else (lambda inner: ((strConcat)((emitType)(head)))(((strConcat)("<"))(((strConcat)(inner))(">"))))(((joinWith)(", "))(((listMap)(emitType))(args)))))((collectTyAppArgs)(TyApp(f, a))))((collectTyAppHead)(TyApp(f, a))))(t._0, t._1) if t._tag == "TyApp" else (lambda a, b: ((strConcat)((emitType)(a)))(((strConcat)(" -> "))((emitType)(b))))(t._0, t._1))))))))))
 
 def collectTyAppHead(t: TypeExpr) -> TypeExpr:
-    return ((collectTyAppHead)(f) if t._tag == "TyApp" else t)
+    return ((lambda f: (collectTyAppHead)(f))(t._0) if t._tag == "TyApp" else t)
 
-def collectTyAppArgs(t: TypeExpr) -> list[Any]:
-    return (((listAppend)((collectTyAppArgs)(f)))([a]) if t._tag == "TyApp" else [])
+def collectTyAppArgs(t: TypeExpr) -> list[T]:
+    return ((lambda f, a: ((listAppend)((collectTyAppArgs)(f)))([a]))(t._0, t._1) if t._tag == "TyApp" else [])
 
 def emitPattern(p: Pattern) -> str:
-    return ((safeIdent)(x) if p._tag == "PVar" else ("_" if p._tag == "PWild" else ("[]" if p._tag == "PNil" else (((strConcat)((intToStr)(n)))("L") if p._tag == "PLitInt" else (((strConcat)("\""))(((strConcat)((escapeStr)(s)))("\"")) if p._tag == "PLitStr" else (((strConcat)("("))(((strConcat)((emitPattern)(h)))(((strConcat)(" :: "))(((strConcat)((emitPattern)(t)))(")")))) if p._tag == "PCons" else ((emitConPattern)(c))(args)))))))
+    return ((lambda x: (safeIdent)(x))(p._0) if p._tag == "PVar" else ("_" if p._tag == "PWild" else ("[]" if p._tag == "PNil" else ((lambda n: ((strConcat)((intToStr)(n)))("L"))(p._0) if p._tag == "PLitInt" else ((lambda s: ((strConcat)("\""))(((strConcat)((escapeStr)(s)))("\"")))(p._0) if p._tag == "PLitStr" else ((lambda h, t: ((strConcat)("("))(((strConcat)((emitPattern)(h)))(((strConcat)(" :: "))(((strConcat)((emitPattern)(t)))(")")))))(p._0, p._1) if p._tag == "PCons" else (lambda c, args: ((emitConPattern)(c))(args))(p._0, p._1)))))))
 
 def emitConPattern(c: str):
     def _f_args(args: list[Pattern]):
@@ -1160,20 +1107,20 @@ def emitCharLit(c: str) -> str:
     return ("'\\n'" if (c == "\n") else ("'\\t'" if (c == "\t") else ("'\\\\'" if (c == "\\") else ("'\\''" if (c == "'") else ((strConcat)(((strConcat)("'"))((strFromChars)([c]))))("'")))))
 
 def emitExpr(e: Expr) -> str:
-    return (((strConcat)((intToStr)(n)))("L") if e._tag == "EInt" else (((strConcat)("\""))(((strConcat)((escapeStr)(s)))("\"")) if e._tag == "EStr" else (("true" if b else "false") if e._tag == "EBool" else ((emitCharLit)(c) if e._tag == "EChar" else (s if e._tag == "EFloat" else ((safeIdent)(x) if e._tag == "EVar" else (c if e._tag == "ECon" else ("[]" if e._tag == "ENil" else (((emitApp)(f))(a) if e._tag == "EApp" else (((strConcat)("(if "))(((strConcat)((emitExpr)(c)))(((strConcat)(" then "))(((strConcat)((emitExpr)(t)))(((strConcat)(" else "))(((strConcat)((emitExpr)(el)))(")")))))) if e._tag == "EIf" else ((lambda arms: ((strConcat)("(match "))(((strConcat)((emitExpr)(scrut)))(((strConcat)(" with "))(((strConcat)(arms))(")")))))(((emitArms)(pats))(bodies)) if e._tag == "EMatch" else (((strConcat)("(fun "))(((strConcat)((safeIdent)(x)))(((strConcat)(" -> "))(((strConcat)((emitExpr)(body)))(")")))) if e._tag == "ELam" else (((strConcat)("(let "))(((strConcat)((safeIdent)(x)))(((strConcat)(" = "))(((strConcat)((emitExpr)(e)))(((strConcat)(" in "))(((strConcat)((emitExpr)(body)))(")")))))) if e._tag == "ELet" else (((strConcat)("["))(((strConcat)(((joinWith)("; "))(((listMap)(emitExpr))(items))))("]")) if e._tag == "EList" else (((strConcat)("("))(((strConcat)((emitExpr)(l)))(((strConcat)(" "))(((strConcat)((mapOp)(op)))(((strConcat)(" "))(((strConcat)((emitExpr)(r)))(")")))))) if e._tag == "EBinOp" else (((strConcat)("("))(((strConcat)((emitExpr)(a)))(((strConcat)(", "))(((strConcat)((emitExpr)(b)))(")")))) if e._tag == "ETuple" else ((strConcat)("("))(((strConcat)((emitExpr)(h)))(((strConcat)(" :: "))(((strConcat)((emitExpr)(t)))(")"))))))))))))))))))))
+    return ((lambda n: ((strConcat)((intToStr)(n)))("L"))(e._0) if e._tag == "EInt" else ((lambda s: ((strConcat)("\""))(((strConcat)((escapeStr)(s)))("\"")))(e._0) if e._tag == "EStr" else ((lambda b: ("true" if b else "false"))(e._0) if e._tag == "EBool" else ((lambda c: (emitCharLit)(c))(e._0) if e._tag == "EChar" else ((lambda s: s)(e._0) if e._tag == "EFloat" else ((lambda x: (safeIdent)(x))(e._0) if e._tag == "EVar" else ((lambda c: c)(e._0) if e._tag == "ECon" else ("[]" if e._tag == "ENil" else ((lambda f, a: ((emitApp)(f))(a))(e._0, e._1) if e._tag == "EApp" else ((lambda c, t, el: ((strConcat)("(if "))(((strConcat)((emitExpr)(c)))(((strConcat)(" then "))(((strConcat)((emitExpr)(t)))(((strConcat)(" else "))(((strConcat)((emitExpr)(el)))(")")))))))(e._0, e._1, e._2) if e._tag == "EIf" else ((lambda scrut, pats, bodies: (lambda arms: ((strConcat)("(match "))(((strConcat)((emitExpr)(scrut)))(((strConcat)(" with "))(((strConcat)(arms))(")")))))(((emitArms)(pats))(bodies)))(e._0, e._1, e._2) if e._tag == "EMatch" else ((lambda x, body: ((strConcat)("(fun "))(((strConcat)((safeIdent)(x)))(((strConcat)(" -> "))(((strConcat)((emitExpr)(body)))(")")))))(e._0, e._1) if e._tag == "ELam" else ((lambda x, e, body: ((strConcat)("(let "))(((strConcat)((safeIdent)(x)))(((strConcat)(" = "))(((strConcat)((emitExpr)(e)))(((strConcat)(" in "))(((strConcat)((emitExpr)(body)))(")")))))))(e._0, e._1, e._2) if e._tag == "ELet" else ((lambda items: ((strConcat)("["))(((strConcat)(((joinWith)("; "))(((listMap)(emitExpr))(items))))("]")))(e._0) if e._tag == "EList" else ((lambda op, l, r: ((strConcat)("("))(((strConcat)((emitExpr)(l)))(((strConcat)(" "))(((strConcat)((mapOp)(op)))(((strConcat)(" "))(((strConcat)((emitExpr)(r)))(")")))))))(e._0, e._1, e._2) if e._tag == "EBinOp" else ((lambda a, b: ((strConcat)("("))(((strConcat)((emitExpr)(a)))(((strConcat)(", "))(((strConcat)((emitExpr)(b)))(")")))))(e._0, e._1) if e._tag == "ETuple" else (lambda h, t: ((strConcat)("("))(((strConcat)((emitExpr)(h)))(((strConcat)(" :: "))(((strConcat)((emitExpr)(t)))(")")))))(e._0, e._1)))))))))))))))))
 
 def gatherAppHead(e: Expr) -> Expr:
-    return ((gatherAppHead)(f) if e._tag == "EApp" else e)
+    return ((lambda f: (gatherAppHead)(f))(e._0) if e._tag == "EApp" else e)
 
-def gatherAppArgs(e: Expr) -> list[Any]:
-    return (((listAppend)((gatherAppArgs)(f)))([a]) if e._tag == "EApp" else [])
+def gatherAppArgs(e: Expr) -> list[T]:
+    return ((lambda f, a: ((listAppend)((gatherAppArgs)(f)))([a]))(e._0, e._1) if e._tag == "EApp" else [])
 
 def isUpperStart(s: str) -> bool:
     return ((lambda n: ((True if (n <= 90) else False) if (n >= 65) else False))((charToInt)(c)) if len((strChars)(s)) > 0 else False)
 
 def emitApp(f: Expr):
     def _f_a(a: Expr):
-        return (lambda head: (lambda args: (((emitConApp)(c))(args) if head._tag == "ECon" else ((((emitConApp)(x))(args) if (isUpperStart)(x) else ((strConcat)("("))(((strConcat)((emitExpr)(f)))(((strConcat)(" "))(((strConcat)((emitExpr)(a)))(")"))))) if head._tag == "EVar" else ((strConcat)("("))(((strConcat)((emitExpr)(f)))(((strConcat)(" "))(((strConcat)((emitExpr)(a)))(")")))))))((gatherAppArgs)(EApp(f, a))))((gatherAppHead)(EApp(f, a)))
+        return (lambda head: (lambda args: ((lambda c: ((emitConApp)(c))(args))(head._0) if head._tag == "ECon" else ((lambda x: (((emitConApp)(x))(args) if (isUpperStart)(x) else ((strConcat)("("))(((strConcat)((emitExpr)(f)))(((strConcat)(" "))(((strConcat)((emitExpr)(a)))(")"))))))(head._0) if head._tag == "EVar" else ((strConcat)("("))(((strConcat)((emitExpr)(f)))(((strConcat)(" "))(((strConcat)((emitExpr)(a)))(")")))))))((gatherAppArgs)(EApp(f, a))))((gatherAppHead)(EApp(f, a)))
     return _f_a
 
 def exprListHead(xs: list[Expr]) -> Expr:
@@ -1186,7 +1133,7 @@ def emitConApp(c: str):
 
 def emitArms(pats: list[Pattern]):
     def _f_bodies(bodies: list[Expr]):
-        return (((lambda arm: (lambda rest: (arm if ((strLen)(rest) == 0) else ((strConcat)(arm))(((strConcat)(" "))(rest))))(((emitArms)(prest))(brest)))(((strConcat)("| "))(((strConcat)((emitPattern)(p)))(((strConcat)(" -> "))((emitExpr)(b))))) if len(bodies) > 0 else "") if len(pats) > 0 else "")
+        return ((lambda p, prest: ((lambda b, brest: (lambda arm: (lambda rest: (arm if ((strLen)(rest) == 0) else ((strConcat)(arm))(((strConcat)(" "))(rest))))(((emitArms)(prest))(brest)))(((strConcat)("| "))(((strConcat)((emitPattern)(p)))(((strConcat)(" -> "))((emitExpr)(b))))))(bodies[0], bodies[1:]) if len(bodies) > 0 else ""))(pats[0], pats[1:]) if len(pats) > 0 else "")
     return _f_bodies
 
 def emitTypeParam(s: str) -> str:
@@ -1199,19 +1146,19 @@ def emitCtorArgs(args: list[TypeExpr]) -> str:
     return ((joinWith)(" * "))(((listMap)(emitType))(args))
 
 def emitCtor(c: Constructor) -> str:
-    return (((strConcat)("    | "))(name) if len(args) == 0 else ((strConcat)("    | "))(((strConcat)(name))(((strConcat)(" of "))((emitCtorArgs)(args)))))
+    return (lambda name, args: (((strConcat)("    | "))(name) if len(args) == 0 else ((strConcat)("    | "))(((strConcat)(name))(((strConcat)(" of "))((emitCtorArgs)(args))))))(c._0, c._1)
 
 def emitCtors(cs: list[Constructor]) -> str:
     return ((joinWith)("\n"))(((listMap)(emitCtor))(cs))
 
 def emitParamName(p: Param) -> str:
-    return (safeIdent)(n)
+    return (lambda n: (safeIdent)(n))(p._0)
 
 def emitParamStr(ps: list[Param]) -> str:
     return ("" if len(ps) == 0 else ((strConcat)(" "))(((joinWith)(" "))(((listMap)(emitParamName))(ps))))
 
 def emitDecl(d: Decl) -> str:
-    return ((lambda header: (lambda body: ((strConcat)(header))(((strConcat)(" =\n"))(body)))((emitCtors)(ctors)))(((strConcat)("type "))(((strConcat)(name))((emitTypeParams)(tvars)))) if d._tag == "DType" else ((lambda paramStr: ((strConcat)("let rec "))(((strConcat)((safeIdent)(name)))(((strConcat)(paramStr))(((strConcat)(" =\n    "))((emitExpr)(body))))))((emitParamStr)(params)) if d._tag == "DFn" else (((strConcat)("let "))(((strConcat)((safeIdent)(name)))(((strConcat)(" = "))((emitExpr)(body)))) if d._tag == "DLet" else (((strConcat)("// import "))(((joinWith)("."))(parts)) if d._tag == "DImport" else (emitDecl)(inner)))))
+    return ((lambda name, tvars, ctors: (lambda header: (lambda body: ((strConcat)(header))(((strConcat)(" =\n"))(body)))((emitCtors)(ctors)))(((strConcat)("type "))(((strConcat)(name))((emitTypeParams)(tvars)))))(d._0, d._1, d._2) if d._tag == "DType" else ((lambda name, params, body: (lambda paramStr: ((strConcat)("let rec "))(((strConcat)((safeIdent)(name)))(((strConcat)(paramStr))(((strConcat)(" =\n    "))((emitExpr)(body))))))((emitParamStr)(params)))(d._0, d._1, d._3) if d._tag == "DFn" else ((lambda name, body: ((strConcat)("let "))(((strConcat)((safeIdent)(name)))(((strConcat)(" = "))((emitExpr)(body)))))(d._0, d._1) if d._tag == "DLet" else ((lambda parts: ((strConcat)("// import "))(((joinWith)("."))(parts)))(d._0) if d._tag == "DImport" else (lambda inner: (emitDecl)(inner))(d._0)))))
 
 def emitDecls(ds: list[Decl]) -> str:
     return ((joinWith)("\n\n"))(((listMap)(emitDecl))(ds))
@@ -1222,7 +1169,7 @@ def emitModulePath(parts: list[str]) -> str:
     return ((joinWith)("."))(parts)
 
 def emitModule(m: Module) -> str:
-    return (lambda header: (lambda prelude: (lambda body: ((strConcat)(header))(((strConcat)("\n\n"))(((strConcat)(prelude))(((strConcat)("\n\n"))(body)))))((emitDecls)(decls)))(emitPrelude))(((strConcat)("module "))((emitModulePath)(path)))
+    return (lambda path, decls: (lambda header: (lambda prelude: (lambda body: ((strConcat)(header))(((strConcat)("\n\n"))(((strConcat)(prelude))(((strConcat)("\n\n"))(body)))))((emitDecls)(decls)))(emitPrelude))(((strConcat)("module "))((emitModulePath)(path))))(m._0, m._1)
 
 def codegenCheck(label: str):
     def _f_got(got: str):
@@ -1243,66 +1190,8 @@ __ll_main_Std_Codegen: int = (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda _
 def showErrors(errs: list[ElabError]) -> str:
     return (((listFold)(lambda acc: lambda e: (lambda msg: (msg if ((strLen)(acc) == 0) else ((strConcat)(acc))(((strConcat)("\n"))(msg))))((errMsg)(e))))(""))(errs)
 
-def encodeJsonEscape(c: str) -> str:
-    return ("\\n" if c == "\n" else ("\\t" if c == "\t" else ("\\r" if c == "\r" else ("\\\\" if c == "\\" else ("\\\"" if c == "\"" else (strFromChars)([c]))))))
-
-def escapeJson(s: str) -> str:
-    return (((listFold)(lambda acc: lambda c: ((strConcat)(acc))((encodeJsonEscape)(c))))(""))((strChars)(s))
-
-def jsonStr(s: str) -> str:
-    return ((strConcat)("\""))(((strConcat)((escapeJson)(s)))("\""))
-
-def firstError(errs: list[ElabError]) -> str:
-    return ((errMsg)(err) if len(errs) > 0 else "")
-
-def secondaryErrorCount(errs: list[ElabError]) -> int:
-    return ((listLen)(rest) if len(errs) > 0 else 0)
-
-def declPrimaryName(d: Decl) -> str:
-    return (name if d._tag == "DFn" else (name if d._tag == "DType" else (name if d._tag == "DLet" else ((((listFold)(lambda acc: lambda seg: (seg if ((strLen)(acc) == 0) else ((strConcat)(acc))(((strConcat)("."))(seg)))))(""))(segs) if d._tag == "DImport" else (declPrimaryName)(inner)))))
-
-def declKindTag(d: Decl) -> str:
-    return ("fn" if d._tag == "DFn" else ("type" if d._tag == "DType" else ("let" if d._tag == "DLet" else ("import" if d._tag == "DImport" else (declKindTag)(inner)))))
-
-def findSymbolKind(name: str):
-    def _f_decls(decls: list[Decl]):
-        return ("" if len(decls) == 0 else ((declKindTag)(d) if ((declPrimaryName)(d) == name) else ((findSymbolKind)(name))(rest)))
-    return _f_decls
-
-def hasLexErrors(tokens: list[Token]) -> bool:
-    return (True if len(tokens) > 0 else ((hasLexErrors)(rest) if len(tokens) > 0 else False))
-
-def firstLexError(tokens: list[Token]) -> str:
-    return (((strConcat)("Unexpected char: "))((strFromChars)([c])) if len(tokens) > 0 else ((firstLexError)(rest) if len(tokens) > 0 else ""))
-
-def countAllTokens(tokens: list[Token]) -> int:
-    return ((1 + (countAllTokens)(rest)) if len(tokens) > 0 else 0)
-
-def countCodeTokens(tokens: list[Token]) -> int:
-    return (0 if len(tokens) == 0 else ((countCodeTokens)(rest) if len(tokens) > 0 else ((countCodeTokens)(rest) if len(tokens) > 0 else ((countCodeTokens)(rest) if len(tokens) > 0 else ((countCodeTokens)(rest) if len(tokens) > 0 else (1 + (countCodeTokens)(rest)))))))
-
-def checkCompact(src: str) -> str:
-    return (lambda tokens: ((lambda p1: (lambda p2: ((strConcat)(p2))(",\"secondary_count\":0}"))(((strConcat)(p1))((jsonStr)((firstLexError)(tokens)))))("{\"ok\":false,\"stage\":\"lexer\",\"primary_error\":") if (hasLexErrors)(tokens) else (lambda ast: (lambda errs: ("{\"ok\":true,\"stage\":\"ok\",\"primary_error\":\"\",\"secondary_count\":0}" if len(errs) == 0 else (lambda p1: (lambda p2: (lambda p3: ((strConcat)(p3))(((strConcat)((intToStr)((secondaryErrorCount)(errs))))("}")))(((strConcat)(p2))(",\"secondary_count\":")))(((strConcat)(p1))((jsonStr)((firstError)(errs)))))("{\"ok\":false,\"stage\":\"elaborate\",\"primary_error\":")))((elaborate)(ast)))((parseModule)(tokens))))((tokenize)(src))
-
-def nextBlocker(src: str) -> str:
-    return (lambda tokens: ((lambda p1: (lambda p2: ((strConcat)(p2))(",\"secondary_count\":0}"))(((strConcat)(p1))((jsonStr)((firstLexError)(tokens)))))("{\"ok\":false,\"blocker\":\"lexer\",\"stage\":\"lexer\",\"primary_error\":") if (hasLexErrors)(tokens) else (lambda ast: (lambda errs: ("{\"ok\":true,\"blocker\":\"ok\",\"stage\":\"ok\",\"primary_error\":\"\",\"secondary_count\":0}" if len(errs) == 0 else (lambda p1: (lambda p2: (lambda p3: ((strConcat)(p3))(((strConcat)((intToStr)((secondaryErrorCount)(errs))))("}")))(((strConcat)(p2))(",\"secondary_count\":")))(((strConcat)(p1))((jsonStr)((firstError)(errs)))))("{\"ok\":false,\"blocker\":\"elaborate\",\"stage\":\"elaborate\",\"primary_error\":")))((elaborate)(ast)))((parseModule)(tokens))))((tokenize)(src))
-
-def lookupSymbol(src: str):
-    def _f_name(name: str):
-        return (lambda tokens: ((lambda p1: (lambda p2: (lambda p3: (lambda p4: ((strConcat)(p4))(",\"secondary_count\":0}"))(((strConcat)(p3))((jsonStr)((firstLexError)(tokens)))))(((strConcat)(p2))(",\"primary_error\":")))(((strConcat)(p1))((jsonStr)(name))))("{\"ok\":false,\"stage\":\"lexer\",\"symbol\":") if (hasLexErrors)(tokens) else (lambda ast: (lambda kind: ((lambda p1: (lambda p2: (lambda p3: (lambda p4: ((strConcat)(p4))(",\"secondary_count\":0}"))(((strConcat)(p3))((jsonStr)(((strConcat)("Symbol not found: "))(name)))))(((strConcat)(p2))(",\"primary_error\":")))(((strConcat)(p1))((jsonStr)(name))))("{\"ok\":false,\"stage\":\"lookup\",\"symbol\":") if ((strLen)(kind) == 0) else (lambda p1: (lambda p2: (lambda p3: (lambda p4: ((strConcat)(p4))("}"))(((strConcat)(p3))((jsonStr)(kind))))(((strConcat)(p2))(",\"kind\":")))(((strConcat)(p1))((jsonStr)(name))))("{\"ok\":true,\"stage\":\"lookup\",\"symbol\":")))(((findSymbolKind)(name))(decls)))((parseModule)(tokens))))((tokenize)(src))
-    return _f_name
-
-def compileCompact(src: str) -> str:
-    return (lambda tokens: ((checkCompact)(src) if (hasLexErrors)(tokens) else (lambda ast: (lambda errs: ((lambda out: (lambda p1: (lambda p2: ((strConcat)(p2))("}"))(((strConcat)(p1))((intToStr)((strLen)(out)))))("{\"ok\":true,\"stage\":\"codegen\",\"output_bytes\":"))((emitModule)(ast)) if len(errs) == 0 else (checkCompact)(src)))((elaborate)(ast)))((parseModule)(tokens))))((tokenize)(src))
-
-def renderCompact(src: str) -> str:
-    return (lambda tokens: (lambda ast: (renderModule)(ast))((parseModule)(tokens)))((tokenize)(src))
-
-def tokenEstimate(src: str) -> str:
-    return (lambda tokens: (lambda p1: (lambda p2: (lambda p3: (lambda p4: (lambda p5: ((strConcat)(p5))(((strConcat)((intToStr)((countCodeTokens)(tokens))))("}")))(((strConcat)(p4))(",\"non_layout_tokens\":")))(((strConcat)(p3))((intToStr)((countAllTokens)(tokens)))))(((strConcat)(p2))(",\"lexer_tokens\":")))(((strConcat)(p1))((intToStr)((strLen)(src)))))("{\"ok\":true,\"source_bytes\":"))((tokenize)(src))
-
 def compile(src: str) -> str:
-    return (lambda tokens: (lambda ast: (lambda errors: ((emitModule)(ast) if len(errors) == 0 else (showErrors)(errors)))((elaborate)(ast)))((parseModule)(tokens)))((tokenize)(src))
+    return (lambda tokens: (lambda ast: (lambda errors: ((emitModule)(ast) if (listIsEmpty)(errors) else (showErrors)(errors)))((elaborate)(ast)))((parseModule)(tokens)))((tokenize)(src))
 
 def compilerCheckContains(label: str):
     def _f_got(got: str):
@@ -1317,10 +1206,3 @@ def checkHasError(label: str):
             return ((printfn)(((strConcat)("OK "))(label)) if ((strContains)(needle))(got) else (printfn)(((strConcat)("FAIL "))(((strConcat)(label))(((strConcat)("\n  expected error containing: "))(((strConcat)(needle))(((strConcat)("\n  got: "))(got)))))))
         return _f_needle
     return _f_got
-
-def main() -> None:
-    (lambda src1: (lambda out1: (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda src2: (lambda out2: (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda _tmp: (lambda src3: (lambda out3: (lambda _tmp: (lambda src4: (lambda out4: (lambda _tmp: (lambda _tmp: (lambda src5: (lambda out5: (lambda _tmp: (lambda _tmp: (lambda chk6: (lambda _tmp: (lambda _tmp: (lambda src7: (lambda out7: (lambda _tmp: (lambda _tmp: (lambda tok8: (lambda _tmp: (lambda _tmp: 0)((((compilerCheckContains)("8 tokens has non layout"))(tok8))("\"non_layout_tokens\":")))((((compilerCheckContains)("8 tokens has bytes"))(tok8))("\"source_bytes\":")))((tokenEstimate)(src1)))((((compilerCheckContains)("7 render fn"))(out7))("add(a Int)(b Int) = (a + b)")))((((compilerCheckContains)("7 render module"))(out7))("module Test.Render")))((renderCompact)(src7)))("module Test.Render\nadd(a Int)(b Int) = a + b\n"))((((compilerCheckContains)("6 compact primary error"))(chk6))("\"primary_error\":\"Unbound variable: y\"")))((((compilerCheckContains)("6 compact stage"))(chk6))("\"stage\":\"elaborate\"")))((checkCompact)(src3)))((((compilerCheckContains)("5 if expression"))(out5))("if")))((((compilerCheckContains)("5 abs function"))(out5))("let rec abs")))((compile)(src5)))("module Test.IfElse\nabs(n Int) = if n < 0\n  0 - n\nelse n\n"))((((compilerCheckContains)("4 let binding"))(out4))("let answer")))((((compilerCheckContains)("4 module const"))(out4))("module Test.Const")))((compile)(src4)))("module Test.Const\nlet answer = 42\n"))((((checkHasError)("3 unbound var error"))(out3))("Unbound variable: y")))((compile)(src3)))("module Test.Bad\nbroken(x Int) = y\n"))((((compilerCheckContains)("2 match expr"))(out2))("match")))((((compilerCheckContains)("2 describe fn"))(out2))("let rec describe")))((((compilerCheckContains)("2 ctor Red"))(out2))("| Red")))((((compilerCheckContains)("2 type Color"))(out2))("type Color")))((((compilerCheckContains)("2 module colors"))(out2))("module Test.Colors")))((compile)(src2)))("module Test.Colors\nColor = Red | Blue | Green\ndescribe(c Color) =\n  match c\n    | Red -> \"red\"\n    | Blue -> \"blue\"\n    | Green -> \"green\"\n"))((((compilerCheckContains)("1 add function"))(out1))("let rec add")))((((compilerCheckContains)("1 prelude present"))(out1))("ll-lang stdlib prelude")))((((compilerCheckContains)("1 module header"))(out1))("module Test.Hello")))((compile)(src1)))("module Test.Hello\nadd(a Int)(b Int) = a + b\n")
-
-
-if __name__ == '__main__':
-    main()

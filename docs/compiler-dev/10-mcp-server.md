@@ -13,7 +13,7 @@ lllc mcp
 Mcp.runServer()
    │
    ├─ mcpServer CE (FsMcp.Server)
-   │     name "ll-lang"  version "0.8.0"
+   │     name "ll-lang"  version "1.0.0"
    │     tool compile_file   → compileFileTool
    │     tool check_file     → checkFileTool
    │     tool run_file       → runFileTool
@@ -123,7 +123,7 @@ delegate to — not the MCP envelope itself:
 ## Security
 
 - Tools that take paths validate the `.lll` extension but do not sandbox.
-- `run_file` executes `dotnet fsi` — arbitrary code execution. The tool
+- `run_file` executes compiled code via `dotnet run` on a temporary project — arbitrary code execution. The tool
   description warns clients; MCP clients typically surface a confirmation UI.
 - Never write to stdout except via the FsMcp SDK — anything else corrupts the
   JSON-RPC channel. Log to stderr only.

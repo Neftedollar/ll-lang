@@ -1,0 +1,199 @@
+module Std.Render
+
+import Std.Parser
+
+-- Canonical ll-lang renderer.
+-- Emits a parseable compact source form from the parser AST.
+
+joinWith(sep Str)(items List[Str]) =
+  match items
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat sep (joinWith sep rest))
+
+encodeStrEscape(c Char) =
+  match c
+    | '\n' -> "\\n"
+    | '\t' -> "\\t"
+    | '\r' -> "\\r"
+    | '\\' -> "\\\\"
+    | '"' -> "\\\""
+    | _ -> strFromChars [c]
+
+escapeStr(s Str) =
+  listFold (\acc c. strConcat acc (encodeStrEscape c)) "" (strChars s)
+
+emitCharLit(c Char) =
+  match c
+    | '\n' -> "'\\n'"
+    | '\t' -> "'\\t'"
+    | '\\' -> "'\\\\'"
+    | '\'' -> "'\\''"
+    | _ -> strConcat (strConcat "'" (strFromChars [c])) "'"
+
+emitType(t TypeExpr) =
+  match t
+    | TyName name -> name
+    | TyApp head arg ->
+      strConcat (emitType head) (strConcat "[" (strConcat (emitType arg) "]"))
+    | TyFn a b ->
+      strConcat (emitTypeAtom a) (strConcat " -> " (emitType b))
+
+emitTypeAtom(t TypeExpr) =
+  match t
+    | TyFn _ _ -> strConcat "(" (strConcat (emitType t) ")")
+    | _ -> emitType t
+
+emitParam(p Param) =
+  match p
+    | MkParam name ty ->
+      strConcat "(" (strConcat name (strConcat " " (strConcat (emitType ty) ")")))
+
+emitParams(ps List[Param]) =
+  joinWith "" (listMap emitParam ps)
+
+emitCtor(c Constructor) =
+  match c
+    | MkCon name args ->
+      match args
+        | [] -> name
+        | _ ->
+          strConcat name (strConcat " " (joinWith " " (listMap emitTypeAtom args)))
+
+isAtomicExpr(e Expr) =
+  match e
+    | EInt _ -> true
+    | EStr _ -> true
+    | EBool _ -> true
+    | EChar _ -> true
+    | EFloat _ -> true
+    | EVar _ -> true
+    | ECon _ -> true
+    | ENil -> true
+    | _ -> false
+
+emitExprAtom(e Expr) =
+  if isAtomicExpr e
+    emitExpr e
+  else
+    strConcat "(" (strConcat (emitExpr e) ")")
+
+emitPattern(p Pattern) =
+  match p
+    | PVar name -> name
+    | PWild -> "_"
+    | PNil -> "[]"
+    | PLitInt n -> intToStr n
+    | PLitStr s -> strConcat "\"" (strConcat (escapeStr s) "\"")
+    | PCons h t ->
+      strConcat (emitPatternAtom h) (strConcat " :: " (emitPattern t))
+    | PCon name args ->
+      match args
+        | [] -> name
+        | _ ->
+          strConcat name (strConcat " " (joinWith " " (listMap emitPatternAtom args)))
+
+emitPatternAtom(p Pattern) =
+  match p
+    | PCon _ (_ :: _) ->
+      strConcat "(" (strConcat (emitPattern p) ")")
+    | PCons _ _ ->
+      strConcat "(" (strConcat (emitPattern p) ")")
+    | _ -> emitPattern p
+
+gatherAppHead(e Expr) =
+  match e
+    | EApp f _ -> gatherAppHead f
+    | _ -> e
+
+gatherAppArgs(e Expr) =
+  match e
+    | EApp f a -> listAppend (gatherAppArgs f) [a]
+    | _ -> []
+
+gatherLamNames(e Expr) =
+  match e
+    | ELam name body -> name :: gatherLamNames body
+    | _ -> []
+
+gatherLamBody(e Expr) =
+  match e
+    | ELam _ body -> gatherLamBody body
+    | _ -> e
+
+emitArms(pats List[Pattern])(bodies List[Expr]) =
+  match pats
+    | [] -> ""
+    | p :: restPats ->
+      match bodies
+        | [] -> ""
+        | b :: restBodies ->
+          arm = strConcat "  | " (strConcat (emitPattern p) (strConcat " -> " (emitExpr b)))
+          rest = emitArms restPats restBodies
+          match rest
+            | "" -> arm
+            | _ -> strConcat arm (strConcat "\n" rest)
+
+emitExpr(e Expr) =
+  match e
+    | EInt n -> intToStr n
+    | EStr s -> strConcat "\"" (strConcat (escapeStr s) "\"")
+    | EBool b ->
+      if b
+        "true"
+      else "false"
+    | EChar c -> emitCharLit c
+    | EFloat s -> s
+    | EVar name -> name
+    | ECon name -> name
+    | ENil -> "[]"
+    | EApp _ _ ->
+      head = gatherAppHead e
+      args = gatherAppArgs e
+      strConcat (emitExprAtom head) (strConcat " " (joinWith " " (listMap emitExprAtom args)))
+    | EIf cond thenExpr elseExpr ->
+      strConcat "if " (strConcat (emitExpr cond) (strConcat "\n  " (strConcat (emitExpr thenExpr) (strConcat "\nelse " (emitExpr elseExpr)))))
+    | EMatch scrut pats bodies ->
+      arms = emitArms pats bodies
+      strConcat "match " (strConcat (emitExpr scrut) (strConcat "\n" arms))
+    | ELam _ _ ->
+      params = gatherLamNames e
+      body = gatherLamBody e
+      strConcat "\\" (strConcat (joinWith " " params) (strConcat ". " (emitExpr body)))
+    | ELet name rhs body ->
+      strConcat "let " (strConcat name (strConcat " = " (strConcat (emitExpr rhs) (strConcat "\n" (emitExpr body)))))
+    | EList items ->
+      strConcat "[" (strConcat (joinWith " " (listMap emitExpr items)) "]")
+    | EBinOp op lhs rhs ->
+      strConcat "(" (strConcat (emitExpr lhs) (strConcat " " (strConcat op (strConcat " " (strConcat (emitExpr rhs) ")")))))
+    | ETuple a b ->
+      strConcat "(" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) ")")))
+    | ECons h t ->
+      strConcat (emitExprAtom h) (strConcat " :: " (emitExpr t))
+
+emitDecl(d Decl) =
+  match d
+    | DFn name params _ body ->
+      strConcat name (strConcat (emitParams params) (strConcat " = " (emitExpr body)))
+    | DType name tvars ctors ->
+      header = match tvars
+        | [] -> name
+        | _ -> strConcat name (strConcat " " (joinWith " " tvars))
+      strConcat header (strConcat " = " (joinWith " | " (listMap emitCtor ctors)))
+    | DImport segs ->
+      strConcat "import " (joinWith "." segs)
+    | DExport inner ->
+      strConcat "export " (emitDecl inner)
+    | DLet name body ->
+      strConcat "let " (strConcat name (strConcat " = " (emitExpr body)))
+
+emitDecls(ds List[Decl]) =
+  joinWith "\n\n" (listMap emitDecl ds)
+
+renderModule(m Module) =
+  match m
+    | MkModule path decls ->
+      match path
+        | [] -> emitDecls decls
+        | _ ->
+          strConcat "module " (strConcat (joinWith "." path) (strConcat "\n\n" (emitDecls decls)))

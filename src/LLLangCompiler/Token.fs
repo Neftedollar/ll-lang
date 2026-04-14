@@ -18,6 +18,10 @@ type Token =
     | CharLit of char
     // Operators
     | Arrow                 // ->
+    | PipeForward           // |>
+    | Bind                  // >>=
+    | Choice                // <|>
+    | ThenThen              // >>
     | Backslash             // \
     | Dot                   // .
     | Comma                 // ,
@@ -27,6 +31,8 @@ type Token =
     | Bar                   // |
     | LBrack                // [
     | RBrack                // ]
+    | LBrace                // {
+    | RBrace                // }
     | LParen                // (
     | RParen                // )
     | Plus | Minus | Star | Slash | Caret

@@ -134,6 +134,19 @@ let private tryAsBinOp (te: TypedExpr) : (string * TypedExpr * TypedExpr) option
         | _ -> None
     | _ -> None
 
+let private tryAsSymbolicOp (te: TypedExpr) : (string * TypedExpr * TypedExpr) option =
+    match te.Expr with
+    | TEApp(outer, right) ->
+        match outer.Expr with
+        | TEApp(inner, left) ->
+            match inner.Expr with
+            | TEVar (">>=" as op)
+            | TEVar (">>" as op)
+            | TEVar ("<|>" as op) -> Some (op, left, right)
+            | _ -> None
+        | _ -> None
+    | _ -> None
+
 let private tryAsStrConcat (te: TypedExpr) : (TypedExpr * TypedExpr) option =
     match te.Expr with
     | TEApp(outer, right) ->
@@ -151,6 +164,12 @@ let private needsCallHeadParens (s: string) =
 let private emitCall (head: string) (arg: string) =
     let h = if needsCallHeadParens head then "(" + head + ")" else head
     h + "(" + arg + ")"
+
+let private wrapLambdaHeadAsDelegate (headType: TypeExpr) (headExpr: string) : string =
+    if headExpr.Contains("=>") then
+        "((" + emitType headType + ")(" + headExpr + "))"
+    else
+        headExpr
 
 let private constructorTypeArgSuffix (t: TypeExpr) : string =
     let (head, args) = collectTyApp t
@@ -355,6 +374,18 @@ let private isSimpleMatchReturnType (t: TypeExpr) : bool =
     | _ -> false
 
 let rec private tryEmitExpr (te: TypedExpr) : string option =
+    match tryAsSymbolicOp te with
+    | Some (">>=", left, right) ->
+        match tryEmitExpr right, tryEmitExpr left with
+        | Some rightStr, Some leftStr ->
+            let callHead = wrapLambdaHeadAsDelegate right.Type rightStr
+            Some (emitCall callHead leftStr)
+        | _ -> None
+    | Some (">>", _, right) ->
+        tryEmitExpr right
+    | Some ("<|>", left, _) ->
+        tryEmitExpr left
+    | _ ->
     match tryAsStrConcat te with
     | Some (a, b) ->
         match tryEmitExpr a, tryEmitExpr b with
@@ -419,7 +450,8 @@ let rec private tryEmitExpr (te: TypedExpr) : string option =
                 | _, Some argsStr ->
                     match tryEmitExpr head with
                     | Some headStr ->
-                        Some (argsStr |> List.fold emitCall headStr)
+                        let callHead = wrapLambdaHeadAsDelegate head.Type headStr
+                        Some (argsStr |> List.fold emitCall callHead)
                     | None -> None
                 | _ -> None
             | TELam(ps, body) ->
@@ -458,7 +490,9 @@ let rec private tryEmitExpr (te: TypedExpr) : string option =
                 emitMatchExprCSharp scrut branches te.Type
             | TEPipe(a, b) ->
                 match tryEmitExpr a, tryEmitExpr b with
-                | Some aStr, Some bStr -> Some ("((" + bStr + ")(" + aStr + "))")
+                | Some aStr, Some bStr ->
+                    let pipeHead = wrapLambdaHeadAsDelegate b.Type bStr
+                    Some (emitCall pipeHead aStr)
                 | _ -> None
             | TETagged(e, _) -> tryEmitExpr e
             | TEList es ->

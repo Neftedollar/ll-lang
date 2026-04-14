@@ -156,7 +156,7 @@ missing = maybeWithDefault 0 (strToInt "x") -- 0
 
 | Function | Type | Description |
 |----------|------|-------------|
-| `mapEmpty` | `() -> RBMap[K][V]` | Empty map |
+| `mapEmpty` | `RBMap[K][V]` | Empty map value |
 | `mapInsert` | `(K -> K -> Int) -> K -> V -> RBMap[K][V] -> RBMap[K][V]` | Insert key-value pair |
 | `mapLookup` | `(K -> K -> Int) -> K -> RBMap[K][V] -> Maybe[V]` | Lookup by key |
 | `mapDelete` | `(K -> K -> Int) -> K -> RBMap[K][V] -> RBMap[K][V]` | Remove key |
@@ -181,7 +181,7 @@ strCmp(a Str)(b Str) =
 
 -- Build a map
 scores =
-  mapEmpty()
+  mapEmpty
     -> mapInsert strCmp "alice" 95
     -> mapInsert strCmp "bob" 87
     -> mapInsert strCmp "carol" 92
@@ -240,8 +240,8 @@ loadConfig(path Str) =
 ### `Std.Json` — JSON parser and serializer
 
 **Import:** `import Std.Json`  
-**LOC:** 609  
-**Description:** RFC-style JSON parser with strict number validation, escape handling (`\uXXXX` + surrogate pairs), deterministic serializer, and structural equality helpers.
+**LOC:** ~420  
+**Description:** JSON parser and serializer built on `Std.Parsec` combinators. Supports strict number shape validation, string escapes (`\uXXXX` + surrogate pairs), deterministic serializer, and structural equality helpers.
 
 **Key functions:**
 
@@ -250,6 +250,11 @@ loadConfig(path Str) =
 | `parseJson` | `Str -> ParseResult[JsonValue]` | Parse JSON text into AST |
 | `stringify` | `JsonValue -> Str` | Serialize AST back to JSON text |
 | `equalJson` | `JsonValue -> JsonValue -> Bool` | Structural AST equality |
+
+Backward-compatible aliases are also provided:
+- `parse` (alias of `parseJson`)
+- `renderJson` (alias-compatible implementation for `stringify`)
+- `eqJsonValue` (alias-compatible implementation for `equalJson`)
 
 **Usage:**
 
@@ -270,6 +275,99 @@ validateAndRoundtrip(src Str) =
             "OK"
           else "MISMATCH"
 ```
+
+---
+
+### `Std.State` — stateful computation primitives
+
+**Import:** `import Std.State`  
+**Description:** Concrete state monad foundation for self-hosted compiler passes and imperative-style pipelines via `stateBind`.
+
+**Key types:**
+
+```lll
+StateUnit = StateUnit
+StatePair A S = MkStatePair A S
+State S A = MkState (S -> StatePair[A][S])
+```
+
+**Key functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `stateRun` | `State[S][A] -> S -> StatePair[A][S]` | Run stateful computation |
+| `stateEval` | `State[S][A] -> S -> A` | Extract result value |
+| `stateExec` | `State[S][A] -> S -> S` | Extract final state |
+| `statePure` | `A -> State[S][A]` | Lift pure value |
+| `stateMap` | `(A -> B) -> State[S][A] -> State[S][B]` | Map over result |
+| `stateBind` | `State[S][A] -> (A -> State[S][B]) -> State[S][B]` | Sequence computations |
+| `stateGet` | `S -> State[S][S]` | Read state (seed argument pins `S` in current compiler) |
+| `statePut` | `S -> State[S][StateUnit]` | Replace state |
+| `stateModify` | `(S -> S) -> State[S][StateUnit]` | Transform state |
+
+`stateGet` is temporarily argument-based due current top-level polymorphic value inference limits; once zero-arg polymorphic values are stabilized it can be reduced to a plain `State[S][S]` value.
+
+---
+
+### `Std.Parsec` — parser combinator toolkit
+
+**Import:** `import Std.Parsec`  
+**Description:** Reusable parser-combinator substrate for self-hosted parsing tasks. Works over source text with explicit position tracking and backtracking control.
+
+**Key types:**
+
+```lll
+ParsePos = MkParsePos Int Int Int
+ParseState = MkParseState Str List[Char] ParsePos
+ParseError = MkParseError Str ParsePos
+Parser A = MkParser (ParseState -> ParseStep[A])
+```
+
+**Core functions:**
+
+| Function | Description |
+|----------|-------------|
+| `runParser` | Run parser on `Str` and return `Result` |
+| `parsePure` / `parseMap` / `parseBind` | Core combinators |
+| `parseOrElse` / `parseTry` | Choice + controlled rollback |
+| `parseLabel` / `parseFail` | Diagnostics helpers |
+| `parseSatisfy` / `parseChar` / `parseString` | Primitive token parsers |
+| `parseOneOf` / `parseNoneOf` / `parsePeekChar` / `parseAnyChar` / `parseEof` | Character/EOF parsers |
+| `parseMany` / `parseMany1` / `parseOptional` / `parseSepBy` / `parseSepBy1` / `parseBetween` | Structural combinators |
+| `parseWhitespace` / `parseSpaces` / `parseDigit` / `parseInt` / `parseQuotedString` | Common building blocks |
+
+`Std.Json` uses `Std.Parsec` as its parser backend.
+
+Combinator pipelines can use either parenthesized lambdas or trailing lambda sugar:
+
+```lll
+parseBind parseInt \n.
+  parsePure (n + 1)
+```
+
+---
+
+### `Std.Lazy` — explicit laziness on top of strict evaluation
+
+**Import:** `import Std.Lazy`  
+**Description:** Controlled delayed evaluation for expensive or recursive computations without changing strict language semantics.
+
+**Key types:**
+
+```lll
+Lazy[A] = Delayed (Int -> A) | Ready A
+```
+
+**Core functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `lazyDelay` | `(Int -> A) -> Lazy[A]` | Create delayed value |
+| `lazyReady` | `A -> Lazy[A]` | Create already-forced value |
+| `lazyForce` | `Lazy[A] -> (A, Lazy[A])` | Force and return memoized node |
+| `lazyValue` | `Lazy[A] -> A` | Force and return value only |
+| `lazyMap` | `(A -> B) -> Lazy[A] -> Lazy[B]` | Map through delayed value |
+| `lazyBind` | `Lazy[A] -> (A -> Lazy[B]) -> Lazy[B]` | Compose delayed computations |
 
 ---
 
@@ -509,6 +607,8 @@ buildFile(path Str) =
 | Data structures | `Std.Map` | Ordered map, O(log n) |
 | Config | `Std.Toml` | TOML manifest parser |
 | Parsing | `Std.Json` | JSON parse + stringify + roundtrip helpers |
+| Parsing | `Std.Parsec` | Parser combinator substrate |
+| Runtime | `Std.Lazy` | Explicit delayed evaluation |
 | Parsing | `Std.Lexer` | ll-lang tokenizer |
 | Parsing | `Std.Parser` | Recursive-descent parser |
 | Type checking | `Std.Elaborator` | Name resolution, binding checks |
@@ -525,6 +625,6 @@ buildFile(path Str) =
 
 ## Notes on self-hosted modules
 
-The stdlib modules are written in ll-lang and compiled via the bootstrap compiler. Because the module system does not yet support cross-module type sharing in all configurations, each module redefines the shared AST types inline (Token, Expr, Pattern, Decl). This is intentional for standalone compilation — each module is independently runnable with `lllc run`.
+The stdlib modules are written in ll-lang and compiled via the bootstrap compiler. Library modules are no longer expected to be independently runnable via `main()`; smoke/demo entrypoints should live in dedicated executable modules.
 
 When using multiple modules together in a project, import them in dependency order: `Std.Lexer` before `Std.Parser` before `Std.Elaborator` before `Std.Codegen`.

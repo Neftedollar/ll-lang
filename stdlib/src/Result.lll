@@ -1,0 +1,38 @@
+module Std.Result
+
+import Std.Maybe
+
+Result A E = Ok A | Err E
+
+resultWithDefault(defValue A)(r Result[A][E]) =
+  match r
+    | Ok v -> v
+    | Err e -> defValue
+
+resultOrElse(f E -> Result[A][E])(r Result[A][E]) =
+  match r
+    | Ok _ -> r
+    | Err e -> f e
+
+resultFromMaybe(errValue E)(m Maybe[A]) =
+  match m
+    | Some v -> Ok v
+    | None -> Err errValue
+
+resultToList(r Result[A][E]) =
+  match r
+    | Ok v -> [v]
+    | Err e -> []
+
+-- ---- Self-checks -------------------------------------------------------------
+
+check(label Str)(ok Bool) =
+  if ok
+    _ = printfn (strConcat "OK " label)
+    0
+  else
+    _ = printfn (strConcat "FAIL " label)
+    1
+
+fallbackNotFound(e Str) = Ok (strConcat "fallback:" e)
+

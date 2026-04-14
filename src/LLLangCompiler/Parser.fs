@@ -13,6 +13,9 @@ type private Ctx = {
 
 let private cur (c: Ctx) = c.Tokens[c.Pos]
 let private curTok (c: Ctx) = c.Tokens[c.Pos].Token
+let private peekTok (c: Ctx) (offset: int) =
+    let idx = c.Pos + offset
+    if idx >= 0 && idx < c.Tokens.Length then c.Tokens[idx].Token else Eof
 
 let private advance (c: Ctx) =
     if c.Pos < c.Tokens.Length - 1 then c.Pos <- c.Pos + 1
@@ -36,12 +39,67 @@ let private skip (c: Ctx) (t: Token) : Result<unit, string> =
 let private skipNewlines (c: Ctx) =
     while curTok c = Newline do advance c
 
+// Layout noise inside bracketed literals:
+// `[` followed by a newline often introduces `Indent`/`Dedent` tokens from
+// offside lexing, but inside list literals they should behave like whitespace.
+let private skipListLayout (c: Ctx) =
+    let mutable cont = true
+    while cont do
+        match curTok c with
+        | Newline | Indent | Dedent -> advance c
+        | _ -> cont <- false
+
+/// Detect whether the current list literal (parser position is right after `[`)
+/// contains explicit element separators at the top list level.
+/// We currently encode both physical newlines and `;` as `Newline` tokens.
+let private listHasExplicitSeparators (c: Ctx) : bool =
+    let mutable idx = c.Pos
+    let mutable depth = 1
+    let mutable found = false
+    while idx < c.Tokens.Length && depth > 0 && not found do
+        match c.Tokens[idx].Token with
+        | LBrack -> depth <- depth + 1
+        | RBrack -> depth <- depth - 1
+        | Newline when depth = 1 -> found <- true
+        | _ -> ()
+        idx <- idx + 1
+    found
+
+let private hasEmptyParenSuffix (c: Ctx) : bool =
+    curTok c = LParen
+    && c.Pos + 1 < c.Tokens.Length
+    && c.Tokens[c.Pos + 1].Token = RParen
+
+let private consumeEmptyParenSuffix (c: Ctx) : unit =
+    // `f()` is a zero-arg call suffix for names declared with `name() = ...`.
+    // In the current core this is semantically equivalent to `f`.
+    advance c // (
+    advance c // )
+
 // ---- Expression parser ----------------------------------------------
 
 let rec private parseAtom (c: Ctx) : Result<Expr, string> =
     skipNewlines c
     let startIdx = c.Pos
     match curTok c with
+    | Minus ->
+        // Unary minus: support `-1`, `-1.25`, and desugar `-expr` to
+        // `(0 - expr)` for non-literal operands.
+        advance c
+        match curTok c with
+        | IntLit n ->
+            advance c
+            Ok (recordAt c startIdx (ELit (LInt (-n))))
+        | FloatLit f ->
+            advance c
+            Ok (recordAt c startIdx (ELit (LFloat (-f))))
+        | _ ->
+            match parseAtom c with
+            | Ok rhs ->
+                let minusVar = recordAt c startIdx (EVar "-")
+                let lhs = ELit (LInt 0L)
+                Ok (recordAt c startIdx (EApp(EApp(minusVar, lhs), rhs)))
+            | Error e -> Error e
     | IntLit n -> advance c; Ok (ELit (LInt n))
     | FloatLit f -> advance c; Ok (ELit (LFloat f))
     | StrLit s -> advance c; Ok (ELit (LStr s))
@@ -97,26 +155,29 @@ let rec private parseAtom (c: Ctx) : Result<Expr, string> =
                 | Ok () -> Ok expr
     | LBrack ->
         advance c
-        skipNewlines c
+        let explicitSep = listHasExplicitSeparators c
+        skipListLayout c
         let elems = ResizeArray<Expr>()
         let mutable lstCont = true
-        // Phase 7.3b bug 1: an element that STARTS with a TypeId (a
-        // constructor) is parsed via `parseApp` so juxtaposition-application
-        // lands in the list literal directly — `[TNum 42]` becomes
-        // EList [EApp(TNum, 42)] (one element), not EList [TNum; 42] (two
-        // elements). Lowercase-atom / literal-starting elements still fall
-        // back to `parseTagged`, so `[1 2 3]` keeps its three-element shape
-        // and `[tok]` remains single-atom. This makes `[TNum 42]` a one-element
-        // list — users wanting multiple ctor elements must use listAppend /
-        // cons rather than whitespace-separate them.
         while lstCont && curTok c <> RBrack && curTok c <> Eof do
+            // Two list modes:
+            // 1) explicit separators (`;` or newline): parse full element expr
+            //    without crossing separator boundaries (`parseAppInline`).
+            // 2) space-separated compact mode: preserve `[1 2 3]` as three atoms,
+            //    but still allow ctor-app heads like `[TNum 42]`.
             let parseElem =
-                match curTok c with
-                | TypeId _ -> parseApp
-                | _ -> parseTagged
+                if explicitSep then
+                    parseAppInline
+                else
+                    match curTok c with
+                    | TypeId _ -> parseApp
+                    | _ -> parseTagged
             match parseElem c with
             | Error _ -> lstCont <- false
-            | Ok e -> elems.Add(e); skipNewlines c
+            | Ok e ->
+                elems.Add(e)
+                skipListLayout c
+        skipListLayout c
         match skip c RBrack with
         | Error e -> Error e
         | Ok () -> Ok (EList (List.ofSeq elems))
@@ -153,6 +214,11 @@ and private parseTagged (c: Ctx) : Result<Expr, string> =
                 Ok atom
         | _ -> Ok atom
 
+and private parseTrailingArg (c: Ctx) : Result<Expr, string> =
+    match curTok c with
+    | Backslash -> parseExprInner c
+    | _ -> parseTagged c
+
 /// Application parser. When `crossNewlines` is true (normal use) a
 /// Newline+Indent sequence is treated as a continuation-argument block.
 /// When `crossNewlines` is false (if-condition parsing) the parser
@@ -178,14 +244,17 @@ and private parseAppWith (crossNewlines: bool) (c: Ctx) : Result<Expr, string> =
             // still more args on the parent line after the Dedent.
             match curTok c with
             | IntLit _ | FloatLit _ | StrLit _ | CharLit _ | KwTrue | KwFalse
-            | Ident _ | TypeId _ | LParen | LBrack ->
+            | Ident _ | TypeId _ | LParen | LBrack | Backslash ->
                 let argIdx = c.Pos
-                match parseTagged c with
-                | Ok arg ->
-                    // Position of EApp = position of the argument token,
-                    // which is where `E001 TypeMismatch` wants to point.
-                    result <- recordAt c argIdx (EApp(result, arg))
-                | Error _ -> cont <- false
+                if hasEmptyParenSuffix c then
+                    consumeEmptyParenSuffix c
+                else
+                    match parseTrailingArg c with
+                    | Ok arg ->
+                        // Position of EApp = position of the argument token,
+                        // which is where `E001 TypeMismatch` wants to point.
+                        result <- recordAt c argIdx (EApp(result, arg))
+                    | Error _ -> cont <- false
             | Newline when crossNewlines ->
                 // Peek past any newlines to see if we're at a multi-line
                 // continuation block (Indent + atom). If not, rewind.
@@ -198,7 +267,7 @@ and private parseAppWith (crossNewlines: bool) (c: Ctx) : Result<Expr, string> =
                         match curTok c with
                         | IntLit _ | FloatLit _ | StrLit _ | CharLit _
                         | KwTrue | KwFalse | Ident _ | TypeId _
-                        | LParen | LBrack -> true
+                        | LParen | LBrack | Backslash -> true
                         | _ -> false
                     if isAtomStart then
                         // Consume every atom in the block as a continuation
@@ -212,12 +281,15 @@ and private parseAppWith (crossNewlines: bool) (c: Ctx) : Result<Expr, string> =
                             match curTok c with
                             | IntLit _ | FloatLit _ | StrLit _ | CharLit _
                             | KwTrue | KwFalse | Ident _ | TypeId _
-                            | LParen | LBrack ->
+                            | LParen | LBrack | Backslash ->
                                 let argIdx = c.Pos
-                                match parseTagged c with
-                                | Ok arg ->
-                                    result <- recordAt c argIdx (EApp(result, arg))
-                                | Error _ -> blockCont <- false
+                                if hasEmptyParenSuffix c then
+                                    consumeEmptyParenSuffix c
+                                else
+                                    match parseTrailingArg c with
+                                    | Ok arg ->
+                                        result <- recordAt c argIdx (EApp(result, arg))
+                                    | Error _ -> blockCont <- false
                             | _ -> blockCont <- false
                         while curTok c = Newline do advance c
                         // Consume the Dedent that closes the continuation
@@ -350,11 +422,13 @@ and private parsePipe (c: Ctx) : Result<Expr, string> =
     | Error e -> Error e
     | Ok left ->
         let mutable result = left
-        while curTok c = Arrow do
-            advance c
+        let rec parseRight () =
             match parseCmp c with
             | Ok right -> result <- EPipe(result, right)
             | Error _ -> ()
+        while curTok c = Arrow || curTok c = PipeForward do
+            advance c
+            parseRight ()
         Ok result
 
 /// Pipe-precedence expression that does NOT consume Newline+Indent
@@ -365,12 +439,66 @@ and private parsePipeInline (c: Ctx) : Result<Expr, string> =
     | Error e -> Error e
     | Ok left ->
         let mutable result = left
-        while curTok c = Arrow do
-            advance c
+        let rec parseRight () =
             match parseCmpInline c with
             | Ok right -> result <- EPipe(result, right)
             | Error _ -> ()
+        while curTok c = Arrow || curTok c = PipeForward do
+            advance c
+            parseRight ()
         Ok result
+
+and private parseBindWith (cons: Ctx -> Result<Expr, string>) (c: Ctx) : Result<Expr, string> =
+    match cons c with
+    | Error e -> Error e
+    | Ok left ->
+        let mutable result = left
+        let mutable cont = true
+        while cont do
+            match curTok c with
+            | Bind
+            | ThenThen as op ->
+                let opIdx = c.Pos
+                advance c
+                match cons c with
+                | Ok right ->
+                    let opName =
+                        match op with
+                        | Bind -> ">>="
+                        | ThenThen -> ">>"
+                        | _ -> "?"
+                    let opVar = recordAt c opIdx (EVar opName)
+                    let inner = recordAt c opIdx (EApp(opVar, result))
+                    result <- recordAt c opIdx (EApp(inner, right))
+                | Error _ -> cont <- false
+            | _ -> cont <- false
+        Ok result
+
+and private parseBind (c: Ctx) : Result<Expr, string> = parseBindWith parsePipe c
+and private parseBindInline (c: Ctx) : Result<Expr, string> = parseBindWith parsePipeInline c
+
+and private parseChoiceWith (cons: Ctx -> Result<Expr, string>) (c: Ctx) : Result<Expr, string> =
+    match cons c with
+    | Error e -> Error e
+    | Ok left ->
+        let mutable result = left
+        let mutable cont = true
+        while cont do
+            match curTok c with
+            | Choice ->
+                let opIdx = c.Pos
+                advance c
+                match cons c with
+                | Ok right ->
+                    let opVar = recordAt c opIdx (EVar "<|>")
+                    let inner = recordAt c opIdx (EApp(opVar, result))
+                    result <- recordAt c opIdx (EApp(inner, right))
+                | Error _ -> cont <- false
+            | _ -> cont <- false
+        Ok result
+
+and private parseChoice (c: Ctx) : Result<Expr, string> = parseChoiceWith parseBind c
+and private parseChoiceInline (c: Ctx) : Result<Expr, string> = parseChoiceWith parseBindInline c
 
 and private parseExprInner (c: Ctx) : Result<Expr, string> =
     skipNewlines c
@@ -389,11 +517,11 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
         match parsePattern c with
         | Error _ ->
             c.Pos <- saved
-            parsePipe c
+            parseChoice c
         | Ok pat ->
             if curTok c <> Eq then
                 c.Pos <- saved
-                parsePipe c
+                parseChoice c
             else
                 advance c  // consume =
                 match parseExprInner c with
@@ -446,10 +574,10 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
                     | _ -> Ok (ELetPat(pat, e1, body))
     | KwIf ->
         advance c
-        // Use parsePipeInline for the condition so that a following
+        // Use parseChoiceInline for the condition so that a following
         // Newline+Indent block is NOT consumed as application arguments —
         // that block is the if-body, not a continuation of the condition.
-        match parsePipeInline c with
+        match parseChoiceInline c with
         | Error e -> Error e
         | Ok cond ->
             skipNewlines c
@@ -532,7 +660,7 @@ and private parseExprInner (c: Ctx) : Result<Expr, string> =
                 // at the match expression rather than 0:0.
                 if branches.Count > 0 then Ok (recordAt c matchIdx (EMatchOf(scrut, List.ofSeq branches)))
                 else Error "Expected match branches (| pat -> expr)"
-    | _ -> parsePipe c
+    | _ -> parseChoice c
 
 /// Parse an expression inside an indented block. If the parsed expression
 /// is a bare `let name = e` (without `in`) AND there is more content on
@@ -599,6 +727,21 @@ and private parsePatCons (c: Ctx) : Result<Pattern, string> =
         else Ok lhs
 
 and private parsePatAtom (c: Ctx) : Result<Pattern, string> =
+    let isPatArgStart (t: Token) =
+        match t with
+        | Underscore
+        | Ident _
+        | TypeId _
+        | IntLit _
+        | FloatLit _
+        | StrLit _
+        | CharLit _
+        | KwTrue
+        | KwFalse
+        | LParen
+        | LBrack -> true
+        | _ -> false
+
     match curTok c with
     | Underscore -> advance c; Ok PWild
     | Ident name -> advance c; Ok (PVar name)
@@ -651,28 +794,17 @@ and private parsePatAtom (c: Ctx) : Result<Pattern, string> =
                     Ok result
     | TypeId name ->
         advance c
-        // collect subpatterns (atoms only, not constructors with args)
+        // Collect constructor arguments as full pattern atoms so forms like
+        // `Some (a, b)` and nested ctor/list args stay stable.
         let args = ResizeArray<Pattern>()
         let mutable cont = true
         while cont do
-            match curTok c with
-            | Ident n -> args.Add(PVar n); advance c
-            | Underscore -> args.Add(PWild); advance c
-            | IntLit n -> args.Add(PLit (LInt n)); advance c
-            | FloatLit f -> args.Add(PLit (LFloat f)); advance c
-            | StrLit s -> args.Add(PLit (LStr s)); advance c
-            | CharLit ch -> args.Add(PLit (LChar ch)); advance c
-            | KwTrue -> args.Add(PLit (LBool true)); advance c
-            | KwFalse -> args.Add(PLit (LBool false)); advance c
-            | LParen ->
-                advance c
-                match parsePatCons c with
-                | Ok p ->
-                    match skip c RParen with
-                    | Ok () -> args.Add(p)
-                    | Error _ -> cont <- false
+            if isPatArgStart (curTok c) then
+                match parsePatAtom c with
+                | Ok arg -> args.Add(arg)
                 | Error _ -> cont <- false
-            | _ -> cont <- false
+            else
+                cont <- false
         Ok (PCon(name, List.ofSeq args))
     | LParen ->
         advance c
@@ -1265,6 +1397,63 @@ let private parseDecl (c: Ctx) : Result<Decl, string> =
 
 // ---- Module parser --------------------------------------------------
 
+type private ExportItem = {
+    Name: string
+    Line: int
+    Col: int
+}
+
+let private parseExportList (c: Ctx) : Result<ExportItem list, string> =
+    match skip c KwExport with
+    | Error e -> Error e
+    | Ok () ->
+        skipNewlines c
+        match skip c LBrace with
+        | Error e -> Error e
+        | Ok () ->
+            skipNewlines c
+            let names = ResizeArray<ExportItem>()
+            let mutable parseErr: string option = None
+            let mutable doneList = false
+            while not doneList && parseErr.IsNone do
+                skipNewlines c
+                match curTok c with
+                | RBrace ->
+                    doneList <- true
+                | Ident name
+                | TypeId name ->
+                    let tok = cur c
+                    names.Add({ Name = name; Line = tok.Line; Col = tok.Col })
+                    advance c
+                    skipNewlines c
+                    match curTok c with
+                    | Comma ->
+                        advance c
+                        skipNewlines c
+                    | RBrace -> ()
+                    | other ->
+                        let t = cur c
+                        parseErr <- Some $"Expected ',' or '}}' in export list at {t.Line}:{t.Col}, got {other}"
+                | other ->
+                    let t = cur c
+                    parseErr <- Some $"Expected export name in export list at {t.Line}:{t.Col}, got {other}"
+            match parseErr with
+            | Some e -> Error e
+            | None ->
+                match skip c RBrace with
+                | Error e -> Error e
+                | Ok () ->
+                    let duplicate =
+                        names
+                        |> Seq.groupBy (fun n -> n.Name)
+                        |> Seq.tryPick (fun (_, group) ->
+                            let items = group |> Seq.toList
+                            if items.Length > 1 then Some items[1] else None)
+                    match duplicate with
+                    | Some item ->
+                        Error $"Duplicate export name '{item.Name}' at {item.Line}:{item.Col}"
+                    | None -> Ok (List.ofSeq names)
+
 let private parseModuleCtx (c: Ctx) : Result<LLModule, string> =
     skipNewlines c
     match skip c KwModule with
@@ -1296,7 +1485,16 @@ let private parseModuleCtx (c: Ctx) : Result<LLModule, string> =
                     else ic <- false
             imports.Add(List.ofSeq parts)
             skipNewlines c
-        let decls = ResizeArray<Decl * bool>()
+        let explicitExportNamesResult =
+            if curTok c = KwExport && peekTok c 1 = LBrace then
+                parseExportList c |> Result.map Some
+            else
+                Ok None
+        match explicitExportNamesResult with
+        | Error e -> Error e
+        | Ok explicitExportNames ->
+            skipNewlines c
+            let decls = ResizeArray<Decl * bool>()
         // Phase 7.5d bugfix: propagate the first decl parse error instead
         // of silently advancing one token and dropping the whole decl.
         // The old behaviour (`| Error _ -> advance c`) turned any parse
@@ -1306,24 +1504,64 @@ let private parseModuleCtx (c: Ctx) : Result<LLModule, string> =
         // Now the first broken decl aborts the module parse and the
         // driver reports the real `Expected ... got ...` message pointing
         // at the offending token's line:col.
-        let mutable declErr : string option = None
-        while curTok c <> Eof && declErr.IsNone do
-            skipNewlines c
-            if curTok c = Eof then ()
-            else
-                let exported = curTok c = KwExport
-                if exported then advance c
-                match parseDecl c with
-                | Ok d -> decls.Add((d, exported)); skipNewlines c
-                | Error e -> declErr <- Some e
-        match declErr with
-        | Some e -> Error e
-        | None ->
-            Ok {
-                Path = List.ofSeq path
-                Imports = List.ofSeq imports
-                Decls = List.ofSeq decls
-            }
+            let mutable declErr : string option = None
+            while curTok c <> Eof && declErr.IsNone do
+                skipNewlines c
+                if curTok c = Eof then ()
+                else
+                    let exported = curTok c = KwExport
+                    if exported then advance c
+                    match parseDecl c with
+                    | Ok d -> decls.Add((d, exported)); skipNewlines c
+                    | Error e -> declErr <- Some e
+            match declErr with
+            | Some e -> Error e
+            | None ->
+                let declList = List.ofSeq decls
+                let declaredNames =
+                    declList
+                    |> List.collect (fun (decl, _) -> declExportNames decl)
+                    |> Set.ofList
+                let legacyExportedNames =
+                    declList
+                    |> List.collect (fun (decl, exported) ->
+                        if exported then declExportNames decl else [])
+                    |> Set.ofList
+                let explicitExportedNames =
+                    match explicitExportNames with
+                    | None -> Ok None
+                    | Some items ->
+                        let unknown =
+                            items
+                            |> List.tryFind (fun item -> not (Set.contains item.Name declaredNames))
+                        match unknown with
+                        | Some item ->
+                            Error $"Unknown export name '{item.Name}' at {item.Line}:{item.Col}"
+                        | None ->
+                            Ok (Some (items |> List.map (fun i -> i.Name) |> Set.ofList))
+                match explicitExportedNames with
+                | Error e -> Error e
+                | Ok explicitSetOpt ->
+                    let finalExportSet =
+                        match explicitSetOpt with
+                        | Some s -> Some (Set.union s legacyExportedNames)
+                        | None -> None
+                    let normalizedDecls =
+                        declList
+                        |> List.map (fun (decl, _) ->
+                            let exported =
+                                match finalExportSet with
+                                | Some names ->
+                                    declExportNames decl
+                                    |> List.exists (fun name -> Set.contains name names)
+                                | None -> false
+                            (decl, exported))
+                    Ok {
+                        Path = List.ofSeq path
+                        Imports = List.ofSeq imports
+                        Exports = finalExportSet |> Option.map (Set.toList >> List.sort)
+                        Decls = normalizedDecls
+                    }
 
 /// Parse a module and return both the AST and the side-table of source
 /// positions for a subset of nodes (EVar, ECon, EApp, EMatch, EMatchOf,

@@ -1,0 +1,33 @@
+module Std.Lazy
+
+-- Explicit laziness for a strict language.
+-- We model thunks as (Int -> A) to avoid depending on a dedicated Unit value.
+-- `lazyForce` returns both the value and an updated cached node.
+
+export Lazy A = Delayed (Int -> A) | Ready A
+
+export lazyDelay(f Int -> A) =
+  Delayed f
+
+export lazyReady(x A) =
+  Ready x
+
+export lazyForce(node Lazy[A]) =
+  match node
+    | Ready v -> (v, Ready v)
+    | Delayed f ->
+      v = f 0
+      (v, Ready v)
+
+export lazyValue(node Lazy[A]) =
+  match lazyForce node
+    | (v, _) -> v
+
+export lazyMap(f A -> B)(node Lazy[A]) =
+  Delayed (\ignored. f (lazyValue node))
+
+export lazyBind(node Lazy[A])(k A -> Lazy[B]) =
+  Delayed (\ignored.
+    v = lazyValue node
+    lazyValue (k v)
+  )

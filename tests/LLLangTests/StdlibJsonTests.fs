@@ -8,7 +8,7 @@ let private repoRoot =
 
 let private runJsonLll () =
     let lllPath =
-        Path.Combine(repoRoot, "stdlib/src/Json.lll")
+        Path.Combine(repoRoot, "stdlib/smoke/JsonSmoke.lll")
     let llcDll =
         Path.Combine(repoRoot, "src/LLLangTool/bin/Debug/net10.0/lllc.dll")
     let psi = System.Diagnostics.ProcessStartInfo("dotnet", $"\"{llcDll}\" run \"{lllPath}\"")

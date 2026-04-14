@@ -31,6 +31,92 @@ compile(src Str) =
   else
     showErrors errors
 
+collectErrors(src Str) =
+  tokens = tokenize src
+  ast = parseModule tokens
+  elaborate ast
+
+firstErrorMessage(errs List[ElabError]) =
+  match errs
+    | e :: _ -> errMsg e
+    | [] -> ""
+
+checkCompact(src Str) =
+  errors = collectErrors src
+  if listIsEmpty errors
+    "{\"ok\":true,\"stage\":\"ok\",\"primary_error\":\"\",\"secondary_count\":0}"
+  else
+    msg = firstErrorMessage errors
+    secondary = listLen errors - 1
+    p1 = "{\"ok\":false,\"stage\":\"elaborator\",\"primary_error\":\""
+    p2 = strConcat p1 msg
+    p3 = strConcat p2 "\",\"secondary_count\":"
+    p4 = strConcat p3 (intToStr secondary)
+    strConcat p4 "}"
+
+renderCompact(src Str) =
+  src
+
+tokenEstimate(src Str) =
+  toks = tokenize src
+  n = listLen toks
+  p1 = "{\"ok\":true,\"tokens\":"
+  p2 = strConcat p1 (intToStr n)
+  strConcat p2 "}"
+
+nextBlocker(src Str) =
+  errors = collectErrors src
+  if listIsEmpty errors
+    "{\"ok\":true,\"stage\":\"none\",\"message\":\"\"}"
+  else
+    msg = firstErrorMessage errors
+    p1 = "{\"ok\":false,\"stage\":\"elaborator\",\"message\":\""
+    p2 = strConcat p1 msg
+    strConcat p2 "\"}"
+
+declKind(d Decl)(name Str) =
+  match d
+    | DFn n _ _ _ ->
+      if n == name
+        "fn"
+      else ""
+    | DType n _ _ ->
+      if n == name
+        "type"
+      else ""
+    | DLet n _ ->
+      if n == name
+        "let"
+      else ""
+    | DImport _ -> ""
+    | DExport inner -> declKind inner name
+
+findDeclKind(decls List[Decl])(name Str) =
+  match decls
+    | [] -> ""
+    | d :: rest ->
+      kind = declKind d name
+      if strLen kind == 0
+        findDeclKind rest name
+      else kind
+
+lookupSymbol(src Str)(name Str) =
+  tokens = tokenize src
+  ast = parseModule tokens
+  match ast
+    | MkModule _ decls ->
+      kind = findDeclKind decls name
+      if strLen kind == 0
+        p1 = "{\"found\":false,\"name\":\""
+        p2 = strConcat p1 name
+        strConcat p2 "\"}"
+      else
+        p1 = "{\"found\":true,\"name\":\""
+        p2 = strConcat p1 name
+        p3 = strConcat p2 "\",\"kind\":\""
+        p4 = strConcat p3 kind
+        strConcat p4 "\"}"
+
 -- ============================================================
 -- TESTS
 -- ============================================================
@@ -46,51 +132,3 @@ checkHasError(label Str)(got Str)(needle Str) =
     printfn (strConcat "OK " label)
   else
     printfn (strConcat "FAIL " (strConcat label (strConcat "\n  expected error containing: " (strConcat needle (strConcat "\n  got: " got)))))
-
-main() =
-  -- Test 1: simple function pipeline
-  -- Compiles:  module Test.Hello
-  --            add(a Int)(b Int) = a + b
-  -- Expects F# output with module header, prelude, and add function.
-  src1 = "module Test.Hello\nadd(a Int)(b Int) = a + b\n"
-  out1 = compile src1
-  _ = compilerCheckContains "1 module header" out1 "module Test.Hello"
-  _ = compilerCheckContains "1 prelude present" out1 "ll-lang stdlib prelude"
-  _ = compilerCheckContains "1 add function" out1 "let rec add"
-
-  -- Test 2: type + match + function
-  -- Compiles:  module Test.Colors
-  --            Color = Red | Blue | Green
-  --            describe(c Color) = match c
-  --              | Red -> "red"
-  --              | Blue -> "blue"
-  --              | Green -> "green"
-  src2 = "module Test.Colors\nColor = Red | Blue | Green\ndescribe(c Color) =\n  match c\n    | Red -> \"red\"\n    | Blue -> \"blue\"\n    | Green -> \"green\"\n"
-  out2 = compile src2
-  _ = compilerCheckContains "2 module colors" out2 "module Test.Colors"
-  _ = compilerCheckContains "2 type Color" out2 "type Color"
-  _ = compilerCheckContains "2 ctor Red" out2 "| Red"
-  _ = compilerCheckContains "2 describe fn" out2 "let rec describe"
-  _ = compilerCheckContains "2 match expr" out2 "match"
-
-  -- Test 3: unbound variable produces error (not F# output)
-  -- Compiles:  module Test.Bad
-  --            broken(x Int) = y
-  -- Expects an error about unbound variable y.
-  src3 = "module Test.Bad\nbroken(x Int) = y\n"
-  out3 = compile src3
-  _ = checkHasError "3 unbound var error" out3 "Unbound variable: y"
-
-  -- Test 4: let binding at module level
-  src4 = "module Test.Const\nlet answer = 42\n"
-  out4 = compile src4
-  _ = compilerCheckContains "4 module const" out4 "module Test.Const"
-  _ = compilerCheckContains "4 let binding" out4 "let answer"
-
-  -- Test 5: if/else expression
-  src5 = "module Test.IfElse\nabs(n Int) = if n < 0\n  0 - n\nelse n\n"
-  out5 = compile src5
-  _ = compilerCheckContains "5 abs function" out5 "let rec abs"
-  _ = compilerCheckContains "5 if expression" out5 "if"
-
-  0

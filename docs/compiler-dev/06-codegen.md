@@ -352,27 +352,17 @@ The prelude is emitted AFTER the user's type declarations so that
 rather than F#'s built-in `Option` / `Result`. The core prelude is
 also exposed as `Codegen.preludeBlock` for tests.
 
-## `lllc run` and `dotnet fsi` quirks
+## `lllc run` execution model
 
-F# interactive (`dotnet fsi`) does not honor `[<EntryPoint>]` or
-module headers in script mode. `lllc run` works around this by
-post-processing the emitted source:
+`lllc run` no longer rewrites emitted source text. The run path now:
 
-```fsharp
-let stripped =
-    fs.Split('\n')
-    |> Array.filter (fun l ->
-        let t = l.TrimStart()
-        not (t.StartsWith("module ")) && not (t.StartsWith("[<EntryPoint>]")))
-    |> String.concat "\n"
-let withInvoke = stripped + "\nmain [||] |> exit\n"
-```
+1. resolves imports (`Std.*`, `vendor/*/src`, sibling files),
+2. compiles to typed modules,
+3. emits a temporary multi-file F# project (`Prelude.fs` + module files),
+4. executes it via `dotnet run --project <temp>.fsproj`.
 
-It drops the `module` line and the `[<EntryPoint>]` attribute, then
-appends an explicit `main [||] |> exit` call so the main function
-actually runs. This is invisible to users but important if you're
-debugging why `lllc run` produces different behavior than `lllc build`
-followed by `dotnet fsc`.
+This keeps runtime behavior aligned with normal project builds and
+avoids `module` / `[<EntryPoint>]` stripping hacks.
 
 ## Known gaps
 

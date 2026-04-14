@@ -20,6 +20,7 @@ Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting 
 ## Status
 
 Working end-to-end compiler with a large automated xUnit suite (see CI badge), written in F# / .NET 10. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib → module system → MCP server → TypeScript + Python + Java + C# + LLVM codegen.
+Current release line: **1.0.0**.
 
 **Release contract (1.0):**
 - **Stable:** core compiler + `lllc build/check/run/new/install/mcp` + targets `fs/ts/py/java/cs`
@@ -94,9 +95,12 @@ lllc build --target llvm <file.lll> # compile → <file>.ll  (LLVM IR)
 lllc build [dir]                    # compile project (reads lll.toml)
 lllc check <file.lll>               # type-check single file (no codegen)
 lllc check [dir]                    # type-check project (no codegen)
-lllc run   <file.lll>               # compile and run via dotnet fsi
+lllc run   <file.lll>               # compile and run via temporary F# project
 lllc new   <name>                   # scaffold new project
-lllc install                        # fetch source-based dependencies
+lllc install                        # resolve direct+transitive deps into vendor/ + rewrite ll.sum
+lllc mod tidy                       # same as install (canonical dependency sync)
+lllc mod add dep=https://repo#ref   # add dependency and sync
+lllc mod why dep                    # explain dependency chain + local direct importers
 lllc mcp                            # run MCP server (stdio, for Claude/Cursor)
 ```
 
@@ -106,7 +110,7 @@ lllc mcp                            # run MCP server (stdio, for Claude/Cursor)
 lllc new myapp          # creates myapp/lll.toml + myapp/src/Main.lll
 cd myapp
 # edit src/Main.lll, add more .lll files to src/
-lllc build              # → bin/fsharp/myapp.fs (default target)
+lllc build              # → bin/fsharp/myapp.fsproj (+ Prelude.fs + module .fs files)
 dotnet run --project bin/fsharp/myapp.fsproj
 ```
 
@@ -317,7 +321,7 @@ Source (.lll)
     ▼  HMInfer     — Algorithm W, let-generalization, trait dispatch (E006),
                      occurs check (E008), unit algebra preservation
     ▼  Codegen     — emits idiomatic F# / TS / Python / Java / C# / LLVM
-    ▼  dotnet fsi  — runs the result (via `lllc run`)
+    ▼  dotnet run --project <tmp fsproj>  — runs the result (via `lllc run`)
 ```
 
 ## Project Structure

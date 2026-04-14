@@ -6,16 +6,16 @@ import Std.Maybe
 -- Keys are compared via an explicit comparator: cmp a b
 --   returns negative if a < b, zero if a == b, positive if a > b
 
-Color = Red | Black
+export Color = Red | Black
 
 -- RBMap K V = Leaf | Node Color (RBMap K V) K V (RBMap K V)
-RBMap K V = Leaf | Node Color (RBMap K V) K V (RBMap K V)
+export RBMap K V = Leaf | Node Color (RBMap K V) K V (RBMap K V)
 
 -- Empty map
-mapEmpty() = Leaf
+export mapEmpty() = Leaf
 
 -- Size of map
-mapSize(m RBMap[K][V]) =
+export mapSize(m RBMap[K][V]) =
   match m
     | Leaf -> 0
     | Node _ left _ _ right -> 1 + mapSize left + mapSize right
@@ -79,14 +79,14 @@ ins(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) =
       else Node c left nk v right
 
 -- mapInsert: insert k->v into map, replacing value if key exists
-mapInsert(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) =
+export mapInsert(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) =
   t = ins cmp k v m
   match t
     | Leaf -> Leaf
     | Node _ left nk nv right -> Node (Black) left nk nv right
 
 -- mapLookup: lookup key k
-mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) =
+export mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) =
   match m
     | Leaf -> None
     | Node _ left nk nv right ->
@@ -98,13 +98,13 @@ mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) =
       else Some nv
 
 -- mapContains: check if key k is in map
-mapContains(cmp K -> K -> Int)(k K)(m RBMap[K][V]) =
+export mapContains(cmp K -> K -> Int)(k K)(m RBMap[K][V]) =
   match mapLookup cmp k m
     | Some _ -> true
     | None -> false
 
 -- mapFold: in-order fold over key-value pairs
-mapFold(f B -> K -> V -> B)(acc B)(m RBMap[K][V]) =
+export mapFold(f B -> K -> V -> B)(acc B)(m RBMap[K][V]) =
   match m
     | Leaf -> acc
     | Node _ left k v right ->
@@ -113,7 +113,7 @@ mapFold(f B -> K -> V -> B)(acc B)(m RBMap[K][V]) =
       mapFold f acc2 right
 
 -- mapKeys: return list of keys in sorted (in-order) order
-mapKeys(m RBMap[K][V]) =
+export mapKeys(m RBMap[K][V]) =
   match m
     | Leaf -> []
     | Node _ left k _ right ->
@@ -122,7 +122,7 @@ mapKeys(m RBMap[K][V]) =
       listAppend lkeys (k :: rkeys)
 
 -- Integer comparator
-intCmp(a Int)(b Int) =
+export intCmp(a Int)(b Int) =
   if a < b
     0 - 1
   else if a > b
@@ -130,7 +130,7 @@ intCmp(a Int)(b Int) =
   else 0
 
 -- String comparator
-strCmp(a Str)(b Str) =
+export strCmp(a Str)(b Str) =
   if a < b
     0 - 1
   else if a > b
@@ -138,7 +138,7 @@ strCmp(a Str)(b Str) =
   else 0
 
 -- Test helper: print OK or FAIL
-mapCheck(label Str)(ok Bool) =
+export mapCheck(label Str)(ok Bool) =
   if ok
     _ = printfn (strConcat "OK " label)
     0
@@ -147,89 +147,3 @@ mapCheck(label Str)(ok Bool) =
     1
 
 -- Main: exercise all API functions
-main() =
-  -- mapEmpty / mapSize
-  m0 = mapEmpty
-  _ = mapCheck "1 mapEmpty size=0" (mapSize m0 == 0)
-
-  -- mapInsert + mapSize
-  m1 = mapInsert intCmp 3 "three" m0
-  m2 = mapInsert intCmp 1 "one" m1
-  m3 = mapInsert intCmp 5 "five" m2
-  m4 = mapInsert intCmp 2 "two" m3
-  m5 = mapInsert intCmp 4 "four" m4
-  _ = mapCheck "2 mapInsert size=5" (mapSize m5 == 5)
-
-  -- mapLookup: found
-  r1 = mapLookup intCmp 3 m5
-  ok1 = match r1
-    | Some v -> v == "three"
-    | None -> false
- 
-  _ = mapCheck "3 mapLookup found" ok1
-
-  -- mapLookup: not found
-  r2 = mapLookup intCmp 99 m5
-  ok2 = match r2
-    | Some _ -> false
-    | None -> true
- 
-  _ = mapCheck "4 mapLookup missing" ok2
-
-  -- mapContains
-  _ = mapCheck "5 mapContains present" (mapContains intCmp 2 m5)
-  _ = mapCheck "6 mapContains absent" (mapContains intCmp 99 m5 == false)
-
-  -- mapFold: sum all keys
-  keySum = mapFold (\acc k v. acc + k) 0 m5
-  _ = mapCheck "7 mapFold sum keys" (keySum == 15)
-
-  -- mapKeys: in-order keys
-  keys = mapKeys m5
-  _ = mapCheck "8 mapKeys length" (listLen keys == 5)
-
-  -- strCmp
-  ms = mapInsert strCmp "banana" 2 (mapInsert strCmp "apple" 1 (mapEmpty))
-  r3 = mapLookup strCmp "apple" ms
-  ok3 = match r3
-    | Some n -> n == 1
-    | None -> false
- 
-  _ = mapCheck "9 strCmp lookup" ok3
-
-  -- mapEmpty() usage
-  me = mapEmpty
-  _ = mapCheck "10 mapEmpty size=0" (mapSize me == 0)
-
-  -- Duplicate key insert: size stays same, value updated
-  md1 = mapInsert intCmp 42 "first" (mapEmpty)
-  md2 = mapInsert intCmp 42 "second" md1
-  okDup = match mapLookup intCmp 42 md2
-    | Some v -> v == "second"
-    | None -> false
- 
-  _ = mapCheck "11 duplicate key insert" (if mapSize md2 == 1
-    okDup
-  else false)
-
-  -- Sorted order: insert [5,3,1,4,2], mapKeys returns [1,2,3,4,5]
-  ms1 = mapInsert intCmp 5 0 (mapEmpty)
-  ms2 = mapInsert intCmp 3 0 ms1
-  ms3 = mapInsert intCmp 1 0 ms2
-  ms4 = mapInsert intCmp 4 0 ms3
-  ms5 = mapInsert intCmp 2 0 ms4
-  skeys = mapKeys ms5
-  firstOk = match skeys
-    | h :: _ -> h == 1
-    | [] -> false
- 
-  lastKey = listAt skeys 4
-  lastOk = match lastKey
-    | Some v -> v == 5
-    | None -> false
- 
-  _ = mapCheck "12 sorted order" (if firstOk
-    lastOk
-  else false)
-
-  0

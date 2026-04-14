@@ -176,6 +176,19 @@ let private tryAsBinOp (te: TypedExpr) : (string * TypedExpr * TypedExpr) option
         | _ -> None
     | _ -> None
 
+let private tryAsSymbolicOp (te: TypedExpr) : (string * TypedExpr * TypedExpr) option =
+    match te.Expr with
+    | TEApp(outer, right) ->
+        match outer.Expr with
+        | TEApp(inner, left) ->
+            match inner.Expr with
+            | TEVar (">>=" as op)
+            | TEVar (">>" as op)
+            | TEVar ("<|>" as op) -> Some (op, left, right)
+            | _ -> None
+        | _ -> None
+    | _ -> None
+
 // ── String concat ─────────────────────────────────────────────────────────────
 
 let private tryAsStrConcat (te: TypedExpr) : (TypedExpr * TypedExpr) option =
@@ -313,6 +326,14 @@ and private emitExprJava (te: TypedExpr) : string =
         |> List.fold (fun (accExpr, accTy) arg -> emitApplyStep accExpr accTy arg) (startExpr, Some headExpr.Type)
         |> fst
 
+    match tryAsSymbolicOp te with
+    | Some (">>=", left, right) ->
+        emitApplyStep (emitExprJava right) (Some right.Type) left |> fst
+    | Some (">>", _, right) ->
+        "(" + emitExprJava right + ")"
+    | Some ("<|>", left, _) ->
+        "(" + emitExprJava left + ")"
+    | _ ->
     // String concat
     match tryAsStrConcat te with
     | Some (a, b) -> "(" + emitExprJava a + " + " + emitExprJava b + ")"
@@ -323,7 +344,14 @@ and private emitExprJava (te: TypedExpr) : string =
     | None ->
     match te.Expr with
     | TELit l  -> emitLit l
-    | TEVar x  -> safeIdent x
+    | TEVar x  ->
+        let sx = safeIdent x
+        match te.Type with
+        | TyFn(_, _) when Set.contains sx currentKnownJavaFunctions ->
+            // Java needs an explicit callable value when passing a known static method.
+            "__ll_arg -> " + sx + "(__ll_arg)"
+        | _ ->
+            sx
     | TECon c  ->
         match c with
         | "true" -> "true"

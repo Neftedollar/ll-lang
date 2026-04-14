@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc Compiler.ts --target es2022 --module esnext",
-    "run": "node Compiler.ts"
+    "build": "tsc \"Compiler.ts\" --target es2022 --module esnext",
+    "run": "tsc \"Compiler.ts\" --target es2022 --module esnext && node \"Compiler.js\""
   },
   "devDependencies": {
     "typescript": "^5.9.0"

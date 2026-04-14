@@ -1,0 +1,80 @@
+module StdSmoke.MapSmoke
+
+import Std.Map
+
+main() =
+  m0 = Leaf
+  _ = mapCheck "1 mapEmpty size=0" (mapSize m0 == 0)
+
+  m1 = mapInsert intCmp 3 30 m0
+  m2 = mapInsert intCmp 1 10 m1
+  m3 = mapInsert intCmp 4 40 m2
+  m4 = mapInsert intCmp 2 20 m3
+  m5 = mapInsert intCmp 5 50 m4
+
+  _ = mapCheck "2 mapInsert size=5" (mapSize m5 == 5)
+
+  lookupFound =
+    match mapLookup intCmp 4 m5
+      | Some v -> v == 40
+      | None -> false
+  _ = mapCheck "3 mapLookup found" lookupFound
+
+  lookupMissing =
+    match mapLookup intCmp 99 m5
+      | Some _ -> false
+      | None -> true
+  _ = mapCheck "4 mapLookup missing" lookupMissing
+
+  _ = mapCheck "5 mapContains present" (mapContains intCmp 2 m5)
+  contains7 = mapContains intCmp 7 m5
+  absent7 =
+    if contains7
+      false
+    else
+      true
+  _ = mapCheck "6 mapContains absent" absent7
+
+  keySum = mapFold (\acc. \k. \v. acc + k) 0 m5
+  _ = mapCheck "7 mapFold sum keys" (keySum == 15)
+
+  keys = mapKeys m5
+  _ = mapCheck "8 mapKeys length" (listLen keys == 5)
+
+  s0 = Leaf
+  s1 = mapInsert intCmp 20 2 s0
+  s2 = mapInsert intCmp 10 1 s1
+  s3 = mapInsert intCmp 30 3 s2
+  strLookup =
+    match mapLookup intCmp 10 s3
+      | Some v -> v == 1
+      | None -> false
+  _ = mapCheck "9 strCmp lookup" strLookup
+
+  _ = mapCheck "10 mapEmpty size=0" (mapSize Leaf == 0)
+
+  d1 = mapInsert intCmp 1 10 m0
+  d2 = mapInsert intCmp 1 99 d1
+  dupOk =
+    if mapSize d2 == 1
+      match mapLookup intCmp 1 d2
+        | Some v -> v == 99
+        | None -> false
+    else false
+  _ = mapCheck "11 duplicate key insert" dupOk
+
+  sortedOk =
+    match keys
+      | a :: b :: c :: d :: e :: [] ->
+        if a == 1
+          if b == 2
+            if c == 3
+              if d == 4
+                e == 5
+              else false
+            else false
+          else false
+        else false
+      | _ -> false
+  _ = mapCheck "12 sorted order" sortedOk
+  0

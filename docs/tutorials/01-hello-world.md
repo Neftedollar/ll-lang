@@ -41,7 +41,7 @@ lllc run hello.lll
 Hello, ll-lang!
 ```
 
-`lllc run` compiles to F# and immediately pipes the result through `dotnet fsi`. You get an answer in one command.
+`lllc run` compiles to a temporary F# project and executes it via `dotnet run`. You get an answer in one command.
 
 ## Build it
 

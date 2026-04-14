@@ -2,6 +2,7 @@ module LLLangTests.ModuleSystemTests
 
 open System
 open System.IO
+open System.Diagnostics
 open Xunit
 open LLLang.Elaborator
 open LLLang.Manifest
@@ -67,6 +68,41 @@ let private withTempDir (f: string -> 'a) : 'a =
 
 let private errMsg (es: LLLang.Elaborator.LLError list) =
     es |> List.map (fun e -> e.Message) |> String.concat "; "
+
+let private repoRoot =
+    Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, "../.."))
+
+let private lllcDllPath =
+    Path.Combine(repoRoot, "src/LLLangTool/bin/Debug/net10.0/lllc.dll")
+
+let private runLllc (cwd: string) (args: string list) : int * string * string =
+    let psi = ProcessStartInfo("dotnet")
+    psi.WorkingDirectory <- cwd
+    psi.UseShellExecute <- false
+    psi.RedirectStandardOutput <- true
+    psi.RedirectStandardError <- true
+    psi.ArgumentList.Add(lllcDllPath)
+    for a in args do
+        psi.ArgumentList.Add(a)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
+    let stdout = proc.StandardOutput.ReadToEnd()
+    let stderr = proc.StandardError.ReadToEnd()
+    proc.WaitForExit()
+    (proc.ExitCode, stdout, stderr)
+
+let private runCmd (cwd: string) (exe: string) (args: string list) : int * string * string =
+    let psi = ProcessStartInfo(exe)
+    psi.WorkingDirectory <- cwd
+    psi.UseShellExecute <- false
+    psi.RedirectStandardOutput <- true
+    psi.RedirectStandardError <- true
+    for a in args do
+        psi.ArgumentList.Add(a)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
+    let stdout = proc.StandardOutput.ReadToEnd()
+    let stderr = proc.StandardError.ReadToEnd()
+    proc.WaitForExit()
+    (proc.ExitCode, stdout, stderr)
 
 [<Fact>]
 let ``loadProject: two-file project sorts in dependency order`` () =
@@ -134,6 +170,116 @@ let ``compileProject: two-file project emits concatenated F# with both modules``
                 Assert.Contains("module Greet.Lib", fs)
                 Assert.Contains("module Greet.Main", fs)
                 Assert.True(fs.Length > 50)
+    )
+
+[<Fact>]
+let ``compileProject: imported polymorphic value can be reused at two concrete types`` () =
+    withTempDir (fun root ->
+        Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
+        File.WriteAllText(Path.Combine(root, "lll.toml"), "[project]\nname = \"poly\"\n")
+        File.WriteAllText(
+            Path.Combine(root, "src", "Lib.lll"),
+            "module Poly.Lib\n\nexport id(x A) A = x\n")
+        File.WriteAllText(
+            Path.Combine(root, "src", "Main.lll"),
+            "module Poly.Main\nimport Poly.Lib\n\nmain() Int =\n  n = id 42\n  s = id \"hi\"\n  n\n")
+
+        match loadProject root with
+        | Error es -> Assert.Fail(sprintf "loadProject failed: %s" (errMsg es))
+        | Ok proj ->
+            match compileProjectToModules proj with
+            | Error es ->
+                Assert.Fail(sprintf "compileProjectToModules failed (polymorphic import regression): %s" (errMsg es))
+            | Ok tms ->
+                Assert.Equal(2, tms.Length)
+    )
+
+[<Fact>]
+let ``compileProject: export list gates imported visibility`` () =
+    withTempDir (fun root ->
+        Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
+        File.WriteAllText(Path.Combine(root, "lll.toml"), "[project]\nname = \"vis\"\n")
+        File.WriteAllText(
+            Path.Combine(root, "src", "Lib.lll"),
+            "module Vis.Lib\n\nexport { pub }\npub() Int = 1\nhidden() Int = 2\n")
+        File.WriteAllText(
+            Path.Combine(root, "src", "Main.lll"),
+            "module Vis.Main\nimport Vis.Lib\n\nmain() Int = hidden()\n")
+
+        match loadProject root with
+        | Error es -> Assert.Fail(sprintf "loadProject failed: %s" (errMsg es))
+        | Ok proj ->
+            match compileProjectToModules proj with
+            | Ok _ -> Assert.Fail("Expected E002 on non-exported imported name but got Ok")
+            | Error es ->
+                let msg = errMsg es
+                Assert.Contains("UnboundVar hidden", msg))
+
+[<Fact>]
+let ``compileProject: modules without explicit export remain import-visible`` () =
+    withTempDir (fun root ->
+        Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
+        File.WriteAllText(Path.Combine(root, "lll.toml"), "[project]\nname = \"vislegacy\"\n")
+        File.WriteAllText(
+            Path.Combine(root, "src", "Lib.lll"),
+            "module Vislegacy.Lib\n\nhelper() Int = 41\n")
+        File.WriteAllText(
+            Path.Combine(root, "src", "Main.lll"),
+            "module Vislegacy.Main\nimport Vislegacy.Lib\n\nmain() Int = helper() + 1\n")
+
+        match loadProject root with
+        | Error es -> Assert.Fail(sprintf "loadProject failed: %s" (errMsg es))
+        | Ok proj ->
+            match compileProjectToModules proj with
+            | Error es ->
+                Assert.Fail(sprintf "compileProjectToModules failed (legacy visibility regression): %s" (errMsg es))
+            | Ok tms ->
+                Assert.Equal(2, tms.Length))
+
+[<Fact>]
+let ``compileProject: legacy export decl does not gate visibility without export list`` () =
+    withTempDir (fun root ->
+        Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
+        File.WriteAllText(Path.Combine(root, "lll.toml"), "[project]\nname = \"visold\"\n")
+        File.WriteAllText(
+            Path.Combine(root, "src", "Lib.lll"),
+            "module Visold.Lib\n\nexport pub() Int = 1\nhidden() Int = 2\n")
+        File.WriteAllText(
+            Path.Combine(root, "src", "Main.lll"),
+            "module Visold.Main\nimport Visold.Lib\n\nmain() Int = hidden()\n")
+
+        match loadProject root with
+        | Error es -> Assert.Fail(sprintf "loadProject failed: %s" (errMsg es))
+        | Ok proj ->
+            match compileProjectToModules proj with
+            | Error es ->
+                Assert.Fail(sprintf "compileProjectToModules failed (legacy export compatibility regression): %s" (errMsg es))
+            | Ok tms ->
+                Assert.Equal(2, tms.Length))
+
+[<Fact>]
+let ``compileProject: non-imported sibling module does not leak names into scope`` () =
+    withTempDir (fun root ->
+        Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
+        File.WriteAllText(Path.Combine(root, "lll.toml"), "[project]\nname = \"leak\"\n")
+        File.WriteAllText(
+            Path.Combine(root, "src", "A.lll"),
+            "module Leak.A\n\nexport v() Int = 1\n")
+        File.WriteAllText(
+            Path.Combine(root, "src", "ZZ.lll"),
+            "module Leak.ZZ\nimport Leak.A\n\nexport v() Str = \"bad\"\n")
+        File.WriteAllText(
+            Path.Combine(root, "src", "Main.lll"),
+            "module Leak.Main\nimport Leak.A\n\nmain() Int = v() + 1\n")
+
+        match loadProject root with
+        | Error es -> Assert.Fail(sprintf "loadProject failed: %s" (errMsg es))
+        | Ok proj ->
+            match compileProjectToModules proj with
+            | Error es ->
+                Assert.Fail(sprintf "compileProjectToModules failed (import leakage regression): %s" (errMsg es))
+            | Ok tms ->
+                Assert.Equal(3, tms.Length)
     )
 
 [<Fact>]
@@ -207,8 +353,8 @@ let ``loadProject: path dep files included in sorted results`` () =
             File.WriteAllText(Path.Combine(libRoot, "src", "Util.lll"),
                 "module Mylib.Util\n\nexport greet() Str = \"hi\"\n")
 
-            // Install as a symlink (simulate lllc install via direct copy for test)
-            let depsDir = Path.Combine(root, ".ll-deps")
+            // Simulate vendored dep layout used by ProjectLoader.
+            let depsDir = Path.Combine(root, "vendor")
             Directory.CreateDirectory(depsDir) |> ignore
             // Copy the dep directory contents instead of symlinking (portable test)
             let depTarget = Path.Combine(depsDir, "mylib")
@@ -226,4 +372,595 @@ let ``loadProject: path dep files included in sorted results`` () =
                 Assert.Equal<string list>(["Mylib"; "Util"], proj.Files.[0].ModulePath)
                 Assert.Equal<string list>(["App"; "Main"], proj.Files.[1].ModulePath)
         )
+    )
+
+[<Fact>]
+let ``lllc install resolves transitive path deps into vendor and keeps ll.sum deterministic`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depARoot = Path.Combine(root, "dep-a")
+        let depBRoot = Path.Combine(root, "dep-b")
+
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depARoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depBRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(appRoot, "vendor", "stale")) |> ignore
+
+        File.WriteAllText(Path.Combine(depBRoot, "lll.toml"), "[project]\nname = \"depb\"\n")
+        File.WriteAllText(Path.Combine(depBRoot, "src", "Main.lll"), "module Depb.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(depARoot, "lll.toml"),
+            "[project]\nname = \"depa\"\n\n[deps]\ndepb = { path = \"../dep-b\" }\n")
+        File.WriteAllText(Path.Combine(depARoot, "src", "Main.lll"), "module Depa.Main\n\nexport v() Int = 2\n")
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ndepa = { path = \"../dep-a\" }\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+
+        let (code1, out1, err1) = runLllc appRoot ["install"]
+        Assert.True((code1 = 0), $"first install failed\nstdout:\n{out1}\nstderr:\n{err1}")
+
+        let depAVendor = Path.Combine(appRoot, "vendor", "depa")
+        let depBVendor = Path.Combine(appRoot, "vendor", "depb")
+        let staleVendor = Path.Combine(appRoot, "vendor", "stale")
+        Assert.True(Directory.Exists(depAVendor), "vendor/depa should exist after install")
+        Assert.True(Directory.Exists(depBVendor), "vendor/depb should exist after install")
+        Assert.False(Directory.Exists(staleVendor), "stale vendor dir should be removed during sync")
+
+        let llSumPath = Path.Combine(appRoot, "ll.sum")
+        Assert.True(File.Exists(llSumPath), "ll.sum should be produced by install")
+        let sum1 = File.ReadAllText(llSumPath)
+        Assert.Contains("depa path:../dep-a sha256:", sum1)
+        Assert.Contains("depb path:../dep-b sha256:", sum1)
+
+        let (code2, out2, err2) = runLllc appRoot ["install"]
+        Assert.True((code2 = 0), $"second install failed\nstdout:\n{out2}\nstderr:\n{err2}")
+        let sum2 = File.ReadAllText(llSumPath)
+        Assert.Equal(sum1, sum2)
+    )
+
+[<Fact>]
+let ``lllc install fails when transitive deps resolve same name from different sources`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depARoot = Path.Combine(root, "dep-a")
+        let depBRoot = Path.Combine(root, "dep-b")
+        let commonV1Root = Path.Combine(root, "common-v1")
+        let commonV2Root = Path.Combine(root, "common-v2")
+
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depARoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depBRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(commonV1Root, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(commonV2Root, "src")) |> ignore
+
+        File.WriteAllText(Path.Combine(commonV1Root, "lll.toml"), "[project]\nname = \"common\"\n")
+        File.WriteAllText(Path.Combine(commonV1Root, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 1\n")
+        File.WriteAllText(Path.Combine(commonV2Root, "lll.toml"), "[project]\nname = \"common\"\n")
+        File.WriteAllText(Path.Combine(commonV2Root, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 2\n")
+
+        File.WriteAllText(
+            Path.Combine(depARoot, "lll.toml"),
+            "[project]\nname = \"depa\"\n\n[deps]\ncommon = { path = \"../common-v1\" }\n")
+        File.WriteAllText(Path.Combine(depARoot, "src", "Main.lll"), "module Depa.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(depBRoot, "lll.toml"),
+            "[project]\nname = \"depb\"\n\n[deps]\ncommon = { path = \"../common-v2\" }\n")
+        File.WriteAllText(Path.Combine(depBRoot, "src", "Main.lll"), "module Depb.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ndepa = { path = \"../dep-a\" }\ndepb = { path = \"../dep-b\" }\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+
+        let (code, outText, errText) = runLllc appRoot ["install"]
+        Assert.True((code <> 0), $"install should fail on dep source conflict\nstdout:\n{outText}\nstderr:\n{errText}")
+        Assert.Contains("dependency conflict for common", errText)
+        Assert.Contains("via app -> depa -> common", errText)
+        Assert.Contains("via app -> depb -> common", errText)
+    )
+
+[<Fact>]
+let ``lllc install prefers highest semver when transitive git deps resolve same name`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depARoot = Path.Combine(root, "dep-a")
+        let depBRoot = Path.Combine(root, "dep-b")
+        let commonRepo = Path.Combine(root, "common-repo")
+
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depARoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depBRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(commonRepo, "src")) |> ignore
+
+        let ensureGitOk (code: int, so: string, se: string) (ctx: string) =
+            Assert.True((code = 0), $"git command failed ({ctx})\nstdout:\n{so}\nstderr:\n{se}")
+
+        // Build local git repo with two commits and two tags.
+        File.WriteAllText(Path.Combine(commonRepo, "lll.toml"), "[project]\nname = \"common\"\n")
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 1\n")
+        runCmd commonRepo "git" ["init"] |> fun r -> ensureGitOk r "init"
+        runCmd commonRepo "git" ["config"; "user.email"; "tests@example.com"] |> fun r -> ensureGitOk r "config email"
+        runCmd commonRepo "git" ["config"; "user.name"; "LLLang Tests"] |> fun r -> ensureGitOk r "config name"
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add v1"
+        runCmd commonRepo "git" ["commit"; "-m"; "v1"] |> fun r -> ensureGitOk r "commit v1"
+        runCmd commonRepo "git" ["tag"; "v1"] |> fun r -> ensureGitOk r "tag v1"
+
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 2\n")
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add v2"
+        runCmd commonRepo "git" ["commit"; "-m"; "v2"] |> fun r -> ensureGitOk r "commit v2"
+        runCmd commonRepo "git" ["tag"; "v2"] |> fun r -> ensureGitOk r "tag v2"
+
+        let repoUrl = commonRepo.Replace("\\", "/")
+
+        File.WriteAllText(
+            Path.Combine(depARoot, "lll.toml"),
+            "[project]\nname = \"depa\"\n\n[deps]\ncommon = \"" + repoUrl + "#v1\"\n")
+        File.WriteAllText(Path.Combine(depARoot, "src", "Main.lll"), "module Depa.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(depBRoot, "lll.toml"),
+            "[project]\nname = \"depb\"\n\n[deps]\ncommon = \"" + repoUrl + "#v2\"\n")
+        File.WriteAllText(Path.Combine(depBRoot, "src", "Main.lll"), "module Depb.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ndepa = { path = \"../dep-a\" }\ndepb = { path = \"../dep-b\" }\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+
+        let (code, outText, errText) = runLllc appRoot ["install"]
+        Assert.True((code = 0), $"install should pick highest semver ref\nstdout:\n{outText}\nstderr:\n{errText}")
+        let resolvedCommonMain = Path.Combine(appRoot, "vendor", "common", "src", "Main.lll")
+        Assert.True(File.Exists(resolvedCommonMain), "vendor/common/src/Main.lll should exist after install")
+        let commonMain = File.ReadAllText(resolvedCommonMain)
+        Assert.Contains("export v() Int = 2", commonMain)
+    )
+
+[<Fact>]
+let ``lllc install prefers higher transitive semver over lower direct git dep`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depBRoot = Path.Combine(root, "dep-b")
+        let commonRepo = Path.Combine(root, "common-repo")
+
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depBRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(commonRepo, "src")) |> ignore
+
+        let ensureGitOk (code: int, so: string, se: string) (ctx: string) =
+            Assert.True((code = 0), $"git command failed ({ctx})\nstdout:\n{so}\nstderr:\n{se}")
+
+        File.WriteAllText(Path.Combine(commonRepo, "lll.toml"), "[project]\nname = \"common\"\n")
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 1\n")
+        runCmd commonRepo "git" ["init"] |> fun r -> ensureGitOk r "init"
+        runCmd commonRepo "git" ["config"; "user.email"; "tests@example.com"] |> fun r -> ensureGitOk r "config email"
+        runCmd commonRepo "git" ["config"; "user.name"; "LLLang Tests"] |> fun r -> ensureGitOk r "config name"
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add v1"
+        runCmd commonRepo "git" ["commit"; "-m"; "v1"] |> fun r -> ensureGitOk r "commit v1"
+        runCmd commonRepo "git" ["tag"; "v1"] |> fun r -> ensureGitOk r "tag v1"
+
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 2\n")
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add v2"
+        runCmd commonRepo "git" ["commit"; "-m"; "v2"] |> fun r -> ensureGitOk r "commit v2"
+        runCmd commonRepo "git" ["tag"; "v2"] |> fun r -> ensureGitOk r "tag v2"
+
+        let repoUrl = commonRepo.Replace("\\", "/")
+
+        File.WriteAllText(
+            Path.Combine(depBRoot, "lll.toml"),
+            "[project]\nname = \"depb\"\n\n[deps]\ncommon = \"" + repoUrl + "#v2\"\n")
+        File.WriteAllText(Path.Combine(depBRoot, "src", "Main.lll"), "module Depb.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ncommon = \"" + repoUrl + "#v1\"\ndepb = { path = \"../dep-b\" }\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+
+        let (code, outText, errText) = runLllc appRoot ["install"]
+        Assert.True((code = 0), $"install should converge to higher transitive semver\nstdout:\n{outText}\nstderr:\n{errText}")
+        let resolvedCommonMain = Path.Combine(appRoot, "vendor", "common", "src", "Main.lll")
+        Assert.True(File.Exists(resolvedCommonMain), "vendor/common/src/Main.lll should exist after install")
+        let commonMain = File.ReadAllText(resolvedCommonMain)
+        Assert.Contains("export v() Int = 2", commonMain)
+    )
+
+[<Fact>]
+let ``lllc install semver compare handles multi-digit components deterministically`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depARoot = Path.Combine(root, "dep-a")
+        let depBRoot = Path.Combine(root, "dep-b")
+        let commonRepo = Path.Combine(root, "common-repo")
+
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depARoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depBRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(commonRepo, "src")) |> ignore
+
+        let ensureGitOk (code: int, so: string, se: string) (ctx: string) =
+            Assert.True((code = 0), $"git command failed ({ctx})\nstdout:\n{so}\nstderr:\n{se}")
+
+        File.WriteAllText(Path.Combine(commonRepo, "lll.toml"), "[project]\nname = \"common\"\n")
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 12\n")
+        runCmd commonRepo "git" ["init"] |> fun r -> ensureGitOk r "init"
+        runCmd commonRepo "git" ["config"; "user.email"; "tests@example.com"] |> fun r -> ensureGitOk r "config email"
+        runCmd commonRepo "git" ["config"; "user.name"; "LLLang Tests"] |> fun r -> ensureGitOk r "config name"
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add v1.2.0"
+        runCmd commonRepo "git" ["commit"; "-m"; "v1.2.0"] |> fun r -> ensureGitOk r "commit v1.2.0"
+        runCmd commonRepo "git" ["tag"; "v1.2.0"] |> fun r -> ensureGitOk r "tag v1.2.0"
+
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 110\n")
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add v1.10.0"
+        runCmd commonRepo "git" ["commit"; "-m"; "v1.10.0"] |> fun r -> ensureGitOk r "commit v1.10.0"
+        runCmd commonRepo "git" ["tag"; "v1.10.0"] |> fun r -> ensureGitOk r "tag v1.10.0"
+
+        let repoUrl = commonRepo.Replace("\\", "/")
+
+        File.WriteAllText(
+            Path.Combine(depARoot, "lll.toml"),
+            "[project]\nname = \"depa\"\n\n[deps]\ncommon = \"" + repoUrl + "#v1.2.0\"\n")
+        File.WriteAllText(Path.Combine(depARoot, "src", "Main.lll"), "module Depa.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(depBRoot, "lll.toml"),
+            "[project]\nname = \"depb\"\n\n[deps]\ncommon = \"" + repoUrl + "#v1.10.0\"\n")
+        File.WriteAllText(Path.Combine(depBRoot, "src", "Main.lll"), "module Depb.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ndepa = { path = \"../dep-a\" }\ndepb = { path = \"../dep-b\" }\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+
+        let (code, outText, errText) = runLllc appRoot ["install"]
+        Assert.True((code = 0), $"install should prefer v1.10.0 over v1.2.0\nstdout:\n{outText}\nstderr:\n{errText}")
+        let resolvedCommonMain = Path.Combine(appRoot, "vendor", "common", "src", "Main.lll")
+        Assert.True(File.Exists(resolvedCommonMain), "vendor/common/src/Main.lll should exist after install")
+        let commonMain = File.ReadAllText(resolvedCommonMain)
+        Assert.Contains("export v() Int = 110", commonMain)
+    )
+
+[<Fact>]
+let ``lllc install semver convergence is idempotent across repeated runs`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depBRoot = Path.Combine(root, "dep-b")
+        let commonRepo = Path.Combine(root, "common-repo")
+
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depBRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(commonRepo, "src")) |> ignore
+
+        let ensureGitOk (code: int, so: string, se: string) (ctx: string) =
+            Assert.True((code = 0), $"git command failed ({ctx})\nstdout:\n{so}\nstderr:\n{se}")
+
+        File.WriteAllText(Path.Combine(commonRepo, "lll.toml"), "[project]\nname = \"common\"\n")
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 1\n")
+        runCmd commonRepo "git" ["init"] |> fun r -> ensureGitOk r "init"
+        runCmd commonRepo "git" ["config"; "user.email"; "tests@example.com"] |> fun r -> ensureGitOk r "config email"
+        runCmd commonRepo "git" ["config"; "user.name"; "LLLang Tests"] |> fun r -> ensureGitOk r "config name"
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add v1"
+        runCmd commonRepo "git" ["commit"; "-m"; "v1"] |> fun r -> ensureGitOk r "commit v1"
+        runCmd commonRepo "git" ["tag"; "v1"] |> fun r -> ensureGitOk r "tag v1"
+
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 2\n")
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add v2"
+        runCmd commonRepo "git" ["commit"; "-m"; "v2"] |> fun r -> ensureGitOk r "commit v2"
+        runCmd commonRepo "git" ["tag"; "v2"] |> fun r -> ensureGitOk r "tag v2"
+
+        let repoUrl = commonRepo.Replace("\\", "/")
+        File.WriteAllText(
+            Path.Combine(depBRoot, "lll.toml"),
+            "[project]\nname = \"depb\"\n\n[deps]\ncommon = \"" + repoUrl + "#v2\"\n")
+        File.WriteAllText(Path.Combine(depBRoot, "src", "Main.lll"), "module Depb.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ncommon = \"" + repoUrl + "#v1\"\ndepb = { path = \"../dep-b\" }\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+
+        let (code1, out1, err1) = runLllc appRoot ["install"]
+        Assert.True((code1 = 0), $"first install should converge\nstdout:\n{out1}\nstderr:\n{err1}")
+        let llSumPath = Path.Combine(appRoot, "ll.sum")
+        Assert.True(File.Exists(llSumPath), "ll.sum should exist after first install")
+        let sum1 = File.ReadAllText(llSumPath)
+        let commonMain1 = File.ReadAllText(Path.Combine(appRoot, "vendor", "common", "src", "Main.lll"))
+        Assert.Contains("export v() Int = 2", commonMain1)
+
+        let (code2, out2, err2) = runLllc appRoot ["install"]
+        Assert.True((code2 = 0), $"second install should stay stable\nstdout:\n{out2}\nstderr:\n{err2}")
+        let sum2 = File.ReadAllText(llSumPath)
+        Assert.Equal(sum1, sum2)
+        let commonMain2 = File.ReadAllText(Path.Combine(appRoot, "vendor", "common", "src", "Main.lll"))
+        Assert.Contains("export v() Int = 2", commonMain2)
+    )
+
+[<Fact>]
+let ``lllc install prefers deterministic winner when transitive git deps resolve same name from non-semver refs`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depARoot = Path.Combine(root, "dep-a")
+        let depBRoot = Path.Combine(root, "dep-b")
+        let commonRepo = Path.Combine(root, "common-repo")
+
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depARoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depBRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(commonRepo, "src")) |> ignore
+
+        let ensureGitOk (code: int, so: string, se: string) (ctx: string) =
+            Assert.True((code = 0), $"git command failed ({ctx})\nstdout:\n{so}\nstderr:\n{se}")
+
+        File.WriteAllText(Path.Combine(commonRepo, "lll.toml"), "[project]\nname = \"common\"\n")
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 10\n")
+        runCmd commonRepo "git" ["init"] |> fun r -> ensureGitOk r "init"
+        runCmd commonRepo "git" ["config"; "user.email"; "tests@example.com"] |> fun r -> ensureGitOk r "config email"
+        runCmd commonRepo "git" ["config"; "user.name"; "LLLang Tests"] |> fun r -> ensureGitOk r "config name"
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add alpha"
+        runCmd commonRepo "git" ["commit"; "-m"; "alpha"] |> fun r -> ensureGitOk r "commit alpha"
+        runCmd commonRepo "git" ["tag"; "alpha"] |> fun r -> ensureGitOk r "tag alpha"
+
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 20\n")
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add beta"
+        runCmd commonRepo "git" ["commit"; "-m"; "beta"] |> fun r -> ensureGitOk r "commit beta"
+        runCmd commonRepo "git" ["tag"; "beta"] |> fun r -> ensureGitOk r "tag beta"
+
+        let repoUrl = commonRepo.Replace("\\", "/")
+
+        File.WriteAllText(
+            Path.Combine(depARoot, "lll.toml"),
+            "[project]\nname = \"depa\"\n\n[deps]\ncommon = \"" + repoUrl + "#alpha\"\n")
+        File.WriteAllText(Path.Combine(depARoot, "src", "Main.lll"), "module Depa.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(depBRoot, "lll.toml"),
+            "[project]\nname = \"depb\"\n\n[deps]\ncommon = \"" + repoUrl + "#beta\"\n")
+        File.WriteAllText(Path.Combine(depBRoot, "src", "Main.lll"), "module Depb.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ndepa = { path = \"../dep-a\" }\ndepb = { path = \"../dep-b\" }\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+
+        let (code, outText, errText) = runLllc appRoot ["install"]
+        Assert.True((code = 0), $"install should pick deterministic non-semver winner\nstdout:\n{outText}\nstderr:\n{errText}")
+        let resolvedCommonMain = Path.Combine(appRoot, "vendor", "common", "src", "Main.lll")
+        Assert.True(File.Exists(resolvedCommonMain), "vendor/common/src/Main.lll should exist after install")
+        let commonMain = File.ReadAllText(resolvedCommonMain)
+        // beta > alpha lexically, so resolver should converge to beta.
+        Assert.Contains("export v() Int = 20", commonMain)
+    )
+
+[<Fact>]
+let ``lllc install prefers semver tag over non-semver ref for same-repo git conflicts`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depARoot = Path.Combine(root, "dep-a")
+        let depBRoot = Path.Combine(root, "dep-b")
+        let commonRepo = Path.Combine(root, "common-repo")
+
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depARoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depBRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(commonRepo, "src")) |> ignore
+
+        let ensureGitOk (code: int, so: string, se: string) (ctx: string) =
+            Assert.True((code = 0), $"git command failed ({ctx})\nstdout:\n{so}\nstderr:\n{se}")
+
+        File.WriteAllText(Path.Combine(commonRepo, "lll.toml"), "[project]\nname = \"common\"\n")
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 10\n")
+        runCmd commonRepo "git" ["init"] |> fun r -> ensureGitOk r "init"
+        runCmd commonRepo "git" ["config"; "user.email"; "tests@example.com"] |> fun r -> ensureGitOk r "config email"
+        runCmd commonRepo "git" ["config"; "user.name"; "LLLang Tests"] |> fun r -> ensureGitOk r "config name"
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add v1.0.0"
+        runCmd commonRepo "git" ["commit"; "-m"; "v1.0.0"] |> fun r -> ensureGitOk r "commit v1.0.0"
+        runCmd commonRepo "git" ["tag"; "v1.0.0"] |> fun r -> ensureGitOk r "tag v1.0.0"
+
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 20\n")
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add alpha"
+        runCmd commonRepo "git" ["commit"; "-m"; "alpha"] |> fun r -> ensureGitOk r "commit alpha"
+        runCmd commonRepo "git" ["tag"; "alpha"] |> fun r -> ensureGitOk r "tag alpha"
+
+        let repoUrl = commonRepo.Replace("\\", "/")
+
+        File.WriteAllText(
+            Path.Combine(depARoot, "lll.toml"),
+            "[project]\nname = \"depa\"\n\n[deps]\ncommon = \"" + repoUrl + "#alpha\"\n")
+        File.WriteAllText(Path.Combine(depARoot, "src", "Main.lll"), "module Depa.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(depBRoot, "lll.toml"),
+            "[project]\nname = \"depb\"\n\n[deps]\ncommon = \"" + repoUrl + "#v1.0.0\"\n")
+        File.WriteAllText(Path.Combine(depBRoot, "src", "Main.lll"), "module Depb.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ndepa = { path = \"../dep-a\" }\ndepb = { path = \"../dep-b\" }\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+
+        let (code, outText, errText) = runLllc appRoot ["install"]
+        Assert.True((code = 0), $"install should prefer semver over non-semver\nstdout:\n{outText}\nstderr:\n{errText}")
+        let resolvedCommonMain = Path.Combine(appRoot, "vendor", "common", "src", "Main.lll")
+        Assert.True(File.Exists(resolvedCommonMain), "vendor/common/src/Main.lll should exist after install")
+        let commonMain = File.ReadAllText(resolvedCommonMain)
+        Assert.Contains("export v() Int = 10", commonMain)
+    )
+
+[<Fact>]
+let ``lllc install uses ll.sum pinned source for non-semver same-repo conflicts`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depARoot = Path.Combine(root, "dep-a")
+        let depBRoot = Path.Combine(root, "dep-b")
+        let commonRepo = Path.Combine(root, "common-repo")
+
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depARoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depBRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(commonRepo, "src")) |> ignore
+
+        let ensureGitOk (code: int, so: string, se: string) (ctx: string) =
+            Assert.True((code = 0), $"git command failed ({ctx})\nstdout:\n{so}\nstderr:\n{se}")
+
+        File.WriteAllText(Path.Combine(commonRepo, "lll.toml"), "[project]\nname = \"common\"\n")
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 10\n")
+        runCmd commonRepo "git" ["init"] |> fun r -> ensureGitOk r "init"
+        runCmd commonRepo "git" ["config"; "user.email"; "tests@example.com"] |> fun r -> ensureGitOk r "config email"
+        runCmd commonRepo "git" ["config"; "user.name"; "LLLang Tests"] |> fun r -> ensureGitOk r "config name"
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add alpha"
+        runCmd commonRepo "git" ["commit"; "-m"; "alpha"] |> fun r -> ensureGitOk r "commit alpha"
+        runCmd commonRepo "git" ["tag"; "alpha"] |> fun r -> ensureGitOk r "tag alpha"
+
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 20\n")
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "add beta"
+        runCmd commonRepo "git" ["commit"; "-m"; "beta"] |> fun r -> ensureGitOk r "commit beta"
+        runCmd commonRepo "git" ["tag"; "beta"] |> fun r -> ensureGitOk r "tag beta"
+
+        let repoUrl = commonRepo.Replace("\\", "/")
+
+        File.WriteAllText(
+            Path.Combine(depARoot, "lll.toml"),
+            "[project]\nname = \"depa\"\n\n[deps]\ncommon = \"" + repoUrl + "#alpha\"\n")
+        File.WriteAllText(Path.Combine(depARoot, "src", "Main.lll"), "module Depa.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(depBRoot, "lll.toml"),
+            "[project]\nname = \"depb\"\n\n[deps]\ncommon = \"" + repoUrl + "#beta\"\n")
+        File.WriteAllText(Path.Combine(depBRoot, "src", "Main.lll"), "module Depb.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ndepa = { path = \"../dep-a\" }\ndepb = { path = \"../dep-b\" }\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+
+        // Pin winner in lock file: resolver should follow this over deterministic lexical winner.
+        File.WriteAllText(
+            Path.Combine(appRoot, "ll.sum"),
+            "common git:" + repoUrl + "#alpha sha256:lockpin\n")
+
+        let (code, outText, errText) = runLllc appRoot ["install"]
+        Assert.True((code = 0), $"install should respect ll.sum non-semver pin\nstdout:\n{outText}\nstderr:\n{errText}")
+        let resolvedCommonMain = Path.Combine(appRoot, "vendor", "common", "src", "Main.lll")
+        Assert.True(File.Exists(resolvedCommonMain), "vendor/common/src/Main.lll should exist after install")
+        let commonMain = File.ReadAllText(resolvedCommonMain)
+        Assert.Contains("export v() Int = 10", commonMain)
+    )
+
+[<Fact>]
+let ``lllc mod add with path source updates manifest and installs dependency`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depRoot = Path.Combine(root, "dep")
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depRoot, "src")) |> ignore
+
+        File.WriteAllText(Path.Combine(appRoot, "lll.toml"), "[project]\nname = \"app\"\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+        File.WriteAllText(Path.Combine(depRoot, "lll.toml"), "[project]\nname = \"dep\"\n")
+        File.WriteAllText(Path.Combine(depRoot, "src", "Util.lll"), "module Dep.Util\n\nexport value() Int = 1\n")
+
+        let rel = Path.GetRelativePath(appRoot, depRoot).Replace('\\', '/')
+        let (code, outText, errText) = runLllc appRoot ["mod"; "add"; "dep=" + "path:" + rel]
+        Assert.True((code = 0), $"mod add should succeed\nstdout:\n{outText}\nstderr:\n{errText}")
+
+        let manifest = File.ReadAllText(Path.Combine(appRoot, "lll.toml"))
+        Assert.Contains("dep = { path = \"" + rel + "\" }", manifest)
+        Assert.True(Directory.Exists(Path.Combine(appRoot, "vendor", "dep")), "vendor/dep should exist after mod add")
+        Assert.True(File.Exists(Path.Combine(appRoot, "ll.sum")), "ll.sum should exist after mod add")
+    )
+
+[<Fact>]
+let ``lllc mod tidy removes stale vendor entries`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depRoot = Path.Combine(root, "dep")
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(appRoot, "vendor", "stale")) |> ignore
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ndep = { path = \"../dep\" }\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+        File.WriteAllText(Path.Combine(depRoot, "lll.toml"), "[project]\nname = \"dep\"\n")
+        File.WriteAllText(Path.Combine(depRoot, "src", "Util.lll"), "module Dep.Util\n\nexport value() Int = 1\n")
+
+        let (code, outText, errText) = runLllc appRoot ["mod"; "tidy"]
+        Assert.True((code = 0), $"mod tidy should succeed\nstdout:\n{outText}\nstderr:\n{errText}")
+        Assert.False(Directory.Exists(Path.Combine(appRoot, "vendor", "stale")), "stale vendor dir should be removed by mod tidy")
+        Assert.True(Directory.Exists(Path.Combine(appRoot, "vendor", "dep")), "declared dependency should remain in vendor after mod tidy")
+    )
+
+[<Fact>]
+let ``lllc mod why reports local importers for declared dependency`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depRoot = Path.Combine(root, "dep")
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depRoot, "src")) |> ignore
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ndep = { path = \"../dep\" }\n")
+        File.WriteAllText(
+            Path.Combine(appRoot, "src", "Main.lll"),
+            "module App.Main\nimport Dep.Util\n\nmain() Int = value()\n")
+        File.WriteAllText(Path.Combine(depRoot, "lll.toml"), "[project]\nname = \"dep\"\n")
+        File.WriteAllText(Path.Combine(depRoot, "src", "Util.lll"), "module Dep.Util\n\nexport value() Int = 1\n")
+
+        let (installCode, installOut, installErr) = runLllc appRoot ["install"]
+        Assert.True((installCode = 0), $"install should succeed before mod why\nstdout:\n{installOut}\nstderr:\n{installErr}")
+
+        let (code, outText, errText) = runLllc appRoot ["mod"; "why"; "dep"]
+        Assert.True((code = 0), $"mod why should succeed for declared dependency\nstdout:\n{outText}\nstderr:\n{errText}")
+        Assert.Contains("dep is imported by:", outText)
+        Assert.Contains("App.Main", outText)
+        Assert.Contains("dependency chain: app -> dep", outText)
+    )
+
+[<Fact>]
+let ``lllc mod why reports transitive dependency chain`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depARoot = Path.Combine(root, "depa")
+        let depBRoot = Path.Combine(root, "depb")
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depARoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depBRoot, "src")) |> ignore
+
+        File.WriteAllText(Path.Combine(depBRoot, "lll.toml"), "[project]\nname = \"depb\"\n")
+        File.WriteAllText(Path.Combine(depBRoot, "src", "Main.lll"), "module Depb.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(depARoot, "lll.toml"),
+            "[project]\nname = \"depa\"\n\n[deps]\ndepb = { path = \"../depb\" }\n")
+        File.WriteAllText(Path.Combine(depARoot, "src", "Main.lll"), "module Depa.Main\n\nexport v() Int = 2\n")
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ndepa = { path = \"../depa\" }\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\nimport Depa.Main\n\nmain() Int = v()\n")
+
+        let (installCode, installOut, installErr) = runLllc appRoot ["install"]
+        Assert.True((installCode = 0), $"install should succeed before mod why depb\nstdout:\n{installOut}\nstderr:\n{installErr}")
+
+        let (code, outText, errText) = runLllc appRoot ["mod"; "why"; "depb"]
+        Assert.True((code = 0), $"mod why should resolve transitive dependency chain\nstdout:\n{outText}\nstderr:\n{errText}")
+        Assert.Contains("no local modules directly import depb", outText)
+        Assert.Contains("dependency chain: app -> depa -> depb", outText)
+    )
+
+[<Fact>]
+let ``lllc mod why fails for undeclared dependency`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        File.WriteAllText(Path.Combine(appRoot, "lll.toml"), "[project]\nname = \"app\"\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+
+        let (code, outText, errText) = runLllc appRoot ["mod"; "why"; "missing"]
+        Assert.True((code <> 0), $"mod why should fail for undeclared dependency\nstdout:\n{outText}\nstderr:\n{errText}")
+        Assert.Contains("dependency 'missing' is not present in resolved dependency graph", errText)
     )

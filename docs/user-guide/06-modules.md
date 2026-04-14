@@ -25,15 +25,23 @@ fn firstDoubled(xs List[Int]) Maybe[Int] =
 
 Each `import` declares a dependency on another module. Imports appear immediately after the module header, before any declarations.
 
-The **implicit prelude** (~50 stdlib functions) is always in scope without any `import`. Writing `import Std.List` currently parses correctly but is a no-op — all prelude names are already visible.
+In project mode, only explicitly imported modules contribute cross-module names during front-end checking.  
+The implicit prelude (~50 stdlib functions) is still always in scope without any `import`.
 
 ## Exports
 
 ```lll
-export fn greet(name Str) Str = "hello " ++ name
+export { greet }
+
+greet(name Str) Str = "hello " ++ name
 ```
 
-Prefixing a declaration with `export` marks it as public to other modules. Without `export`, a declaration is private to the file.
+Canonical surface: one module-level export list (`export { ... }`) placed after imports.
+
+Current compatibility behavior:
+- if `export { ... }` exists, imports only see listed names;
+- if export list is absent, imports see all top-level names (compatibility fallback);
+- legacy `export decl` still parses for compatibility, but does not by itself restrict visibility.
 
 ---
 
@@ -44,7 +52,7 @@ For multi-file programs, create a project manifest `lll.toml` at the project roo
 ```toml
 [project]
 name    = "myapp"
-version = "0.8.0"       # optional
+version = "1.0.0"       # optional
 entry   = "src/Main.lll"  # optional, default src/Main.lll
 
 [deps]
@@ -106,7 +114,9 @@ Output: `bin/myapp.fs` + `bin/myapp.fsproj` (ready for `dotnet build`).
 ```lll
 module Hello.Greet
 
-export fn greet(name Str) Str = "Hello, " ++ name ++ "!"
+export { greet }
+
+greet(name Str) Str = "Hello, " ++ name ++ "!"
 ```
 
 `src/Main.lll`:
@@ -144,8 +154,8 @@ lllc build   # → bin/hello.fs (both modules concatenated)
 - **No dep resolution yet.** The `[deps]` section is parsed and schema-frozen but packages are not fetched. Writing a dep that isn't vendored locally produces `E022 UnresolvedDep` (only when actually imported).
 - **`[platform]` target selection is live, `Platform.*` module APIs are still partial.**  
   The manifest's `[platform] use = [...]` and `Platform.*.SDK` aliases are wired into build/CLI flow, but many `import Platform.*` module surfaces are still being implemented incrementally.
-- **Cross-module type checking is partial.** Each file is elaborated and type-checked independently; F# handles cross-module type resolution in the concatenated output. This means `E002 UnboundVar` may not fire for missing imported names at compile time — but `dotnet build` will catch them.
-- **No `export` visibility enforcement yet.** The `export` flag is tracked in the AST but not enforced — every declaration is accessible.
+- **Cross-module checking is import-scoped, but still file-local in inference.** The compiler now only imports names from declared `import` dependencies (no global sibling leakage), yet each file is still inferred independently and backend builds remain the final authority for some cross-file mismatches.
+- **Visibility is export-list first.** Add `export { ... }` to enforce a stable module API; modules without export-list stay all-visible for compatibility.
 
 ## Practical advice
 

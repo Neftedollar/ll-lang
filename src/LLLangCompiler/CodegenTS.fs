@@ -126,6 +126,19 @@ let private tryAsBinOp (te: TypedExpr) : (string * TypedExpr * TypedExpr) option
         | _ -> None
     | _ -> None
 
+let private tryAsSymbolicOp (te: TypedExpr) : (string * TypedExpr * TypedExpr) option =
+    match te.Expr with
+    | TEApp(outer, right) ->
+        match outer.Expr with
+        | TEApp(inner, left) ->
+            match inner.Expr with
+            | TEVar (">>=" as op)
+            | TEVar (">>" as op)
+            | TEVar ("<|>" as op) -> Some (op, left, right)
+            | _ -> None
+        | _ -> None
+    | _ -> None
+
 // ── Stdlib call mapping ───────────────────────────────────────────────────────
 // ll-lang stdlib name → TypeScript expression (may be partial application)
 
@@ -377,6 +390,14 @@ and private emitExprTS (te: TypedExpr) : string =
             else "(" + argStr + " as " + expectedTs + ")"
         | _ -> argStr
 
+    match tryAsSymbolicOp te with
+    | Some (">>=", left, right) ->
+        "(" + emitExprTS right + ")(" + emitArgFor right.Type left + ")"
+    | Some (">>", _, right) ->
+        "(" + emitExprTS right + ")"
+    | Some ("<|>", left, _) ->
+        "(" + emitExprTS left + ")"
+    | _ ->
     // String concat
     match tryAsStrConcat te with
     | Some (a, b) -> "(" + emitExprTS a + " + " + emitExprTS b + ")"

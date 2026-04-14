@@ -1,0 +1,88 @@
+module Std.List
+
+import Std.Maybe
+
+listTake(n Int)(xs List[A]) =
+  if n <= 0
+    []
+  else
+    match xs
+      | h :: t -> h :: (listTake (n - 1) t)
+      | [] -> []
+
+listDrop(n Int)(xs List[A]) =
+  if n <= 0
+    xs
+  else
+    match xs
+      | _ :: t -> listDrop (n - 1) t
+      | [] -> []
+
+listFlatMap(f A -> List[B])(xs List[A]) =
+  listConcat (listMap f xs)
+
+listAny(p A -> Bool)(xs List[A]) =
+  listFold
+    (\acc x.
+      if acc
+        true
+      else p x
+    )
+    false
+    xs
+
+listAll(p A -> Bool)(xs List[A]) =
+  listFold
+    (\acc x.
+      if acc
+        p x
+      else false
+    )
+    true
+    xs
+
+listFind(p A -> Bool)(xs List[A]) =
+  match xs
+    | h :: t ->
+      if p h
+        Some h
+      else listFind p t
+    | [] -> None
+
+listFindIndexFrom(i Int)(p A -> Bool)(xs List[A]) =
+  match xs
+    | h :: t ->
+      if p h
+        Some i
+      else listFindIndexFrom (i + 1) p t
+    | [] -> None
+
+listFindIndex(p A -> Bool)(xs List[A]) =
+  listFindIndexFrom 0 p xs
+
+listPartition(p A -> Bool)(xs List[A]) =
+  foldedPair =
+    listFold
+      (\acc x.
+        match acc
+          | (ys, ns) ->
+            if p x
+              ((x :: ys), ns)
+            else
+              (ys, (x :: ns))
+      )
+      ([], [])
+      xs
+  match foldedPair
+    | (ys, ns) -> ((listReverse ys), (listReverse ns))
+
+-- ---- Self-checks -------------------------------------------------------------
+
+check(label Str)(ok Bool) =
+  if ok
+    _ = printfn (strConcat "OK " label)
+    0
+  else
+    _ = printfn (strConcat "FAIL " label)
+    1
+

@@ -3,7 +3,10 @@ module LLLang.Tool
 open System
 open System.IO
 open System.Diagnostics
+open System.Security.Cryptography
+open System.Text
 open System.Text.RegularExpressions
+open LLLang.AST
 open LLLang.Elaborator
 open LLLang.Compiler
 open LLLang.Manifest
@@ -75,6 +78,19 @@ let private targetExt (target: Target) = targetOutputExt target
 let private targetOrDefault (targetOpt: Target option) : Target =
     targetOpt |> Option.defaultValue FSharp
 
+let private moduleHasTopLevelMain (m: LLModule) : bool =
+    m.Decls
+    |> List.exists (fun (decl, _) ->
+        match decl with
+        | DFn(sig_, _) -> sig_.Name = "main"
+        | DLet(name, _) -> name = "main"
+        | _ -> false)
+
+let private sourceHasTopLevelMain (src: string) : bool =
+    match parseModuleWithPos src with
+    | Ok (m, _) -> moduleHasTopLevelMain m
+    | Error _ -> false
+
 let private resolveProjectTargets (manifestPlatforms: string list) : Result<Target list, string list> =
     let platforms =
         if manifestPlatforms.IsEmpty then ["fsharp"]
@@ -113,16 +129,25 @@ let private templateOutputFileName (projectName: string) (templatePath: string) 
     | ".csproj" -> projectName + ext
     | _ -> fileName
 
-let private writeRuntimeTemplateIfAvailable (projectName: string) (target: Target) (outDir: string) (mainFileName: string) : string option =
+let private writeRuntimeTemplateIfAvailable
+    (projectName: string)
+    (target: Target)
+    (outDir: string)
+    (mainFileName: string)
+    (isExecutable: bool)
+    : string option =
     match tryResolveRuntimeTemplate target with
     | None -> None
     | Some templatePath ->
         let mainFileStem = fileNameWithoutExtensionOrEmpty mainFileName
+        let outputType = if isExecutable then "Exe" else "Library"
         let rendered =
             File.ReadAllText(templatePath)
                 .Replace("{project_name}", projectName)
                 .Replace("{main_file}", mainFileName)
                 .Replace("{main_file_stem}", mainFileStem)
+                .Replace("{output_type}", outputType)
+                .Replace("<OutputType>Exe</OutputType>", "<OutputType>" + outputType + "</OutputType>")
         let outFile = templateOutputFileName projectName templatePath
         let outPath = Path.Combine(outDir, outFile)
         File.WriteAllText(outPath, rendered)
@@ -207,6 +232,7 @@ let private printSdkSuggestions (artifact: EmittedArtifact) : unit =
 let private cmdBuild (path: string) (target: Target) : int =
     try
         let src = File.ReadAllText(path)
+        let isExecutable = sourceHasTopLevelMain src
         match compileTarget target src with
         | Ok out ->
             let outPath = changeExtensionOrInput path (targetExt target)
@@ -214,7 +240,7 @@ let private cmdBuild (path: string) (target: Target) : int =
             let outDir = directoryNameOrCurrent outPath
             let stem = fileNameOrEmpty outPath
             let projectStem = fileNameWithoutExtensionOrEmpty outPath
-            let templatePath = writeRuntimeTemplateIfAvailable projectStem target outDir stem
+            let templatePath = writeRuntimeTemplateIfAvailable projectStem target outDir stem isExecutable
             Console.WriteLine("Built " + stem)
             let artifact =
                 {
@@ -236,14 +262,20 @@ let private cmdBuild (path: string) (target: Target) : int =
         1
 
 /// Write output files for one target into bin/<platform>/.
-let private writeTargetOutput (rootDir: string) (name: string) (target: Target) (code: string) : EmittedArtifact =
+let private writeTargetOutput
+    (rootDir: string)
+    (name: string)
+    (target: Target)
+    (code: string)
+    (isExecutable: bool)
+    : EmittedArtifact =
     let platform = targetPlatformName target
     let outDir = Path.Combine(rootDir, "bin", platform)
     Directory.CreateDirectory(outDir) |> ignore
     let writeMainAndTemplate (ext: string) =
         let outPath = Path.Combine(outDir, name + ext)
         File.WriteAllText(outPath, code)
-        let templatePath = writeRuntimeTemplateIfAvailable name target outDir (fileNameOrEmpty outPath)
+        let templatePath = writeRuntimeTemplateIfAvailable name target outDir (fileNameOrEmpty outPath) isExecutable
         outPath, templatePath
     match target with
     | FSharp ->
@@ -251,9 +283,10 @@ let private writeTargetOutput (rootDir: string) (name: string) (target: Target) 
         let (outPath, templateProjectPath) = writeMainAndTemplate ".fs"
         let projectPath = Path.Combine(outDir, name + ".fsproj")
         if not (File.Exists(projectPath)) then
+            let outputType = if isExecutable then "Exe" else "Library"
             let fsproj = $"""<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>{outputType}</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>preview</LangVersion>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
@@ -287,7 +320,12 @@ let private writeTargetOutput (rootDir: string) (name: string) (target: Target) 
 
 /// Write multi-file F# output into bin/fsharp/ — one .fs per module plus Prelude.fs.
 /// Generates a .fsproj that lists every file in the correct compilation order.
-let private writeTargetOutputMultiFile (rootDir: string) (name: string) (files: (string * string) list) : EmittedArtifact =
+let private writeTargetOutputMultiFile
+    (rootDir: string)
+    (name: string)
+    (files: (string * string) list)
+    (isExecutable: bool)
+    : EmittedArtifact =
     let outDir = Path.Combine(rootDir, "bin", "fsharp")
     Directory.CreateDirectory(outDir) |> ignore
     for (fileName, content) in files do
@@ -296,10 +334,11 @@ let private writeTargetOutputMultiFile (rootDir: string) (name: string) (files: 
         files
         |> List.map (fun (fn, _) -> sprintf "    <Compile Include=\"%s\" />" fn)
         |> String.concat "\n"
+    let outputType = if isExecutable then "Exe" else "Library"
     let fsproj =
         "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
         + "  <PropertyGroup>\n"
-        + "    <OutputType>Exe</OutputType>\n"
+        + "    <OutputType>" + outputType + "</OutputType>\n"
         + "    <TargetFramework>net10.0</TargetFramework>\n"
         + "    <LangVersion>preview</LangVersion>\n"
         + "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
@@ -327,7 +366,12 @@ let private writeTargetOutputMultiFile (rootDir: string) (name: string) (files: 
         JavaClassName = None
     }
 
-let private writeSiblingFSharpFilesAndProject (outDir: string) (name: string) (files: (string * string) list) : EmittedArtifact =
+let private writeSiblingFSharpFilesAndProject
+    (outDir: string)
+    (name: string)
+    (files: (string * string) list)
+    (isExecutable: bool)
+    : EmittedArtifact =
     Directory.CreateDirectory(outDir) |> ignore
     for (fileName, content) in files do
         File.WriteAllText(Path.Combine(outDir, fileName), content)
@@ -335,10 +379,11 @@ let private writeSiblingFSharpFilesAndProject (outDir: string) (name: string) (f
         files
         |> List.map (fun (fn, _) -> "    <Compile Include=\"" + fn + "\" />")
         |> String.concat "\n"
+    let outputType = if isExecutable then "Exe" else "Library"
     let fsproj =
         "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
         + "  <PropertyGroup>\n"
-        + "    <OutputType>Exe</OutputType>\n"
+        + "    <OutputType>" + outputType + "</OutputType>\n"
         + "    <TargetFramework>net10.0</TargetFramework>\n"
         + "    <LangVersion>preview</LangVersion>\n"
         + "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
@@ -372,6 +417,7 @@ let private cmdBuildProject (rootDir: string) (targetOverride: Target option) : 
         match loadProject rootDir with
         | Error es -> printErrors es; 1
         | Ok proj ->
+            let isExecutableProject = not (String.IsNullOrWhiteSpace proj.Manifest.Entry)
             let compileForTarget (target: Target) =
                 match LLLang.Compiler.compileProjectToModulesForTarget target proj with
                 | Error es ->
@@ -383,22 +429,22 @@ let private cmdBuildProject (rootDir: string) (targetOverride: Target option) : 
                         | FSharp ->
                             // Multi-file: Prelude.fs + one .fs per module, valid .fsproj.
                             let files = LLLang.Codegen.emitProjectFiles tms
-                            writeTargetOutputMultiFile rootDir proj.Manifest.Name files
+                            writeTargetOutputMultiFile rootDir proj.Manifest.Name files isExecutableProject
                         | TypeScript ->
                             let code = LLLang.CodegenTS.emitProjectModules tms
-                            writeTargetOutput rootDir proj.Manifest.Name TypeScript code
+                            writeTargetOutput rootDir proj.Manifest.Name TypeScript code isExecutableProject
                         | Python ->
                             let code = LLLang.CodegenPy.emitProjectModules tms
-                            writeTargetOutput rootDir proj.Manifest.Name Python code
+                            writeTargetOutput rootDir proj.Manifest.Name Python code isExecutableProject
                         | Java ->
                             let code = LLLang.CodegenJava.emitProjectModules tms
-                            writeTargetOutput rootDir proj.Manifest.Name Java code
+                            writeTargetOutput rootDir proj.Manifest.Name Java code isExecutableProject
                         | CSharp ->
                             let code = LLLang.CodegenCSharp.emitProjectModules tms
-                            writeTargetOutput rootDir proj.Manifest.Name CSharp code
+                            writeTargetOutput rootDir proj.Manifest.Name CSharp code isExecutableProject
                         | LLVM ->
                             let code = LLLang.CodegenLLVM.emitProjectModules tms
-                            writeTargetOutput rootDir proj.Manifest.Name LLVM code
+                            writeTargetOutput rootDir proj.Manifest.Name LLVM code isExecutableProject
                     printSdkSuggestions artifact
                     true
             let targetsResult =
@@ -521,15 +567,12 @@ let private findStdlibDir (mainFilePath: string) : string option =
 
 /// Parse imports out of a .lll source string without failing if there are errors.
 let private extractImports (src: string) : string list list =
-    match tokenize src with
+    match parseModuleWithPos src with
     | Error _ -> []
-    | Ok toks ->
-        match parseModuleWithPos toks with
-        | Error _ -> []
-        | Ok (m, _) -> m.Imports
+    | Ok (m, _) -> m.Imports
 
 /// Given an import path like ["Std"; "Maybe"], find the file on disk.
-/// Searches stdlib/src/, .ll-deps/ relative to mainFileDir, and mainFileDir itself.
+/// Searches stdlib/src/, vendor/ relative to mainFileDir, and mainFileDir itself.
 let private resolveImport (mainFilePath: string) (importPath: string list) : string option =
     let mainFileDir = directoryNameOrCurrent mainFilePath
     // Derive filename: last segment + .lll
@@ -544,10 +587,10 @@ let private resolveImport (mainFilePath: string) (importPath: string list) : str
             let relParts = List.tail importPath  // drop "Std" prefix
             let relPath = Path.Combine(relParts |> Array.ofList) + ".lll"
             [ Path.Combine(stdlibSrc, relPath) ]
-    // For .ll-deps/: depName matches first segment (lowercased)
+    // For vendor/: depName matches first segment (lowercased)
     let depCandidates =
         let depName = (List.head importPath).ToLower()
-        let depSrc = Path.Combine(mainFileDir, ".ll-deps", depName, "src")
+        let depSrc = Path.Combine(mainFileDir, "vendor", depName, "src")
         let relParts = List.tail importPath
         if relParts.IsEmpty then []
         else
@@ -661,6 +704,7 @@ let private cmdBuildFile (path: string) (targetOverride: Target option) : int =
     try
         let absPath = Path.GetFullPath(path)
         let src = File.ReadAllText(absPath)
+        let isExecutable = sourceHasTopLevelMain src
         let target = targetOrDefault targetOverride
         match resolveRunImports absPath src with
         | Error msg ->
@@ -686,7 +730,7 @@ let private cmdBuildFile (path: string) (targetOverride: Target option) : int =
                     | FSharp when List.length tms > 1 ->
                         // Multi-module single-file builds must stay multi-file for valid F#.
                         let filesOut = LLLang.Codegen.emitProjectFiles tms
-                        let built = writeSiblingFSharpFilesAndProject rootDir stem filesOut
+                        let built = writeSiblingFSharpFilesAndProject rootDir stem filesOut isExecutable
                         let outPath = Path.Combine(rootDir, stem + ".fs")
                         Console.WriteLine("Built " + fileNameOrEmpty outPath)
                         built
@@ -703,7 +747,7 @@ let private cmdBuildFile (path: string) (targetOverride: Target option) : int =
                         File.WriteAllText(outPath, out)
                         let outDir = directoryNameOrCurrent outPath
                         let stemOut = fileNameWithoutExtensionOrEmpty outPath
-                        let templatePath = writeRuntimeTemplateIfAvailable stemOut target outDir (fileNameOrEmpty outPath)
+                        let templatePath = writeRuntimeTemplateIfAvailable stemOut target outDir (fileNameOrEmpty outPath) isExecutable
                         Console.WriteLine("Built " + fileNameOrEmpty outPath)
                         {
                             Target = target
@@ -808,7 +852,54 @@ let private cmdRunViaSdk (path: string) (target: Target) : int =
             Console.WriteLine("Running: " + resolved)
             runShellCommand artifact.OutDir resolved
 
-/// Run: compile file.lll → temp .fsx → dotnet fsi. Returns exit code.
+let private runDotnetProject (projectPath: string) (workingDir: string option) (toolArgs: string list) : int =
+    let buildPsi = ProcessStartInfo("dotnet")
+    buildPsi.ArgumentList.Add("build")
+    buildPsi.ArgumentList.Add("-c")
+    buildPsi.ArgumentList.Add("Release")
+    buildPsi.ArgumentList.Add("-v")
+    buildPsi.ArgumentList.Add("q")
+    buildPsi.ArgumentList.Add("--nologo")
+    buildPsi.ArgumentList.Add(projectPath)
+    buildPsi.RedirectStandardOutput <- true
+    buildPsi.RedirectStandardError <- true
+    buildPsi.UseShellExecute <- false
+    match workingDir with
+    | Some wd -> buildPsi.WorkingDirectory <- wd
+    | None -> ()
+    use buildProc = startProcessOrFail buildPsi
+    let buildStdOut = buildProc.StandardOutput.ReadToEnd()
+    let buildStdErr = buildProc.StandardError.ReadToEnd()
+    buildProc.WaitForExit()
+    if buildProc.ExitCode <> 0 then
+        if not (String.IsNullOrWhiteSpace buildStdOut) then Console.Error.WriteLine(buildStdOut)
+        if not (String.IsNullOrWhiteSpace buildStdErr) then Console.Error.WriteLine(buildStdErr)
+        buildProc.ExitCode
+    else
+        let runPsi = ProcessStartInfo("dotnet")
+        runPsi.ArgumentList.Add("run")
+        runPsi.ArgumentList.Add("--no-build")
+        runPsi.ArgumentList.Add("-c")
+        runPsi.ArgumentList.Add("Release")
+        runPsi.ArgumentList.Add("-v")
+        runPsi.ArgumentList.Add("q")
+        runPsi.ArgumentList.Add("--project")
+        runPsi.ArgumentList.Add(projectPath)
+        if not (List.isEmpty toolArgs) then
+            runPsi.ArgumentList.Add("--")
+            for a in toolArgs do
+                runPsi.ArgumentList.Add(a)
+        runPsi.RedirectStandardOutput <- false
+        runPsi.RedirectStandardError <- false
+        runPsi.UseShellExecute <- false
+        match workingDir with
+        | Some wd -> runPsi.WorkingDirectory <- wd
+        | None -> ()
+        use runProc = startProcessOrFail runPsi
+        runProc.WaitForExit()
+        runProc.ExitCode
+
+/// Run: compile file.lll -> temp multi-file F# project -> dotnet run. Returns exit code.
 let private cmdRun (path: string) (targetOverride: Target option) : int =
     try
         let target = targetOrDefault targetOverride
@@ -817,87 +908,43 @@ let private cmdRun (path: string) (targetOverride: Target option) : int =
         else
             let absPath = Path.GetFullPath(path)
             let src = File.ReadAllText(absPath)
-            let imports = extractImports src
-            if imports.IsEmpty then
-                // Fast path: no imports, compile single file as before
-                match LLLang.Compiler.compile src with
-                | Ok fs ->
-                    let tmp = Path.GetTempFileName() + ".fsx"
-                    let stripped =
-                        fs.Split('\n')
-                        |> Array.filter (fun l ->
-                            let t = l.TrimStart()
-                            not (t.StartsWith("module ")) && not (t.StartsWith("[<EntryPoint>]")))
-                        |> String.concat "\n"
-                    let withInvoke = stripped + "\nmain [||] |> int64 |> exit\n"
-                    File.WriteAllText(tmp, withInvoke)
-                    let psi = ProcessStartInfo("dotnet", $"fsi \"{tmp}\"")
-                    psi.RedirectStandardOutput <- false
-                    psi.RedirectStandardError  <- false
-                    psi.UseShellExecute        <- false
-                    use p = startProcessOrFail psi
-                    p.WaitForExit()
-                    try File.Delete(tmp) with _ -> ()
-                    p.ExitCode
+            // Canonical run path: resolve imports -> compile project modules ->
+            // materialize temporary F# project -> dotnet run.
+            match resolveRunImports absPath src with
+            | Error msg ->
+                Console.Error.WriteLine("lllc: import resolution error: " + msg)
+                1
+            | Ok files ->
+                let fakeManifest : LLManifest =
+                    { Name = "run"
+                      Version = "0.0.0"
+                      Entry = ""
+                      Deps = Map.empty
+                      Platform = ["fsharp"] }
+                let proj : LLProject =
+                    { Manifest = fakeManifest
+                      RootDir = directoryNameOrCurrent absPath
+                      Files = files }
+                match LLLang.Compiler.compileProjectToModules proj with
                 | Error es ->
                     printErrors es
                     1
-            else
-                // Resolve imports and compile as mini-project
-                match resolveRunImports absPath src with
-                | Error msg ->
-                    Console.Error.WriteLine("lllc: import resolution error: " + msg)
-                    1
-                | Ok files ->
-                    let fakeManifest : LLManifest = { Name = "run"; Version = "0.0.0"; Entry = ""; Deps = Map.empty; Platform = ["fsharp"] }
-                    let proj : LLProject = { Manifest = fakeManifest; RootDir = directoryNameOrCurrent absPath; Files = files }
-                    match LLLang.Compiler.compileProjectToModules proj with
-                    | Error es ->
-                        printErrors es
-                        1
-                    | Ok tms ->
-                        let fs = LLLang.Codegen.emitProjectModules tms
-                        let tmp = Path.GetTempFileName() + ".fsx"
-                        // Strip module declarations and [<EntryPoint>] attributes.
-                        // For multi-module output, rename all `let main` except the last
-                        // occurrence so that fsi sees only one `main` binding.
-                        let lines = fs.Split('\n')
-                        // Find all top-level `let main` definitions.
-                        let mainLineIndices =
-                            lines
-                            |> Array.mapi (fun i l -> i, l)
-                            |> Array.filter (fun (_, l) -> l.TrimStart().StartsWith("let main"))
-                            |> Array.map fst
-                        let lastMainIdx = if mainLineIndices.Length > 0 then mainLineIndices[mainLineIndices.Length - 1] else -1
-                        let mutable mainCounter = 0
-                        let processed =
-                            lines
-                            |> Array.mapi (fun i l ->
-                                let t = l.TrimStart()
-                                if t.StartsWith("module ") || t.StartsWith("[<EntryPoint>]") then ""
-                                elif t.StartsWith("let main") && i <> lastMainIdx then
-                                    // Rename intermediate main to avoid duplicate definition
-                                    let renamed = "_dep_main_" + string mainCounter
-                                    mainCounter <- mainCounter + 1
-                                    let t2 = l.TrimStart()
-                                    let leading = l.Substring(0, l.Length - t2.Length)
-                                    if t2.StartsWith("let main (") then
-                                        leading + t2.Replace("let main (", "let " + renamed + " (")
-                                    elif t2.StartsWith("let main =") then
-                                        leading + t2.Replace("let main =", "let " + renamed + " =")
-                                    else l
-                                else l)
-                            |> String.concat "\n"
-                        let withInvoke = processed + "\nmain [||] |> int64 |> exit\n"
-                        File.WriteAllText(tmp, withInvoke)
-                        let psi = ProcessStartInfo("dotnet", $"fsi \"{tmp}\"")
-                        psi.RedirectStandardOutput <- false
-                        psi.RedirectStandardError  <- false
-                        psi.UseShellExecute        <- false
-                        use proc = startProcessOrFail psi
-                        proc.WaitForExit()
-                        try File.Delete(tmp) with _ -> ()
-                        proc.ExitCode
+                | Ok tms ->
+                    let filesOut = LLLang.Codegen.emitProjectFiles tms
+                    let tempDir =
+                        Path.Combine(Path.GetTempPath(), "lllc-run-" + Guid.NewGuid().ToString("N"))
+                    Directory.CreateDirectory(tempDir) |> ignore
+                    try
+                        let artifact =
+                            writeSiblingFSharpFilesAndProject tempDir "lllc_run" filesOut true
+                        let projectPath =
+                            artifact.ProjectFilePath |> Option.defaultValue (Path.Combine(tempDir, "lllc_run.fsproj"))
+                        runDotnetProject projectPath None []
+                    finally
+                        try
+                            Directory.Delete(tempDir, true)
+                        with _ ->
+                            ()
     with
     | ex ->
         Console.Error.WriteLine("lllc: " + ex.Message)
@@ -993,21 +1040,7 @@ let private cmdRunSelf (toolArgs: string list) : int =
                             + "</Project>\n"
                         let fsprojPath = Path.Combine(tempDir, "lllcself.fsproj")
                         File.WriteAllText(fsprojPath, fsproj)
-                        let psi = ProcessStartInfo("dotnet")
-                        psi.ArgumentList.Add("run")
-                        psi.ArgumentList.Add("--project")
-                        psi.ArgumentList.Add(fsprojPath)
-                        if not (List.isEmpty toolArgs) then
-                            psi.ArgumentList.Add("--")
-                            for a in toolArgs do
-                                psi.ArgumentList.Add(a)
-                        psi.RedirectStandardOutput <- false
-                        psi.RedirectStandardError  <- false
-                        psi.UseShellExecute        <- false
-                        psi.WorkingDirectory       <- tempDir
-                        use p = startProcessOrFail psi
-                        p.WaitForExit()
-                        p.ExitCode
+                        runDotnetProject fsprojPath (Some tempDir) toolArgs
                     finally
                         let keepTemp =
                             match tryGetEnv "LL_KEEP_SELF_TEMP" with
@@ -1019,7 +1052,438 @@ let private cmdRunSelf (toolArgs: string list) : int =
         Console.Error.WriteLine("lllc: " + ex.Message)
         1
 
-/// Install dependencies listed in lll.toml (or ll.toml) into .ll-deps/. Returns exit code.
+let rec private copyDirectoryRecursive (srcDir: string) (dstDir: string) : unit =
+    Directory.CreateDirectory(dstDir) |> ignore
+    for filePath in Directory.GetFiles(srcDir) do
+        let name =
+            match Path.GetFileName(filePath) with
+            | null -> ""
+            | n -> n
+        let dstPath = Path.Combine(dstDir, name)
+        File.Copy(filePath, dstPath, true)
+    for childDir in Directory.GetDirectories(srcDir) do
+        let name =
+            match Path.GetFileName(childDir) with
+            | null -> ""
+            | n -> n
+        let dstChild = Path.Combine(dstDir, name)
+        copyDirectoryRecursive childDir dstChild
+
+let private depSourceToText (source: DepSource) : string =
+    match source with
+    | GitDep(url, ref) -> "git:" + url + "#" + ref
+    | PathDep(path) -> "path:" + path
+
+let private tryParseSemverTag (value: string) : (int * int * int) option =
+    let raw = value.Trim()
+    let trimmed =
+        if raw.StartsWith("v", StringComparison.OrdinalIgnoreCase) then
+            raw.Substring(1)
+        else
+            raw
+    let parts = trimmed.Split('.', StringSplitOptions.RemoveEmptyEntries)
+    if parts.Length = 0 || parts.Length > 3 then
+        None
+    else
+        let tryPart (idx: int) =
+            if idx < parts.Length then
+                match Int32.TryParse(parts.[idx]) with
+                | true, parsed -> Some parsed
+                | _ -> None
+            else
+                Some 0
+        match tryPart 0, tryPart 1, tryPart 2 with
+        | Some major, Some minor, Some patch -> Some(major, minor, patch)
+        | _ -> None
+
+let private sourcePriorityKey (source: DepSource) : (int * string * int * int * int * string) =
+    match source with
+    | GitDep(url, ref) ->
+        match tryParseSemverTag ref with
+        // Negative values to sort descending by semver.
+        | Some (major, minor, patch) -> (0, url, -major, -minor, -patch, ref)
+        | None -> (0, url, Int32.MaxValue, Int32.MaxValue, Int32.MaxValue, ref)
+    | PathDep(path) -> (1, path, 0, 0, 0, "")
+
+let private pendingPriorityKey (name: string, source: DepSource, ownerRoot: string, chain: string list) =
+    // Prefer shallower nodes first so all direct deps materialize before
+    // deeper transitive alternatives of the same logical dep name.
+    let depth = List.length chain
+    depth, name, sourcePriorityKey source, ownerRoot, String.concat "->" chain
+
+let private compareSameRepoGitRef (leftSource: DepSource) (rightSource: DepSource) : int option =
+    // > 0 => left preferred, < 0 => right preferred, = 0 => equal.
+    // Policy for same-repo git refs:
+    //  1) semver tags outrank non-semver refs;
+    //  2) semver-vs-semver uses numeric compare;
+    //  3) non-semver-vs-non-semver uses case-insensitive lexical compare.
+    match leftSource, rightSource with
+    | GitDep(leftUrl, leftRef), GitDep(rightUrl, rightRef) when leftUrl = rightUrl ->
+        match tryParseSemverTag leftRef, tryParseSemverTag rightRef with
+        | Some leftSemver, Some rightSemver -> Some (compare leftSemver rightSemver)
+        | Some _, None -> Some 1
+        | None, Some _ -> Some -1
+        | None, None ->
+            Some (StringComparer.OrdinalIgnoreCase.Compare(leftRef.Trim(), rightRef.Trim()))
+    | _ -> None
+
+let private canPreferExistingOverIncoming (existingSource: DepSource) (incomingSource: DepSource) : bool =
+    match compareSameRepoGitRef existingSource incomingSource with
+    | Some cmp when cmp >= 0 -> true
+    | _ -> false
+
+let private shouldSkipByPreferred (preferredSource: DepSource) (candidateSource: DepSource) : bool =
+    if depSourceToText preferredSource = depSourceToText candidateSource then
+        false
+    else
+        match compareSameRepoGitRef preferredSource candidateSource with
+        | Some cmp when cmp > 0 -> true
+        | _ -> false
+
+let private sha256Hex (bytes: byte array) : string =
+    let sb = StringBuilder(bytes.Length * 2)
+    for b in bytes do
+        sb.Append(b.ToString("x2")) |> ignore
+    sb.ToString()
+
+let private hashDirectorySha256 (dir: string) : string =
+    if not (Directory.Exists(dir)) then
+        ""
+    else
+        let isIgnoredForHash (relPath: string) =
+            relPath = ".git"
+            || relPath.StartsWith(".git/", StringComparison.Ordinal)
+        use sha = SHA256.Create()
+        let filesWithRel =
+            Directory.GetFiles(dir, "*", SearchOption.AllDirectories)
+            |> Array.map (fun p -> p, Path.GetRelativePath(dir, p).Replace('\\', '/'))
+            |> Array.filter (fun (_, rel) -> not (isIgnoredForHash rel))
+            |> Array.sortBy snd
+        for (p, rel) in filesWithRel do
+            let relBytes = Encoding.UTF8.GetBytes(rel + "\n")
+            sha.TransformBlock(relBytes, 0, relBytes.Length, null, 0) |> ignore
+            let data = File.ReadAllBytes(p)
+            sha.TransformBlock(data, 0, data.Length, null, 0) |> ignore
+            let nl = Encoding.UTF8.GetBytes("\n")
+            sha.TransformBlock(nl, 0, nl.Length, null, 0) |> ignore
+        sha.TransformFinalBlock(Array.empty<byte>, 0, 0) |> ignore
+        let hash =
+            match sha.Hash with
+            | null -> Array.empty<byte>
+            | h -> h
+        sha256Hex hash
+
+let private renderManifestToml (m: LLManifest) : string =
+    let depsLines =
+        m.Deps
+        |> Map.toList
+        |> List.sortBy fst
+        |> List.map (fun (name, source) ->
+            match source with
+            | GitDep(url, ref) -> name + " = \"" + url + "#" + ref + "\""
+            | PathDep(path) -> name + " = { path = \"" + path + "\" }")
+    let platformLine =
+        if List.isEmpty m.Platform then
+            []
+        else
+            let items = m.Platform |> List.map (fun p -> "\"" + p + "\"") |> String.concat ", "
+            ["[platform]"; "use = [" + items + "]"; ""]
+    String.concat "\n" (
+        ["[project]"
+         "name = \"" + m.Name + "\""
+         "version = \"" + m.Version + "\""
+         "entry = \"" + m.Entry + "\""
+         ""]
+        @ (if List.isEmpty depsLines then [] else "[deps]" :: depsLines @ [""])
+        @ platformLine)
+
+let private parseAddSource (raw: string) : DepSource option =
+    if raw.StartsWith("path:", StringComparison.Ordinal) then
+        Some (PathDep(raw.Substring("path:".Length)))
+    else
+        let idx = raw.LastIndexOf('#')
+        if idx > 0 then
+            Some (GitDep(raw.Substring(0, idx), raw.Substring(idx + 1)))
+        elif raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase) then
+            Some (GitDep(raw, "main"))
+        else
+            None
+
+let private parseDepSourceText (raw: string) : DepSource option =
+    if raw.StartsWith("git:", StringComparison.Ordinal) then
+        let payload = raw.Substring("git:".Length)
+        let idx = payload.LastIndexOf('#')
+        if idx > 0 then
+            Some (GitDep(payload.Substring(0, idx), payload.Substring(idx + 1)))
+        else
+            Some (GitDep(payload, "main"))
+    elif raw.StartsWith("path:", StringComparison.Ordinal) then
+        Some (PathDep(raw.Substring("path:".Length)))
+    else
+        None
+
+type private ResolvedDep = {
+    DisplaySource: DepSource
+    CanonicalSource: string
+    DeclaredByRoot: string
+    DeclaredByChain: string list
+}
+
+let private canonicalizeDepSource (ownerRoot: string) (source: DepSource) : string =
+    match source with
+    | GitDep(url, ref) -> "git:" + url + "#" + ref
+    | PathDep(path) ->
+        let abs = Path.GetFullPath(Path.Combine(ownerRoot, path))
+        "path:" + abs
+
+let private writeLlSum (rootDir: string) (resolvedDeps: Map<string, ResolvedDep>) : unit =
+    let vendorDir = Path.Combine(rootDir, "vendor")
+    let lines =
+        resolvedDeps
+        |> Map.toList
+        |> List.sortBy fst
+        |> List.map (fun (name, resolved) ->
+            let depDir = Path.Combine(vendorDir, name)
+            let hash = hashDirectorySha256 depDir
+            name + " " + depSourceToText resolved.DisplaySource + " sha256:" + hash)
+    File.WriteAllText(Path.Combine(rootDir, "ll.sum"), String.concat "\n" lines + (if List.isEmpty lines then "" else "\n"))
+
+let private readLlSumSources (rootDir: string) : Map<string, DepSource> =
+    let llSumPath = Path.Combine(rootDir, "ll.sum")
+    if not (File.Exists(llSumPath)) then
+        Map.empty
+    else
+        File.ReadAllLines(llSumPath)
+        |> Array.choose (fun line ->
+            let trimmed = line.Trim()
+            if String.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal) then
+                None
+            else
+                let parts = trimmed.Split(' ', 3, StringSplitOptions.RemoveEmptyEntries)
+                if parts.Length < 2 then
+                    None
+                else
+                    parseDepSourceText parts.[1] |> Option.map (fun source -> parts.[0], source))
+        |> Map.ofArray
+
+let private readManifestOrFail (depRoot: string) : LLManifest option =
+    match LLLang.ProjectLoader.findManifest depRoot with
+    | None -> None
+    | Some manifestPath ->
+        match parseManifest (File.ReadAllText manifestPath) with
+        | Ok manifest -> Some manifest
+        | Error e ->
+            failwith ("manifest parse failed for " + depRoot + ": " + e)
+
+let private tryReadVendorDepManifest (rootDir: string) (depName: string) : LLManifest option =
+    let manifestPath = Path.Combine(rootDir, "vendor", depName, "lll.toml")
+    if not (File.Exists(manifestPath)) then
+        None
+    else
+        match parseManifest (File.ReadAllText manifestPath) with
+        | Ok m -> Some m
+        | Error _ -> None
+
+let private findDependencyChain (rootManifest: LLManifest) (rootDir: string) (targetDep: string) : string list option =
+    let target = targetDep.ToLowerInvariant()
+    let projectName =
+        if String.IsNullOrWhiteSpace rootManifest.Name then
+            "root"
+        else
+            rootManifest.Name
+    let direct =
+        rootManifest.Deps
+        |> Map.toList
+        |> List.map fst
+        |> List.map (fun d -> d.ToLowerInvariant())
+        |> List.distinct
+    let parent = System.Collections.Generic.Dictionary<string, string>()
+    let q = System.Collections.Generic.Queue<string>()
+    for d in direct do
+        parent.[d] <- projectName
+        q.Enqueue(d)
+    while q.Count > 0 do
+        let cur = q.Dequeue()
+        match tryReadVendorDepManifest rootDir cur with
+        | None -> ()
+        | Some manifest ->
+            for (childName, _) in manifest.Deps |> Map.toList do
+                let child = childName.ToLowerInvariant()
+                if not (parent.ContainsKey(child)) then
+                    parent.[child] <- cur
+                    q.Enqueue(child)
+    if not (parent.ContainsKey(target)) then
+        None
+    else
+        let rec rebuild acc cur =
+            let acc' = cur :: acc
+            let p = parent.[cur]
+            if p = projectName then
+                projectName :: acc'
+            else
+                rebuild acc' p
+        Some (rebuild [] target)
+
+let private materializeDepOrFail (rootDir: string) (ownerRoot: string) (name: string) (source: DepSource) : string =
+    let targetDir = Path.Combine(rootDir, "vendor", name)
+    if Directory.Exists(targetDir) then
+        Directory.Delete(targetDir, true)
+    match source with
+    | GitDep(url, ref) ->
+        printfn "  fetch %s from %s#%s" name url ref
+        let clonePsi = ProcessStartInfo("git", sprintf "clone --depth 1 %s \"%s\"" url targetDir)
+        clonePsi.UseShellExecute <- false
+        let cloneProc = startProcessOrFail clonePsi
+        cloneProc.WaitForExit()
+        if cloneProc.ExitCode <> 0 then
+            failwith ("git clone failed for " + name)
+        let coPsi = ProcessStartInfo("git", sprintf "-C \"%s\" checkout %s" targetDir ref)
+        coPsi.UseShellExecute <- false
+        let coProc = startProcessOrFail coPsi
+        coProc.WaitForExit()
+        if coProc.ExitCode <> 0 then
+            failwith ("git checkout " + ref + " failed for " + name)
+        targetDir
+    | PathDep(path) ->
+        let resolved = Path.GetFullPath(Path.Combine(ownerRoot, path))
+        if not (Directory.Exists(resolved)) then
+            failwith ("path dep not found for " + name + ": " + resolved)
+        printfn "  copy %s from %s" name resolved
+        copyDirectoryRecursive resolved targetDir
+        // Keep source-root as original directory so nested path deps resolve
+        // relative to the declaring dependency's own repository layout.
+        resolved
+
+type private ResolveOutcome =
+    | ResolveDone of Map<string, ResolvedDep>
+    | ResolveRestart of Map<string, DepSource>
+
+let private clearVendorDirectory (vendorDir: string) : unit =
+    if Directory.Exists(vendorDir) then
+        for existing in Directory.GetDirectories(vendorDir) do
+            Directory.Delete(existing, true)
+
+let private upsertPreferredSemver (preferred: Map<string, DepSource>) (name: string) (incoming: DepSource) : Map<string, DepSource> =
+    match Map.tryFind name preferred with
+    | Some current when canPreferExistingOverIncoming current incoming -> preferred
+    | _ -> preferred |> Map.add name incoming
+
+let private isHigherRefConflict (existingSource: DepSource) (incomingSource: DepSource) : bool =
+    match compareSameRepoGitRef existingSource incomingSource with
+    | Some cmp when cmp < 0 -> true
+    | _ -> false
+
+let private hasPreferredWinner (preferred: Map<string, DepSource>) (name: string) (source: DepSource) : bool =
+    match Map.tryFind name preferred with
+    | Some winner when shouldSkipByPreferred winner source -> true
+    | _ -> false
+
+let private resolveWithPreferred
+    (rootDir: string)
+    (vendorDir: string)
+    (manifest: LLManifest)
+    (rootProjectName: string)
+    (lockedSources: Map<string, DepSource>)
+    : Map<string, ResolvedDep> =
+    let initialPending =
+        manifest.Deps
+        |> Map.toList
+        |> List.map (fun (name, source) -> name, source, rootDir, [rootProjectName; name])
+
+    let rec resolvePass
+        (pending: (string * DepSource * string * string list) list)
+        (resolved: Map<string, ResolvedDep>)
+        (preferred: Map<string, DepSource>)
+        : ResolveOutcome =
+        match pending |> List.sortBy pendingPriorityKey with
+        | [] -> ResolveDone resolved
+        | (name, source, ownerRoot, chain) :: rest ->
+            if hasPreferredWinner preferred name source then
+                resolvePass rest resolved preferred
+            else
+                let canonical = canonicalizeDepSource ownerRoot source
+                match Map.tryFind name resolved with
+                | Some existing when existing.CanonicalSource = canonical ->
+                    resolvePass rest resolved preferred
+                | Some existing ->
+                    let lockedWinner =
+                        match Map.tryFind name lockedSources with
+                        | Some locked when depSourceToText locked = depSourceToText existing.DisplaySource ->
+                            Some existing.DisplaySource
+                        | Some locked when depSourceToText locked = depSourceToText source ->
+                            Some source
+                        | _ -> None
+                    match lockedWinner with
+                    | Some winner when depSourceToText winner = depSourceToText existing.DisplaySource ->
+                        resolvePass rest resolved preferred
+                    | Some winner ->
+                        // Lock pins an alternative source for this dep name.
+                        ResolveRestart (preferred |> Map.add name winner)
+                    | None when canPreferExistingOverIncoming existing.DisplaySource source ->
+                        resolvePass rest resolved preferred
+                    | None when isHigherRefConflict existing.DisplaySource source ->
+                        // Defer and restart from root with upgraded winner to avoid
+                        // stale transitive tails from the lower version.
+                        ResolveRestart (upsertPreferredSemver preferred name source)
+                    | None ->
+                        let existingChain =
+                            if List.isEmpty existing.DeclaredByChain then
+                                existing.DeclaredByRoot
+                            else
+                                String.concat " -> " existing.DeclaredByChain
+                        let incomingChain =
+                            if List.isEmpty chain then
+                                ownerRoot
+                            else
+                                String.concat " -> " chain
+                        failwith ("dependency conflict for " + name + ": "
+                                  + depSourceToText existing.DisplaySource
+                                  + " (declared in " + existing.DeclaredByRoot + " via " + existingChain + ") vs "
+                                  + depSourceToText source
+                                  + " (declared in " + ownerRoot + " via " + incomingChain + ")")
+                | None ->
+                    let sourceRoot = materializeDepOrFail rootDir ownerRoot name source
+                    let nestedDeps =
+                        match readManifestOrFail sourceRoot with
+                        | None -> []
+                        | Some depManifest ->
+                            depManifest.Deps
+                            |> Map.toList
+                            |> List.map (fun (depName, depSource) -> depName, depSource, sourceRoot, chain @ [depName])
+                    let resolved' =
+                        Map.add name {
+                            DisplaySource = source
+                            CanonicalSource = canonical
+                            DeclaredByRoot = ownerRoot
+                            DeclaredByChain = chain
+                        } resolved
+                    resolvePass (rest @ nestedDeps) resolved' preferred
+
+    let rec loop (attempt: int) (preferred: Map<string, DepSource>) =
+        if attempt > 32 then
+            failwith "dependency resolution exceeded restart limit (semver winner convergence)"
+        match resolvePass initialPending Map.empty preferred with
+        | ResolveDone resolved -> resolved
+        | ResolveRestart preferred' ->
+            clearVendorDirectory vendorDir
+            loop (attempt + 1) preferred'
+    loop 0 Map.empty
+
+/// Install dependencies listed in lll.toml (or ll.toml) into vendor/. Returns exit code.
+// TODO(selfhost:resolver):
+// blocker: no MVS/version-conflict solver yet; resolver requires one canonical
+//   source per dep name across full transitive graph.
+// works-now: deterministic transitive resolution + vendor materialization +
+//   ll.sum hashing for all resolved deps; repeated installs are idempotent;
+//   conflict diagnostics include declaring roots and transitive "via" chains;
+//   same-repo semver tag conflicts deterministically converge to the highest
+//   tag via restartable preferred-source selection; same-repo non-semver git
+//   refs also converge deterministically by canonical lexical ref ordering
+//   (with ll.sum still able to pin an explicit winner).
+// next-step: add full MVS/version selection policy for broader multi-source
+//   conflicts beyond same-repo git ref selection.
+// coverage-note: transitive git-ref conflict regression is covered in
+//   ModuleSystemTests (`...same name from different refs`).
 let private cmdInstall (rootDir: string) : int =
     try
         let tomlPath =
@@ -1031,33 +1495,114 @@ let private cmdInstall (rootDir: string) : int =
             | Ok m -> m
             | Error e ->
                 eprintfn "lllc: manifest error: %s" e
-                { Name = ""; Version = ""; Entry = ""; Deps = Map.empty; Platform = [] }
-        let depDir = Path.Combine(rootDir, ".ll-deps")
-        Directory.CreateDirectory(depDir) |> ignore
-        for KeyValue(name, source) in manifest.Deps do
-            let targetDir = Path.Combine(depDir, name)
-            if Directory.Exists(targetDir) then
-                printfn "  skip %s (already installed)" name
+                failwith "manifest parse failed"
+        let rootProjectName =
+            if String.IsNullOrWhiteSpace manifest.Name then
+                "root"
             else
-                match source with
-                | GitDep(url, ref) ->
-                    printfn "  fetch %s from %s#%s" name url ref
-                    let psi = ProcessStartInfo("git", sprintf "clone --depth 1 --branch %s %s \"%s\"" ref url targetDir)
-                    psi.UseShellExecute <- false
-                    let proc = startProcessOrFail psi
-                    proc.WaitForExit()
-                    if proc.ExitCode <> 0 then
-                        eprintfn "  error: git clone failed for %s" name
-                | PathDep(path) ->
-                    let resolved = Path.GetFullPath(Path.Combine(rootDir, path))
-                    printfn "  link %s -> %s" name resolved
-                    let psi = ProcessStartInfo("ln", sprintf "-s \"%s\" \"%s\"" resolved targetDir)
-                    psi.UseShellExecute <- false
-                    (startProcessOrFail psi).WaitForExit() |> ignore
-        Console.WriteLine("Installed " + string manifest.Deps.Count + " dependencies.")
+                manifest.Name
+        let lockedSources = readLlSumSources rootDir
+        let vendorDir = Path.Combine(rootDir, "vendor")
+        Directory.CreateDirectory(vendorDir) |> ignore
+        let resolvedDeps = resolveWithPreferred rootDir vendorDir manifest rootProjectName lockedSources
+        let resolvedNames = resolvedDeps |> Map.toList |> List.map fst |> Set.ofList
+        for existing in Directory.GetDirectories(vendorDir) do
+            let depName = Path.GetFileName(existing)
+            if not (Set.contains depName resolvedNames) then
+                Directory.Delete(existing, true)
+        writeLlSum rootDir resolvedDeps
+        Console.WriteLine("Installed " + string resolvedDeps.Count + " dependencies into vendor/.")
         0
     with ex ->
         eprintfn "lllc: %s" ex.Message
+        1
+
+let private cmdMod (rootDir: string) (args: string list) : int =
+    let manifestPath =
+        match LLLang.ProjectLoader.findManifest rootDir with
+        | Some p -> p
+        | None -> Path.Combine(rootDir, "lll.toml")
+    match args with
+    | ["tidy"] ->
+        cmdInstall rootDir
+    | ["add"; spec] ->
+        match spec.IndexOf('=') with
+        | -1 ->
+            eprintfn "lllc: usage: lllc mod add <name>=<https://...#ref|path:../dir>"
+            1
+        | eqIdx ->
+            let depName = spec.Substring(0, eqIdx).Trim()
+            let rawSource = spec.Substring(eqIdx + 1).Trim()
+            match parseAddSource rawSource with
+            | None ->
+                eprintfn "lllc: unsupported dep source '%s'" rawSource
+                1
+            | Some depSource ->
+                let manifest =
+                    match parseManifest (File.ReadAllText manifestPath) with
+                    | Ok m -> m
+                    | Error e ->
+                        eprintfn "lllc: manifest error: %s" e
+                        failwith "manifest parse failed"
+                let updated = { manifest with Deps = manifest.Deps |> Map.add depName depSource }
+                File.WriteAllText(manifestPath, renderManifestToml updated)
+                cmdInstall rootDir
+    | ["why"; depName] ->
+        let manifestResult =
+            match parseManifest (File.ReadAllText manifestPath) with
+            | Ok m -> Ok m
+            | Error e -> Error e
+        match manifestResult with
+        | Error e ->
+            eprintfn "lllc: manifest error: %s" e
+            1
+        | Ok manifest ->
+            let depKey = depName.ToLowerInvariant()
+            match findDependencyChain manifest rootDir depName with
+            | None ->
+                let known =
+                    manifest.Deps
+                    |> Map.toList
+                    |> List.map fst
+                    |> List.sort
+                    |> String.concat ", "
+                eprintfn
+                    "lllc: dependency '%s' is not present in resolved dependency graph (run 'lllc install' first)%s"
+                    depName
+                    (if String.IsNullOrWhiteSpace known then "" else " (direct deps: " + known + ")")
+                1
+            | Some chain ->
+                match loadProject rootDir with
+                | Error es ->
+                    printErrors es
+                    1
+                | Ok proj ->
+                    let rootSrc = Path.Combine(rootDir, "src")
+                    let consumers =
+                        proj.Files
+                        |> List.filter (fun lf ->
+                            let abs = Path.GetFullPath(lf.FilePath)
+                            abs.StartsWith(rootSrc, StringComparison.Ordinal))
+                        |> List.choose (fun lf ->
+                            match parseModuleWithPos lf.Src with
+                            | Error _ -> None
+                            | Ok (m, _) ->
+                                let hasDepImport =
+                                    m.Imports
+                                    |> List.exists (fun imp ->
+                                        match imp with
+                                        | h :: _ -> h.ToLowerInvariant() = depKey
+                                        | [] -> false)
+                                if hasDepImport then Some (String.concat "." lf.ModulePath) else None)
+                    if List.isEmpty consumers then
+                        printfn "no local modules directly import %s" depName
+                    else
+                        printfn "%s is imported by:" depName
+                        for c in consumers do printfn "  - %s" c
+                    printfn "dependency chain: %s" (String.concat " -> " chain)
+                    0
+    | _ ->
+        eprintfn "lllc: usage: lllc mod tidy | lllc mod add <name>=<source> | lllc mod why <dep>"
         1
 
 /// Scaffold a new project. Returns exit code.
@@ -1136,8 +1681,15 @@ let main (argv: string[]) : int =
             | _ ->
                 Console.Error.WriteLine("lllc: usage: lllc run [--target fs|ts|py|java|cs|llvm] <file.lll>")
                 1
+    | "self" :: rest -> cmdRunSelf rest
     | "reverse" :: rest -> cmdReverse rest
     | ["new"; name] -> cmdNew name
+    | "mod" :: rest ->
+        let root =
+            match findProjectRoot (Directory.GetCurrentDirectory()) with
+            | Some r -> r
+            | None -> Directory.GetCurrentDirectory()
+        cmdMod root rest
     | "install" :: _ ->
         let root =
             match findProjectRoot (Directory.GetCurrentDirectory()) with
@@ -1155,7 +1707,10 @@ let main (argv: string[]) : int =
         Console.Error.WriteLine("  lllc reverse --from <target> <file>        [experimental] recover minimal ll-lang from generated target code")
         Console.Error.WriteLine("  lllc self  <cmd> <file> [arg]              run self-hosted lllc tools (lll layer)")
         Console.Error.WriteLine("  lllc new   <name>                          scaffold new project")
-        Console.Error.WriteLine("  lllc install                               install dependencies from lll.toml")
+        Console.Error.WriteLine("  lllc install                               install dependencies into vendor/ and rewrite ll.sum")
+        Console.Error.WriteLine("  lllc mod tidy                              sync vendor/ with lll.toml and rewrite ll.sum")
+        Console.Error.WriteLine("  lllc mod add <name>=<source>              add dep and install (source: https://..#ref or path:../dir)")
+        Console.Error.WriteLine("  lllc mod why <dep>                         explain dependency chain + local direct importers")
         Console.Error.WriteLine("  lllc mcp                                   run MCP server (stdio transport)")
         Console.Error.WriteLine("")
         Console.Error.WriteLine("  --target fs   emit F# (default)")

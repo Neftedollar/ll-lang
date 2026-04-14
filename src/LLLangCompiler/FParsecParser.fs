@@ -245,6 +245,7 @@ let pLambdaExpr, pLambdaExprImpl = createParserForwardedToRef()
 let pAtom, pAtomImpl = createParserForwardedToRef()
 let pAppExpr, pAppExprImpl = createParserForwardedToRef()
 let pUnaryExpr, pUnaryExprImpl = createParserForwardedToRef()
+let pAppArg, pAppArgImpl = createParserForwardedToRef()
 
 // Stubs for Step 5
 // do pIfExprImpl := fail "pIfExpr not yet implemented (Step 5)"
@@ -383,6 +384,14 @@ do pAtomImpl :=
     |> withPos
 
 /// Application: atom atom* (juxtaposition = curried call)
+do pAppArgImpl :=
+    attempt pLambdaExpr <|> pAtom
+
+let private pNoArgCallSuffix : FParser<unit> =
+    // `f()` is a zero-arg call suffix for names declared with `name() = ...`.
+    // In the current core this is semantically equivalent to `f`.
+    attempt (skipChar '(' >>. wsOrComment >>. skipChar ')' .>> wsOrComment)
+
 do pAppExprImpl :=
     getPosition >>= fun appStartPos ->
         pAtom >>= fun head ->
@@ -408,13 +417,53 @@ do pAppExprImpl :=
                     if hitHardBreak && (not canContinueOnLine || col = 1) then
                         preturn acc
                     elif hitHardBreak && canContinueOnLine then
-                        // Also stop if this line starts a keyword-free
-                        // binding (`name = ...` / `_ = ...`), otherwise an
-                        // argument continuation can accidentally eat the next
-                        // let-chain statement.
-                        opt (attempt pKeywordFreeBindingHead)
+                        opt pNoArgCallSuffix
                         >>= function
-                            | Some _ -> preturn acc
+                            | Some _ -> loop acc continuationLine
+                            | None ->
+                                // Also stop if this line starts a keyword-free
+                                // binding (`name = ...` / `_ = ...`), otherwise an
+                                // argument continuation can accidentally eat the next
+                                // let-chain statement.
+                                opt (attempt pKeywordFreeBindingHead)
+                                >>= function
+                                    | Some _ -> preturn acc
+                                    | None ->
+                                        opt (
+                                            attempt (
+                                                getPosition >>= fun argStart ->
+                                                    opt (lookAhead anyChar) >>= function
+                                                        | None -> fail "end of input"
+                                                        | Some argHeadChar ->
+                                                            // Keep `n - 1` as subtraction, not implicit app `n (-1)`.
+                                                            if argHeadChar = '-' then
+                                                                fail "stop implicit app before minus"
+                                                            else
+                                                                pAppArg >>= fun arg ->
+                                                                    getPosition >>= fun argEnd ->
+                                                                        getUserState >>= fun state ->
+                                                                            let hasTrailingNewline =
+                                                                                trailingWsHasNewline state.Source argEnd.Index
+                                                                            preturn (arg, argHeadChar, int argStart.Line, int argEnd.Line, int argEnd.Column, hasTrailingNewline)))
+                                        >>= function
+                                            | Some (arg, argHeadChar, argStartLine, argEndLine, argEndCol, hasTrailingNewline) ->
+                                                let startedWithGrouping =
+                                                    argHeadChar = '(' || argHeadChar = '[' || argHeadChar = '{'
+                                                let spansMultipleLogicalLines =
+                                                    (argEndLine - argStartLine) > 1
+                                                let nextContinuationLine =
+                                                    if startedWithGrouping && spansMultipleLogicalLines && argEndCol > 1 && not hasTrailingNewline then
+                                                        Some argEndLine
+                                                    elif continuationLine = Some argEndLine then
+                                                        continuationLine
+                                                    else
+                                                        None
+                                                loop (EApp(acc, arg)) nextContinuationLine
+                                            | None -> preturn acc
+                    else
+                        opt pNoArgCallSuffix
+                        >>= function
+                            | Some _ -> loop acc continuationLine
                             | None ->
                                 opt (
                                     attempt (
@@ -426,7 +475,7 @@ do pAppExprImpl :=
                                                     if argHeadChar = '-' then
                                                         fail "stop implicit app before minus"
                                                     else
-                                                        pAtom >>= fun arg ->
+                                                        pAppArg >>= fun arg ->
                                                             getPosition >>= fun argEnd ->
                                                                 getUserState >>= fun state ->
                                                                     let hasTrailingNewline =
@@ -447,38 +496,6 @@ do pAppExprImpl :=
                                                 None
                                         loop (EApp(acc, arg)) nextContinuationLine
                                     | None -> preturn acc
-                    else
-                        opt (
-                            attempt (
-                                getPosition >>= fun argStart ->
-                                    opt (lookAhead anyChar) >>= function
-                                        | None -> fail "end of input"
-                                        | Some argHeadChar ->
-                                            // Keep `n - 1` as subtraction, not implicit app `n (-1)`.
-                                            if argHeadChar = '-' then
-                                                fail "stop implicit app before minus"
-                                            else
-                                                pAtom >>= fun arg ->
-                                                    getPosition >>= fun argEnd ->
-                                                        getUserState >>= fun state ->
-                                                            let hasTrailingNewline =
-                                                                trailingWsHasNewline state.Source argEnd.Index
-                                                            preturn (arg, argHeadChar, int argStart.Line, int argEnd.Line, int argEnd.Column, hasTrailingNewline)))
-                        >>= function
-                            | Some (arg, argHeadChar, argStartLine, argEndLine, argEndCol, hasTrailingNewline) ->
-                                let startedWithGrouping =
-                                    argHeadChar = '(' || argHeadChar = '[' || argHeadChar = '{'
-                                let spansMultipleLogicalLines =
-                                    (argEndLine - argStartLine) > 1
-                                let nextContinuationLine =
-                                    if startedWithGrouping && spansMultipleLogicalLines && argEndCol > 1 && not hasTrailingNewline then
-                                        Some argEndLine
-                                    elif continuationLine = Some argEndLine then
-                                        continuationLine
-                                    else
-                                        None
-                                loop (EApp(acc, arg)) nextContinuationLine
-                            | None -> preturn acc
             loop head None
     |> withPos
 
@@ -533,13 +550,37 @@ let pCmpExpr : FParser<Expr> =
             List.fold (fun acc (op, right) -> EApp(EApp(EVar op, acc), right)) head tail)
     |> withPos
 
-/// Pipe: expr -> expr -> ...
+/// Pipe: expr -> expr -> ...  and expr |> expr |> ...
 let pPipeExpr : FParser<Expr> =
+    let pipeOp =
+        (skipString "|>" >>. wsOrComment >>% (fun acc arg -> EPipe(acc, arg)))
+        <|> (skipString "->" >>. wsOrComment >>% (fun acc arg -> EPipe(acc, arg)))
     pipe2
         pCmpExpr
-        (many (skipString "->" >>. wsOrComment >>. pCmpExpr))
+        (many (pipeOp .>>. pCmpExpr))
         (fun head tail ->
-            List.fold (fun acc arg -> EPipe(acc, arg)) head tail)
+            List.fold (fun acc (mk, arg) -> mk acc arg) head tail)
+    |> withPos
+
+/// Bind sequencing: expr >>= expr, expr >> expr
+let pBindExpr : FParser<Expr> =
+    let bindOp =
+        (skipString ">>=" >>. wsOrComment >>% ">>=")
+        <|> (skipString ">>" >>. wsOrComment >>% ">>")
+    pipe2
+        pPipeExpr
+        (many (pipe2 bindOp pPipeExpr (fun op right -> (op, right))))
+        (fun head tail ->
+            List.fold (fun acc (op, right) -> EApp(EApp(EVar op, acc), right)) head tail)
+    |> withPos
+
+/// Choice: expr <|> expr
+let pChoiceExpr : FParser<Expr> =
+    pipe2
+        pBindExpr
+        (many (skipString "<|>" >>. wsOrComment >>. pBindExpr))
+        (fun head tail ->
+            List.fold (fun acc right -> EApp(EApp(EVar "<|>", acc), right)) head tail)
     |> withPos
 
 // ---- If-then-else: if cond [then]? body else other ----
@@ -592,7 +633,7 @@ do pExprImpl :=
     <|> pLetKwExpr
     <|> pLetKeywordFreeExpr
     <|> pLambdaExpr
-    <|> pPipeExpr
+    <|> pChoiceExpr
 
 // ---- Type expressions ----
 // Use forward ref to break circular dependency
@@ -861,24 +902,85 @@ let pDecl : FParser<Decl> =
     <|> attempt pTypeDecl
     <|> attempt pFnDecl
 
-let pDeclWithExport : FParser<Decl * bool> =
+let pDeclWithLegacyExport : FParser<Decl * bool> =
     pipe2
         (opt (kw "export"))
         pDecl
         (fun exportKw decl -> (decl, exportKw.IsSome))
     |> withPos
 
+let pExportName : FParser<string> =
+    attempt pTypeId <|> pIdent
+
+let pExportList : FParser<string list> =
+    attempt (
+        kw "export"
+        >>. skipChar '{' >>. wsOrComment
+        >>. sepEndBy pExportName (skipChar ',' >>. wsOrComment)
+        .>> skipChar '}' .>> wsOrComment)
+    >>= fun names ->
+        let duplicate =
+            names
+            |> List.groupBy id
+            |> List.tryPick (fun (name, grouped) ->
+                if List.length grouped > 1 then Some name else None)
+        match duplicate with
+        | Some name -> fail $"Duplicate export name '{name}'"
+        | None -> preturn names
+
 /// Full module parser
 let pModule : FParser<LLModule> =
-    pipe3
+    pipe4
         (kw "module" >>. opt pModulePath)
         (many pImportDecl)
-        (many pDeclWithExport)
-        (fun path imports decls ->
-            { Path = path
-                      |> Option.defaultValue []
-              Imports = imports
-              Decls = decls })
+        (opt pExportList)
+        (many pDeclWithLegacyExport)
+        (fun path imports explicitExports decls -> (path, imports, explicitExports, decls))
+    >>= fun (path, imports, explicitExports, decls) ->
+        let declList = decls
+        let declaredNames =
+            declList
+            |> List.collect (fun (decl, _) -> declExportNames decl)
+            |> Set.ofList
+        let legacyExportedNames =
+            declList
+            |> List.collect (fun (decl, exported) ->
+                if exported then declExportNames decl else [])
+            |> Set.ofList
+        let explicitExportedNames =
+            explicitExports
+            |> Option.map Set.ofList
+        let unknownExport =
+            match explicitExportedNames with
+            | Some names ->
+                names
+                |> Set.filter (fun n -> not (Set.contains n declaredNames))
+                |> Set.toList
+                |> List.sort
+                |> List.tryHead
+            | None -> None
+        match unknownExport with
+        | Some name -> fail $"Unknown export name '{name}'"
+        | None ->
+            let finalExportSet =
+                match explicitExportedNames with
+                | Some names -> Some (Set.union names legacyExportedNames)
+                | None -> None
+            let normalizedDecls =
+                declList
+                |> List.map (fun (decl, _) ->
+                    let exported =
+                        match finalExportSet with
+                        | Some names ->
+                            declExportNames decl
+                            |> List.exists (fun n -> Set.contains n names)
+                        | None -> false
+                    (decl, exported))
+            preturn
+                { Path = path |> Option.defaultValue []
+                  Imports = imports
+                  Exports = finalExportSet |> Option.map (Set.toList >> List.sort)
+                  Decls = normalizedDecls }
     |> withPos
 
 // ---- Public API ----

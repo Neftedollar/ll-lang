@@ -4,7 +4,6 @@ open LLLang.Prelude
 open Std.Maybe
 open Std.Lexer
 open Std.Parser
-open Std.Render
 
 type ElabError =
     | MkError of string
@@ -115,5 +114,5 @@ and hasErrorWith needle errs =
 and assertHasError label needle errs =
     (if ((hasErrorWith needle) errs) then (printfn ((strConcat "OK ") label)) else (printfn ((strConcat "FAIL ") ((strConcat label) ((strConcat " — expected error: ") needle)))))
 
-and __test_main_Elaborator () =
+and __test_main_Elaborator =
     (let colorCtors1 = ((MkCon ("Red", [])) :: ((MkCon ("Black", [])) :: [])) in (let decls1 = ((DType ("Color", [], colorCtors1)) :: ((DFn ("id", ((MkParam ("x", (TyName "Int"))) :: []), None, (EVar "x"))) :: [])) in (let m1 = (MkModule (("M" :: []), decls1)) in (let _ = ((assertNoErrors "1 valid program") (elaborate m1)) in (let decls2 = ((DFn ("broken", ((MkParam ("x", (TyName "Int"))) :: []), None, (EVar "y"))) :: []) in (let m2 = (MkModule (("M" :: []), decls2)) in (let _ = (((assertHasError "2 unbound variable") "y") (elaborate m2)) in (let decls3 = ((DFn ("foo", ((MkParam ("x", (TyName "Int"))) :: []), None, (EVar "x"))) :: ((DFn ("foo", ((MkParam ("y", (TyName "Int"))) :: []), None, (EVar "y"))) :: [])) in (let m3 = (MkModule (("M" :: []), decls3)) in (let _ = (((assertHasError "3 duplicate function") "foo") (elaborate m3)) in (let matchExpr = (EMatch ((EVar "x"), ((PCon ("Red", [])) :: ((PCon ("Black", [])) :: [])), ((EInt 1L) :: ((EInt 2L) :: [])))) in (let colorCtors4 = ((MkCon ("Red", [])) :: ((MkCon ("Black", [])) :: [])) in (let decls4 = ((DType ("Color", [], colorCtors4)) :: ((DFn ("describeColor", ((MkParam ("x", (TyName "Color"))) :: []), None, matchExpr)) :: [])) in (let m4 = (MkModule (("M" :: []), decls4)) in (let _ = ((assertNoErrors "4 valid match with constructors") (elaborate m4)) in (let decls5 = ((DFn ("bad", ((MkParam ("x", (TyName "Int"))) :: []), None, (ECon "Nope"))) :: []) in (let m5 = (MkModule (("M" :: []), decls5)) in (let _ = (((assertHasError "5 unbound constructor") "Nope") (elaborate m5)) in (let letExpr = (ELet ("z", (EInt 10L), (EBinOp ("+", (EVar "z"), (EInt 1L))))) in (let decls6 = ((DFn ("useZ", [], None, letExpr)) :: []) in (let m6 = (MkModule (("M" :: []), decls6)) in (let _ = ((assertNoErrors "6 let binding scoping") (elaborate m6)) in 0L))))))))))))))))))))))

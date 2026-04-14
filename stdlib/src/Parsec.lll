@@ -1,0 +1,472 @@
+module Std.Parsec
+
+export Maybe A = Some A | None
+export Result A E = Ok A | Err E
+
+export ParsePos = MkParsePos Int Int Int
+export ParseState = MkParseState Str List[Char] ParsePos
+export ParseError = MkParseError Str ParsePos
+
+export ParseStep A =
+  | StepOk A ParseState
+  | StepErr ParseError ParseState Bool
+
+export Parser A = MkParser (ParseState -> ParseStep[A])
+
+-- ---- Position / state helpers ----------------------------------------------
+
+posOffset(p ParsePos) =
+  match p
+    | MkParsePos o _ _ -> o
+
+posLine(p ParsePos) =
+  match p
+    | MkParsePos _ l _ -> l
+
+posCol(p ParsePos) =
+  match p
+    | MkParsePos _ _ c -> c
+
+statePos(st ParseState) =
+  match st
+    | MkParseState _ _ p -> p
+
+stateChars(st ParseState) =
+  match st
+    | MkParseState _ cs _ -> cs
+
+stateOffset(st ParseState) =
+  posOffset (statePos st)
+
+stateCurrentChar(st ParseState) =
+  listAt (stateChars st) (stateOffset st)
+
+advancePos(c Char)(p ParsePos) =
+  o = posOffset p
+  l = posLine p
+  col = posCol p
+  if c == '\n'
+    MkParsePos (o + 1) (l + 1) 1
+  else
+    MkParsePos (o + 1) l (col + 1)
+
+stateAdvance(c Char)(st ParseState) =
+  match st
+    | MkParseState src cs p -> MkParseState src cs (advancePos c p)
+
+stateInit(src Str) =
+  MkParseState src (strChars src) (MkParsePos 0 1 1)
+
+mkErr(msg Str)(st ParseState) =
+  MkParseError msg (statePos st)
+
+parserRunStep(p Parser[A])(st ParseState) =
+  match p
+    | MkParser f -> f st
+
+stateConsumedFrom(a ParseState)(b ParseState) =
+  stateOffset b > stateOffset a
+
+isConsumedFrom(start ParseState)(finish ParseState)(reported Bool) =
+  if reported
+    true
+  else
+    stateConsumedFrom start finish
+
+charInList(c Char)(xs List[Char]) =
+  match xs
+    | x :: rest ->
+      if c == x
+        true
+      else
+        charInList c rest
+    | _ -> false
+
+pushChars(cs List[Char])(acc List[Char]) =
+  match cs
+    | c :: rest -> pushChars rest (c :: acc)
+    | _ -> acc
+
+-- ---- Core parser API --------------------------------------------------------
+
+export runParser(p Parser[A])(src Str) =
+  st0 = stateInit src
+  match parserRunStep p st0
+    | StepOk v st1 -> Ok (v, st1)
+    | StepErr e _ _ -> Err e
+
+export parsePure(v A) =
+  MkParser (\st. StepOk v st)
+
+export parseFail(msg Str) =
+  MkParser (\st. StepErr (mkErr msg st) st false)
+
+export parseMap(f A -> B)(p Parser[A]) =
+  MkParser (\st0.
+    match parserRunStep p st0
+      | StepOk a st1 -> StepOk (f a) st1
+      | StepErr e stErr consumed -> StepErr e stErr consumed
+  )
+
+export parseBind(p Parser[A])(k A -> Parser[B]) =
+  MkParser (\st0.
+    match parserRunStep p st0
+      | StepOk a st1 ->
+        match parserRunStep (k a) st1
+          | StepOk b st2 -> StepOk b st2
+          | StepErr e stErr consumed2 ->
+            StepErr e stErr (isConsumedFrom st0 stErr consumed2)
+      | StepErr e stErr consumed1 ->
+        StepErr e stErr consumed1
+  )
+
+export parseTry(p Parser[A]) =
+  MkParser (\st0.
+    match parserRunStep p st0
+      | StepOk v st1 -> StepOk v st1
+      | StepErr e _ _ -> StepErr e st0 false
+  )
+
+export parseOrElse(p Parser[A])(q Parser[A]) =
+  MkParser (\st0.
+    match parserRunStep p st0
+      | StepOk v st1 -> StepOk v st1
+      | StepErr e stErr consumed ->
+        if isConsumedFrom st0 stErr consumed
+          StepErr e stErr true
+        else
+          parserRunStep q st0
+  )
+
+export parseLabel(label Str)(p Parser[A]) =
+  MkParser (\st0.
+    match parserRunStep p st0
+      | StepOk v st1 -> StepOk v st1
+      | StepErr _ stErr consumed ->
+        StepErr (MkParseError label (statePos stErr)) stErr consumed
+  )
+
+parseGetState =
+  MkParser (\st. StepOk st st)
+
+parseSetState(next ParseState) =
+  MkParser (\ignored. StepOk true next)
+
+-- ---- Primitive char parsers -------------------------------------------------
+
+export parsePeekChar =
+  MkParser (\st.
+    match stateCurrentChar st
+      | Some c -> StepOk c st
+      | None -> StepErr (mkErr "unexpected EOF" st) st false
+  )
+
+export parseAnyChar =
+  MkParser (\st.
+    match stateCurrentChar st
+      | Some c -> StepOk c (stateAdvance c st)
+      | None -> StepErr (mkErr "unexpected EOF" st) st false
+  )
+
+export parseSatisfy(pred Char -> Bool)(expected Str) =
+  MkParser (\st.
+    match stateCurrentChar st
+      | Some c ->
+        if pred c
+          StepOk c (stateAdvance c st)
+        else
+          StepErr (mkErr (strConcat "unexpected char, expected " expected) st) st false
+      | None ->
+        StepErr (mkErr (strConcat "unexpected EOF, expected " expected) st) st false
+  )
+
+export parseChar(ch Char) =
+  parseSatisfy (\c. c == ch) (strConcat "'" (strConcat (strFromChars [ch]) "'"))
+
+parseStringFrom(expected List[Char])(orig Str)(st ParseState) =
+  match expected
+    | ec :: rest ->
+      match stateCurrentChar st
+        | Some c ->
+          if c == ec
+            parseStringFrom rest orig (stateAdvance c st)
+          else
+            StepErr (mkErr (strConcat "expected string " orig) st) st false
+        | None ->
+          StepErr (mkErr (strConcat "unexpected EOF, expected string " orig) st) st false
+    | _ -> StepOk orig st
+
+export parseString(s Str) =
+  MkParser (\st. parseStringFrom (strChars s) s st)
+
+export parseOneOf(chars Str) =
+  charSet = strChars chars
+  parseSatisfy (\c. charInList c charSet) (strConcat "one of " chars)
+
+export parseNoneOf(chars Str) =
+  charSet = strChars chars
+  parseSatisfy (\c.
+    if charInList c charSet
+      false
+    else true
+  ) (strConcat "none of " chars)
+
+export parseEof =
+  MkParser (\st.
+    match stateCurrentChar st
+      | None -> StepOk true st
+      | Some _ -> StepErr (mkErr "expected EOF" st) st false
+  )
+
+-- ---- Repetition / structure -------------------------------------------------
+
+parseManyLoop(p Parser[A])(accRev List[A])(st ParseState) =
+  match parserRunStep p st
+    | StepOk v st1 -> parseManyLoop p (v :: accRev) st1
+    | StepErr e stErr consumed ->
+      if isConsumedFrom st stErr consumed
+        StepErr e stErr true
+      else
+        StepOk (listReverse accRev) st
+
+export parseMany(p Parser[A]) =
+  MkParser (\st. parseManyLoop p [] st)
+
+export parseMany1(p Parser[A]) =
+  parseBind p \x.
+    parseMap (\xs. x :: xs) (parseMany p)
+  
+
+export parseOptional(p Parser[A]) =
+  MkParser (\st0.
+    match parserRunStep p st0
+      | StepOk v st1 -> StepOk (Some v) st1
+      | StepErr e stErr consumed ->
+        if isConsumedFrom st0 stErr consumed
+          StepErr e stErr true
+        else
+          StepOk None st0
+  )
+
+export parseSepBy1(p Parser[A])(sep Parser[B]) =
+  parseBind p \x.
+    parseBind (parseMany (parseBind sep \ignoredSep. p)) \xs.
+      parsePure (x :: xs)
+    
+  
+
+export parseSepBy(p Parser[A])(sep Parser[B]) =
+  parseOrElse (parseTry (parseSepBy1 p sep)) (parsePure [])
+
+export parseBetween(openP Parser[A])(closeP Parser[B])(p Parser[C]) =
+  parseBind openP \ignoredOpen.
+    parseBind p \v.
+      parseBind closeP \ignoredClose.
+        parsePure v
+      
+    
+  
+
+-- ---- Common char-level helpers ---------------------------------------------
+
+export parseWhitespace =
+  parseSatisfy charIsSpace "whitespace"
+
+export parseSpaces =
+  parseMany parseWhitespace
+
+export parseDigit =
+  parseSatisfy charIsDigit "digit"
+
+takeDigits(st ParseState)(accRev List[Char]) =
+  match stateCurrentChar st
+    | Some c ->
+      if charIsDigit c
+        takeDigits (stateAdvance c st) (c :: accRev)
+      else
+        (listReverse accRev, st)
+    | None -> (listReverse accRev, st)
+
+export parseInt =
+  MkParser (\st0.
+    signPair =
+      match stateCurrentChar st0
+        | Some '-' -> ("-", stateAdvance '-' st0)
+        | _ -> ("", st0)
+    match signPair
+      | (sign, st1) ->
+        digitsPair = takeDigits st1 []
+        match digitsPair
+          | (digits, st2) ->
+            if listLen digits == 0
+              StepErr
+                (mkErr "expected digit" st1)
+                st1
+                (stateConsumedFrom st0 st1)
+            else
+              nStr = strConcat sign (strFromChars digits)
+              match strToInt nStr
+                | Some n -> StepOk n st2
+                | None ->
+                  StepErr
+                    (mkErr (strConcat "invalid int literal: " nStr) st2)
+                    st2
+                    true
+  )
+
+-- ---- Quoted string parser ---------------------------------------------------
+
+isHexDigit(c Char) =
+  if c >= '0'
+    if c <= '9'
+      true
+    else if c >= 'a'
+      if c <= 'f'
+        true
+      else if c >= 'A'
+        if c <= 'F'
+          true
+        else false
+      else false
+    else if c >= 'A'
+      if c <= 'F'
+        true
+      else false
+    else false
+  else if c >= 'a'
+    if c <= 'f'
+      true
+    else if c >= 'A'
+      if c <= 'F'
+        true
+      else false
+    else false
+  else if c >= 'A'
+    if c <= 'F'
+      true
+    else false
+  else false
+
+hexVal(c Char) =
+  if c >= '0'
+    if c <= '9'
+      charToInt c - charToInt '0'
+    else if c >= 'a'
+      if c <= 'f'
+        10 + (charToInt c - charToInt 'a')
+      else if c >= 'A'
+        if c <= 'F'
+          10 + (charToInt c - charToInt 'A')
+        else (0 - 1)
+      else (0 - 1)
+    else if c >= 'A'
+      if c <= 'F'
+        10 + (charToInt c - charToInt 'A')
+      else (0 - 1)
+    else (0 - 1)
+  else if c >= 'a'
+    if c <= 'f'
+      10 + (charToInt c - charToInt 'a')
+    else if c >= 'A'
+      if c <= 'F'
+        10 + (charToInt c - charToInt 'A')
+      else (0 - 1)
+    else (0 - 1)
+  else if c >= 'A'
+    if c <= 'F'
+      10 + (charToInt c - charToInt 'A')
+    else (0 - 1)
+  else (0 - 1)
+
+readHex4(st ParseState)(acc Int)(count Int) =
+  if count == 0
+    StepOk acc st
+  else
+    match stateCurrentChar st
+      | Some c ->
+        if isHexDigit c
+          nextAcc = acc * 16 + (hexVal c)
+          readHex4 (stateAdvance c st) nextAcc (count - 1)
+        else
+          StepErr (mkErr "invalid hex digit in \\u escape" st) st false
+      | None ->
+        StepErr (mkErr "incomplete \\u escape" st) st false
+
+expectChar(st ParseState)(want Char)(msg Str) =
+  match stateCurrentChar st
+    | Some c ->
+      if c == want
+        StepOk c (stateAdvance c st)
+      else
+        StepErr (mkErr msg st) st false
+    | None ->
+      StepErr (mkErr msg st) st false
+
+parseUnicodeEscapeChars(st ParseState) =
+  match readHex4 st 0 4
+    | StepErr e stErr consumed -> StepErr e stErr consumed
+    | StepOk hi rest ->
+      if hi >= 55296
+        if hi <= 56319
+          match expectChar rest '\\' "expected second \\u escape for surrogate pair"
+            | StepErr e stErr consumed -> StepErr e stErr consumed
+            | StepOk _ rest2 ->
+              match expectChar rest2 'u' "expected second \\u escape for surrogate pair"
+                | StepErr e2 stErr2 consumed2 -> StepErr e2 stErr2 consumed2
+                | StepOk _ rest3 ->
+                  match readHex4 rest3 0 4
+                    | StepErr e3 stErr3 consumed3 -> StepErr e3 stErr3 consumed3
+                    | StepOk lo rest4 ->
+                      if lo >= 56320
+                        if lo <= 57343
+                          StepOk [(intToChar hi) (intToChar lo)] rest4
+                        else
+                          StepErr (mkErr "invalid low surrogate in \\u pair" rest4) rest4 true
+                      else
+                        StepErr (mkErr "expected low surrogate after high surrogate" rest4) rest4 true
+        else if hi <= 57343
+          StepErr (mkErr "unexpected low surrogate without leading high surrogate" rest) rest true
+        else
+          StepOk [(intToChar hi)] rest
+      else
+        StepOk [(intToChar hi)] rest
+
+parseEscapeChars(st ParseState) =
+  match stateCurrentChar st
+    | Some '"' -> StepOk ['"'] (stateAdvance '"' st)
+    | Some '\\' -> StepOk ['\\'] (stateAdvance '\\' st)
+    | Some '/' -> StepOk ['/'] (stateAdvance '/' st)
+    | Some 'b' -> StepOk [(intToChar 8)] (stateAdvance 'b' st)
+    | Some 'f' -> StepOk [(intToChar 12)] (stateAdvance 'f' st)
+    | Some 'n' -> StepOk ['\n'] (stateAdvance 'n' st)
+    | Some 'r' -> StepOk ['\r'] (stateAdvance 'r' st)
+    | Some 't' -> StepOk ['\t'] (stateAdvance 't' st)
+    | Some 'u' -> parseUnicodeEscapeChars (stateAdvance 'u' st)
+    | Some _ -> StepErr (mkErr "invalid escape sequence in string" st) st false
+    | None -> StepErr (mkErr "unterminated string escape" st) st false
+
+scanQuotedChars(st ParseState)(accRev List[Char]) =
+  match stateCurrentChar st
+    | Some '"' ->
+      StepOk (strFromChars (listReverse accRev)) (stateAdvance '"' st)
+    | Some '\\' ->
+      match parseEscapeChars (stateAdvance '\\' st)
+        | StepErr e stErr consumed -> StepErr e stErr consumed
+        | StepOk outChars st2 ->
+          scanQuotedChars st2 (pushChars outChars accRev)
+    | Some c ->
+      if charToInt c < 32
+        StepErr (mkErr "control character in string literal" st) st true
+      else
+        scanQuotedChars (stateAdvance c st) (c :: accRev)
+    | None ->
+      StepErr (mkErr "unterminated string literal" st) st true
+
+export parseQuotedString =
+  MkParser (\st0.
+    match stateCurrentChar st0
+      | Some '"' ->
+        scanQuotedChars (stateAdvance '"' st0) []
+      | _ ->
+        StepErr (mkErr "expected quoted string" st0) st0 false
+  )

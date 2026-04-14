@@ -56,7 +56,7 @@ Key rules:
 ## Run and build
 
 ```bash
-lllc run hello.lll          # compile + execute via dotnet fsi
+lllc run hello.lll          # compile + execute via temporary F# project
 lllc build hello.lll        # compile → hello.fs
 lllc check hello.lll        # type-check only (no codegen output)
 ```
@@ -155,10 +155,14 @@ std = { path = "../stdlib" }
 Then fetch:
 
 ```bash
-lllc install
+lllc mod tidy
 ```
 
-`lllc install` copies source deps into `.ll-deps/` so the compiler can resolve imports.
+`lllc mod tidy` resolves direct + transitive deps into `vendor/` and rewrites
+`ll.sum` deterministically so repeated installs are stable (hashing ignores
+`.git` metadata inside vendored git dependencies). For same-repo git refs,
+resolver selection is deterministic: highest semver tag wins when tags parse as
+semver, otherwise lexical ref ordering is used (and `ll.sum` can pin a winner).
 
 ---
 

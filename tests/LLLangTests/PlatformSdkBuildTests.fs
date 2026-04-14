@@ -282,6 +282,19 @@ let ``lllc run --target java compiles and executes class-aligned source`` () =
     )
 
 [<Fact>]
+let ``lllc run --target fs handles symbolic operators`` () =
+    withTempDir (fun root ->
+        Assert.True(File.Exists(lllcDll), $"missing lllc tool at {lllcDll}")
+        let srcPath = Path.Combine(root, "RunFsSym.lll")
+        File.WriteAllText(
+            srcPath,
+            "module Demo.RunFsSym\n\nmain() Int =\n  x = 5 >>= (\\n. n + 1)\n  y = x <|> 0\n  z = y >> 7\n  z\n")
+
+        let (exitCode, stdout, stderr) = runLllc root ["run"; "--target"; "fs"; srcPath]
+        Assert.True((exitCode = 0), $"lllc run --target fs (symbolic operators) failed: exit={exitCode}\nstdout:\n{stdout}\nstderr:\n{stderr}")
+    )
+
+[<Fact>]
 let ``lllc run --target ts compiles and executes emitted javascript`` () =
     withTempDir (fun root ->
         if toolExists "npx" && toolExists "node" then
@@ -295,6 +308,22 @@ let ``lllc run --target ts compiles and executes emitted javascript`` () =
             Assert.Contains("&& node ", stdout)
             Assert.Contains("RunTs.js", stdout)
             Assert.True(File.Exists(Path.Combine(root, "RunTs.js")), "expected emitted javascript file")
+    )
+
+[<Fact>]
+let ``lllc run --target ts handles symbolic operators`` () =
+    withTempDir (fun root ->
+        if toolExists "npx" && toolExists "node" then
+            Assert.True(File.Exists(lllcDll), $"missing lllc tool at {lllcDll}")
+            let srcPath = Path.Combine(root, "RunTsSym.lll")
+            File.WriteAllText(
+                srcPath,
+                "module Demo.RunTsSym\n\nmain() Int =\n  x = 5 >>= (\\n. n + 1)\n  y = x <|> 0\n  z = y >> 7\n  z\n")
+
+            let (exitCode, stdout, stderr) = runLllc root ["run"; "--target"; "ts"; srcPath]
+            Assert.True((exitCode = 0), $"lllc run --target ts (symbolic operators) failed: exit={exitCode}\nstdout:\n{stdout}\nstderr:\n{stderr}")
+            Assert.Contains("RunTsSym.js", stdout)
+            Assert.True(File.Exists(Path.Combine(root, "RunTsSym.js")), "expected emitted javascript file")
     )
 
 [<Fact>]
@@ -313,6 +342,22 @@ let ``lllc run --target py executes emitted python module`` () =
     )
 
 [<Fact>]
+let ``lllc run --target py handles symbolic operators`` () =
+    withTempDir (fun root ->
+        if toolExists "python3" then
+            Assert.True(File.Exists(lllcDll), $"missing lllc tool at {lllcDll}")
+            let srcPath = Path.Combine(root, "RunPySym.lll")
+            File.WriteAllText(
+                srcPath,
+                "module Demo.RunPySym\n\nmain() Int =\n  x = 5 >>= (\\n. n + 1)\n  y = x <|> 0\n  z = y >> 7\n  z\n")
+
+            let (exitCode, stdout, stderr) = runLllc root ["run"; "--target"; "py"; srcPath]
+            Assert.True((exitCode = 0), $"lllc run --target py (symbolic operators) failed: exit={exitCode}\nstdout:\n{stdout}\nstderr:\n{stderr}")
+            Assert.Contains("RunPySym.py", stdout)
+            Assert.True(File.Exists(Path.Combine(root, "RunPySym.py")), "expected emitted python file")
+    )
+
+[<Fact>]
 let ``lllc run --target cs executes emitted csharp project`` () =
     withTempDir (fun root ->
         Assert.True(File.Exists(lllcDll), $"missing lllc tool at {lllcDll}")
@@ -325,6 +370,39 @@ let ``lllc run --target cs executes emitted csharp project`` () =
         Assert.Contains("RunCs.csproj", stdout)
         Assert.True(File.Exists(Path.Combine(root, "RunCs.cs")), "expected emitted csharp file")
         Assert.True(File.Exists(Path.Combine(root, "RunCs.csproj")), "expected emitted csharp project")
+    )
+
+[<Fact>]
+let ``lllc run --target cs handles pipe with inline lambdas`` () =
+    withTempDir (fun root ->
+        Assert.True(File.Exists(lllcDll), $"missing lllc tool at {lllcDll}")
+        let srcPath = Path.Combine(root, "RunCsPipe.lll")
+        File.WriteAllText(srcPath, "module Demo.RunCsPipe\n\nmain() Int = 1 |> (\\x. x + 1) |> (\\x. x * 2)\n")
+
+        let (exitCode, stdout, stderr) = runLllc root ["run"; "--target"; "cs"; srcPath]
+        Assert.True((exitCode = 4), $"lllc run --target cs (pipe inline lambda) should return 4: exit={exitCode}\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        Assert.Contains("Running: dotnet run --project ", stdout)
+        Assert.Contains("RunCsPipe.csproj", stdout)
+        let csPath = Path.Combine(root, "RunCsPipe.cs")
+        Assert.True(File.Exists(csPath), "expected emitted csharp file")
+        let csText = File.ReadAllText(csPath)
+        Assert.Contains("Func<long, long>", csText)
+    )
+
+[<Fact>]
+let ``lllc run --target java handles symbolic operators`` () =
+    withTempDir (fun root ->
+        if toolExists "javac" && toolExists "java" then
+            Assert.True(File.Exists(lllcDll), $"missing lllc tool at {lllcDll}")
+            let srcPath = Path.Combine(root, "RunJavaSym.lll")
+            File.WriteAllText(
+                srcPath,
+                "module Demo.RunJavaSym\n\nmain() Int =\n  x = 5 >>= (\\n. n + 1)\n  y = x <|> 0\n  z = y >> 7\n  z\n")
+
+            let (exitCode, stdout, stderr) = runLllc root ["run"; "--target"; "java"; srcPath]
+            Assert.True((exitCode = 0), $"lllc run --target java (symbolic operators) failed: exit={exitCode}\nstdout:\n{stdout}\nstderr:\n{stderr}")
+            Assert.Contains("RunJavaSym", stdout)
+            Assert.True(File.Exists(Path.Combine(root, "RunJavaSym.java")), "expected emitted java file")
     )
 
 [<Fact>]

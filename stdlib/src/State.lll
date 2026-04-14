@@ -1,0 +1,78 @@
+module Std.State
+
+export StateUnit = StateUnit
+
+-- TODO(lllang): return to canonical `State S A = MkState (S -> (A, S))`
+-- when tuple types in ADT fields are stable in all parser modes.
+export StatePair A S = MkStatePair A S
+export State S A = MkState (S -> StatePair[A][S])
+
+export let stateRun =
+  \st. \s.
+    match st
+      | MkState f -> f s
+
+export let statePure =
+  \a.
+    MkState (\s. MkStatePair a s)
+
+export let stateMap =
+  \f. \st.
+    MkState (\s.
+      match st
+        | MkState run ->
+          match run s
+            | MkStatePair a s1 -> MkStatePair (f a) s1
+    )
+
+export let stateBind =
+  \st. \k.
+    MkState (\s.
+      match st
+        | MkState run ->
+          match run s
+            | MkStatePair a s1 ->
+              match k a
+                | MkState run2 -> run2 s1
+    )
+
+export let stateEval =
+  \st. \s.
+    match st
+      | MkState run ->
+        match run s
+          | MkStatePair a _ -> a
+
+export let stateExec =
+  \st. \s.
+    match st
+      | MkState run ->
+        match run s
+          | MkStatePair _ s1 -> s1
+
+pickSame(x S)(y S) = x
+
+-- TODO(lllang): make `stateGet` a zero-arg polymorphic value (`State[S][S]`)
+-- after top-level polymorphic value inference is stabilized.
+export stateGet(dummy S) =
+  MkState (\s.
+    s2 = pickSame s dummy
+    MkStatePair s2 s2
+  )
+
+export let statePut =
+  \next.
+    MkState (\ignored.
+      next2 = pickSame next ignored
+      MkStatePair StateUnit next2
+    )
+
+-- TODO(lllang): nested stateBind chains that capture an outer value across
+-- stateModify can still trigger HM inference edge-cases; keep state pipelines
+-- in direct sequential form until inference stabilization lands.
+export let stateModify =
+  \f.
+    MkState (\s.
+      s1 = f s
+      MkStatePair StateUnit s1
+    )

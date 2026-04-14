@@ -1,6 +1,7 @@
 module LLLang.Lexer
 
 open System
+open System.Globalization
 open LLLang.Token
 
 let private keywords =
@@ -75,6 +76,22 @@ let tokenize (source: string) : Result<Tok list, string> =
             while pos < source.Length && source[pos] <> '\n' do advance()
             scan()
         | '-' when peek() = '>' -> let t = mk Arrow in advance(); advance(); result.Add(t); scan()
+        | '|' when peek() = '>' -> let t = mk PipeForward in advance(); advance(); result.Add(t); scan()
+        | '>' when peek() = '>' && pos + 2 < source.Length && source[pos + 2] = '=' ->
+            let t = mk Bind
+            advance(); advance(); advance()
+            result.Add(t)
+            scan()
+        | '>' when peek() = '>' ->
+            let t = mk ThenThen
+            advance(); advance()
+            result.Add(t)
+            scan()
+        | '<' when peek() = '|' && pos + 2 < source.Length && source[pos + 2] = '>' ->
+            let t = mk Choice
+            advance(); advance(); advance()
+            result.Add(t)
+            scan()
         | '<' when peek() = '=' -> let t = mk Le in advance(); advance(); result.Add(t); scan()
         | '>' when peek() = '=' -> let t = mk Ge in advance(); advance(); result.Add(t); scan()
         | '=' when peek() = '=' -> let t = mk EqEq in advance(); advance(); result.Add(t); scan()
@@ -88,12 +105,18 @@ let tokenize (source: string) : Result<Tok list, string> =
         | '>' -> add Gt; advance(); scan()
         | '=' -> add Eq; advance(); scan()
         | ',' -> add Comma; advance(); scan()
+        // Legacy separator support: treat `;` as a synthetic newline.
+        // This keeps semicolon-separated list/object literals and statement
+        // chains parseable while the grammar remains newline-driven.
+        | ';' -> add Newline; advance(); scan()
         | '.' -> add Dot; advance(); scan()
         | ':' when peek() = ':' -> let t = mk ColonColon in advance(); advance(); result.Add(t); scan()
         | ':' -> add Colon; advance(); scan()
         | '|' -> add Bar; advance(); scan()
         | '[' -> add LBrack; advance(); scan()
         | ']' -> add RBrack; advance(); scan()
+        | '{' -> add LBrace; advance(); scan()
+        | '}' -> add RBrace; advance(); scan()
         | '(' -> add LParen; advance(); scan()
         | ')' -> add RParen; advance(); scan()
         | '\\' -> add Backslash; advance(); scan()
@@ -157,9 +180,15 @@ let tokenize (source: string) : Result<Tok list, string> =
             if pos < source.Length && source[pos] = '.' && pos + 1 < source.Length && Char.IsDigit(source[pos + 1]) then
                 advance()
                 while pos < source.Length && Char.IsDigit(source[pos]) do advance()
-                result.Add({ Token = FloatLit (Double.Parse(source[start..pos-1])); Line = l; Col = c2 })
+                result.Add(
+                    { Token = FloatLit (Double.Parse(source[start..pos-1], CultureInfo.InvariantCulture))
+                      Line = l
+                      Col = c2 })
             else
-                result.Add { Token = IntLit (Int64.Parse(source[start..pos-1])); Line = l; Col = c2 }
+                result.Add
+                    { Token = IntLit (Int64.Parse(source[start..pos-1], CultureInfo.InvariantCulture))
+                      Line = l
+                      Col = c2 }
             scan()
         | c when Char.IsLetter c || c = '_' ->
             let l, c2 = line, col()

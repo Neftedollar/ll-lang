@@ -116,6 +116,19 @@ let private tryAsBinOp (te: TypedExpr) : (string * TypedExpr * TypedExpr) option
         | _ -> None
     | _ -> None
 
+let private tryAsSymbolicOp (te: TypedExpr) : (string * TypedExpr * TypedExpr) option =
+    match te.Expr with
+    | TEApp(outer, right) ->
+        match outer.Expr with
+        | TEApp(inner, left) ->
+            match inner.Expr with
+            | TEVar (">>=" as op)
+            | TEVar (">>" as op)
+            | TEVar ("<|>" as op) -> Some (op, left, right)
+            | _ -> None
+        | _ -> None
+    | _ -> None
+
 // ── String concat ─────────────────────────────────────────────────────────────
 let private tryAsStrConcat (te: TypedExpr) : (TypedExpr * TypedExpr) option =
     match te.Expr with
@@ -181,6 +194,14 @@ let rec private emitMatchCases (ind: string) (scrutVar: string) (branches: (Type
 // ── Expression emission ───────────────────────────────────────────────────────
 
 and private emitExprPy (te: TypedExpr) : string =
+    match tryAsSymbolicOp te with
+    | Some (">>=", left, right) ->
+        "(" + emitExprPy right + ")(" + emitExprPy left + ")"
+    | Some (">>", _, right) ->
+        "(" + emitExprPy right + ")"
+    | Some ("<|>", left, _) ->
+        "(" + emitExprPy left + ")"
+    | _ ->
     match tryAsStrConcat te with
     | Some (a, b) -> "(" + emitExprPy a + " + " + emitExprPy b + ")"
     | None ->

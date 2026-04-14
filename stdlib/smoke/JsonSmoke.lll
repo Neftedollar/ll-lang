@@ -1,0 +1,37 @@
+module StdSmoke.JsonSmoke
+
+import Std.Json
+
+main() =
+  _ = printfn (runOkCase "pos-null" "null" "null")
+  _ = printfn (runOkCase "pos-bool" "false" "bool")
+  _ = printfn (runOkCase "pos-int" "123" "number")
+  _ = printfn (runOkCase "pos-exp" "1.2e+3" "number")
+  _ = printfn (runOkCase "pos-str-esc" "\"a\\n\\t\\\\\\\"\"" "string")
+  _ = printfn (runOkCase "pos-u-basic" "\"\\u0041\"" "string")
+  _ = printfn (runOkCase "pos-u-surrogate" "\"\\uD834\\uDD1E\"" "string")
+  _ = printfn (runOkCase "pos-array" "[1,2,3]" "array")
+  _ = printfn (runOkCase "pos-object" "{\"a\":1,\"b\":[true,null]}" "object")
+
+  _ = printfn (runRoundtripCase "rt-num" "123.5")
+  _ = printfn (runRoundtripCase "rt-str-esc" "\"line\\ntext\"")
+  _ = printfn (runRoundtripCase "rt-u-surrogate" "\"\\uD834\\uDD1E\"")
+  _ = printfn (runRoundtripCase "rt-array" "[1,{\"k\":\"v\"},false]")
+  _ = printfn (runRoundtripCase "rt-object" "{\"x\":1,\"y\":{\"z\":[1,2]}}")
+
+  utilOk = stringify (JNum "12.34") == "12.34"
+  _ =
+    if utilOk
+      printfn (mkOk "util-float-to-str")
+    else
+      printfn (mkFail "util-float-to-str" "render-mismatch")
+
+  _ = printfn (runErrCase "neg-leading-zero" "01")
+  _ = printfn (runErrCase "neg-bad-exp" "1e")
+  _ = printfn (runErrCase "neg-bad-frac" "1.")
+  _ = printfn (runErrCase "neg-bad-escape" "\"\\q\"")
+  _ = printfn (runErrCase "neg-lone-high-surrogate" "\"\\uD834\"")
+  _ = printfn (runErrCase "neg-lone-low-surrogate" "\"\\uDD1E\"")
+  _ = printfn (runErrCase "neg-missing-comma" "[1 2]")
+  _ = printfn (runErrCase "neg-trailing-garbage" "true false")
+  0

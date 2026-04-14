@@ -1,0 +1,79 @@
+module Std.Str
+
+strIsEmpty(s Str) =
+  strLen s == 0
+
+strStartsWith(prefix Str)(s Str) =
+  plen = strLen prefix
+  slen = strLen s
+  if plen > slen
+    false
+  else
+    strSlice s 0 plen == prefix
+
+strEndsWith(suffix Str)(s Str) =
+  slen = strLen s
+  tlen = strLen suffix
+  if tlen > slen
+    false
+  else
+    strSlice s (slen - tlen) tlen == suffix
+
+strTake(n Int)(s Str) =
+  if n <= 0
+    ""
+  else if n >= strLen s
+    s
+  else
+    strSlice s 0 n
+
+strDrop(n Int)(s Str) =
+  if n <= 0
+    s
+  else
+    len = strLen s
+    if n >= len
+      ""
+    else
+      strSlice s n (len - n)
+
+strRepeat(n Int)(chunk Str) =
+  if n <= 0
+    ""
+  else
+    strConcat chunk (strRepeat (n - 1) chunk)
+
+strPadLeft(width Int)(fill Str)(s Str) =
+  len = strLen s
+  if len >= width
+    s
+  else if strLen fill == 0
+    s
+  else
+    need = width - len
+    padRaw = strRepeat need fill
+    pad = strTake need padRaw
+    strConcat pad s
+
+strPadRight(width Int)(fill Str)(s Str) =
+  len = strLen s
+  if len >= width
+    s
+  else if strLen fill == 0
+    s
+  else
+    need = width - len
+    padRaw = strRepeat need fill
+    pad = strTake need padRaw
+    strConcat s pad
+
+-- ---- Self-checks -------------------------------------------------------------
+
+check(label Str)(ok Bool) =
+  if ok
+    _ = printfn (strConcat "OK " label)
+    0
+  else
+    _ = printfn (strConcat "FAIL " label)
+    1
+

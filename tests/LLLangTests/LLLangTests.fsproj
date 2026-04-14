@@ -55,6 +55,7 @@
     <Compile Include="CodegenCSharpTests.fs" />
     <Compile Include="CodegenLLVMTests.fs" />
     <Compile Include="StdlibMapTests.fs" />
+    <Compile Include="StdlibStateParsecTests.fs" />
     <Compile Include="StdlibJsonTests.fs" />
   </ItemGroup>
 </Project>

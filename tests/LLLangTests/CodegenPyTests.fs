@@ -125,6 +125,20 @@ let ``Py: external JSON_parse emits json.loads wrapper`` () =
     Assert.Contains("json.loads(s)", py)
 
 [<Fact>]
+let ``Py: symbolic operators lower without raw symbolic identifiers`` () =
+    let src =
+        "module M\n"
+        + "main() Int =\n"
+        + "  x = 5 >>= (\\n. n + 1)\n"
+        + "  y = x <|> 0\n"
+        + "  z = y >> 7\n"
+        + "  z\n"
+    let py = pySrc src
+    Assert.DoesNotContain(">>=", py)
+    Assert.DoesNotContain("<|>", py)
+    Assert.DoesNotContain(" >> ", py)
+
+[<Fact>]
 let ``Py: JSON_parse declaration adds import json`` () =
     let src =
         "module M\n"

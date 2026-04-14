@@ -129,8 +129,20 @@ let private withFixtureLock (f: unit -> unit) =
     try f ()
     finally fixtureLock.ReleaseMutex()
 
+let private fixtureLockLease () : System.IDisposable =
+    if not (fixtureLock.WaitOne(30000)) then
+        failwith "timeout waiting for bootstrap fixture lock — is another test run stuck?"
+    // Defensive invariant: every fixture-mutating bootstrap test assumes
+    // `20a-bootstrap-input.lll` exists. Keep it materialized under the lock
+    // so a previously interrupted test run cannot cascade into "missing fixture"
+    // failures across the suite.
+    ensureSharedBootstrapFixturePresent ()
+    { new System.IDisposable with
+        member _.Dispose() = fixtureLock.ReleaseMutex() }
+
 [<Fact>]
 let ``20-bootstrap-compiler.lll parses, elaborates, and infers without errors`` () =
+    use _lock = fixtureLockLease ()
     let src = readValid "20-bootstrap-compiler.lll"
     match tokenize src |> Result.bind parseModuleWithPos with
     | Error e -> Assert.Fail($"parse: {e}")
@@ -144,6 +156,8 @@ let ``20-bootstrap-compiler.lll parses, elaborates, and infers without errors`` 
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll runs and emits F# source for the clean module loaded from 20a-bootstrap-input.lll`` () =
+    use _lock = fixtureLockLease ()
+    ensureSharedBootstrapFixturePresent ()
     let (_, stdout, stderr) = runBootstrap ()
     // Phase 7.9c: `main` reads the source from
     // `spec/examples/valid/20a-bootstrap-input.lll` via `readFile`.
@@ -181,6 +195,8 @@ let ``20-bootstrap-compiler.lll runs and emits F# source for the clean module lo
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll actually reads its source from 20a-bootstrap-input.lll (file-reading path)`` () =
+    use _lock = fixtureLockLease ()
+    ensureSharedBootstrapFixturePresent ()
     // Phase 7.9c: prove that the source flows through `readFile` and
     // not a stale hardcoded string. We temporarily rename the input
     // file out of the way, run the bootstrap compiler, and assert
@@ -215,6 +231,7 @@ let ``20-bootstrap-compiler.lll actually reads its source from 20a-bootstrap-inp
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll can self-compile its own source fixture and emit core pipeline markers`` () =
+    use _lock = fixtureLockLease ()
     // Self-hosting parity smoke:
     // run bootstrap compiler with its OWN source as input fixture.
     // This is intentionally a structural guard (not byte-equality):
@@ -258,6 +275,7 @@ let ``20-bootstrap-compiler.lll can self-compile its own source fixture and emit
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll self-compile output matches fixpoint snapshot compiler1-latest.fs`` () =
+    use _lock = fixtureLockLease ()
     // Strict fixpoint regression gate:
     // compiler output produced from bootstrap source must match the
     // canonical snapshot checked into docs/compiler-dev/fixpoint-snapshots.
@@ -297,6 +315,7 @@ let ``20-bootstrap-compiler.lll self-compile output matches fixpoint snapshot co
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll self-compile output satisfies structural fixpoint metrics contract`` () =
+    use _lock = fixtureLockLease ()
     // Independent contract over the emitted compiler text shape.
     // This guards accidental snapshot churn that preserves superficial
     // behaviour but changes fixpoint structure/formatting.
@@ -337,6 +356,7 @@ let ``20-bootstrap-compiler.lll self-compile output satisfies structural fixpoin
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll diagnostics contract: unbound var includes stable E002 payload`` () =
+    use _lock = fixtureLockLease ()
     // Diagnostics parity guard: bootstrap should surface a stable,
     // machine-detectable ll-lang error payload on semantic failure.
     let inputPath =
@@ -364,6 +384,7 @@ main() = missingFn 1
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts stdlib builtin strConcat in fn body (Phase 7.9e)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9e: before the fix, `elaborate` started with an empty
     // `MkEnv []` env, so any fn body that called a stdlib builtin like
     // `strConcat` / `listMap` / `readFile` fired `E002 UnboundVar
@@ -402,6 +423,7 @@ let ``20-bootstrap-compiler.lll accepts stdlib builtin strConcat in fn body (Pha
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts == operator in fn body (Phase 7.9f)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9f: before the fix, the bootstrap compiler's lexer only
     // emitted `TEq` for a single `=` and had no double-`=` token, so a
     // fn body like `if 1 == 1 then 0 else 1` could not parse. The fix
@@ -446,6 +468,7 @@ let ``20-bootstrap-compiler.lll accepts == operator in fn body (Phase 7.9f)`` ()
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts < and > operators in fn body (Phase 7.9g)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9g: before the fix, the bootstrap compiler's lexer had
     // no `TLt` / `TGt` tokens, so a fn body like
     // `if n < 0 then 0 - n else n` could not parse. The fix adds two
@@ -503,6 +526,7 @@ let ``20-bootstrap-compiler.lll accepts < and > operators in fn body (Phase 7.9g
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll parses Maybe[Int] return type and emits main (bracket-form types in fn signatures)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9d: the bootstrap compiler's parseParamGroups /
     // parseReturnType only accepted bare `Upper` type names. A fn with
     // a bracket-form return type like `Maybe[Int]` caused the parser to
@@ -542,6 +566,7 @@ let ``20-bootstrap-compiler.lll parses Maybe[Int] return type and emits main (br
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts true and false literals in fn body (Phase 7.9h)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9h: before the fix, the bootstrap compiler's elaborator
     // fired `E002 UnboundVar true` / `E002 UnboundVar false` for any
     // program that used bare `true` / `false` literals. The bootstrap
@@ -616,6 +641,7 @@ let ``20-bootstrap-compiler.lll accepts true and false literals in fn body (Phas
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts char literals in fn body (Phase 7.9i)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9i: before the fix, the bootstrap compiler's lexer
     // silently dropped `'` as an unknown char (falling through to the
     // catch-all `else lexChars rest` in `lexChars`), mangling any
@@ -675,6 +701,7 @@ let ``20-bootstrap-compiler.lll accepts char literals in fn body (Phase 7.9i)`` 
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts char escape sequences in fn body (Phase 7.9j)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9j: before the fix, the bootstrap compiler's `lexCharLit`
     // treated `\` as a regular char, so `'\n'` attempted to lex as
     // `'\` + a continuation that doesn't match the closing quote,
@@ -739,6 +766,7 @@ let ``20-bootstrap-compiler.lll accepts char escape sequences in fn body (Phase 
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts string literal escape sequences (Phase 7.9m)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9m: before the fix, the bootstrap compiler's `lexStr`
     // via `takeStrBody` treated `\` as a regular char and terminated
     // on the first `"`, so `"hello\nworld"` either mangled the body
@@ -801,6 +829,7 @@ let ``20-bootstrap-compiler.lll accepts string literal escape sequences (Phase 7
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts constructor patterns in match arms (Phase 7.9l)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9l: before the fix, the bootstrap compiler's
     // `parsePrimaryPat` had no `TUpper`-headed arm, so constructor
     // patterns like `| Some n -> ...` and `| None -> ...` fell through
@@ -860,6 +889,7 @@ let ``20-bootstrap-compiler.lll accepts constructor patterns in match arms (Phas
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll accepts multi-line let-in and match arm layout (Phase 7.9.newlines)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9.newlines: before the fix, the bootstrap compiler's
     // `parseLetIn` and `parseArms` peeked at the next token without
     // first calling `skipNewlines`, so any intervening `TNewline`
@@ -934,6 +964,7 @@ let ``20-bootstrap-compiler.lll accepts multi-line let-in and match arm layout (
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll skips `--` line comments (Phase 7.9n)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9n: before the fix, the bootstrap compiler's `lexChars`
     // had zero handling for `--` line comments — it just hit the `-`
     // arm, went into `lexMinusOrArrow`, emitted a `TMinus`, and kept
@@ -1003,6 +1034,7 @@ let ``20-bootstrap-compiler.lll skips `--` line comments (Phase 7.9n)`` () =
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll parses multi-line type decl with leading bar (Phase 7.9o)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9o: before the fix, the bootstrap compiler's
     // `parseTypeDecl` / `parseCtors` / `parseCtorsTail` trio had
     // no newline tolerance around the constructor list. The
@@ -1088,6 +1120,7 @@ let ``20-bootstrap-compiler.lll parses multi-line type decl with leading bar (Ph
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll resolves charToInt via stdlibNames (Phase 7.9p)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9p: the bootstrap compiler's `stdlibNames` list in
     // `elaborate`/`checkDecls` seeds the initial name environment
     // with every stdlib builtin a user program can call without
@@ -1152,6 +1185,7 @@ let ``20-bootstrap-compiler.lll resolves charToInt via stdlibNames (Phase 7.9p)`
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll parses multi-line if-then-else and keeps emitting subsequent fns (Phase 7.9q)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9q: before the fix, the bootstrap compiler's `parseIf`
     // had no newline tolerance around `then`/`else`. A multi-line
     // if form
@@ -1222,6 +1256,7 @@ let ``20-bootstrap-compiler.lll parses multi-line if-then-else and keeps emittin
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll resolves charIsDigit via stdlibNames (Phase 7.9r)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.9r: after 7.9q cleared the parser blocker by adding
     // newline tolerance to `parseIf`, the fixpoint probe revealed
     // four remaining `E002 UnboundVar` errors:
@@ -1275,6 +1310,7 @@ let ``20-bootstrap-compiler.lll resolves charIsDigit via stdlibNames (Phase 7.9r
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll emits list literal expressions (Phase 7.10a)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.10a: before this slice, the bootstrap's `parseAtom` had
     // NO arm for `TLBrack` in expression position — every list literal
     // (`[]`, `[c]`, `[1 2 3]`) silently fell through to the `(EInt 0,
@@ -1326,6 +1362,7 @@ let ``20-bootstrap-compiler.lll emits list literal expressions (Phase 7.10a)`` (
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll emits if expression in match arm body (Phase 7.10b)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.10b: before this slice, `parseArmBody` in the bootstrap
     // fell straight through to `parseCompare`, which SKIPS the special-
     // form dispatch (`parseIf` / `parseLetIn` / `parseMatch` / `parseLam`)
@@ -1388,6 +1425,7 @@ let ``20-bootstrap-compiler.lll emits if expression in match arm body (Phase 7.1
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll resolves strToInt via stdlibNames (Phase 7.10c)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.10c: the bootstrap's `stdlibNames` mirror list omitted
     // `strToInt` — the host elaborator knows it as a builtin, and the
     // bootstrap's own source already uses it inside `lexNum`, but
@@ -1429,6 +1467,7 @@ let ``20-bootstrap-compiler.lll resolves strToInt via stdlibNames (Phase 7.10c)`
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll supports string literal patterns (Phase 7.10d)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.10d: the bootstrap's `Pat` type and `parsePrimaryPat` /
     // `showPat` / `patBinders` / `patIsCatchAll` / `emitPat` cascade
     // did not handle `PStr Str` — a string literal as a match pattern.
@@ -1478,6 +1517,7 @@ let ``20-bootstrap-compiler.lll supports string literal patterns (Phase 7.10d)``
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll resolves strChars/strFromChars/intToStr/charIsSpace/listReverse via stdlibNames (Phase 7.10e)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.10e: a small stdlib audit. The bootstrap's `stdlibNames`
     // mirror list was missing five host builtins that the bootstrap
     // itself calls from its lexer and emitter — `strChars` (tokenize,
@@ -1550,6 +1590,7 @@ let ``20-bootstrap-compiler.lll resolves strChars/strFromChars/intToStr/charIsSp
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll desugars clause-sugar fn bodies (Phase 7.10g)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.10g: the bootstrap's `parseFnDecl` called `parseExpr`
     // directly on the fn body, and `parseExpr` had no `TBar :: _`
     // dispatch — so any fn whose body used clause-sugar
@@ -1615,6 +1656,7 @@ let ``20-bootstrap-compiler.lll desugars clause-sugar fn bodies (Phase 7.10g)`` 
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll emits tuple literal expressions (Phase 7.10q)`` () =
+    use _lock = fixtureLockLease ()
     // Phase 7.10q: before this slice, the bootstrap compiler had no
     // `TComma` token, no `ETuple2` AST node, and `parseAtom` only handled
     // `(e)` paren-grouping (not `(e1, e2)` tuples). Every tuple site in
@@ -1684,6 +1726,7 @@ let ``20-bootstrap-compiler.lll emits tuple literal expressions (Phase 7.10q)`` 
 
 [<Fact>]
 let ``20y-bootstrap-input-prelude.lll: bootstrap prelude contains listFold and listReverse (Phase 7.10r blocker 1)`` () =
+    use _lock = fixtureLockLease ()
     // Blocker 1: Prelude parity.
     // The bootstrap emits only 6 stdlib bindings in its prelude
     // (print, printfn, readFile, strConcat, strLen, listAppend at
@@ -1734,6 +1777,7 @@ let ``20y-bootstrap-input-prelude.lll: bootstrap prelude contains listFold and l
 
 [<Fact>]
 let ``20y-bootstrap-input-mutrec.lll: mutually recursive fns across type boundary produce correct let-rec grouping (Phase 7.10r blocker 2)`` () =
+    use _lock = fixtureLockLease ()
     // Blocker 2: Binding count parity.
     // compiler_1.fs (F# host compiling the bootstrap) emits 275 bindings;
     // compiler_2.fs (bootstrap compiling itself) emits only 238 — a
@@ -1787,6 +1831,7 @@ let ``20y-bootstrap-input-mutrec.lll: mutually recursive fns across type boundar
 
 [<Fact>]
 let ``20y-bootstrap-input-fmt.lll: each fn in a multi-fn module is emitted on its own separate line (Phase 7.10r blocker 3)`` () =
+    use _lock = fixtureLockLease ()
     // Blocker 3: Format parity.
     // For byte-identical fixpoint, compiler_1.fs and compiler_2.fs must
     // produce the same whitespace layout. The F# host compiler's
@@ -1841,6 +1886,7 @@ let ``20y-bootstrap-input-fmt.lll: each fn in a multi-fn module is emitted on it
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll emits TError for unknown chars instead of silently dropping (Bug #7)`` () =
+    use _lock = fixtureLockLease ()
     // Bug #7 fix: the bootstrap lexer's main loop (`lexChars`) previously
     // fell through to `else lexChars rest` for unrecognised characters,
     // silently dropping them. The fix adds a `TError Char` variant to the
@@ -1889,6 +1935,7 @@ let ``20-bootstrap-compiler.lll emits TError for unknown chars instead of silent
 
 [<Fact>]
 let ``20-bootstrap-compiler.lll lexCharLit and lexCharEsc return TEnd at EOF instead of empty list (Bug #14)`` () =
+    use _lock = fixtureLockLease ()
     // Bug #14 fix: `lexCharLit` and `lexCharEsc` previously returned `[]`
     // (empty token list) when they hit EOF before seeing a closing `'`.
     // Returning `[]` is subtly wrong: the parser interprets an empty list

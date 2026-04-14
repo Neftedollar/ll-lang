@@ -22,7 +22,7 @@ Keep manifest and code on separate sides of the cut.
 # lll.toml
 [project]
 name    = "my-app"             # required, becomes root module namespace
-version = "0.8.0"              # semver, required
+version = "1.0.0"              # semver, required
 lll     = "0.8"                # min compiler version
 entry   = "src/Main.lll"       # optional; defaults to src/Main.lll
 
