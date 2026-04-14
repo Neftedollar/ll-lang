@@ -5023,15 +5023,6 @@ For 1.0-focused iterations, prioritize core ll-lang surface:
 Current deferred items are tracked inline in code with `TODO(selfhost:...)`.
 The active buckets are:
 
-- `selfhost:resolver` — deterministic transitive `vendor/ll.sum` sync is live;
-  `mod add/tidy/why` flow is canonical in CLI; conflict diagnostics include
-  declaring roots and transitive `via` chains; same-repo semver git-tag
-  conflicts deterministically converge to the highest tag (including
-  direct-vs-transitive clashes via restartable selection); same-repo non-semver
-  git refs also converge deterministically (lexical ref ordering), while
-  `ll.sum` can still pin an explicit winner; `ll.sum` hashing ignores vendored
-  `.git` metadata for repeatable lock output; remaining gap is full
-  MVS/version selection for broader multi-source policy.
 - `selfhost:operators` — symbolic operators are parsed and elaborated with
   stable precedence; `>>=` / `>>` / `<|>` are constrained to a single carrier
   shape (`m >>= (a -> m) -> m`, `m -> m -> m`), but full Monad/Alt evidence-
@@ -5048,3 +5039,10 @@ The active buckets are:
 through the elaboration boundary and adding a cross-module regression test for
 polymorphic import reuse (`id` at `Int` and `Str` in the same downstream
 module).
+
+`selfhost:resolver` was closed by moving resolver winner selection from
+same-repo-only heuristics to a canonical deterministic policy:
+`PathDep > GitDep`; for git refs, semver outranks non-semver, semver compares
+numerically, non-semver compares lexically by ref then URL; restart-based
+convergence is preserved, and `ll.sum` pins still override when pinned source
+matches a contender.

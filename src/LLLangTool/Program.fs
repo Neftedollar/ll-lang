@@ -1111,34 +1111,22 @@ let private pendingPriorityKey (name: string, source: DepSource, ownerRoot: stri
     let depth = List.length chain
     depth, name, sourcePriorityKey source, ownerRoot, String.concat "->" chain
 
-let private compareSameRepoGitRef (leftSource: DepSource) (rightSource: DepSource) : int option =
+let private compareGitCandidates (leftUrl: string) (leftRef: string) (rightUrl: string) (rightRef: string) : int =
     // > 0 => left preferred, < 0 => right preferred, = 0 => equal.
-    // Policy for same-repo git refs:
-    //  1) semver tags outrank non-semver refs;
-    //  2) semver-vs-semver uses numeric compare;
-    //  3) non-semver-vs-non-semver uses case-insensitive lexical compare.
-    match leftSource, rightSource with
-    | GitDep(leftUrl, leftRef), GitDep(rightUrl, rightRef) when leftUrl = rightUrl ->
-        match tryParseSemverTag leftRef, tryParseSemverTag rightRef with
-        | Some leftSemver, Some rightSemver -> Some (compare leftSemver rightSemver)
-        | Some _, None -> Some 1
-        | None, Some _ -> Some -1
-        | None, None ->
-            Some (StringComparer.OrdinalIgnoreCase.Compare(leftRef.Trim(), rightRef.Trim()))
-    | _ -> None
-
-let private canPreferExistingOverIncoming (existingSource: DepSource) (incomingSource: DepSource) : bool =
-    match compareSameRepoGitRef existingSource incomingSource with
-    | Some cmp when cmp >= 0 -> true
-    | _ -> false
-
-let private shouldSkipByPreferred (preferredSource: DepSource) (candidateSource: DepSource) : bool =
-    if depSourceToText preferredSource = depSourceToText candidateSource then
-        false
-    else
-        match compareSameRepoGitRef preferredSource candidateSource with
-        | Some cmp when cmp > 0 -> true
-        | _ -> false
+    // Policy:
+    //  1) semver refs outrank non-semver refs;
+    //  2) semver-vs-semver uses numeric compare (independent of repo URL);
+    //  3) non-semver-vs-non-semver uses lexical compare on refs, then URL.
+    match tryParseSemverTag leftRef, tryParseSemverTag rightRef with
+    | Some leftSemver, Some rightSemver -> compare leftSemver rightSemver
+    | Some _, None -> 1
+    | None, Some _ -> -1
+    | None, None ->
+        let refCmp = StringComparer.OrdinalIgnoreCase.Compare(leftRef.Trim(), rightRef.Trim())
+        if refCmp <> 0 then
+            refCmp
+        else
+            StringComparer.OrdinalIgnoreCase.Compare(leftUrl.Trim(), rightUrl.Trim())
 
 let private sha256Hex (bytes: byte array) : string =
     let sb = StringBuilder(bytes.Length * 2)
@@ -1227,6 +1215,11 @@ type private ResolvedDep = {
     CanonicalSource: string
     DeclaredByRoot: string
     DeclaredByChain: string list
+}
+
+type private PreferredWinner = {
+    DisplaySource: DepSource
+    CanonicalSource: string
 }
 
 let private canonicalizeDepSource (ownerRoot: string) (source: DepSource) : string =
@@ -1356,26 +1349,38 @@ let private materializeDepOrFail (rootDir: string) (ownerRoot: string) (name: st
 
 type private ResolveOutcome =
     | ResolveDone of Map<string, ResolvedDep>
-    | ResolveRestart of Map<string, DepSource>
+    | ResolveRestart of Map<string, PreferredWinner>
 
 let private clearVendorDirectory (vendorDir: string) : unit =
     if Directory.Exists(vendorDir) then
         for existing in Directory.GetDirectories(vendorDir) do
             Directory.Delete(existing, true)
 
-let private upsertPreferredSemver (preferred: Map<string, DepSource>) (name: string) (incoming: DepSource) : Map<string, DepSource> =
+let private comparePreferredWinner (left: PreferredWinner) (right: PreferredWinner) : int =
+    match left.DisplaySource, right.DisplaySource with
+    | PathDep _, PathDep _ ->
+        StringComparer.OrdinalIgnoreCase.Compare(left.CanonicalSource, right.CanonicalSource)
+    | PathDep _, GitDep _ -> 1
+    | GitDep _, PathDep _ -> -1
+    | GitDep(leftUrl, leftRef), GitDep(rightUrl, rightRef) ->
+        let cmp = compareGitCandidates leftUrl leftRef rightUrl rightRef
+        if cmp <> 0 then
+            cmp
+        else
+            StringComparer.OrdinalIgnoreCase.Compare(left.CanonicalSource, right.CanonicalSource)
+
+let private upsertPreferredWinner
+    (preferred: Map<string, PreferredWinner>)
+    (name: string)
+    (incoming: PreferredWinner)
+    : Map<string, PreferredWinner> =
     match Map.tryFind name preferred with
-    | Some current when canPreferExistingOverIncoming current incoming -> preferred
+    | Some current when comparePreferredWinner current incoming >= 0 -> preferred
     | _ -> preferred |> Map.add name incoming
 
-let private isHigherRefConflict (existingSource: DepSource) (incomingSource: DepSource) : bool =
-    match compareSameRepoGitRef existingSource incomingSource with
-    | Some cmp when cmp < 0 -> true
-    | _ -> false
-
-let private hasPreferredWinner (preferred: Map<string, DepSource>) (name: string) (source: DepSource) : bool =
+let private hasPreferredWinner (preferred: Map<string, PreferredWinner>) (name: string) (canonicalSource: string) : bool =
     match Map.tryFind name preferred with
-    | Some winner when shouldSkipByPreferred winner source -> true
+    | Some winner when not (String.Equals(winner.CanonicalSource, canonicalSource, StringComparison.OrdinalIgnoreCase)) -> true
     | _ -> false
 
 let private resolveWithPreferred
@@ -1393,15 +1398,15 @@ let private resolveWithPreferred
     let rec resolvePass
         (pending: (string * DepSource * string * string list) list)
         (resolved: Map<string, ResolvedDep>)
-        (preferred: Map<string, DepSource>)
+        (preferred: Map<string, PreferredWinner>)
         : ResolveOutcome =
         match pending |> List.sortBy pendingPriorityKey with
         | [] -> ResolveDone resolved
         | (name, source, ownerRoot, chain) :: rest ->
-            if hasPreferredWinner preferred name source then
+            let canonical = canonicalizeDepSource ownerRoot source
+            if hasPreferredWinner preferred name canonical then
                 resolvePass rest resolved preferred
             else
-                let canonical = canonicalizeDepSource ownerRoot source
                 match Map.tryFind name resolved with
                 | Some existing when existing.CanonicalSource = canonical ->
                     resolvePass rest resolved preferred
@@ -1409,38 +1414,37 @@ let private resolveWithPreferred
                     let lockedWinner =
                         match Map.tryFind name lockedSources with
                         | Some locked when depSourceToText locked = depSourceToText existing.DisplaySource ->
-                            Some existing.DisplaySource
+                            Some {
+                                DisplaySource = existing.DisplaySource
+                                CanonicalSource = existing.CanonicalSource
+                            }
                         | Some locked when depSourceToText locked = depSourceToText source ->
-                            Some source
+                            Some {
+                                DisplaySource = source
+                                CanonicalSource = canonical
+                            }
                         | _ -> None
                     match lockedWinner with
-                    | Some winner when depSourceToText winner = depSourceToText existing.DisplaySource ->
+                    | Some winner when String.Equals(winner.CanonicalSource, existing.CanonicalSource, StringComparison.OrdinalIgnoreCase) ->
                         resolvePass rest resolved preferred
                     | Some winner ->
                         // Lock pins an alternative source for this dep name.
                         ResolveRestart (preferred |> Map.add name winner)
-                    | None when canPreferExistingOverIncoming existing.DisplaySource source ->
-                        resolvePass rest resolved preferred
-                    | None when isHigherRefConflict existing.DisplaySource source ->
-                        // Defer and restart from root with upgraded winner to avoid
-                        // stale transitive tails from the lower version.
-                        ResolveRestart (upsertPreferredSemver preferred name source)
                     | None ->
-                        let existingChain =
-                            if List.isEmpty existing.DeclaredByChain then
-                                existing.DeclaredByRoot
-                            else
-                                String.concat " -> " existing.DeclaredByChain
-                        let incomingChain =
-                            if List.isEmpty chain then
-                                ownerRoot
-                            else
-                                String.concat " -> " chain
-                        failwith ("dependency conflict for " + name + ": "
-                                  + depSourceToText existing.DisplaySource
-                                  + " (declared in " + existing.DeclaredByRoot + " via " + existingChain + ") vs "
-                                  + depSourceToText source
-                                  + " (declared in " + ownerRoot + " via " + incomingChain + ")")
+                        let existingWinner = {
+                            DisplaySource = existing.DisplaySource
+                            CanonicalSource = existing.CanonicalSource
+                        }
+                        let incomingWinner = {
+                            DisplaySource = source
+                            CanonicalSource = canonical
+                        }
+                        if comparePreferredWinner existingWinner incomingWinner >= 0 then
+                            resolvePass rest resolved preferred
+                        else
+                            // Defer and restart from root with upgraded winner to avoid
+                            // stale transitive tails from a lower-priority source.
+                            ResolveRestart (upsertPreferredWinner preferred name incomingWinner)
                 | None ->
                     let sourceRoot = materializeDepOrFail rootDir ownerRoot name source
                     let nestedDeps =
@@ -1459,9 +1463,9 @@ let private resolveWithPreferred
                         } resolved
                     resolvePass (rest @ nestedDeps) resolved' preferred
 
-    let rec loop (attempt: int) (preferred: Map<string, DepSource>) =
+    let rec loop (attempt: int) (preferred: Map<string, PreferredWinner>) =
         if attempt > 32 then
-            failwith "dependency resolution exceeded restart limit (semver winner convergence)"
+            failwith "dependency resolution exceeded restart limit (winner convergence)"
         match resolvePass initialPending Map.empty preferred with
         | ResolveDone resolved -> resolved
         | ResolveRestart preferred' ->
@@ -1470,20 +1474,14 @@ let private resolveWithPreferred
     loop 0 Map.empty
 
 /// Install dependencies listed in lll.toml (or ll.toml) into vendor/. Returns exit code.
-// TODO(selfhost:resolver):
-// blocker: no MVS/version-conflict solver yet; resolver requires one canonical
-//   source per dep name across full transitive graph.
-// works-now: deterministic transitive resolution + vendor materialization +
-//   ll.sum hashing for all resolved deps; repeated installs are idempotent;
-//   conflict diagnostics include declaring roots and transitive "via" chains;
-//   same-repo semver tag conflicts deterministically converge to the highest
-//   tag via restartable preferred-source selection; same-repo non-semver git
-//   refs also converge deterministically by canonical lexical ref ordering
-//   (with ll.sum still able to pin an explicit winner).
-// next-step: add full MVS/version selection policy for broader multi-source
-//   conflicts beyond same-repo git ref selection.
-// coverage-note: transitive git-ref conflict regression is covered in
-//   ModuleSystemTests (`...same name from different refs`).
+// Resolver policy:
+// - Deterministic single-winner resolution per dependency name.
+// - Winner ranking: PathDep > GitDep; for GitDep semver refs outrank
+//   non-semver refs; semver compares numerically; non-semver compares
+//   lexically by ref then URL.
+// - ll.sum pin (when source text matches a contender) overrides ranking.
+// - Resolution restarts from root whenever a stronger contender appears, then
+//   converges under preferred winner map.
 let private cmdInstall (rootDir: string) : int =
     try
         let tomlPath =

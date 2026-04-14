@@ -422,7 +422,7 @@ let ``lllc install resolves transitive path deps into vendor and keeps ll.sum de
     )
 
 [<Fact>]
-let ``lllc install fails when transitive deps resolve same name from different sources`` () =
+let ``lllc install converges deterministically when transitive path deps resolve same name from different sources`` () =
     withTempDir (fun root ->
         let appRoot = Path.Combine(root, "app")
         let depARoot = Path.Combine(root, "dep-a")
@@ -457,10 +457,12 @@ let ``lllc install fails when transitive deps resolve same name from different s
         File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
 
         let (code, outText, errText) = runLllc appRoot ["install"]
-        Assert.True((code <> 0), $"install should fail on dep source conflict\nstdout:\n{outText}\nstderr:\n{errText}")
-        Assert.Contains("dependency conflict for common", errText)
-        Assert.Contains("via app -> depa -> common", errText)
-        Assert.Contains("via app -> depb -> common", errText)
+        Assert.True((code = 0), $"install should converge to deterministic path winner\nstdout:\n{outText}\nstderr:\n{errText}")
+        let resolvedCommonMain = Path.Combine(appRoot, "vendor", "common", "src", "Main.lll")
+        Assert.True(File.Exists(resolvedCommonMain), "vendor/common/src/Main.lll should exist after install")
+        let commonMain = File.ReadAllText(resolvedCommonMain)
+        // Canonical path lexical winner: .../common-v2 > .../common-v1.
+        Assert.Contains("export v() Int = 2", commonMain)
     )
 
 [<Fact>]
@@ -846,6 +848,115 @@ let ``lllc install uses ll.sum pinned source for non-semver same-repo conflicts`
         Assert.True(File.Exists(resolvedCommonMain), "vendor/common/src/Main.lll should exist after install")
         let commonMain = File.ReadAllText(resolvedCommonMain)
         Assert.Contains("export v() Int = 10", commonMain)
+    )
+
+[<Fact>]
+let ``lllc install resolves same-name deps from different git repos by semver winner`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depARoot = Path.Combine(root, "dep-a")
+        let depBRoot = Path.Combine(root, "dep-b")
+        let commonRepoA = Path.Combine(root, "common-repo-a")
+        let commonRepoB = Path.Combine(root, "common-repo-b")
+
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depARoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depBRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(commonRepoA, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(commonRepoB, "src")) |> ignore
+
+        let ensureGitOk (code: int, so: string, se: string) (ctx: string) =
+            Assert.True((code = 0), $"git command failed ({ctx})\nstdout:\n{so}\nstderr:\n{se}")
+
+        File.WriteAllText(Path.Combine(commonRepoA, "lll.toml"), "[project]\nname = \"common\"\n")
+        File.WriteAllText(Path.Combine(commonRepoA, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 12\n")
+        runCmd commonRepoA "git" ["init"] |> fun r -> ensureGitOk r "repoA init"
+        runCmd commonRepoA "git" ["config"; "user.email"; "tests@example.com"] |> fun r -> ensureGitOk r "repoA config email"
+        runCmd commonRepoA "git" ["config"; "user.name"; "LLLang Tests"] |> fun r -> ensureGitOk r "repoA config name"
+        runCmd commonRepoA "git" ["add"; "."] |> fun r -> ensureGitOk r "repoA add"
+        runCmd commonRepoA "git" ["commit"; "-m"; "repoA v1.2.0"] |> fun r -> ensureGitOk r "repoA commit"
+        runCmd commonRepoA "git" ["tag"; "v1.2.0"] |> fun r -> ensureGitOk r "repoA tag"
+
+        File.WriteAllText(Path.Combine(commonRepoB, "lll.toml"), "[project]\nname = \"common\"\n")
+        File.WriteAllText(Path.Combine(commonRepoB, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 110\n")
+        runCmd commonRepoB "git" ["init"] |> fun r -> ensureGitOk r "repoB init"
+        runCmd commonRepoB "git" ["config"; "user.email"; "tests@example.com"] |> fun r -> ensureGitOk r "repoB config email"
+        runCmd commonRepoB "git" ["config"; "user.name"; "LLLang Tests"] |> fun r -> ensureGitOk r "repoB config name"
+        runCmd commonRepoB "git" ["add"; "."] |> fun r -> ensureGitOk r "repoB add"
+        runCmd commonRepoB "git" ["commit"; "-m"; "repoB v1.10.0"] |> fun r -> ensureGitOk r "repoB commit"
+        runCmd commonRepoB "git" ["tag"; "v1.10.0"] |> fun r -> ensureGitOk r "repoB tag"
+
+        let repoUrlA = commonRepoA.Replace("\\", "/")
+        let repoUrlB = commonRepoB.Replace("\\", "/")
+
+        File.WriteAllText(
+            Path.Combine(depARoot, "lll.toml"),
+            "[project]\nname = \"depa\"\n\n[deps]\ncommon = \"" + repoUrlA + "#v1.2.0\"\n")
+        File.WriteAllText(Path.Combine(depARoot, "src", "Main.lll"), "module Depa.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(depBRoot, "lll.toml"),
+            "[project]\nname = \"depb\"\n\n[deps]\ncommon = \"" + repoUrlB + "#v1.10.0\"\n")
+        File.WriteAllText(Path.Combine(depBRoot, "src", "Main.lll"), "module Depb.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ndepa = { path = \"../dep-a\" }\ndepb = { path = \"../dep-b\" }\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+
+        let (code, outText, errText) = runLllc appRoot ["install"]
+        Assert.True((code = 0), $"install should converge across cross-repo semver conflict\nstdout:\n{outText}\nstderr:\n{errText}")
+        let resolvedCommonMain = Path.Combine(appRoot, "vendor", "common", "src", "Main.lll")
+        Assert.True(File.Exists(resolvedCommonMain), "vendor/common/src/Main.lll should exist after install")
+        let commonMain = File.ReadAllText(resolvedCommonMain)
+        Assert.Contains("export v() Int = 110", commonMain)
+    )
+
+[<Fact>]
+let ``lllc install prefers direct path dep over transitive git dep with same name`` () =
+    withTempDir (fun root ->
+        let appRoot = Path.Combine(root, "app")
+        let depBRoot = Path.Combine(root, "dep-b")
+        let commonLocal = Path.Combine(root, "common-local")
+        let commonRepo = Path.Combine(root, "common-repo")
+
+        Directory.CreateDirectory(Path.Combine(appRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(depBRoot, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(commonLocal, "src")) |> ignore
+        Directory.CreateDirectory(Path.Combine(commonRepo, "src")) |> ignore
+
+        let ensureGitOk (code: int, so: string, se: string) (ctx: string) =
+            Assert.True((code = 0), $"git command failed ({ctx})\nstdout:\n{so}\nstderr:\n{se}")
+
+        File.WriteAllText(Path.Combine(commonLocal, "lll.toml"), "[project]\nname = \"common\"\n")
+        File.WriteAllText(Path.Combine(commonLocal, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 77\n")
+
+        File.WriteAllText(Path.Combine(commonRepo, "lll.toml"), "[project]\nname = \"common\"\n")
+        File.WriteAllText(Path.Combine(commonRepo, "src", "Main.lll"), "module Common.Main\n\nexport v() Int = 9\n")
+        runCmd commonRepo "git" ["init"] |> fun r -> ensureGitOk r "repo init"
+        runCmd commonRepo "git" ["config"; "user.email"; "tests@example.com"] |> fun r -> ensureGitOk r "repo config email"
+        runCmd commonRepo "git" ["config"; "user.name"; "LLLang Tests"] |> fun r -> ensureGitOk r "repo config name"
+        runCmd commonRepo "git" ["add"; "."] |> fun r -> ensureGitOk r "repo add"
+        runCmd commonRepo "git" ["commit"; "-m"; "repo v9"] |> fun r -> ensureGitOk r "repo commit"
+        runCmd commonRepo "git" ["tag"; "v9.0.0"] |> fun r -> ensureGitOk r "repo tag"
+        let repoUrl = commonRepo.Replace("\\", "/")
+
+        File.WriteAllText(
+            Path.Combine(depBRoot, "lll.toml"),
+            "[project]\nname = \"depb\"\n\n[deps]\ncommon = \"" + repoUrl + "#v9.0.0\"\n")
+        File.WriteAllText(Path.Combine(depBRoot, "src", "Main.lll"), "module Depb.Main\n\nexport v() Int = 1\n")
+
+        File.WriteAllText(
+            Path.Combine(appRoot, "lll.toml"),
+            "[project]\nname = \"app\"\n\n[deps]\ncommon = { path = \"../common-local\" }\ndepb = { path = \"../dep-b\" }\n")
+        File.WriteAllText(Path.Combine(appRoot, "src", "Main.lll"), "module App.Main\n\nmain() Int = 0\n")
+
+        let (code, outText, errText) = runLllc appRoot ["install"]
+        Assert.True((code = 0), $"install should prefer direct path dep as winner\nstdout:\n{outText}\nstderr:\n{errText}")
+        let resolvedCommonMain = Path.Combine(appRoot, "vendor", "common", "src", "Main.lll")
+        Assert.True(File.Exists(resolvedCommonMain), "vendor/common/src/Main.lll should exist after install")
+        let commonMain = File.ReadAllText(resolvedCommonMain)
+        Assert.Contains("export v() Int = 77", commonMain)
     )
 
 [<Fact>]
