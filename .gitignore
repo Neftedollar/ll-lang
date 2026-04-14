@@ -9,6 +9,9 @@ my-mcps/
 # installed package dependencies
 .ll-deps/
 
+# local build artifacts (AOT/R2R outputs, dSYM, etc.)
+artifacts/
+
 # generated F# from `lllc build` next to .lll sources
 spec/examples/**/*.fs
 
