@@ -161,6 +161,11 @@ lllc self symbol src/Main.lll lookupName
 
 `lllc self` compiles and runs the `lllcself` ll-lang project and delegates subcommands to its CLI (`check`, `compile`, `render`, `tokens`, `next`, `symbol`).
 
+In the current `1.x` line, `lllc self` is a bridge into the self-hosted
+compiler/tool layer, not yet the canonical top-level compiler path. The `v2`
+plan is to promote the ll-lang-owned compiler path and demote the stage0 F#
+driver to bootstrap-only support.
+
 ---
 
 ## Generated F# layout

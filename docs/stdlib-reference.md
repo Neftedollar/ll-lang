@@ -5,6 +5,20 @@ ll-lang ships two layers of stdlib:
 1. **Prelude** — ~50 builtin functions always in scope. No `import` needed.
 2. **Self-hosted modules** — modules written in ll-lang under `stdlib/src`. Import with `import Std.X`.
 
+For `v2` planning, treat the self-hosted modules as two different groups:
+
+1. **Reusable foundation stdlib**
+   Modules such as `Std.List`, `Std.Maybe`, `Std.Result`, `Std.Map`, `Std.Str`,
+   `Std.State`, `Std.Parsec`, `Std.Json`, `Std.Toml`, `Std.Lazy`, `Std.Test`.
+2. **Compiler implementation modules**
+   Modules such as `Std.Lexer`, `Std.Parser`, `Std.Elaborator`, `Std.Codegen`,
+   `Std.CodegenTS`, `Std.CodegenPy`, `Std.CodegenJava`, `Std.CodegenLLVM`,
+   `Std.Compiler`.
+
+Today these live side-by-side under `stdlib/src`. The `v2` architecture work
+may later move the canonical compiler implementation under a dedicated
+`Compiler.*` namespace, but this document keeps the current module names.
+
 ---
 
 ## Prelude (always in scope)
@@ -620,6 +634,30 @@ buildFile(path Str) =
 | Rendering | `Std.Render` | Shared rendering helpers |
 | Testing | `Std.Test` | Test assertions/utilities |
 | Full pipeline | `Std.Compiler` | Source pipeline helpers |
+
+---
+
+## Compiler implementation modules vs reusable stdlib
+
+The modules below are currently importable like ordinary stdlib modules, but
+they should be read as the self-hosted compiler slice rather than as general
+application-library APIs:
+
+- `Std.Lexer`
+- `Std.Parser`
+- `Std.Elaborator`
+- `Std.Codegen`
+- `Std.CodegenTS`
+- `Std.CodegenPy`
+- `Std.CodegenJava`
+- `Std.CodegenLLVM`
+- `Std.Compiler`
+
+These modules are important because they show that ll-lang can already express
+substantial compiler logic. They should not be treated as proof that the full
+canonical compiler boundary has already migrated away from stage0. That
+boundary is tracked in
+[v2 canonical compiler boundaries](/Users/roman/Documents/dev/tens/code/ll-lang/docs/compiler-dev/14-v2-canonical-compiler-boundaries.md).
 
 ---
 
