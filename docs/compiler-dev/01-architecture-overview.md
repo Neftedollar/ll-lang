@@ -2,6 +2,10 @@
 
 **Status:** All 10 phases complete. Bootstrap fixpoint achieved (`compiler₁.fs == compiler₂.fs`).
 
+For the forward-looking `v2` ownership map of the canonical self-hosted
+compiler, see
+[14-v2-canonical-compiler-boundaries.md](14-v2-canonical-compiler-boundaries.md).
+
 The compiler is a straight pipeline: source text in, target source out. Each
 stage is a pure function (modulo the small `InferState` used in HM) and
 returns `Result<_, LLError list>`.

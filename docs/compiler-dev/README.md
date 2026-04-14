@@ -20,6 +20,7 @@ front-end.
 11. [Multi-target codegen](11-multi-target-codegen.md) — backend contracts and target semantics
 12. [v2 language architecture](12-v2-language-architecture.md) — target design for pure ll-lang core
 13. [v2 implementation roadmap](13-v2-implementation-roadmap.md) — tracked execution plan with done/not-done checklists
+14. [v2 canonical compiler boundaries](14-v2-canonical-compiler-boundaries.md) — subsystem ownership map and migration targets
 
 ## Repository layout
 
