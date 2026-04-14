@@ -48,22 +48,23 @@ A subsystem is considered migrated only when all of the following are true:
 | CLI command orchestration | `src/LLLangTool/Program.fs` | `lllc self` delegates to ll-lang tool layer, but not yet canonical | `Compiler.Cli` or `Tool.Main` | still stage0-first | promote ll-lang CLI path to canonical and demote stage0 wrapper |
 | Full pipeline entrypoint | `src/LLLangCompiler/Compiler.fs` | `stdlib/src/Compiler.lll` | `Std.Compiler` or `Compiler.Main` | ll-lang pipeline exists for core path | expand it to own the full canonical flow |
 
-## Naming target for v2
+## Namespace decision for v2
 
-Two naming strategies are acceptable. Pick one and use it consistently:
+`v2` adopts the following canonical namespace split:
 
-1. **Keep `Std.*` as the canonical compiler module namespace**
-   Best if the self-hosted compiler continues to live under `stdlib/src`.
-2. **Split into a dedicated `Compiler.*` namespace**
-   Best if compiler implementation is separated from general-purpose stdlib.
+- **`Std.*`** remains the namespace for reusable library modules
+- **`Compiler.*`** becomes the canonical namespace for the self-hosted compiler implementation
 
-`v2` should not ship with both as long-term parallel identities.
+This is now the architectural default, not just a recommendation.
 
-Recommended direction:
+Implications:
 
-- keep `Std.*` for reusable library modules
-- move canonical compiler implementation toward `Compiler.*`
-- allow `Std.Compiler` only as a compatibility façade or high-level convenience entrypoint
+- compiler implementation modules should migrate toward `Compiler.*`
+- reusable data-structure and parser/state foundations remain under `Std.*`
+- `Std.Compiler` may remain temporarily as a façade or compatibility bridge, but
+  must not remain the long-term canonical identity of the compiler
+- docs and roadmap updates should assume `Compiler.*` ownership unless a module
+  is intentionally kept reusable
 
 ## Required pass boundaries
 
@@ -84,6 +85,9 @@ phase boundaries:
 
 Not every phase must map to exactly one file, but each phase must have one
 owner module group.
+
+The boundary contracts for these phases are defined in
+[15-v2-pass-contracts.md](15-v2-pass-contracts.md).
 
 ## Immediate documentation tasks for Milestone 1
 

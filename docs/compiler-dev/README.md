@@ -21,6 +21,7 @@ front-end.
 12. [v2 language architecture](12-v2-language-architecture.md) — target design for pure ll-lang core
 13. [v2 implementation roadmap](13-v2-implementation-roadmap.md) — tracked execution plan with done/not-done checklists
 14. [v2 canonical compiler boundaries](14-v2-canonical-compiler-boundaries.md) — subsystem ownership map and migration targets
+15. [v2 pass contracts](15-v2-pass-contracts.md) — explicit input/output contracts for canonical compiler phases
 
 ## Repository layout
 
