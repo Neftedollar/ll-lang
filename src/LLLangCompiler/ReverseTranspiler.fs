@@ -2299,6 +2299,55 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
         |> List.sortBy (fun d -> d.Index)
         |> dedupeFns
     | LLVM ->
+        let maybeMatchPhiFns =
+            collect
+                (RegexOptions.Multiline ||| RegexOptions.Singleline)
+                @"define\s+i64\s+@(?<name>[A-Za-z_][A-Za-z0-9_]*)\((?<params>[^)]*)\)\s*\{(?<fnBody>[\s\S]*?)^\}"
+                parseLlvmParams
+                (fun m ->
+                    let fnBody = m.Groups.["fnBody"].Value
+                    let scrutMatch =
+                        Regex.Match(
+                            fnBody,
+                            @"icmp\s+ne\s+ptr\s+%(?<scrut>[A-Za-z_][A-Za-z0-9_]*),\s+null",
+                            RegexOptions.Singleline
+                        )
+                    let hasTag1 =
+                        Regex.IsMatch(
+                            fnBody,
+                            @"icmp\s+eq\s+i64\s+%[A-Za-z_][A-Za-z0-9_]*,\s+1",
+                            RegexOptions.Singleline
+                        )
+                    let hasTag2 =
+                        Regex.IsMatch(
+                            fnBody,
+                            @"icmp\s+eq\s+i64\s+%[A-Za-z_][A-Za-z0-9_]*,\s+2",
+                            RegexOptions.Singleline
+                        )
+                    let phiMatch =
+                        Regex.Match(
+                            fnBody,
+                            @"%\w+\s*=\s*phi\s+i64\s+\[\s*%(?<payload>[A-Za-z_][A-Za-z0-9_]*)\s*,\s*%match_body_[0-9]+\s*\],\s*\[\s*(?<none1>-?\d+)\s*,\s*%match_body_[0-9]+\s*\],\s*\[\s*(?<none2>-?\d+)\s*,\s*%match_fail_[0-9]+\s*\]",
+                            RegexOptions.Singleline
+                        )
+                    if not scrutMatch.Success || not hasTag1 || not hasTag2 || not phiMatch.Success then
+                        None
+                    else
+                        let scrut = scrutMatch.Groups.["scrut"].Value.Trim()
+                        let payload = phiMatch.Groups.["payload"].Value.Trim()
+                        let none1 = phiMatch.Groups.["none1"].Value.Trim()
+                        let none2 = phiMatch.Groups.["none2"].Value.Trim()
+                        let noneExpr =
+                            if String.IsNullOrWhiteSpace none2 || String.Equals(none1, none2, StringComparison.Ordinal) then
+                                none1
+                            else
+                                none1
+                        if String.IsNullOrWhiteSpace scrut
+                           || String.IsNullOrWhiteSpace payload
+                           || String.IsNullOrWhiteSpace noneExpr then
+                            None
+                        else
+                            Some (sprintf "match %s | Some(n) -> n | None -> %s" scrut noneExpr))
         let addFns =
             collect
                 (RegexOptions.Multiline ||| RegexOptions.Singleline)
@@ -2371,12 +2420,20 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
                 @"define\s+i32\s+@(?<name>main)\((?<params>[^)]*)\)\s*\{[\s\S]*?trunc\s+i64\s+(?<value>-?\d+)\s+to\s+i32[\s\S]*?ret\s+i32\s+%\w+[\s\S]*?\}"
                 parseLlvmParams
                 (fun m -> normalizeRecoveredExpr m.Groups.["value"].Value)
+        let recoveredNames =
+            maybeMatchPhiFns
+            |> List.map (fun f -> f.Name)
+            |> Set.ofList
+        let retArgFnsFiltered =
+            retArgFns
+            |> List.filter (fun f -> not (Set.contains f.Name recoveredNames))
         (addFns
          @ subFns
          @ mulFns
          @ divFns
          @ callFns
-         @ retArgFns
+         @ maybeMatchPhiFns
+         @ retArgFnsFiltered
          @ retConstFns
          @ mainI32RetConstFns
          @ mainI32TruncConstFns)

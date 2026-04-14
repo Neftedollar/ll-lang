@@ -1057,8 +1057,8 @@ let ``reverse boomerang matrix keeps core source slices recompilable per target`
     for target in nonLlvmTargets do
         assertBoomerangRecompile target "maybe_ctor_if" sampleMaybeCtorSrc ["safeDiv("]
 
-    for target in [FSharp; TypeScript; Python; Java; CSharp] do
-        assertBoomerangRecompile target "maybe_match_unpack" sampleMaybeMatchSrc ["unpack("]
+    for target in allTargets do
+        assertBoomerangRecompile target "maybe_match_unpack" sampleMaybeMatchSrc ["unpack("; "| None -> 0"]
 
     assertBoomerangRecompile LLVM "main_i32_wrapper" sampleMainOnlySrc ["main("]
 
