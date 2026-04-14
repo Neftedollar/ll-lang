@@ -2,6 +2,9 @@
 
 `lllc` (the `LLLangTool` project) drives the compiler for both single-file and multi-file project builds.
 
+1.0 note: `build/check/run/new/install/self/mcp` are stable CLI surface. `reverse`
+is available as experimental tooling.
+
 ```
 Usage:
   lllc build [--target fs|ts|py|java|cs|llvm] <file.lll>   compile single file
@@ -10,7 +13,7 @@ Usage:
   lllc check [--target fs|ts|py|java|cs|llvm] [dir]        type-check project (no codegen)
   lllc run   [--target fs|ts|py|java|cs|llvm] <file.lll>   compile and run single file
   lllc new   <name>         scaffold new project
-  lllc reverse --from <target> <file>   recover minimal ll-lang from generated code
+  lllc reverse --from <target> <file>   [experimental] recover minimal ll-lang from generated code
 ```
 
 ---
@@ -227,7 +230,7 @@ dotnet run --project src/LLLangTool -- reverse --from ts bin/typescript/myapp.ts
 
 ---
 
-## `lllc reverse --from <target> <file>` — reverse generated code to ll-lang
+## `lllc reverse --from <target> <file>` — reverse generated code to ll-lang (experimental)
 
 ```bash
 lllc reverse --from ts   out.ts
@@ -238,6 +241,8 @@ lllc reverse --from llvm out.ll
 ```
 
 Accepted source aliases are the same as build targets, including `Platform.*.SDK` aliases.
+
+This command is experimental in 1.0 and not covered by stable compatibility guarantees.
 
 Behavior:
 1. Reads generated source from the given file.

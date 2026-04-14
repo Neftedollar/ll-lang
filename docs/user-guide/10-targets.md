@@ -1,6 +1,8 @@
 # Compilation Targets
 
-ll-lang supports multiple output targets. The same source compiles to F#, TypeScript, Python, Java, C#, or LLVM IR (subset backend).
+ll-lang supports multiple output targets. In 1.0, stable targets are F#, TypeScript, Python, Java, and C#. LLVM IR is available as an experimental subset backend.
+
+See [Release Contract 1.0](../release-contract-1.0.md) for compatibility guarantees.
 
 ## Selecting a Target
 
@@ -12,10 +14,15 @@ lllc build --target ts  file.lll   # TypeScript
 lllc build --target py  file.lll   # Python
 lllc build --target java file.lll  # Java
 lllc build --target cs  file.lll   # C#
-lllc build --target llvm file.lll  # LLVM IR
+lllc build --target llvm file.lll  # LLVM IR (experimental subset)
 ```
 
 Accepted aliases: `fs` / `fsharp`, `ts` / `typescript`, `py` / `python`, `java` / `jvm`, `cs` / `csharp`, `llvm` / `ll`.
+
+## Stability in 1.0
+
+- Stable targets: `fs`, `ts`, `py`, `java`, `cs`
+- Experimental target: `llvm`
 
 The output file uses the appropriate extension (`.fs`, `.ts`, `.py`, `.java`, `.cs`, `.ll`).
 
@@ -199,13 +206,13 @@ lllc build --target cs file.lll  # emits file.cs
 
 The C# backend maps `external` declarations to runtime and base-library APIs. `JSON_parse` currently uses `System.Text.Json.JsonSerializer.Deserialize<object>`, and `using System.Text.Json;` is emitted only when needed.
 
-## LLVM IR
+## LLVM IR (Experimental)
 
 The LLVM backend emits typed LLVM IR with explicit control-flow lowering (`if`, `match`) and `main` lowering suitable for `llvm-as` validation.
 Current supported subset includes integer/float arithmetic (`add/sub/mul/div`), integer comparisons, direct calls, `let`-style local bindings, ADT constructor allocation, and list literal/cons lowering via a compact runtime node ABI.
 
 ```bash
-lllc build --target llvm file.lll  # emits file.ll
+lllc build --target llvm file.lll  # emits file.ll (experimental subset)
 ```
 
 ### External mappings

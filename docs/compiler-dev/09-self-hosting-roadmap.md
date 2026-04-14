@@ -4999,15 +4999,21 @@ Evidence:
 - `reverse boomerang matrix keeps core source slices recompilable per target`
   (case: `maybe_match_unpack` for `FSharp`, `TypeScript`, `Python`, `Java`,
   `CSharp`, `LLVM`)
-  and `maybe_match_unpack_fallback` for the same target set.
+  and `maybe_match_unpack_fallback` for `FSharp`, `TypeScript`, `Python`,
+  `Java`, and `LLVM`.
 - `reverse parser normalizes host Maybe match wrappers for TS Py Java`
 - `reverse parser normalizes CSharp lifted Maybe match wrapper`
 
 ## Current state and next work
 
 Bootstrap self-hosting blocker chain from 7.10d → 7.10r is now closed
-and guarded by regression tests. The next iterations should focus on:
+and guarded by regression tests.
 
-1. reducing bootstrap/host behavioural drift in corner-case parser recovery
-2. expanding boomerang parity from core slices to richer ADT/trait/FFI-heavy cases
-3. growing diagnostics parity beyond `E002` to positional/typed error classes
+Release policy note: `lllc reverse` and LLVM subset hardening are treated as
+experimental and non-blocking for 1.0 (see `docs/release-contract-1.0.md`).
+
+For 1.0-focused iterations, prioritize core ll-lang surface:
+
+1. language/core diagnostics polish and consistency across elaboration + HM
+2. stable target quality (`fs/ts/py/java/cs`) and idiomatic codegen hardening
+3. project/MCP ergonomics and docs clarity for stable 1.0 workflows

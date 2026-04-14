@@ -345,7 +345,7 @@ Source-based dependencies. `lll.toml` declares them:
 ```toml
 [deps]
 std = { path = "../stdlib" }
-json = "https://github.com/user/ll-json#v0.1.0"
+json = "https://github.com/user/ll-json#v0.8.0"
 ```
 
 `lllc install` copies dep sources into `.ll-deps/`. `ProjectLoader.fs` resolves imports by searching `src/` then `.ll-deps/*/src/`.

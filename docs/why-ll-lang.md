@@ -126,7 +126,7 @@ lllc build --target ts   # TypeScript sealed interfaces
 lllc build --target py   # Python @dataclass + Union
 lllc build --target java # Java 21 sealed interfaces + records
 lllc build --target cs   # C# compile-safe skeleton backend
-lllc build --target llvm # LLVM IR deterministic stub backend
+lllc build --target llvm # LLVM IR deterministic stub backend (experimental subset)
 ```
 
 An LLM agent can prototype in ll-lang (fast iteration, compile-time safety), then ship to whichever runtime the rest of the team uses.

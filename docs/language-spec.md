@@ -304,7 +304,7 @@ Module path (`Std.Map`) must match file path under `src/` (`src/Map.lll`).
 ```toml
 [project]
 name = "myapp"
-version = "0.1.0"
+version = "0.8.0"
 
 [deps]
 std = { path = "../stdlib" }
@@ -335,7 +335,10 @@ lllc mcp             # start MCP server (stdio, 10 tools)
 | `--target py` | Python | `@dataclass` + `Union` |
 | `--target java` | Java 21 | Sealed interfaces + records |
 | `--target cs` | C# | Compile-safe MVP skeleton backend |
-| `--target llvm` | LLVM IR | Deterministic IR stub backend |
+| `--target llvm` | LLVM IR | Deterministic IR stub backend (experimental subset in 1.0) |
+
+1.0 compatibility guarantees for stable vs experimental surface are defined in
+`docs/release-contract-1.0.md`.
 
 ---
 

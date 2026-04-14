@@ -752,7 +752,7 @@ let private cmdReverse (args: string list) : int =
             Console.Error.WriteLine("lllc: " + ex.Message)
             1
     | _ ->
-        Console.Error.WriteLine("lllc: usage: lllc reverse --from fs|ts|py|java|cs|llvm|Platform.*.SDK <file>")
+        Console.Error.WriteLine("lllc: usage: lllc reverse --from fs|ts|py|java|cs|llvm|Platform.*.SDK <file>  [experimental]")
         1
 
 let private runShellCommand (workingDir: string) (command: string) : int =
@@ -1152,7 +1152,7 @@ let main (argv: string[]) : int =
         Console.Error.WriteLine("  lllc check [--target fs|ts|py|java|cs|llvm] <file.lll>  type-check single file (no codegen)")
         Console.Error.WriteLine("  lllc check [--target fs|ts|py|java|cs|llvm] [dir]       type-check project (no codegen)")
         Console.Error.WriteLine("  lllc run   [--target fs|ts|py|java|cs|llvm] <file.lll>  compile and run single file")
-        Console.Error.WriteLine("  lllc reverse --from <target> <file>        recover minimal ll-lang from generated target code")
+        Console.Error.WriteLine("  lllc reverse --from <target> <file>        [experimental] recover minimal ll-lang from generated target code")
         Console.Error.WriteLine("  lllc self  <cmd> <file> [arg]              run self-hosted lllc tools (lll layer)")
         Console.Error.WriteLine("  lllc new   <name>                          scaffold new project")
         Console.Error.WriteLine("  lllc install                               install dependencies from lll.toml")
@@ -1163,5 +1163,5 @@ let main (argv: string[]) : int =
         Console.Error.WriteLine("  --target py   emit Python")
         Console.Error.WriteLine("  --target java emit Java")
         Console.Error.WriteLine("  --target cs   emit C#")
-        Console.Error.WriteLine("  --target llvm emit LLVM IR")
+        Console.Error.WriteLine("  --target llvm emit LLVM IR (experimental subset)")
         1

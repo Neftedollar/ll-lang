@@ -437,16 +437,16 @@ let projectInfoTool (args: ProjectInfoArgs) : Task<Result<Content list, McpError
 let runServer () =
     let server = mcpServer {
         name "ll-lang"
-        version "0.1.0"
+        version "0.8.0"
 
         tool (TypedTool.define<CompileFileArgs>
             "compile_file"
-            "Compile a .lll file. target: 'fs'|'ts'|'py'|'java'|'cs'|'llvm' (default 'fs'). include_output=true returns generated source. Returns {ok, errors[], target, <target>?}."
+            "Compile a .lll file. target: 'fs'|'ts'|'py'|'java'|'cs'|'llvm' (default 'fs'). include_output=true returns generated source. Note: 'llvm' is an experimental subset target in 1.0. Returns {ok, errors[], target, <target>?}."
             compileFileTool |> unwrapResult)
 
         tool (TypedTool.define<CompileSourceArgs>
             "compile_source"
-            "Compile ll-lang source string directly (no file needed). target: 'fs'|'ts'|'py'|'java'|'cs'|'llvm' (default 'fs'). Returns {ok, errors[], target, <target>}. Fastest way for an LLM to check generated code."
+            "Compile ll-lang source string directly (no file needed). target: 'fs'|'ts'|'py'|'java'|'cs'|'llvm' (default 'fs'). Note: 'llvm' is an experimental subset target in 1.0. Returns {ok, errors[], target, <target>}. Fastest way for an LLM to check generated code."
             compileSourceTool |> unwrapResult)
 
         tool (TypedTool.define<CheckFileArgs>

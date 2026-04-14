@@ -187,7 +187,7 @@ lllc build --target ts   myapp.lll   # TypeScript
 lllc build --target py   myapp.lll   # Python
 lllc build --target java myapp.lll   # Java 21
 lllc build --target cs   myapp.lll   # C#
-lllc build --target llvm myapp.lll   # LLVM IR
+lllc build --target llvm myapp.lll   # LLVM IR (experimental subset)
 lllc build --target fs   myapp.lll   # F# (default)
 ```
 

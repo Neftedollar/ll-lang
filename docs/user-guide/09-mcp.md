@@ -46,7 +46,7 @@ Compile ll-lang source text end-to-end and return generated code for the selecte
 ```json
 { "source": "module M\nmain() = 0", "target": "fs" }
 ```
-`target` is optional (`fs` default). Aliases: `fs`, `ts`, `py`, `java`, `cs`, `llvm`.
+`target` is optional (`fs` default). Aliases: `fs`, `ts`, `py`, `java`, `cs`, `llvm` (`llvm` is experimental subset in 1.0).
 
 **Output:**
 ```json
@@ -192,7 +192,7 @@ Walk up from a path to find `lll.toml` and return project metadata.
   "root": "/abs/path/to/myapp",
   "manifest_path": "/abs/path/to/myapp/lll.toml",
   "manifest_kind": "lll.toml",
-  "manifest": { "name": "myapp", "version": "0.1.0" },
+  "manifest": { "name": "myapp", "version": "0.8.0" },
   "modules": [
     { "path": "/abs/path/to/myapp/src/Greet.lll", "module": "Myapp.Greet" },
     { "path": "/abs/path/to/myapp/src/Main.lll",  "module": "Myapp.Main" }

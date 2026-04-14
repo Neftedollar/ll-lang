@@ -118,7 +118,7 @@ let private parseInlineTablePath (s: string) : string option =
                 | Error _ -> None
 
 /// Parse a dep value string into a DepSource.
-/// "https://github.com/user/repo#v0.1.0" → GitDep("url", "v0.1.0")
+/// "https://github.com/user/repo#v0.8.0" → GitDep("url", "v0.8.0")
 /// "https://github.com/user/repo"        → GitDep("url", "main")
 /// "{ path = \"../ll-json\" }"           → PathDep("../ll-json")
 let private parseDepSource (valueRaw: string) : DepSource option =

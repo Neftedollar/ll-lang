@@ -44,7 +44,7 @@ For multi-file programs, create a project manifest `lll.toml` at the project roo
 ```toml
 [project]
 name    = "myapp"
-version = "0.1.0"       # optional
+version = "0.8.0"       # optional
 entry   = "src/Main.lll"  # optional, default src/Main.lll
 
 [deps]

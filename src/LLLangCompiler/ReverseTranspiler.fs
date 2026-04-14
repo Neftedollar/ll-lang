@@ -2118,6 +2118,40 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
                         None
                     else
                         Some (sprintf "match %s | Some(%s) -> %s | None -> %s" var1 bind ret noneRet))
+        let tsCurriedMatchIifeFns =
+            Regex.Matches(
+                body,
+                @"(?ms)^\s*(?:export\s+)?const\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*\((?<params1>[^)]*)\)\s*=>\s*\((?<params2>[^)]*)\)\s*=>\s*\(\(\)\s*=>\s*\{\s*if\s*\(\s*(?<var>[A-Za-z_][A-Za-z0-9_]*)\?\._tag\s*===\s*[`""]Some[`""]\s*\)\s*\{\s*const\s+(?<bind>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*[^;]+;\s*return\s+(?<ret>[A-Za-z_][A-Za-z0-9_]*)\s*;\s*\}\s*if\s*\(\s*(?<var2>[A-Za-z_][A-Za-z0-9_]*)\?\._tag\s*===\s*[`""]None[`""]\s*\)\s*\{\s*return\s+(?<noneRet>[^;]+)\s*;\s*\}\s*throw\s+new\s+Error\([^\)]*\)\s*;\s*\}\)\(\)\s*;\s*$",
+                RegexOptions.Multiline ||| RegexOptions.Singleline
+            )
+            |> Seq.cast<Match>
+            |> Seq.choose (fun m ->
+                match normalizeRecoveredName m.Groups.["name"].Value with
+                | None -> None
+                | Some name ->
+                    let p1 = parseFnParamsByColonPrefix m.Groups.["params1"].Value
+                    let p2 = parseFnParamsByColonPrefix m.Groups.["params2"].Value
+                    let parameters = p1 @ p2
+                    let var1 = m.Groups.["var"].Value.Trim()
+                    let var2 = m.Groups.["var2"].Value.Trim()
+                    let bind = m.Groups.["bind"].Value.Trim()
+                    let ret = m.Groups.["ret"].Value.Trim()
+                    let noneRet = m.Groups.["noneRet"].Value.Trim()
+                    if String.IsNullOrWhiteSpace var1
+                       || not (String.Equals(var1, var2, StringComparison.Ordinal))
+                       || not (String.Equals(bind, ret, StringComparison.Ordinal))
+                       || String.IsNullOrWhiteSpace noneRet then
+                        None
+                    else
+                        Some {
+                            Index = m.Index
+                            Name = name
+                            Params = parameters
+                            Body = sprintf "match %s | Some(%s) -> %s | None -> %s" var1 bind ret noneRet
+                        })
+            |> List.ofSeq
+            |> List.sortBy (fun d -> d.Index)
+            |> dedupeFns
         let arrowFns =
             collect
                 RegexOptions.Multiline
@@ -2150,6 +2184,7 @@ let private parseFunctions (target: Target) (src: string) : ReverseFn list =
          @ ifElseArrowBlockFns
          @ ifReturnThenFallbackReturnFns
          @ ifReturnThenFallbackReturnArrowFns
+         @ tsCurriedMatchIifeFns
          @ tsMatchIifeFns
          @ arrowFns
          @ arrowSingleParamFns

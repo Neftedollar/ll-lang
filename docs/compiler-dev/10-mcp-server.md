@@ -13,7 +13,7 @@ lllc mcp
 Mcp.runServer()
    │
    ├─ mcpServer CE (FsMcp.Server)
-   │     name "ll-lang"  version "0.1.0"
+   │     name "ll-lang"  version "0.8.0"
    │     tool compile_file   → compileFileTool
    │     tool check_file     → checkFileTool
    │     tool run_file       → runFileTool

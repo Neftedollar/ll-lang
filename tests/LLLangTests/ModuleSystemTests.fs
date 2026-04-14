@@ -155,7 +155,7 @@ let ``loadProject: single-file project loads correctly`` () =
 
 [<Fact>]
 let ``parseManifest: git dep with ref parses to GitDep`` () =
-    let src = "[project]\nname = \"app\"\n\n[deps]\nstd = \"https://github.com/user/repo#v0.1.0\"\n"
+    let src = "[project]\nname = \"app\"\n\n[deps]\nstd = \"https://github.com/user/repo#v0.8.0\"\n"
     match parseManifest src with
     | Error e -> Assert.Fail(sprintf "Expected Ok but got Error: %s" e)
     | Ok m ->
@@ -163,7 +163,7 @@ let ``parseManifest: git dep with ref parses to GitDep`` () =
         match m.Deps.["std"] with
         | GitDep(url, ref) ->
             Assert.Equal("https://github.com/user/repo", url)
-            Assert.Equal("v0.1.0", ref)
+            Assert.Equal("v0.8.0", ref)
         | PathDep _ -> Assert.Fail("Expected GitDep but got PathDep")
 
 [<Fact>]

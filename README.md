@@ -21,6 +21,11 @@ Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting 
 
 Working end-to-end compiler with a large automated xUnit suite (see CI badge), written in F# / .NET 10. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib → module system → MCP server → TypeScript + Python + Java + C# + LLVM codegen.
 
+**Release contract (1.0):**
+- **Stable:** core compiler + `lllc build/check/run/new/install/mcp` + targets `fs/ts/py/java/cs`
+- **Experimental:** `lllc reverse` and `--target llvm` (subset backend, non-blocking for 1.0)
+- Full contract: [`docs/release-contract-1.0.md`](docs/release-contract-1.0.md)
+
 **Bootstrap: COMPLETE.** `compiler₁.fs == compiler₂.fs` — ll-lang compiles itself (2900+ line bootstrap compiler, fixpoint achieved).
 
 **Self-hosted stdlib** — 10 modules (5857 LOC of ll-lang), covering parsing, type inference, codegen, and data structures:
@@ -51,7 +56,7 @@ Working end-to-end compiler with a large automated xUnit suite (see CI badge), w
 | **7** | **Bootstrap fixpoint** — ll-lang compiles itself (`compiler₁.fs == compiler₂.fs`) | ✅ |
 | **8** | **Module system** — `lll.toml`, multi-file builds, `lllc new`, topo-sort, E020/E024 | ✅ |
 | **9** | **MCP server** — `lllc mcp` stdio server with 10 tools for Claude Code / Cursor / Zed | ✅ |
-| **10** | **Multi-platform codegen** — `lllc build --target ts\|py\|java\|cs\|llvm`; TypeScript DU + Python @dataclass + Java sealed interfaces + C# records + LLVM IR | ✅ |
+| **10** | **Multi-platform codegen** — `lllc build --target ts\|py\|java\|cs\|llvm`; TypeScript DU + Python @dataclass + Java sealed interfaces + C# records + LLVM IR (`llvm` is experimental subset in 1.0) | ✅ |
 
 ## Getting Started
 
@@ -297,10 +302,10 @@ lllc build --target ts   adts.lll   # → TypeScript sealed interfaces
 lllc build --target py   adts.lll   # → Python @dataclass + Union
 lllc build --target java adts.lll   # → Java 21 sealed interfaces
 lllc build --target cs   adts.lll   # → C# records + interfaces
-lllc build --target llvm adts.lll   # → LLVM IR
+lllc build --target llvm adts.lll   # → LLVM IR (experimental subset)
 ```
 
-Same source, same semantics, four targets. Useful when an LLM agent needs to prototype logic in ll-lang and then ship it to a specific platform.
+Same source, same semantics on stable targets (`fs/ts/py/java/cs`), with an additional experimental LLVM backend.
 
 ## Compiler Pipeline
 
@@ -337,7 +342,7 @@ src/LLLangCompiler/        — compiler library (F#)
   CodegenPy.fs             — Python source emitter
   CodegenJava.fs           — Java 21 source emitter
   Compiler.fs              — end-to-end pipeline + Target dispatch
-src/LLLangTool/            — `lllc` CLI (build / run / reverse / self / new / install / mcp)
+src/LLLangTool/            — `lllc` CLI (build / run / self / new / install / mcp + experimental reverse)
   Mcp.fs                   — MCP server (10 tools for LLM clients)
   Program.fs               — entry point
 stdlib/                    — self-hosted stdlib (10 modules, 5857 LOC ll-lang)

@@ -2,7 +2,7 @@
 
 A practical guide for programmers (human or LLM) who want to write `.lll`
 programs, compile them with `lllc`, and target F#, TypeScript, Python, Java,
-C#, or LLVM IR.
+C#, with optional experimental LLVM IR output.
 
 ll-lang is a statically typed functional language with Hindley-Milner inference,
 algebraic data types, traits, semantic tags, and unit algebra.
@@ -16,7 +16,7 @@ algebraic data types, traits, semantic tags, and unit algebra.
 5. [Traits](05-traits.md) — declarations, impls, constrained generics, dispatch
 6. [Modules](06-modules.md) — module headers, imports, project mode (`lll.toml`)
 7. [Error codes](07-error-codes.md) — compact diagnostics (`E001..E008`, `E026`)
-8. [CLI](08-cli.md) — build/check/run/new/install/reverse/self commands
+8. [CLI](08-cli.md) — build/check/run/new/install/self commands (+ experimental reverse)
 9. [MCP server](09-mcp.md) — `lllc mcp` tools for LLM clients
 10. [Compilation targets](10-targets.md) — `--target fs|ts|py|java|cs|llvm`
 11. [Java target details](11-java-target.md) — Java backend mapping details
@@ -30,8 +30,11 @@ Compiler phases 1 to 10 are complete. Current stable surface includes:
 - Multi-file projects with `lll.toml` and target selection
 - Self-hosted stdlib/compiler bootstrap flow
 - MCP server for structured LLM tooling
-- Targets: F#, TypeScript, Python, Java, C#, LLVM IR
+- Targets: F#, TypeScript, Python, Java, C#
 
-Current caveat:
+Current caveats:
 
 - LLVM backend is intentionally subset-based compared to the primary F# backend.
+- `lllc reverse` is available as experimental tooling and is outside 1.0
+  compatibility guarantees.
+- See [Release Contract 1.0](../release-contract-1.0.md).
