@@ -1,5 +1,8 @@
 module LLLang.Tests.CodegenCSharpTests
 
+open System
+open System.IO
+open System.Diagnostics
 open Xunit
 open LLLang.Elaborator
 open LLLang.Compiler
@@ -9,6 +12,24 @@ let private csSrc (src: string) : string =
     match compileToCSharp src with
     | Ok cs -> cs
     | Error es -> failwith $"C# codegen failed: {es}"
+
+let private runProc (cwd: string) (exe: string) (args: string list) : int * string * string =
+    let psi = ProcessStartInfo(exe)
+    psi.WorkingDirectory <- cwd
+    psi.UseShellExecute <- false
+    psi.RedirectStandardOutput <- true
+    psi.RedirectStandardError <- true
+    for arg in args do
+        psi.ArgumentList.Add(arg)
+    use proc = LLLang.Tests.TestCompat.startProcess psi
+    let stdout = proc.StandardOutput.ReadToEnd()
+    let stderr = proc.StandardError.ReadToEnd()
+    proc.WaitForExit()
+    (proc.ExitCode, stdout, stderr)
+
+let private toolExists (exe: string) : bool =
+    let (code, _, _) = runProc __SOURCE_DIRECTORY__ "sh" ["-lc"; "command -v " + exe + " >/dev/null 2>&1"]
+    code = 0
 
 [<Fact>]
 let ``CSharp: compileToCSharp produces non-empty output`` () =
@@ -137,3 +158,37 @@ let ``CSharp: match with constructor payload emits typed guarded accessor flow``
     Assert.DoesNotContain("public static long kind(Json v) => 0L;", cs)
     Assert.Contains("__ll_match is JNum", cs)
     Assert.Contains("__ll_case_1._0", cs)
+
+[<Fact>]
+let ``CSharp: main sequencing preserves side effects at runtime`` () =
+    if not (toolExists "dotnet") then
+        ()
+    else
+        let src =
+            "module Smoke\n"
+            + "main() Int =\n"
+            + "  _ = printfn \"smoke\"\n"
+            + "  0\n"
+        let cs = csSrc src
+        Assert.Contains("public static int Main(string[] args)", cs)
+        Assert.DoesNotContain("=> 0;", cs)
+
+        let tempRoot = Path.Combine(Path.GetTempPath(), "lll-cs-main-smoke-" + Guid.NewGuid().ToString("N"))
+        Directory.CreateDirectory(tempRoot) |> ignore
+        try
+            let csproj =
+                "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
+                + "  <PropertyGroup>\n"
+                + "    <OutputType>Exe</OutputType>\n"
+                + "    <TargetFramework>net10.0</TargetFramework>\n"
+                + "    <ImplicitUsings>enable</ImplicitUsings>\n"
+                + "    <Nullable>enable</Nullable>\n"
+                + "  </PropertyGroup>\n"
+                + "</Project>\n"
+            File.WriteAllText(Path.Combine(tempRoot, "Smoke.csproj"), csproj)
+            File.WriteAllText(Path.Combine(tempRoot, "Program.cs"), cs)
+            let (runCode, runOut, runErr) = runProc tempRoot "dotnet" ["run"; "--project"; "Smoke.csproj"]
+            Assert.True((runCode = 0), $"dotnet run failed\nstdout:\n{runOut}\nstderr:\n{runErr}\nsource:\n{cs}")
+            Assert.Contains("smoke", runOut)
+        finally
+            try Directory.Delete(tempRoot, true) with _ -> ()

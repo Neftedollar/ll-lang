@@ -283,6 +283,11 @@ and private emitExprJava (te: TypedExpr) : string =
         | TyTagged(inner, _) -> stripTaggedType inner
         | _ -> t
 
+    let rec isUnitTy (t: TypeExpr) : bool =
+        match stripTaggedType t with
+        | TyName "Unit" -> true
+        | _ -> false
+
     let tryFnType (t: TypeExpr) : (TypeExpr * TypeExpr) option =
         match stripTaggedType t with
         | TyFn(argTy, retTy) -> Some(argTy, retTy)
@@ -401,21 +406,50 @@ and private emitExprJava (te: TypedExpr) : string =
             nestLambdas ps
 
     | TELet(x, _, e, Some body) ->
-        // Use a trick: since Java ternary can't declare locals, we inline
-        // This is a simplification; for complex cases the body may reference x
-        // We substitute x with the expression value in body
         let eStr = emitExprJava e
         let bodyStr = emitExprJava body
-        // Simple approach: substitute x occurrences in body string
-        // (works for simple cases; x is a fresh name from the compiler)
-        let subst = bodyStr.Replace(safeIdent x, "(" + eStr + ")")
-        subst
+        let retTy = emitTypeBoxed body.Type
+        "((Supplier<" + retTy + ">)(() -> { var " + safeIdent x + " = " + eStr + "; return " + bodyStr + "; })).get()"
 
     | TELet(_, _, e, None) ->
         emitExprJava e
 
     | TELetPat(tp, e, Some body) ->
-        emitExprJava body  // simplified
+        let eStr = emitExprJava e
+        let bodyStr = emitExprJava body
+        let retTy = emitTypeBoxed body.Type
+        let scrutVar = "__ll_pat_" + string te.Id
+        let canBind = not (isUnitTy e.Type)
+        let bindLines =
+            match tp.Pat, canBind with
+            | _, false ->
+                []
+            | PVar v, true ->
+                [ "var " + safeIdent v + " = " + scrutVar + ";" ]
+            | PCon(c, args), true ->
+                let castVar = "__ll_case_" + string te.Id
+                let castLine = "var " + castVar + " = ((" + qualifyJavaCtor c + ") " + scrutVar + ");"
+                let argLines =
+                    args
+                    |> List.mapi (fun i arg ->
+                        match arg with
+                        | PVar v -> Some ("var " + safeIdent v + " = " + castVar + "._" + string i + "();")
+                        | _ -> None)
+                    |> List.choose id
+                castLine :: argLines
+            | PTuple ps, true ->
+                ps
+                |> List.mapi (fun i p ->
+                    match p with
+                    | PVar v -> Some ("var " + safeIdent v + " = " + scrutVar + "[" + string i + "];")
+                    | _ -> None)
+                |> List.choose id
+            | _ -> []
+        let binds = if List.isEmpty bindLines then "" else " " + String.concat " " bindLines
+        let evalLine =
+            if canBind then "var " + scrutVar + " = " + eStr + ";"
+            else eStr + ";"
+        "((Supplier<" + retTy + ">)(() -> { " + evalLine + binds + " return " + bodyStr + "; })).get()"
 
     | TELetPat(_, e, None) ->
         emitExprJava e
@@ -823,6 +857,7 @@ let private emitModule (includePrelude: bool) (tm: TypedModule) : string =
         "import java.util.List;\n" +
         "import java.util.Optional;\n" +
         "import java.util.function.Function;\n" +
+        "import java.util.function.Supplier;\n" +
         "import java.util.regex.Pattern;\n" +
         "import java.util.stream.Collectors;\n" +
         "import java.util.stream.Stream;\n"

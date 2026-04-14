@@ -110,9 +110,9 @@ lllc new myapp
 Creates:
 ```
 myapp/
-├── lll.toml           [project] name = "myapp"
+├── lll.toml           [project] name/version/entry
 └── src/
-    └── Main.lll      module Myapp.Main
+    └── Main.lll       module Myapp.Main
 ```
 
 ---
@@ -129,11 +129,11 @@ lllc run hello.lll
 4. Propagates the child process exit code.
 5. Deletes the temp directory.
 
-Your ll-lang `fn main()` becomes the F# entry point:
+Your ll-lang `main()` becomes the F# entry point:
 
 ```lll
 module Examples.Hello
-fn main() = printfn "Hello, ll-lang!"
+main() = printfn "Hello, ll-lang!"
 ```
 
 ```bash

@@ -1604,6 +1604,27 @@ let private cmdMod (rootDir: string) (args: string list) : int =
         1
 
 /// Scaffold a new project. Returns exit code.
+let private scaffoldModulePrefix (name: string) : string =
+    let normalized =
+        name
+        |> Seq.map (fun ch -> if Char.IsLetterOrDigit ch then ch else ' ')
+        |> Seq.toArray
+        |> fun chars -> String(chars)
+    let parts =
+        normalized.Split([|' '|], StringSplitOptions.RemoveEmptyEntries)
+        |> Array.map (fun part ->
+            if String.IsNullOrWhiteSpace part then
+                ""
+            elif part.Length = 1 then
+                part.ToUpperInvariant()
+            else
+                part.Substring(0, 1).ToUpperInvariant() + part.Substring(1))
+        |> Array.filter (fun part -> part <> "")
+    let joined =
+        if parts.Length = 0 then "App"
+        else String.Concat(parts)
+    if Char.IsDigit joined.[0] then "App" + joined else joined
+
 let private cmdNew (name: string) : int =
     try
         let dir = Path.Combine(Directory.GetCurrentDirectory(), name)
@@ -1612,9 +1633,17 @@ let private cmdNew (name: string) : int =
             1
         else
             Directory.CreateDirectory(Path.Combine(dir, "src")) |> ignore
-            let capName = if name.Length = 0 then name else string (Char.ToUpper name.[0]) + name.[1..]
-            let tomlContent = "[project]\nname = \"" + name + "\"\n"
-            let mainContent = "module " + capName + ".Main\n\nfn main() Str = \"Hello from " + name + "!\"\n"
+            let safeName = name.Replace("\\", "\\\\").Replace("\"", "\\\"")
+            let capName = scaffoldModulePrefix name
+            let tomlContent =
+                String.concat "\n" [
+                    "[project]"
+                    "name = \"" + safeName + "\""
+                    "version = \"0.1.0\""
+                    "entry = \"src/Main.lll\""
+                    ""
+                ]
+            let mainContent = "module " + capName + ".Main\n\nmain() = printfn \"Hello from " + safeName + "!\"\n"
             File.WriteAllText(Path.Combine(dir, "lll.toml"), tomlContent)
             File.WriteAllText(Path.Combine(dir, "src", "Main.lll"), mainContent)
             printfn "Created project '%s' in ./%s/" name name

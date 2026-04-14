@@ -83,6 +83,8 @@ myapp/
 ```toml
 [project]
 name = "myapp"
+version = "0.1.0"
+entry = "src/Main.lll"
 ```
 
 `src/Main.lll`:

@@ -630,15 +630,52 @@ let private buildCurriedLambda (paramNames: string list) (retExpr: string) =
 let private isUnitType (t: TypeExpr) : bool =
     t = TyName "Unit"
 
-let private emitMainExpr (body: TypedExpr) : string =
-    match tryEmitExpr body with
-    | None -> "0"
-    | Some expr ->
-        match body.Type with
-        | TyName "Int" -> "unchecked((int)(" + expr + "))"
-        | TyName "Float" -> "unchecked((int)(" + expr + "))"
-        | TyName "Bool" -> "(" + expr + " ? 1 : 0)"
-        | _ -> "0"
+let rec private flattenMainPrelude (te: TypedExpr) : string list * TypedExpr =
+    match te.Expr with
+    | TELet(name, _, valueExpr, Some body) ->
+        let valueText = emitExprOrDefault valueExpr.Type valueExpr
+        let bindLine =
+            if isUnitType valueExpr.Type then
+                valueText + ";"
+            else
+                "var " + safeIdent name + " = " + valueText + ";"
+        let rest, tail = flattenMainPrelude body
+        (bindLine :: rest, tail)
+    | TELetPat(tp, valueExpr, Some body) ->
+        let valueText = emitExprOrDefault valueExpr.Type valueExpr
+        let bindLine =
+            match tp.Pat with
+            | PWild ->
+                valueText + ";"
+            | PVar name when not (isUnitType valueExpr.Type) ->
+                "var " + safeIdent name + " = " + valueText + ";"
+            | _ ->
+                valueText + ";"
+        let rest, tail = flattenMainPrelude body
+        (bindLine :: rest, tail)
+    | _ -> ([], te)
+
+let private emitMainBody (body: TypedExpr) : string =
+    let preludeLines, finalExpr = flattenMainPrelude body
+    let preludeBlock =
+        preludeLines
+        |> List.map (fun line -> "        " + line)
+        |> String.concat "\n"
+    let finalExprText = emitExprOrDefault finalExpr.Type finalExpr
+    let finalBlock =
+        match finalExpr.Type with
+        | TyName "Int" ->
+            "        var __ll_main_result = " + finalExprText + ";\n        return unchecked((int)(__ll_main_result));"
+        | TyName "Float" ->
+            "        var __ll_main_result = " + finalExprText + ";\n        return unchecked((int)(__ll_main_result));"
+        | TyName "Bool" ->
+            "        var __ll_main_result = " + finalExprText + ";\n        return __ll_main_result ? 1 : 0;"
+        | _ ->
+            "        " + finalExprText + ";\n        return 0;"
+    if preludeBlock = "" then
+        finalBlock
+    else
+        preludeBlock + "\n" + finalBlock
 
 let private emitCSharpExternalDecl (sig_: TypedFnSig) : string =
     match tryGetExternalTarget CSharp sig_.Name with
@@ -675,7 +712,7 @@ let private emitCSharpExternalDecl (sig_: TypedFnSig) : string =
 
 let private emitFnCSharp (sig_: TypedFnSig) (body: TypedExpr) : string =
     if isMainFn sig_ then
-        "    public static int Main(string[] args) => " + emitMainExpr body + ";"
+        "    public static int Main(string[] args)\n    {\n" + emitMainBody body + "\n    }"
     else
         let tpStr = emitMethodTypeParams sig_
         match sig_.Params with

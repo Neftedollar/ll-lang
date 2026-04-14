@@ -188,6 +188,31 @@ let ``Java: main fn emits public static void main`` () =
     Assert.Contains("public static void main(String[] args)", java)
 
 [<Fact>]
+let ``Java: main sequencing preserves side effects at runtime`` () =
+    if not (toolExists "javac") || not (toolExists "java") then
+        ()
+    else
+        let src =
+            "module Smoke\n"
+            + "main() Int =\n"
+            + "  _ = printfn \"smoke\"\n"
+            + "  0\n"
+        let java = javaSrc src
+        let tempRoot = Path.Combine(Path.GetTempPath(), "lll-java-main-smoke-" + Guid.NewGuid().ToString("N"))
+        Directory.CreateDirectory(tempRoot) |> ignore
+        try
+            let javaPath = Path.Combine(tempRoot, "Smoke.java")
+            File.WriteAllText(javaPath, java)
+            let (compileCode, compileOut, compileErr) = runProc tempRoot "javac" [javaPath]
+            Assert.True((compileCode = 0), $"javac failed\nstdout:\n{compileOut}\nstderr:\n{compileErr}\nsource:\n{java}")
+
+            let (runCode, runOut, runErr) = runProc tempRoot "java" ["-cp"; tempRoot; "Smoke"]
+            Assert.True((runCode = 0), $"java run failed\nstdout:\n{runOut}\nstderr:\n{runErr}\nsource:\n{java}")
+            Assert.Contains("smoke", runOut)
+        finally
+            try Directory.Delete(tempRoot, true) with _ -> ()
+
+[<Fact>]
 let ``Java: external console_log emits System.out.println`` () =
     let src = "module M\nexternal console_log(msg Str) Unit"
     let java = javaSrc src

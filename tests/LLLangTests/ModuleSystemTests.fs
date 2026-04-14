@@ -105,6 +105,31 @@ let private runCmd (cwd: string) (exe: string) (args: string list) : int * strin
     (proc.ExitCode, stdout, stderr)
 
 [<Fact>]
+let ``lllc new: scaffolds modern template that passes project check`` () =
+    withTempDir (fun root ->
+        let (newCode, newOut, newErr) = runLllc root ["new"; "starter"]
+        Assert.True((newCode = 0), sprintf "lllc new failed\nstdout:\n%s\nstderr:\n%s" newOut newErr)
+
+        let projectDir = Path.Combine(root, "starter")
+        let manifestPath = Path.Combine(projectDir, "lll.toml")
+        let mainPath = Path.Combine(projectDir, "src", "Main.lll")
+        Assert.True(File.Exists(manifestPath), "missing scaffolded lll.toml")
+        Assert.True(File.Exists(mainPath), "missing scaffolded src/Main.lll")
+
+        let manifest = File.ReadAllText(manifestPath)
+        Assert.Contains("[project]", manifest)
+        Assert.Contains("name = \"starter\"", manifest)
+        Assert.Contains("version = \"0.1.0\"", manifest)
+        Assert.Contains("entry = \"src/Main.lll\"", manifest)
+
+        let mainSrc = File.ReadAllText(mainPath)
+        Assert.DoesNotContain("fn main()", mainSrc)
+        Assert.Contains("main() =", mainSrc)
+
+        let (checkCode, checkOut, checkErr) = runLllc projectDir ["check"]
+        Assert.True((checkCode = 0), sprintf "lllc check on scaffold failed\nstdout:\n%s\nstderr:\n%s\nmain:\n%s" checkOut checkErr mainSrc))
+
+[<Fact>]
 let ``loadProject: two-file project sorts in dependency order`` () =
     withTempDir (fun root ->
         Directory.CreateDirectory(Path.Combine(root, "src")) |> ignore
