@@ -1,0 +1,471 @@
+module Std.CompilerInfer
+
+import Std.Parser
+import Std.Map
+import Std.List
+import Std.Maybe
+import Std.CompilerTypes
+
+-- ============================================================
+-- Hindley-Milner Algorithm W for ll-lang self-hosted compiler.
+-- Canonical owner: Compiler.Infer (14-v2-canonical-compiler-boundaries.md)
+--
+-- Input:  Expr / Decl / Module from Std.Parser
+-- Output: inferred TypeExpr + accumulated error messages
+--
+-- Uses Compiler.Types for: Scheme, Subst, Fresh, unify, generalize, instantiate
+-- ============================================================
+
+-- ---- Inference state --------------------------------------------------
+-- Threading: (env, fresh, errors, accumulated-subst)
+
+InferState = MkInferState (RBMap[Str][Scheme]) Fresh (List[Str]) (RBMap[Str][TypeExpr])
+
+inferEnv(st InferState) =
+  match st
+    | MkInferState env _ _ _ -> env
+
+inferFresh(st InferState) =
+  match st
+    | MkInferState _ f _ _ -> f
+
+inferErrors(st InferState) =
+  match st
+    | MkInferState _ _ errs _ -> errs
+
+inferSubst(st InferState) =
+  match st
+    | MkInferState _ _ _ s -> s
+
+inferAddErr(msg Str)(st InferState) =
+  match st
+    | MkInferState env f errs s -> MkInferState env f (listAppend errs [msg]) s
+
+inferWithEnv(env RBMap[Str][Scheme])(st InferState) =
+  match st
+    | MkInferState _ f errs s -> MkInferState env f errs s
+
+inferWithFresh(f Fresh)(st InferState) =
+  match st
+    | MkInferState env _ errs s -> MkInferState env f errs s
+
+inferWithSubst(s2 RBMap[Str][TypeExpr])(st InferState) =
+  match st
+    | MkInferState env f errs _ -> MkInferState env f errs s2
+
+inferFreshVar(st InferState) =
+  f = inferFresh st
+  let (tv, f2) = freshNext f
+  (tv, inferWithFresh f2 st)
+
+-- ---- Built-in types ---------------------------------------------------
+
+tyInt  = TyName "Int"
+tyStr  = TyName "Str"
+tyBool = TyName "Bool"
+tyChar = TyName "Char"
+tyUnit = TyName "Unit"
+
+-- List[A] is TyApp (TyName "List") A
+tyList(a TypeExpr) = TyApp (TyName "List") a
+
+-- ---- Base type environment --------------------------------------------
+-- Prelude functions and operators
+
+baseScheme(t TypeExpr) = schemeMono t
+
+-- Type for binary arithmetic operator: Int -> Int -> Int
+tyArith = TyFn tyInt (TyFn tyInt tyInt)
+
+-- Type for comparison: Int -> Int -> Bool (simplified; real is polymorphic)
+tyCmp = TyFn tyInt (TyFn tyInt tyBool)
+
+-- Type for string equality: Str -> Str -> Bool
+tyStrEq = TyFn tyStr (TyFn tyStr tyBool)
+
+-- Build the base environment with prelude entries.
+-- Each entry is name -> Scheme.
+baseEnv() =
+  e0 = typeEnvEmpty
+  -- arithmetic
+  e1 = typeEnvInsert "+" (baseScheme tyArith) e0
+  e2 = typeEnvInsert "-" (baseScheme tyArith) e1
+  e3 = typeEnvInsert "*" (baseScheme tyArith) e2
+  e4 = typeEnvInsert "/" (baseScheme tyArith) e3
+  -- comparisons (simplified to Int -> Int -> Bool)
+  e5 = typeEnvInsert "==" (baseScheme tyCmp) e4
+  e6 = typeEnvInsert "!=" (baseScheme tyCmp) e5
+  e7 = typeEnvInsert "<"  (baseScheme tyCmp) e6
+  e8 = typeEnvInsert ">"  (baseScheme tyCmp) e7
+  e9 = typeEnvInsert "<=" (baseScheme tyCmp) e8
+  e10 = typeEnvInsert ">=" (baseScheme tyCmp) e9
+  -- printfn: Str -> Unit
+  e11 = typeEnvInsert "printfn" (baseScheme (TyFn tyStr tyUnit)) e10
+  -- intToStr: Int -> Str
+  e12 = typeEnvInsert "intToStr" (baseScheme (TyFn tyInt tyStr)) e11
+  -- strConcat: Str -> Str -> Str
+  e13 = typeEnvInsert "strConcat" (baseScheme (TyFn tyStr (TyFn tyStr tyStr))) e12
+  -- strLen: Str -> Int
+  e14 = typeEnvInsert "strLen" (baseScheme (TyFn tyStr tyInt)) e13
+  e14
+
+-- ---- Pattern type inference -------------------------------------------
+-- Returns (env_bindings, TypeExpr, errors)
+-- env_bindings: variable names and their types from the pattern
+
+inferPattern(st InferState)(pat Pattern) =
+  match pat
+    | PVar name ->
+      let (tv, st2) = inferFreshVar st
+      ([(name, schemeMono tv)], tv, st2)
+    | PWild ->
+      let (tv, st2) = inferFreshVar st
+      ([], tv, st2)
+    | PCon ctorName args ->
+      -- Get constructor type from env
+      ctorSchemeOpt = typeEnvLookup ctorName (inferEnv st)
+      match ctorSchemeOpt
+        | None ->
+          let (tv, st2) = inferFreshVar st
+          st3 = inferAddErr (strConcat "E002 UnboundVar " ctorName) st2
+          ([], tv, st3)
+        | Some sch ->
+          let (ctorTy, st2) = inferInstantiate st sch
+          -- TODO: unify constructor arg types with pattern arg types
+          -- For now, just bind wildcards for each arg
+          let (bindings, st3) = inferPatternArgs st2 args
+          -- Result type: extract return type from constructor function type
+          retTy = ctorResultType ctorTy (listLen args)
+          (bindings, retTy, st3)
+    | PLitInt _ ->  ([], tyInt, st)
+    | PLitStr _ ->  ([], tyStr, st)
+    | PCons h t ->
+      let (hbinds, hTy, st2) = inferPattern st h
+      let (tbinds, tTy, st3) = inferPattern st2 t
+      st4 = inferUnify st3 tTy (tyList hTy) "pattern cons"
+      (listAppend hbinds tbinds, tyList hTy, st4)
+    | PNil ->
+      let (tv, st2) = inferFreshVar st
+      ([], tyList tv, st2)
+
+inferPatternArgs(st InferState)(args List[Pattern]) =
+  match args
+    | [] -> ([], st)
+    | p :: rest ->
+      let (binds, _, st2) = inferPattern st p
+      let (restBinds, st3) = inferPatternArgs st2 rest
+      (listAppend binds restBinds, st3)
+
+-- Extract the return type of a constructor after n applications.
+ctorResultType(ty TypeExpr)(n Int) =
+  if n <= 0
+    ty
+  else
+    match ty
+      | TyFn _ ret -> ctorResultType ret (n - 1)
+      | _ -> ty
+
+-- Instantiate a scheme in current state.
+inferInstantiate(st InferState)(sch Scheme) =
+  f = inferFresh st
+  let (ty, f2) = instantiate f sch
+  (ty, inferWithFresh f2 st)
+
+-- Unify two types in state; compose substitution and accumulate error on mismatch.
+inferUnify(st InferState)(t1 TypeExpr)(t2 TypeExpr)(ctx Str) =
+  -- Apply current subst before unifying
+  t1a = applyType (inferSubst st) t1
+  t2a = applyType (inferSubst st) t2
+  match unify t1a t2a
+    | InferOk s ->
+      -- Compose: new s after existing accumulated subst
+      s2 = substCompose s (inferSubst st)
+      -- Apply new s to env
+      env2 = typeEnvApply s (inferEnv st)
+      st2 = inferWithEnv env2 st
+      inferWithSubst s2 st2
+    | InferErr msg ->
+      inferAddErr (strConcat ctx (strConcat ": " msg)) st
+
+-- ---- Expression inference (Algorithm W) --------------------------------
+-- Returns (TypeExpr, InferState)
+
+inferExpr(st InferState)(expr Expr) =
+  match expr
+    | EInt _    -> (tyInt, st)
+    | EStr _    -> (tyStr, st)
+    | EBool _   -> (tyBool, st)
+    | EChar _   -> (tyChar, st)
+    | EFloat _  -> (TyName "Float", st)
+    | ENil ->
+      let (tv, st2) = inferFreshVar st
+      (tyList tv, st2)
+    | EVar name ->
+      schOpt = typeEnvLookup name (inferEnv st)
+      match schOpt
+        | None ->
+          let (tv, st2) = inferFreshVar st
+          st3 = inferAddErr (strConcat "E002 UnboundVar " name) st2
+          (tv, st3)
+        | Some sch ->
+          let (ty, st2) = inferInstantiate st sch
+          (ty, st2)
+    | ECon name ->
+      schOpt = typeEnvLookup name (inferEnv st)
+      match schOpt
+        | None ->
+          let (tv, st2) = inferFreshVar st
+          st3 = inferAddErr (strConcat "E002 UnboundCon " name) st2
+          (tv, st3)
+        | Some sch ->
+          let (ty, st2) = inferInstantiate st sch
+          (ty, st2)
+    | EApp f a ->
+      let (fTy, st2) = inferExpr st f
+      let (aTy, st3) = inferExpr st2 a
+      let (retTy, st4) = inferFreshVar st3
+      st5 = inferUnify st4 fTy (TyFn aTy retTy) "application"
+      -- Apply accumulated subst to retTy
+      retTy2 = applyType (inferEnvSubst st5) retTy
+      (retTy2, st5)
+    | ELam param body ->
+      let (paramTy, st2) = inferFreshVar st
+      env2 = typeEnvInsert param (schemeMono paramTy) (inferEnv st2)
+      st3 = inferWithEnv env2 st2
+      let (bodyTy, st4) = inferExpr st3 body
+      paramTy2 = applyType (inferEnvSubst st4) paramTy
+      (TyFn paramTy2 bodyTy, st4)
+    | ELet name val body ->
+      let (valTy, st2) = inferExpr st val
+      sch = generalize (inferEnv st2) valTy
+      env2 = typeEnvInsert name sch (inferEnv st2)
+      st3 = inferWithEnv env2 st2
+      inferExpr st3 body
+    | EIf cond then_ else_ ->
+      let (condTy, st2) = inferExpr st cond
+      st3 = inferUnify st2 condTy tyBool "if condition"
+      let (thenTy, st4) = inferExpr st3 then_
+      let (elseTy, st5) = inferExpr st4 else_
+      st6 = inferUnify st5 thenTy elseTy "if branches"
+      thenTy2 = applyType (inferEnvSubst st6) thenTy
+      (thenTy2, st6)
+    | EMatch scrut pats bodies ->
+      let (scrutTy, st2) = inferExpr st scrut
+      let (tv, st3) = inferFreshVar st2
+      st4 = inferMatchArms st3 scrutTy tv pats bodies
+      resultTy = applyType (inferEnvSubst st4) tv
+      (resultTy, st4)
+    | EBinOp op l r ->
+      -- BinOp: look up operator in env
+      let (opTy, st2) = inferExpr st (EVar op)
+      let (lTy, st3) = inferExpr st2 l
+      let (rTy, st4) = inferExpr st3 r
+      let (retTy, st5) = inferFreshVar st4
+      st6 = inferUnify st5 opTy (TyFn lTy (TyFn rTy retTy)) "binary op"
+      retTy2 = applyType (inferEnvSubst st6) retTy
+      (retTy2, st6)
+    | ETuple a b ->
+      let (aTy, st2) = inferExpr st a
+      let (bTy, st3) = inferExpr st2 b
+      (TyApp (TyApp (TyName "Tuple") aTy) bTy, st3)
+    | EList elems ->
+      let (tv, st2) = inferFreshVar st
+      st3 = listFold (\acc e.
+        let (eTy, acc2) = inferExpr acc e
+        inferUnify acc2 eTy tv "list element"
+      ) st2 elems
+      elemTy = applyType (inferEnvSubst st3) tv
+      (tyList elemTy, st3)
+    | ECons h t ->
+      let (hTy, st2) = inferExpr st h
+      let (tTy, st3) = inferExpr st2 t
+      st4 = inferUnify st3 tTy (tyList hTy) "list cons"
+      (tyList hTy, st4)
+
+-- Infer match arms and unify each arm result with retTy.
+inferMatchArms(st InferState)(scrutTy TypeExpr)(retTy TypeExpr)(pats List[Pattern])(bodies List[Expr]) =
+  match pats
+    | [] -> st
+    | pat :: restPats ->
+      match bodies
+        | [] -> st
+        | body :: restBodies ->
+          -- Infer pattern and bind names
+          let (bindings, patTy, st2) = inferPattern st pat
+          st3 = inferUnify st2 scrutTy patTy "match scrutinee"
+          -- Extend env with pattern bindings
+          env2 = listFold (\acc pair.
+            let (name, sch) = pair
+            typeEnvInsert name sch acc
+          ) (inferEnv st3) bindings
+          st4 = inferWithEnv env2 st3
+          -- Infer body type and unify with result type
+          let (bodyTy, st5) = inferExpr st4 body
+          st6 = inferUnify st5 bodyTy retTy "match arm"
+          -- Restore outer env (bindings are local to this arm)
+          st7 = inferWithEnv (inferEnv st3) st6
+          inferMatchArms st7 scrutTy retTy restPats restBodies
+
+-- Return the accumulated substitution from the state.
+inferEnvSubst(st InferState) = inferSubst st
+
+-- ---- Declaration inference --------------------------------------------
+
+inferDecl(st InferState)(decl Decl) =
+  match decl
+    | DFn name params retTyOpt body ->
+      -- Assign fresh types to untyped params, use declared types for typed ones.
+      let (paramSchemes, paramTys, st2) = inferParams st params
+      -- Build env with param types
+      env2 = listFold (\acc pair.
+        let (pname, sch) = pair
+        typeEnvInsert pname sch acc
+      ) (inferEnv st2) paramSchemes
+      -- Add function itself with fresh type (for recursive calls)
+      let (selfTy, st3) = inferFreshVar (inferWithEnv env2 st2)
+      env3 = typeEnvInsert name (schemeMono selfTy) (inferEnv st3)
+      st4 = inferWithEnv env3 st3
+      -- Infer body type
+      let (bodyTy, st5) = inferExpr st4 body
+      -- Unify with declared return type (if any)
+      st6 = match retTyOpt
+        | None -> st5
+        | Some retTy ->
+          -- Declared type: need to instantiate rigid vars
+          inferUnify st5 bodyTy retTy "declared return type"
+      -- Build function type: param1 -> param2 -> ... -> bodyTy
+      fnTy = buildFnType paramTys bodyTy
+      -- Generalize
+      sch = generalize (inferEnv st6) fnTy
+      -- Add to env (overwrite the placeholder)
+      env4 = typeEnvInsert name sch (inferEnv st6)
+      inferWithEnv env4 st6
+    | DType typeName tvars ctors ->
+      -- Add constructors to env
+      st2 = listFold (\acc ctor.
+        match ctor
+          | MkCon ctorName argTys ->
+            -- Constructor type: arg1 -> arg2 -> ... -> TypeName[tvars...]
+            retTy = applyTypeVars typeName tvars
+            ctorTy = buildFnType argTys retTy
+            -- Generalize over type vars
+            ctorSch = MkScheme tvars ctorTy
+            inferWithEnv (typeEnvInsert ctorName ctorSch (inferEnv acc)) acc
+      ) st ctors
+      st2
+    | DLet name expr ->
+      let (ty, st2) = inferExpr st expr
+      sch = generalize (inferEnv st2) ty
+      inferWithEnv (typeEnvInsert name sch (inferEnv st2)) st2
+    | DExternal name params retTy ->
+      paramTys = listMap (\p. match p | MkParam _ t -> t) params
+      fnTy = buildFnType paramTys retTy
+      sch = schemeMono fnTy
+      inferWithEnv (typeEnvInsert name sch (inferEnv st)) st
+    | DOpaque typeName ->
+      st
+    | DImport _ -> st
+    | DImportUrl _ -> st
+    | DExport inner -> inferDecl st inner
+
+-- Infer parameter list: returns (name->scheme pairs, type list, state).
+inferParams(st InferState)(params List[Param]) =
+  match params
+    | [] -> ([], [], st)
+    | p :: rest ->
+      match p
+        | MkParam pname pty ->
+          -- If type is TyName "?" (untyped hole), use fresh var
+          pty2 = match pty
+            | TyName "?" ->
+              let (tv, _) = inferFreshVar st
+              tv
+            | _ -> pty
+          let (restPairs, restTys, st2) = inferParams st rest
+          sch = schemeMono pty2
+          (listAppend [(pname, sch)] restPairs, listAppend [pty2] restTys, st2)
+
+-- Build a curried function type from arg types and return type.
+buildFnType(argTys List[TypeExpr])(retTy TypeExpr) =
+  match argTys
+    | [] -> retTy
+    | a :: rest -> TyFn a (buildFnType rest retTy)
+
+-- Apply type variables to a base type name: "Maybe" ["A"] -> TyApp (TyName "Maybe") (TyName "A")
+applyTypeVars(base Str)(vars List[Str]) =
+  match vars
+    | [] -> TyName base
+    | v :: rest -> TyApp (applyTypeVars base rest) (TyName v)
+
+-- ---- Module inference -------------------------------------------------
+
+inferModule(decls List[Decl]) =
+  st0 = MkInferState (baseEnv ()) freshInit [] substEmpty
+  stFinal = listFold inferDecl st0 decls
+  inferErrors stFinal
+
+-- ---- Self-tests --------------------------------------------------------
+
+strStartsWith(prefix Str)(s Str) =
+  plen = strLen prefix
+  slen = strLen s
+  if plen > slen
+    false
+  else
+    strSlice s 0 plen == prefix
+
+inferCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+runInfer(expr Expr) =
+  st0 = MkInferState (baseEnv ()) freshInit [] substEmpty
+  let (ty, st1) = inferExpr st0 expr
+  errs = inferErrors st1
+  if listIsEmpty errs
+    renderType (applyType (inferSubst st1) ty)
+  else
+    strConcat "error: " (match errs | e :: _ -> e | [] -> "?")
+
+main =
+  -- 1. Int literal
+  _ = inferCheck "1 EInt" (runInfer (EInt 42)) "Int"
+
+  -- 2. Str literal
+  _ = inferCheck "2 EStr" (runInfer (EStr "hello")) "Str"
+
+  -- 3. Bool literal
+  _ = inferCheck "3 EBool" (runInfer (EBool true)) "Bool"
+
+  -- 4. Lambda identity: \x. x  =>  $0 -> $0
+  _ = inferCheck "4 lambda id" (runInfer (ELam "x" (EVar "x"))) "$0 -> $0"
+
+  -- 5. Lambda const: \x. 42  =>  $0 -> Int
+  _ = inferCheck "5 lambda const" (runInfer (ELam "x" (EInt 42))) "$0 -> Int"
+
+  -- 6. Application: (\x. x) 42 => Int
+  _ = inferCheck "6 app id" (runInfer (EApp (ELam "x" (EVar "x")) (EInt 42))) "Int"
+
+  -- 7. Let binding: let x = 42 in x => Int
+  _ = inferCheck "7 let" (runInfer (ELet "x" (EInt 42) (EVar "x"))) "Int"
+
+  -- 8. If: if true 1 else 2 => Int
+  _ = inferCheck "8 if" (runInfer (EIf (EBool true) (EInt 1) (EInt 2))) "Int"
+
+  -- 9. BinOp: 1 + 2 => Int
+  _ = inferCheck "9 binop +" (runInfer (EBinOp "+" (EInt 1) (EInt 2))) "Int"
+
+  -- 10. List: [1, 2, 3] => List Int
+  _ = inferCheck "10 list" (runInfer (EList [EInt 1; EInt 2; EInt 3])) "List Int"
+
+  -- 11. Unbound var => error
+  r11 = runInfer (EVar "noSuchName")
+  _ = inferCheck "11 unbound" (match strStartsWith "error:" r11 | true -> "err" | false -> "ok") "err"
+
+  -- 12. Lambda + arithmetic: \n. n + 1 => Int -> Int
+  _ = inferCheck "12 lambda arith" (runInfer (ELam "n" (EBinOp "+" (EVar "n") (EInt 1)))) "Int -> Int"
+
+  printfn "Done"
+

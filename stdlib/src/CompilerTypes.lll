@@ -1,4 +1,4 @@
-module Compiler.Types
+module Std.CompilerTypes
 
 import Std.Parser
 import Std.Map
@@ -7,7 +7,7 @@ import Std.Maybe
 
 -- ============================================================
 -- HM Type Representations for ll-lang v2 self-hosted compiler.
--- Canonical owner: Compiler.Types (14-v2-canonical-compiler-boundaries.md)
+-- Canonical owner: Std.CompilerTypes (14-v2-canonical-compiler-boundaries.md)
 --
 -- TypeExpr (from Std.Parser):
 --   TyName Str    -- flex vars ($0,$1,...), rigid vars (a,b), names (Int,Str)
