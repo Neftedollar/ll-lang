@@ -177,7 +177,7 @@ definitions.
 - [ ] `Compiler.Types`, `Compiler.Typed`, `Compiler.Infer` implemented in ll-lang
 - [ ] `Compiler.Lower` implemented in ll-lang
 - [ ] `Compiler.Project.Manifest`, `Compiler.Project.Loader`, `Compiler.Cli` implemented in ll-lang
-- [ ] `Compiler.Backend.CSharp` (ll-lang) added or explicitly deferred
+- [x] `Compiler.Backend.CSharp` (ll-lang) — `stdlib/src/CodegenCSharp.lll` added (548 LOC, 20 tests)
 - [ ] direct tests for each ll-lang-owned subsystem
 - [ ] end-to-end self-hosted pipeline test independent of stage0 behavior
 

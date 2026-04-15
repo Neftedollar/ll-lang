@@ -44,7 +44,7 @@ A subsystem is considered **migrated** only when all of the following are true:
 | TypeScript backend | `src/LLLangCompiler/CodegenTS.fs` | `Compiler.Backend.TypeScript` (file: `stdlib/src/CodegenTS.lll`) | transitional bootstrap | self-hosted emitter exists; parity targets needed |
 | Python backend | `src/LLLangCompiler/CodegenPy.fs` | `Compiler.Backend.Python` (file: `stdlib/src/CodegenPy.lll`) | transitional bootstrap | self-hosted emitter exists; parity targets needed |
 | Java backend | `src/LLLangCompiler/CodegenJava.fs` | `Compiler.Backend.Java` (file: `stdlib/src/CodegenJava.lll`) | transitional bootstrap | self-hosted emitter exists; parity targets needed |
-| C# backend | `src/LLLangCompiler/CodegenCSharp.fs` | `Compiler.Backend.CSharp` | gap to fill — stage0 only | no ll-lang emitter; must be added or explicitly deferred |
+| C# backend | `src/LLLangCompiler/CodegenCSharp.fs` | `Compiler.Backend.CSharp` (file: `stdlib/src/CodegenCSharp.lll`) | transitional bootstrap | self-hosted emitter exists; parity targets needed |
 | LLVM backend | `src/LLLangCompiler/CodegenLLVM.fs` | `Compiler.Backend.LLVM` (file: `stdlib/src/CodegenLLVM.lll`) | experimental bootstrap | self-hosted subset emitter exists; ownership is explicit but backend remains experimental |
 | Project manifest | `src/LLLangCompiler/Manifest.fs` | `Compiler.Project.Manifest` | gap to fill — stage0 only | `Std.Toml` is the parser substrate; self-hosted resolver layer needed over it |
 | Project graph loader | `src/LLLangCompiler/ProjectLoader.fs` | `Compiler.Project.Loader` | gap to fill — stage0 only | no canonical ll-lang owner; module graph loading to be self-hosted |

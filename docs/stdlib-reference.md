@@ -43,6 +43,7 @@ These modules implement the self-hosted compiler. They live under `stdlib/src/` 
 | `stdlib/src/CodegenPy.lll` | `Compiler.Backend.Python` | Python emitter |
 | `stdlib/src/CodegenJava.lll` | `Compiler.Backend.Java` | Java emitter |
 | `stdlib/src/CodegenLLVM.lll` | `Compiler.Backend.LLVM` | LLVM IR emitter (experimental) |
+| `stdlib/src/CodegenCSharp.lll` | `Compiler.Backend.CSharp` | C# emitter |
 | `stdlib/src/Compiler.lll` | `Compiler.Main` | pipeline entrypoint |
 | `stdlib/src/Render.lll` | `Compiler.Render` | diagnostic/output rendering |
 
@@ -613,6 +614,22 @@ transpileToFSharp(src Str) =
 
 ---
 
+### `Std.CodegenCSharp` — C# emitter
+
+**Import:** `import Std.CodegenCSharp`  
+**LOC:** 548  
+**Description:** C# source emitter. Emits `sealed record`/`interface` hierarchies for ADTs, static methods for functions, wrapped IIFE style for `let`-bindings.
+
+**Key functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `emitModule` | `LLModule -> Str` | Emit module as C# source |
+| `emitDecl` | `Decl -> Str` | Emit one declaration |
+| `emitType` | `TypeExpr -> Str` | Emit C# type annotation |
+
+---
+
 ### `Std.Compiler` — full pipeline (source → F#)
 
 **Import:** `import Std.Compiler`  
@@ -661,6 +678,7 @@ buildFile(path Str) =
 | Code generation | `Std.CodegenPy` | Python emitter |
 | Code generation | `Std.CodegenJava` | Java emitter |
 | Code generation | `Std.CodegenLLVM` | LLVM emitter |
+| Code generation | `Std.CodegenCSharp` | C# emitter |
 | Rendering | `Std.Render` | Shared rendering helpers |
 | Testing | `Std.Test` | Test assertions/utilities |
 | Full pipeline | `Std.Compiler` | Source pipeline helpers |
