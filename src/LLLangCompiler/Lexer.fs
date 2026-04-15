@@ -24,6 +24,7 @@ let tokenize (source: string) : Result<Tok list, string> =
     let mutable pos = 0
     let mutable line = 1
     let mutable lineStart = 0
+    let mutable lexError: string option = None
     let indentStack = Collections.Generic.Stack<int>([| 0 |])
 
     let cur () = if pos < source.Length then source[pos] else '\000'
@@ -61,7 +62,7 @@ let tokenize (source: string) : Result<Tok list, string> =
                     result.Add({ Token = Dedent; Line = line; Col = 1 })
 
     let rec scan () =
-        if pos >= source.Length then ()
+        if lexError.IsSome || pos >= source.Length then ()
         else
         match cur() with
         | ' ' | '\t' -> advance(); scan()
@@ -139,40 +140,51 @@ let tokenize (source: string) : Result<Tok list, string> =
                         | '\\' -> sb.Append('\\') |> ignore; advance()
                         | c2 -> sb.Append(c2) |> ignore; advance()
                 | c2 -> sb.Append(c2) |> ignore; advance()
-            result.Add({ Token = StrLit (sb.ToString()); Line = l; Col = c })
-            if not closed then failwith $"Unterminated string literal at {l}:{c}"
-            scan()
+            if not closed then
+                lexError <- Some $"Unterminated string literal at {l}:{c}"
+            else
+                result.Add({ Token = StrLit (sb.ToString()); Line = l; Col = c })
+                scan()
         | '\'' ->
             let l, c = line, col()
             advance()  // consume opening '
             if pos >= source.Length then
-                failwith $"Unterminated char literal at {l}:{c}"
-            let ch =
+                lexError <- Some $"Unterminated char literal at {l}:{c}"
+            else
+            let chOpt =
                 if source[pos] = '\\' then
                     advance()
                     if pos >= source.Length then
-                        failwith $"Unterminated char escape at {l}:{c}"
-                    let esc =
-                        match source[pos] with
-                        | 'n' -> '\n'
-                        | 't' -> '\t'
-                        | 'r' -> '\r'
-                        | '\\' -> '\\'
-                        | '\'' -> '\''
-                        | '"' -> '"'
-                        | '0' -> '\000'
-                        | other -> failwith $"Invalid char escape '\\{other}' at {l}:{c}"
-                    advance()
-                    esc
+                        lexError <- Some $"Unterminated char escape at {l}:{c}"
+                        None
+                    else
+                        let esc =
+                            match source[pos] with
+                            | 'n' -> Some '\n'
+                            | 't' -> Some '\t'
+                            | 'r' -> Some '\r'
+                            | '\\' -> Some '\\'
+                            | '\'' -> Some '\''
+                            | '"' -> Some '"'
+                            | '0' -> Some '\000'
+                            | other ->
+                                lexError <- Some $"Invalid char escape '\\{other}' at {l}:{c}"
+                                None
+                        advance()
+                        esc
                 else
                     let c2 = source[pos]
                     advance()
-                    c2
-            if pos >= source.Length || source[pos] <> '\'' then
-                failwith $"Unterminated char literal at {l}:{c}"
-            advance()  // consume closing '
-            result.Add({ Token = CharLit ch; Line = l; Col = c })
-            scan()
+                    Some c2
+            match chOpt with
+            | None -> ()  // lexError already set
+            | Some ch ->
+                if pos >= source.Length || source[pos] <> '\'' then
+                    lexError <- Some $"Unterminated char literal at {l}:{c}"
+                else
+                    advance()  // consume closing '
+                    result.Add({ Token = CharLit ch; Line = l; Col = c })
+                    scan()
         | c when Char.IsDigit c ->
             let l, c2 = line, col()
             let start = pos
@@ -203,12 +215,12 @@ let tokenize (source: string) : Result<Tok list, string> =
             scan()
         | _ -> advance(); scan()
 
-    try
-        scan()
+    scan()
+    match lexError with
+    | Some e -> Error e
+    | None ->
         while indentStack.Count > 1 do
             indentStack.Pop() |> ignore
             result.Add { Token = Dedent; Line = line; Col = 1 }
         result.Add { Token = Eof; Line = line; Col = col() }
         Ok (List.ofSeq result)
-    with ex ->
-        Error ex.Message
