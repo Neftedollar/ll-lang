@@ -140,6 +140,8 @@ decl ::= fn-decl
        | unit-decl
        | trait-decl
        | impl-decl
+       | external-decl
+       | opaque-decl
 
 (* --- let (top-level) --------------------------------------- *)
 let-decl ::= "let" IDENT "=" expr
@@ -170,6 +172,15 @@ wrapped-type ::= type-expr          (* newtype via tag *)
 (* --- tag & unit -------------------------------------------- *)
 tag-decl  ::= "tag" TYPEID
 unit-decl ::= "unit" TYPEID
+
+(* --- external & opaque ------------------------------------- *)
+(* external declares a platform-native function (no ll-lang body).
+   The Platform SDK provides the actual implementation per target. *)
+external-decl ::= "external" IDENT param* type-expr
+
+(* opaque declares a platform-native type that ll-lang can hold
+   and pass but cannot pattern-match or construct. *)
+opaque-decl ::= "opaque" TYPEID
 
 (* --- trait ------------------------------------------------- *)
 trait-decl ::= "trait" TYPEID type-var+ "=" NEWLINE INDENT fn-sig+ DEDENT

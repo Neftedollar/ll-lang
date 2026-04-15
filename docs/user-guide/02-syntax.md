@@ -245,6 +245,37 @@ specific type constructor.
 
 See [05-traits](05-traits.md).
 
+## `external`: platform-native functions
+
+```lll
+-- Declares a function implemented in the host platform (no ll-lang body).
+-- The Platform SDK provides the actual implementation per compile target.
+external console_log(msg Str) Unit
+external JSON_parse(src Str) Str
+
+logGreeting(name Str) Unit =
+  console_log (strConcat "Hello, " name)
+```
+
+`external` functions are called exactly like regular ll-lang functions.
+The compiler validates that the selected target has a mapping for the name;
+if not, it emits **E026 UnknownExternalMapping**.
+
+Pre-mapped names available on all targets: `console_log`, `JSON_parse`.
+
+## `opaque`: platform-native types
+
+```lll
+-- Declares a type whose internals are managed by the host platform.
+-- ll-lang code can hold and pass opaque values, but cannot pattern-match
+-- or construct them directly.
+opaque HttpClient
+opaque Buffer
+```
+
+Opaque types can appear as parameter and return types on both `external` and
+regular ll-lang functions.
+
 ## Expression-level constructs
 
 ### Application (juxtaposition)
