@@ -1,0 +1,108 @@
+module Std.SelfHostedRun
+
+import Std.ProjectLoader
+import Std.Compiler
+
+-- ============================================================
+-- Self-hosted entry point: mimics what Program.fs cmdRun does
+-- but entirely in ll-lang using file I/O externals +
+-- the self-hosted Std.Compiler pipeline.
+--
+-- Exposed API:
+--   compileSingleFile  : Str -> Str
+--   compileProject     : sources -> Str   (sources = list of (path,content) pairs)
+--   runFile            : Str -> Unit
+-- ============================================================
+
+-- ---- Helpers -------------------------------------------------------
+
+checkContains(label Str)(got Str)(needle Str) =
+  if strContains needle got
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " | expected to contain: " (strConcat needle (strConcat " | got: " got)))))
+
+checkEq(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+-- Concatenate a list of strings with a separator.
+joinLines(sep Str)(xs List[Str]) =
+  match xs
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat sep (joinLines sep rest))
+
+-- ---- Core pipeline -------------------------------------------------
+
+-- Given a path to a .lll source file, read it and compile to F#.
+-- Returns the F# output string (or an error message if compilation fails).
+compileSingleFile(path Str) =
+  src = fileReadAll path
+  compile src
+
+-- Given a list of (path, content) pairs (as returned by loadProject),
+-- compile each module through the full pipeline and join the outputs.
+-- Returns concatenated F# output for all modules.
+compileProject(sources) =
+  outputs = compileProjectStep sources
+  joinLines "\n\n" outputs
+
+compileProjectStep(sources) =
+  match sources
+    | [] -> []
+    | (_, content) :: rest ->
+      out = compile content
+      out :: compileProjectStep rest
+
+-- Driver: given a .lll file path, load + compile + print F# to stdout.
+-- This is the self-hosted equivalent of `lllc run <file>` for codegen.
+runFile(path Str) =
+  src = fileReadAll path
+  fsharp = compile src
+  printfn fsharp
+
+-- ============================================================
+-- TESTS
+-- ============================================================
+
+main =
+  -- 1. compileSingleFile: a known .lll file compiles to F# containing "module"
+  out1 = compileSingleFile "spec/examples/valid/06-stdlib.lll"
+  _ = checkContains "1 compileSingleFile has module" out1 "module"
+
+  -- 2. compileSingleFile: output is non-empty (len > 0)
+  _ = checkContains "2 compileSingleFile non-empty" out1 "module"
+
+  -- 3. compile inline source: basic function round-trips to F# "let"
+  src3 = "module Test\nadd(a Int)(b Int) = a + b\n"
+  out3 = compile src3
+  _ = checkContains "3 compile inline fn has let" out3 "let"
+
+  -- 4. compileProject from loadProject: stdlib root yields non-empty output
+  pairs4 = loadProject "stdlib"
+  combined4 = compileProject pairs4
+  _ = checkContains "4 compileProject has module" combined4 "module"
+
+  -- 5. compileSingleFile on Math.lll (self-contained) produces F# with "let"
+  out5 = compileSingleFile "stdlib/src/Math.lll"
+  _ = checkContains "5 compileSingleFile Math has let" out5 "let"
+
+  -- 6. compile error source returns error message (not empty)
+  src6 = "module Test\nresult = undeclaredVar\n"
+  out6 = compile src6
+  _ = checkContains "6 compile bad src returns error" out6 "undeclared"
+
+  -- 7. compileProject single-file list: inline trivial module
+  pairs7 = [("test.lll", "module T\nfoo(x Int) = x\n")]
+  out7 = compileProject pairs7
+  _ = checkContains "7 compileProject inline has let" out7 "let"
+
+  -- 8. compileProject multiple inline sources: both appear in output
+  pairs8 = [("a.lll", "module A\nfoo(x Int) = x\n"); ("b.lll", "module B\nbar(x Int) = x\n")]
+  out8 = compileProject pairs8
+  _ = checkContains "8 compileProject two modules has foo" out8 "foo"
+
+  printfn "Done"
