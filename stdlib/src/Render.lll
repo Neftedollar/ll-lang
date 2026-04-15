@@ -197,3 +197,24 @@ renderModule(m Module) =
         | [] -> emitDecls decls
         | _ ->
           strConcat "module " (strConcat (joinWith "." path) (strConcat "\n\n" (emitDecls decls)))
+
+-- ---- Tests ---------------------------------------------------------------
+
+renderCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+main =
+  _ = renderCheck "1 escapeStr plain" (escapeStr "hello") "hello"
+  _ = renderCheck "2 escapeStr newline" (escapeStr "\n") "\\n"
+  _ = renderCheck "3 emitExpr int" (emitExpr (EInt 42)) "42"
+  _ = renderCheck "4 emitExpr str" (emitExpr (EStr "hi")) "\"hi\""
+  _ = renderCheck "5 emitExpr bool true" (emitExpr (EBool true)) "true"
+  _ = renderCheck "6 emitExpr bool false" (emitExpr (EBool false)) "false"
+  _ = renderCheck "7 emitExpr var" (emitExpr (EVar "x")) "x"
+  _ = renderCheck "8 emitExpr list empty" (emitExpr (EList [])) "[]"
+  _ = renderCheck "9 emitType TyName" (emitType (TyName "Int")) "Int"
+  _ = renderCheck "10 emitType TyFn" (emitType (TyFn (TyName "Int") (TyName "Int"))) "Int -> Int"
+  printfn "Done"

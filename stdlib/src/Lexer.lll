@@ -438,3 +438,21 @@ checkTokens(label Str)(src Str)(expected Str) =
     printfn p5
 
 -- ---- Tests -------------------------------------------------------------
+
+main =
+  _ = checkTokens "1 int literal" "42" "Int:42 Eof"
+  _ = checkTokens "2 str literal" "\"hi\"" "Str:hi Eof"
+  _ = checkTokens "3 true" "true" "KwTrue Eof"
+  _ = checkTokens "4 false" "false" "KwFalse Eof"
+  _ = checkTokens "5 if" "if" "KwIf Eof"
+  _ = checkTokens "6 match" "match" "KwMatch Eof"
+  _ = checkTokens "7 ident" "foo" "Ident:foo Eof"
+  _ = checkTokens "8 upper ident" "Foo" "TypeId:Foo Eof"
+  _ = checkTokens "9 arrow" "->" "Arrow Eof"
+  _ = checkTokens "10 backslash" "\\" "Backslash Eof"
+  _ = checkTokens "11 pipe" "|" "Bar Eof"
+  _ = checkTokens "12 equals" "=" "Eq Eof"
+  _ = checkTokens "13 let" "let" "KwLet Eof"
+  _ = checkTokens "14 module" "module" "KwModule Eof"
+  _ = checkTokens "15 import" "import" "KwImport Eof"
+  printfn "Done"
