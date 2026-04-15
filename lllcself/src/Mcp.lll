@@ -311,7 +311,8 @@ handleToolsList(params JsonVal) =
     (toolSchema "check_file" "Type-check a .lll file." [MJStr "path"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Path to .lll file"]] [MJStr "path"]);
     (toolSchema "stdlib_search" "Search stdlib by name or signature." [MJStr "query"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Search query"]] [MJStr "query"]);
     (toolSchema "list_errors" "List all error codes." [] []);
-    (toolSchema "lookup_error" "Get error details for E001 etc." [MJStr "code"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Error code"]] [MJStr "code"])
+    (toolSchema "lookup_error" "Get error details for E001 etc." [MJStr "code"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Error code"]] [MJStr "code"]);
+    (toolSchema "list_targets" "List all compile targets with status and description." [] [])
   ]
   MJObj [MJStr "tools"; MJArr tools]
 
@@ -324,6 +325,7 @@ dispatchTool(method Str)(params JsonVal) =
     | "stdlib_search" -> handleStdlibSearch params
     | "list_errors" -> handleListErrors params
     | "lookup_error" -> handleLookupError params
+    | "list_targets" -> handleListTargets params
     | _ -> MJObj [MJStr "error"; MJStr (strConcat "Unknown method: " method)]
 
 -- Tool implementations
@@ -440,6 +442,26 @@ findError(code Str)(errors List[Triple]) =
         Some (MkTriple c name desc)
       else
         findError code rest
+
+-- ---- Compile targets ----
+Target = MkTarget Str Str Str Str Str
+
+knownTargets = [
+  MkTarget "fs"   "FSharp"     "stable"       ".fs"   "F# source files; default target";
+  MkTarget "ts"   "TypeScript" "stable"       ".ts"   "TypeScript source files; ADTs as tagged union types";
+  MkTarget "py"   "Python"     "stable"       ".py"   "Python source files; ADTs as dataclass + Union";
+  MkTarget "java" "Java"       "stable"       ".java" "Java 21; ADTs as sealed interfaces + records";
+  MkTarget "cs"   "CSharp"     "stable"       ".cs"   "C# source files; ADTs as sealed record hierarchies";
+  MkTarget "llvm" "LLVM"       "experimental" ".ll"   "LLVM IR; subset backend — ADT support partial"
+]
+
+targetToJson(t Target) =
+  match t
+    | MkTarget id name status ext desc ->
+      MJObj [MJStr "id"; MJStr id; MJStr "name"; MJStr name; MJStr "status"; MJStr status; MJStr "extension"; MJStr ext; MJStr "description"; MJStr desc]
+
+handleListTargets(params JsonVal) =
+  MJArr (listMap targetToJson knownTargets)
 
 -- ---- Main MCP loop ----
 mcpLoop() =
