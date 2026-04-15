@@ -1,115 +1,140 @@
 # v2 Canonical Compiler Boundaries
 
-**Status:** planning aid for Milestone 1  
+**Status:** frozen specification — binding for v2 development  
 **Audience:** implementation agents and maintainers  
-**Purpose:** define which subsystems should be owned by the canonical ll-lang compiler in `v2`, what their current implementation status is, and what migration step closes each gap.
+**Closes:** #46 (M1.A), #47 (M1.B), #48 (M1.C), #49 (M1.D), #51 (M1.F)
 
 ## Summary
 
-The current repo contains two compiler realities at once:
+The repo contains two compiler realities:
 
-1. the active stage0 compiler in `src/LLLangCompiler/*.fs`
-2. a substantial self-hosted slice under `stdlib/src/*.lll`
+1. the **stage0 bootstrap** in `src/LLLangCompiler/*.fs` — frozen, not the long-term owner
+2. the **canonical self-hosted compiler** under `stdlib/src/*.lll` — the owner for v2
 
-This document turns that into an explicit ownership map. It is not a second
-architecture spec. It is the concrete decomposition needed to implement
-Milestone 1 of the `v2` roadmap.
+This document is the binding ownership map. Every new feature, refactor, and
+migration decision must use this table as the authority. A subsystem "jointly
+owned" by stage0 and self-hosted code is a temporary migration state only —
+not a steady state.
 
 ## Boundary rules
 
-For `v2`, each compiler subsystem must have exactly one canonical owner in
-ll-lang. Stage0 may mirror it for bootstrap purposes, but may not remain the
-active source of truth.
+For `v2`, each compiler subsystem has exactly one canonical owner in ll-lang.
+Stage0 is a bootstrap mirror only; it is not an active source of truth for any
+subsystem where a self-hosted module exists.
 
-A subsystem is considered migrated only when all of the following are true:
+A subsystem is considered **migrated** only when all of the following are true:
 
-- there is a canonical ll-lang module (or module group) that owns it
-- docs point to that ll-lang module as authoritative
+- a canonical ll-lang module (or module group) owns it
+- docs point to that module as authoritative
 - tests exercise the ll-lang path directly
-- stage0 is either a bootstrap mirror or a thin compatibility layer
+- stage0 is a bootstrap mirror or thin compatibility layer
 
-## Current ownership map
+## Frozen ownership table
 
-| Subsystem | Current stage0 owner | Current ll-lang owner | `v2` canonical owner | Current state | Gap to close |
-|-----------|----------------------|------------------------|----------------------|---------------|--------------|
-| Lexer | `src/LLLangCompiler/Lexer.fs` | `stdlib/src/Lexer.lll` | `Std.Lexer` or `Compiler.Syntax.Lexer` | ll-lang implementation exists, but docs still describe stage0-first architecture | make ll-lang lexer the documented owner and ensure feature parity tests gate it |
-| Parser | `src/LLLangCompiler/Parser.fs`, `FParsecParser.fs` | `stdlib/src/Parser.lll` | `Std.Parser` or `Compiler.Syntax.Parser` | ll-lang parser exists as recursive-descent self-host slice | define canonical parser contract and reduce stage0-specific parser assumptions |
-| Elaborator / name checks | `src/LLLangCompiler/Elaborator.fs` | `stdlib/src/Elaborator.lll` | `Std.Elaborator` or `Compiler.Frontend.Elaborator` | ll-lang elaborator exists in simplified form | close behavioral gap vs stage0 and document exact invariants |
-| HM inference / typed core | `src/LLLangCompiler/HMInfer.fs`, `Types.fs`, `TypedAST.fs` | no canonical ll-lang counterpart yet | `Compiler.Types`, `Compiler.Typed`, `Compiler.Infer` | still stage0-owned | design and land canonical ll-lang typed-core modules |
-| Backend-neutral lowering | implicit in stage0 compiler internals | no canonical ll-lang layer | `Compiler.Lower` | missing as an explicit layer | introduce a distinct lowering boundary instead of backend emitters re-deriving semantics |
-| F# backend | `src/LLLangCompiler/Codegen.fs` | `stdlib/src/Codegen.lll` | `Std.Codegen` or `Compiler.Backend.FSharp` | ll-lang emitter exists and is already used in self-host story | formalize it as canonical owner |
-| TypeScript backend | `src/LLLangCompiler/CodegenTS.fs` | `stdlib/src/CodegenTS.lll` | `Std.CodegenTS` or `Compiler.Backend.TypeScript` | ll-lang emitter exists | formalize ownership and add parity targets |
-| Python backend | `src/LLLangCompiler/CodegenPy.fs` | `stdlib/src/CodegenPy.lll` | `Std.CodegenPy` or `Compiler.Backend.Python` | ll-lang emitter exists | formalize ownership and add parity targets |
-| Java backend | `src/LLLangCompiler/CodegenJava.fs` | `stdlib/src/CodegenJava.lll` | `Std.CodegenJava` or `Compiler.Backend.Java` | ll-lang emitter exists | formalize ownership and add parity targets |
-| C# backend | `src/LLLangCompiler/CodegenCSharp.fs` | no canonical ll-lang emitter yet | `Compiler.Backend.CSharp` | still stage0-owned | add canonical ll-lang C# backend or explicitly defer it |
-| LLVM backend | `src/LLLangCompiler/CodegenLLVM.fs` | `stdlib/src/CodegenLLVM.lll` | `Std.CodegenLLVM` or `Compiler.Backend.LLVM` | ll-lang emitter exists for subset path | keep experimental, but still make ownership explicit |
-| Project manifest parsing | `src/LLLangCompiler/Manifest.fs` | `stdlib/src/Toml.lll` is a parser substrate, not the resolver | `Compiler.Project.Manifest` | stage0-owned | add self-hosted manifest/resolver layer over `Std.Toml` |
-| Project graph / topo loading | `src/LLLangCompiler/ProjectLoader.fs` | no canonical ll-lang owner yet | `Compiler.Project.Loader` | stage0-owned | implement self-hosted module graph loader |
-| CLI command orchestration | `src/LLLangTool/Program.fs` | `lllc self` delegates to ll-lang tool layer, but not yet canonical | `Compiler.Cli` or `Tool.Main` | still stage0-first | promote ll-lang CLI path to canonical and demote stage0 wrapper |
-| Full pipeline entrypoint | `src/LLLangCompiler/Compiler.fs` | `stdlib/src/Compiler.lll` | `Std.Compiler` or `Compiler.Main` | ll-lang pipeline exists for core path | expand it to own the full canonical flow |
+| Subsystem | Stage0 bootstrap | Canonical v2 owner | Stage0 status | Migration state |
+|-----------|------------------|--------------------|---------------|-----------------|
+| Lexer | `src/LLLangCompiler/Lexer.fs` | `Compiler.Syntax.Lexer` (file: `stdlib/src/Lexer.lll`) | transitional bootstrap | self-hosted impl exists; needs feature-parity gate |
+| Parser | `src/LLLangCompiler/Parser.fs`, `FParsecParser.fs` | `Compiler.Syntax.Parser` (file: `stdlib/src/Parser.lll`) | transitional bootstrap | self-hosted impl exists; parser contract must be defined |
+| Elaborator | `src/LLLangCompiler/Elaborator.fs` | `Compiler.Frontend.Elaborator` (file: `stdlib/src/Elaborator.lll`) | transitional bootstrap | self-hosted impl exists; behavioral gap vs stage0 to close |
+| Type representations | `src/LLLangCompiler/Types.fs` | `Compiler.Types` | gap to fill — stage0 only | no ll-lang counterpart; must be designed and landed |
+| Typed IR shapes | `src/LLLangCompiler/TypedAST.fs` | `Compiler.Typed` | gap to fill — stage0 only | no ll-lang counterpart; separate from inference |
+| HM inference | `src/LLLangCompiler/HMInfer.fs` | `Compiler.Infer` | gap to fill — stage0 only | no ll-lang counterpart; Algorithm W to be self-hosted |
+| Backend-neutral lowering | implicit in `Codegen*.fs` | `Compiler.Lower` | gap to fill — missing as a layer | no explicit lowering phase; backends re-derive semantics; must be introduced |
+| F# backend | `src/LLLangCompiler/Codegen.fs` | `Compiler.Backend.FSharp` (file: `stdlib/src/Codegen.lll`) | transitional bootstrap | self-hosted emitter exists; formalize as canonical |
+| TypeScript backend | `src/LLLangCompiler/CodegenTS.fs` | `Compiler.Backend.TypeScript` (file: `stdlib/src/CodegenTS.lll`) | transitional bootstrap | self-hosted emitter exists; parity targets needed |
+| Python backend | `src/LLLangCompiler/CodegenPy.fs` | `Compiler.Backend.Python` (file: `stdlib/src/CodegenPy.lll`) | transitional bootstrap | self-hosted emitter exists; parity targets needed |
+| Java backend | `src/LLLangCompiler/CodegenJava.fs` | `Compiler.Backend.Java` (file: `stdlib/src/CodegenJava.lll`) | transitional bootstrap | self-hosted emitter exists; parity targets needed |
+| C# backend | `src/LLLangCompiler/CodegenCSharp.fs` | `Compiler.Backend.CSharp` | gap to fill — stage0 only | no ll-lang emitter; must be added or explicitly deferred |
+| LLVM backend | `src/LLLangCompiler/CodegenLLVM.fs` | `Compiler.Backend.LLVM` (file: `stdlib/src/CodegenLLVM.lll`) | experimental bootstrap | self-hosted subset emitter exists; ownership is explicit but backend remains experimental |
+| Project manifest | `src/LLLangCompiler/Manifest.fs` | `Compiler.Project.Manifest` | gap to fill — stage0 only | `Std.Toml` is the parser substrate; self-hosted resolver layer needed over it |
+| Project graph loader | `src/LLLangCompiler/ProjectLoader.fs` | `Compiler.Project.Loader` | gap to fill — stage0 only | no canonical ll-lang owner; module graph loading to be self-hosted |
+| CLI orchestration | `src/LLLangTool/Program.fs` | `Compiler.Cli` | gap to fill — stage0 first | ll-lang tool layer exists but is not canonical; stage0 wrapper must be demoted |
+| Full pipeline entrypoint | `src/LLLangCompiler/Compiler.fs` | `Compiler.Main` (file: `stdlib/src/Compiler.lll`) | transitional bootstrap | self-hosted pipeline exists for core path; must own the full canonical flow |
 
-## Namespace decision for v2
+### Reading the table
 
-`v2` adopts the following canonical namespace split:
+- **transitional bootstrap**: stage0 is a mirror only. The canonical owner is the ll-lang module. Do not add features to stage0 in this subsystem.
+- **gap to fill — stage0 only**: stage0 is the only implementation. A canonical ll-lang module must be designed and landed. Stage0 remains until the gap is closed.
+- **gap to fill — missing as a layer**: the phase doesn't exist anywhere yet. Must be introduced as an explicit ll-lang module.
+- **experimental bootstrap**: stage0 mirrors an experimental subset. Feature parity is intentionally deferred; ownership is explicit.
 
-- **`Std.*`** remains the namespace for reusable library modules
-- **`Compiler.*`** becomes the canonical namespace for the self-hosted compiler implementation
+## Namespace split (frozen)
 
-This is now the architectural default, not just a recommendation.
+- **`Std.*`** — reusable library modules only: `Std.List`, `Std.Maybe`, `Std.Result`, `Std.Map`, `Std.Str`, `Std.State`, `Std.Parsec`, `Std.Lazy`, `Std.Json`, `Std.Toml`, `Std.Test`.
+- **`Compiler.*`** — canonical self-hosted compiler implementation. All phases listed in the table above belong here.
 
-Implications:
+`Std.Compiler`, `Std.Lexer`, `Std.Parser`, `Std.Elaborator`, `Std.Codegen*` are **temporary compatibility names** for the duration of the bootstrap. They must not remain as the long-term identity of any compiler subsystem.
 
-- compiler implementation modules should migrate toward `Compiler.*`
-- reusable data-structure and parser/state foundations remain under `Std.*`
-- `Std.Compiler` may remain temporarily as a façade or compatibility bridge, but
-  must not remain the long-term canonical identity of the compiler
-- docs and roadmap updates should assume `Compiler.*` ownership unless a module
-  is intentionally kept reusable
+## Typed-core ownership (M1.B)
 
-## Required pass boundaries
+The typed-core area currently has three separate responsibilities blended in stage0. For v2 these are frozen as three distinct modules:
 
-The canonical compiler should be documented and implemented with these explicit
-phase boundaries:
+| Module | Responsibility | Must own | Must not own |
+|--------|---------------|----------|--------------|
+| `Compiler.Types` | type representations and substitutions | `TypeExpr`, `TypeScheme`, `Subst`, `Env`, `FreshState`, `applyType`, `unify` | inference algorithm, IR shapes |
+| `Compiler.Typed` | typed IR shapes | `TypedExpr`, `TypedDecl`, `TypedModule`, `ExprId`, `DispatchInfo` | type operations, inference algorithm |
+| `Compiler.Infer` | HM inference and typed-core construction | Algorithm W, generalization, instantiation, dispatch resolution | type representation definitions, IR shapes |
 
-1. `Compiler.Syntax.Lexer`
-2. `Compiler.Syntax.Parser`
-3. `Compiler.Frontend.Elaborator`
-4. `Compiler.Types`
-5. `Compiler.Typed`
-6. `Compiler.Infer`
-7. `Compiler.Lower`
-8. `Compiler.Backend.<Target>`
-9. `Compiler.Project.Manifest`
-10. `Compiler.Project.Loader`
-11. `Compiler.Cli`
+No code that lives in `Compiler.Types` may depend on `Compiler.Infer`. The dependency direction is: `Compiler.Infer` → `Compiler.Typed` → `Compiler.Types`.
 
-Not every phase must map to exactly one file, but each phase must have one
-owner module group.
+## Lowering as an explicit phase (M1.C)
 
-The boundary contracts for these phases are defined in
-[15-v2-pass-contracts.md](15-v2-pass-contracts.md).
+`Compiler.Lower` is a **required phase** between elaboration/inference and backend codegen. It is not optional.
 
-## Immediate documentation tasks for Milestone 1
+**What lowering must make explicit before any backend sees the IR:**
 
-To close the docs half of Milestone 1, the repo should next do all of:
+- match compilation (match → decision tree or if-chain)
+- closure captures (lambda lifting or explicit closure records)
+- operator desugaring (infix → application)
+- unit elimination (expressions of type `Unit` that must still sequence side effects)
+- tag wrapping/unwrapping (bracket expressions to constructor applications)
 
-- update [01-architecture-overview.md](/Users/roman/Documents/dev/tens/code/ll-lang/docs/compiler-dev/01-architecture-overview.md) so it no longer reads as stage0-only architecture
-- update [stdlib-reference.md](/Users/roman/Documents/dev/tens/code/ll-lang/docs/stdlib-reference.md) to distinguish reusable stdlib from canonical compiler implementation modules
-- document whether the canonical namespace will be `Std.*` or `Compiler.*`
-- document how `lllc self` evolves into the canonical compiler path or gets folded into `lllc`
+**What backends must not do:**
 
-## Exit criteria for Milestone 1
+- re-derive semantics that lowering should have made explicit
+- re-implement match compilation or operator desugaring
+- carry per-target elaboration logic
 
-Milestone 1 is done only when:
+Until `Compiler.Lower` exists as a self-hosted ll-lang module, backends may continue to inline lowering logic, but every such inline is **explicitly transitional** — tracked under issue #48.
 
-- each subsystem in the table has a canonical ll-lang owner
-- docs consistently identify the same owners
-- missing ll-lang-owned subsystems are either implemented or explicitly deferred
-- stage0-only areas are visible and limited
+## Project and CLI as first-class phases (M1.D)
 
-## Validation targets
+The project loader and CLI are compiler phases, not shell glue. Their ownership is frozen:
 
-- architecture docs updated
-- self-hosted subsystem matrix kept current
-- direct tests for each ll-lang-owned subsystem
-- at least one end-to-end self-hosted pipeline test that does not rely on undocumented stage0-only behavior
+| Phase | Canonical owner | Responsibility | Stage0 counterpart |
+|-------|----------------|----------------|--------------------|
+| Manifest parsing | `Compiler.Project.Manifest` | parse `lll.toml` into a structured manifest value | `src/LLLangCompiler/Manifest.fs` |
+| Module graph loading | `Compiler.Project.Loader` | glob sources, validate module paths, topological sort | `src/LLLangCompiler/ProjectLoader.fs` |
+| CLI orchestration | `Compiler.Cli` | command dispatch, error formatting, exit codes | `src/LLLangTool/Program.fs` |
+
+These phases sit **outside** the language pipeline but **inside** the compiler architecture. Their input/output contracts are in [15-v2-pass-contracts.md](15-v2-pass-contracts.md).
+
+## Duplication audit and migration notes (M1.F)
+
+The following definitions are currently duplicated between stage0 and self-hosted trees. Each entry is classified: **intentional mirror** (bootstrap copy, will be deleted when stage0 is retired) or **drift risk** (must be consolidated).
+
+| Definition | Stage0 location | Self-hosted location | Classification | Migration note |
+|------------|-----------------|----------------------|----------------|----------------|
+| `Maybe A = Some A \| None` | `src/LLLangCompiler/AST.fs` (as F# DU) | `stdlib/src/Maybe.lll` | intentional mirror | stage0 F# DU is bootstrap; ll-lang module is canonical; no action until stage0 is retired |
+| `List` / `Cons` / `Nil` | `src/LLLangCompiler/AST.fs` (builtinEnv) | `stdlib/src/List.lll` | intentional mirror | same as above |
+| `LLError` / error format | `src/LLLangCompiler/` (multiple files) | not yet in ll-lang | drift risk | issue #21 tracks structured error fields; ll-lang `Compiler.Diagnostics` module needed |
+| `Token` / `Tok` | `src/LLLangCompiler/Token.fs` | `stdlib/src/Lexer.lll` (partial) | drift risk | Lexer.lll must own the full token type; stage0 `Token.fs` becomes a bootstrap mirror |
+| `AST` node types | `src/LLLangCompiler/AST.fs` | `stdlib/src/Parser.lll` (partial) | drift risk | Parser.lll must own surface AST; `AST.fs` becomes a bootstrap mirror |
+| `TypeExpr` / `TypeScheme` | `src/LLLangCompiler/Types.fs` | not yet in ll-lang | gap — must fill | `Compiler.Types` must be created; no duplication until then |
+
+**Rule for new code:** never copy a type definition from stage0 into a new ll-lang file. Use `import` from the appropriate module. If the module does not exist yet, create it rather than copying.
+
+## Validation targets for Milestone 1
+
+- [x] this document is the binding ownership spec (closes M1.A)
+- [x] typed-core module responsibilities are separated (closes M1.B docs)
+- [x] `Compiler.Lower` is defined as a required phase (closes M1.C docs)
+- [x] project/CLI phases are first-class architecture (closes M1.D docs)
+- [x] duplication is inventoried with migration notes (closes M1.F)
+- [ ] `01-architecture-overview.md` updated to not read as stage0-only
+- [ ] `stdlib-reference.md` updated to distinguish reusable stdlib from compiler impl modules
+- [ ] pass fixture shapes defined per phase (issue #50 / M1.E)
+- [ ] `Compiler.Types`, `Compiler.Typed`, `Compiler.Infer` implemented in ll-lang
+- [ ] `Compiler.Lower` implemented in ll-lang
+- [ ] `Compiler.Project.Manifest`, `Compiler.Project.Loader`, `Compiler.Cli` implemented in ll-lang
+- [ ] direct tests for each ll-lang-owned subsystem

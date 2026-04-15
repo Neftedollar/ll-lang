@@ -2,9 +2,26 @@
 
 **Status:** All 10 phases complete. Bootstrap fixpoint achieved (`compiler₁.fs == compiler₂.fs`).
 
-For the forward-looking `v2` ownership map of the canonical self-hosted
-compiler, see
-[14-v2-canonical-compiler-boundaries.md](14-v2-canonical-compiler-boundaries.md).
+## Stage0 vs v2 canonical architecture
+
+This document describes the **stage0 bootstrap** compiler (`src/LLLangCompiler/*.fs`). Stage0 is
+**frozen** — it is the bootstrap implementation only, not the long-term source of truth for any
+subsystem.
+
+The **canonical v2 compiler** is the self-hosted implementation under `stdlib/src/*.lll`.
+Canonical ownership, pass contracts, and migration notes are the binding authority:
+
+- [14-v2-canonical-compiler-boundaries.md](14-v2-canonical-compiler-boundaries.md) — frozen ownership table
+- [15-v2-pass-contracts.md](15-v2-pass-contracts.md) — frozen pass contracts
+
+**Namespace split:**
+- **`Compiler.*`** — self-hosted compiler implementation phases
+- **`Std.*`** — reusable foundation library modules
+
+Stage0 F# files are **bootstrap mirrors**. Where a self-hosted ll-lang module owns a subsystem,
+the stage0 file is transitional and must not receive new feature work.
+
+---
 
 The compiler is a straight pipeline: source text in, target source out. Each
 stage is a pure function (modulo the small `InferState` used in HM) and
