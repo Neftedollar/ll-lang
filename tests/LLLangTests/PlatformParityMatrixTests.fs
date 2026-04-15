@@ -57,6 +57,8 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
                "module Case.Impl\n\ntrait Show T =\n  show(x T) Str\nBox = MkBox Int\nimpl Show Box =\n  show(x Box) Str = \"box\"\nuseShow(x Box) Str = show x\nmain() Int = 0\n")
               ("constrained_dispatch",
                "module Case.Constrained\n\ntrait Functor F =\n  map(f A->B)(fa F[A]) F[B]\nMaybe A = Some A | None\nimpl Functor Maybe =\n  map(f A->B)(fa Maybe[A]) Maybe[B] =\n    | Some a -> Some (f a)\n    | None -> None\ntransform[F: Functor](xs F[Int])(f Int->Int) F[Int] = map f xs\nmain() Int = 0\n")
+              ("external_opaque",
+               "module Case.ExternalOpaque\n\nexternal console_log(msg Str) Str\nopaque Buffer\ngreet(name Str) = console_log name\nmain() Int = 0\n")
               ]
 
         let targets =
@@ -103,6 +105,10 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
                         Assert.Contains("let map_Maybe", fsText)
                         Assert.Contains("let transform", fsText)
                         Assert.Contains("(map_Maybe f) xs", fsText)
+                    if caseName = "external_opaque" then
+                        let fsText = File.ReadAllText(outPath)
+                        Assert.Contains("type Buffer = obj", fsText)
+                        Assert.Contains("let console_log", fsText)
                 | "cs" ->
                     let csproj = LLLang.Tests.TestCompat.changeExtensionOrInput srcPath ".csproj"
                     Assert.True(File.Exists(csproj), $"missing csharp project for case={caseName}: {csproj}")
@@ -122,6 +128,10 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
                         let csText = File.ReadAllText(outPath)
                         Assert.Contains("map_Maybe", csText)
                         Assert.Contains("transform", csText)
+                    if caseName = "external_opaque" then
+                        let csText = File.ReadAllText(outPath)
+                        Assert.Contains("Buffer", csText)
+                        Assert.Contains("console_log", csText)
                 | "ts" ->
                     if toolExists "tsc" then
                         let (code, so, se) = runProc tempRoot "tsc" [outPath; "--target"; "es2022"; "--module"; "esnext"; "--noEmit"]
