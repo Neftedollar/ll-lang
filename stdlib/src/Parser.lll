@@ -740,15 +740,45 @@ parserCheckModule(label Str)(toks List[Token])(expectedDeclCount Int) =
 -- Token lists are built with :: cons (no comma list syntax in ll-lang).
 
 main =
-  -- external decl: external httpGet(url Str) Str
-  _ = parserCheckDecl "1" (KwExternal :: Ident "httpGet" :: LParen :: Ident "url" :: TypeId "Str" :: RParen :: TypeId "Str" :: Eof :: []) "DExternal httpGet"
-  -- external decl: external ping() Bool
-  _ = parserCheckDecl "2" (KwExternal :: Ident "ping" :: LParen :: RParen :: TypeId "Bool" :: Eof :: []) "DExternal ping"
-  -- opaque decl: opaque HttpClient
-  _ = parserCheckDecl "3" (KwOpaque :: TypeId "HttpClient" :: Eof :: []) "DOpaque HttpClient"
-  -- opaque decl: opaque Promise
-  _ = parserCheckDecl "4" (KwOpaque :: TypeId "Promise" :: Eof :: []) "DOpaque Promise"
-  -- module with external + opaque: 2 decls
-  toks = KwModule :: TypeId "M" :: Newline :: KwExternal :: Ident "connect" :: LParen :: Ident "url" :: TypeId "Str" :: RParen :: TypeId "Bool" :: Newline :: KwOpaque :: TypeId "Conn" :: Eof :: []
-  parserCheckModule "5" toks 2
+  -- 1. external decl: external httpGet(url Str) Str
+  _ = parserCheckDecl "1 external fn" (KwExternal :: Ident "httpGet" :: LParen :: Ident "url" :: TypeId "Str" :: RParen :: TypeId "Str" :: Eof :: []) "DExternal httpGet"
+  -- 2. external decl: external ping() Bool
+  _ = parserCheckDecl "2 external no args" (KwExternal :: Ident "ping" :: LParen :: RParen :: TypeId "Bool" :: Eof :: []) "DExternal ping"
+  -- 3. opaque decl: opaque HttpClient
+  _ = parserCheckDecl "3 opaque" (KwOpaque :: TypeId "HttpClient" :: Eof :: []) "DOpaque HttpClient"
+  -- 4. opaque decl: opaque Promise
+  _ = parserCheckDecl "4 opaque2" (KwOpaque :: TypeId "Promise" :: Eof :: []) "DOpaque Promise"
+  -- 5. module with external + opaque: 2 decls
+  toks5 = KwModule :: TypeId "M" :: Newline :: KwExternal :: Ident "connect" :: LParen :: Ident "url" :: TypeId "Str" :: RParen :: TypeId "Bool" :: Newline :: KwOpaque :: TypeId "Conn" :: Eof :: []
+  _ = parserCheckModule "5 module 2 decls" toks5 2
+
+  -- 6. Int literal: 42
+  _ = parserCheckExpr "6 EInt" (IntLit 42 :: Eof :: []) "EInt 42"
+  -- 7. Str literal: "hi"
+  _ = parserCheckExpr "7 EStr" (StrLit "hi" :: Eof :: []) "EStr hi"
+  -- 8. Bool true
+  _ = parserCheckExpr "8 EBool true" (KwTrue :: Eof :: []) "EBool true"
+  -- 9. Bool false
+  _ = parserCheckExpr "9 EBool false" (KwFalse :: Eof :: []) "EBool false"
+  -- 10. Variable
+  _ = parserCheckExpr "10 EVar" (Ident "x" :: Eof :: []) "EVar x"
+  -- 11. Constructor
+  _ = parserCheckExpr "11 ECon" (TypeId "None" :: Eof :: []) "ECon None"
+  -- 12. Empty list ENil
+  _ = parserCheckExpr "12 ENil" (LBrack :: RBrack :: Eof :: []) "ENil"
+  -- 13. Lambda: \x. x
+  _ = parserCheckExpr "13 ELam" (Backslash :: Ident "x" :: Dot :: Ident "x" :: Eof :: []) "ELam x.EVar x"
+  -- 14. Binary op: 1 + 2
+  _ = parserCheckExpr "14 EBinOp" (IntLit 1 :: Plus :: IntLit 2 :: Eof :: []) "EBinOp(+ EInt 1 EInt 2)"
+  -- 15. Application: f x
+  _ = parserCheckExpr "15 EApp" (Ident "f" :: Ident "x" :: Eof :: []) "EApp(EVar f EVar x)"
+  -- 16. import decl
+  _ = parserCheckDecl "16 DImport" (KwImport :: TypeId "Std" :: Dot :: TypeId "Map" :: Eof :: []) "DImport Std.Map"
+  -- 17. top-level value binding: x = 42 → parsed as zero-arg DFn
+  _ = parserCheckDecl "17 value binding" (Ident "x" :: Eq :: IntLit 42 :: Eof :: []) "DFn x body=(EInt 42)"
+  -- 18. function decl: add(a Int)(b Int) = a + b
+  toks18 = Ident "add" :: LParen :: Ident "a" :: TypeId "Int" :: RParen :: LParen :: Ident "b" :: TypeId "Int" :: RParen :: Eq :: Ident "a" :: Plus :: Ident "b" :: Eof :: []
+  _ = parserCheckDecl "18 DFn" toks18 "DFn add body=(EBinOp(+ EVar a EVar b))"
+
+  printfn "Done"
 
