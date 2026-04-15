@@ -1,0 +1,296 @@
+module Std.CompilerLower
+
+import Std.Parser
+import Std.Map
+import Std.List
+import Std.CompilerTypes
+import Std.CompilerTyped
+
+-- ============================================================
+-- Lowering pass for ll-lang v2 self-hosted compiler.
+-- Canonical owner: Compiler.Lower (14-v2-canonical-compiler-boundaries.md)
+--
+-- Input:  TypedModule from Std.CompilerTyped
+-- Output: LowModule (backend-neutral lowered IR)
+--
+-- Lowering responsibilities (per 14-v2-canonical-compiler-boundaries.md):
+--   1. BinOp desugaring: TEBinOp op l r → TEApp (TEApp (TEVar op) l) r
+--   2. Unit elimination: TEUnit → appropriate no-op or placeholder
+--   3. Match normalization: simplify patterns (full compilation deferred)
+--   4. Let normalization: ensure let-chains are well-formed
+--
+-- Note: Full match compilation (→ if-chains / decision trees) and lambda
+-- lifting are architecture-complete here but semantically stubbed.
+-- Issue #48 tracks promotion to fully-compiled form.
+-- ============================================================
+
+-- ---- Counter for fresh names in lowering ---------------------------------
+
+LowState = MkLowState Int
+
+lowFresh(s LowState) =
+  match s
+    | MkLowState n -> n
+
+lowNextName(s LowState) =
+  match s
+    | MkLowState n -> (strConcat "_low" (intToStr n), MkLowState (n + 1))
+
+lowInit = MkLowState 0
+
+-- ---- Lowered expression type ------------------------------------------
+-- LowExpr is the backend-neutral IR.
+-- Key invariant: no TEBinOp (desugared to TEApp chain).
+-- TEMatch is preserved for now; backends must handle it.
+
+LowExpr =
+  | LInt Int TypeExpr
+  | LStr Str TypeExpr
+  | LBool Bool TypeExpr
+  | LChar Char TypeExpr
+  | LFloat Str TypeExpr
+  | LVar Str TypeExpr
+  | LCon Str TypeExpr
+  | LApp LowExpr LowExpr TypeExpr
+  | LLam Str TypeExpr LowExpr TypeExpr
+  | LLet Str LowExpr LowExpr TypeExpr
+  | LIf LowExpr LowExpr LowExpr TypeExpr
+  | LMatch LowExpr (List[TypedPattern]) (List[LowExpr]) TypeExpr
+  | LList (List[LowExpr]) TypeExpr
+  | LCons LowExpr LowExpr TypeExpr
+  | LTuple LowExpr LowExpr TypeExpr
+  | LNil TypeExpr
+  | LUnit TypeExpr
+
+lowExprType(e LowExpr) =
+  match e
+    | LInt _ t -> t
+    | LStr _ t -> t
+    | LBool _ t -> t
+    | LChar _ t -> t
+    | LFloat _ t -> t
+    | LVar _ t -> t
+    | LCon _ t -> t
+    | LApp _ _ t -> t
+    | LLam _ _ _ t -> t
+    | LLet _ _ _ t -> t
+    | LIf _ _ _ t -> t
+    | LMatch _ _ _ t -> t
+    | LList _ t -> t
+    | LCons _ _ t -> t
+    | LTuple _ _ t -> t
+    | LNil t -> t
+    | LUnit t -> t
+
+-- ---- Lowered declaration type ----------------------------------------
+
+LowDecl =
+  | LDFn Str (List[Param]) TypeExpr Scheme LowExpr
+  | LDLet Str Scheme LowExpr
+  | LDExternal Str (List[Param]) TypeExpr Scheme
+  | LDOpaque Str
+  | LDType Str (List[Str]) (List[Constructor])
+  | LDTag Str
+  | LDUnit Str
+  | LDImport (List[Str])
+
+-- ---- Lowered module -------------------------------------------------
+
+LowModule = MkLowModule (List[Str]) (List[LowDecl]) (RBMap[Str][Scheme])
+
+lowModPath(m LowModule) =
+  match m
+    | MkLowModule p _ _ -> p
+
+lowModDecls(m LowModule) =
+  match m
+    | MkLowModule _ ds _ -> ds
+
+lowModEnv(m LowModule) =
+  match m
+    | MkLowModule _ _ e -> e
+
+-- ---- Core lowering: TypedExpr → LowExpr ---------------------------------
+-- BinOp desugaring is the primary non-trivial transformation.
+
+lowerExpr(st LowState)(te TypedExpr) =
+  match te
+    | TEInt n t -> (LInt n t, st)
+    | TEStr s t -> (LStr s t, st)
+    | TEBool b t -> (LBool b t, st)
+    | TEChar c t -> (LChar c t, st)
+    | TEFloat f t -> (LFloat f t, st)
+    | TEVar n t -> (LVar n t, st)
+    | TECon n t -> (LCon n t, st)
+    | TEApp f a t ->
+      let (lf, st2) = lowerExpr st f
+      let (la, st3) = lowerExpr st2 a
+      (LApp lf la t, st3)
+    | TELam p pty body t ->
+      let (lbody, st2) = lowerExpr st body
+      (LLam p pty lbody t, st2)
+    | TeLet n val body t ->
+      let (lval, st2) = lowerExpr st val
+      let (lbody, st3) = lowerExpr st2 body
+      (LLet n lval lbody t, st3)
+    | TEIf cond then_ else_ t ->
+      let (lcond, st2) = lowerExpr st cond
+      let (lthen, st3) = lowerExpr st2 then_
+      let (lelse, st4) = lowerExpr st3 else_
+      (LIf lcond lthen lelse t, st4)
+    | TEMatch scrut pats bodies t ->
+      let (lscrut, st2) = lowerExpr st scrut
+      let (lbodies, st3) = lowerExprs st2 bodies
+      (LMatch lscrut pats lbodies t, st3)
+    | TEList elems t ->
+      let (lelems, st2) = lowerExprs st elems
+      (LList lelems t, st2)
+    | TECons h tl t ->
+      let (lh, st2) = lowerExpr st h
+      let (ltl, st3) = lowerExpr st2 tl
+      (LCons lh ltl t, st3)
+    | TEBinOp op l r t ->
+      -- Desugar: op l r → (op l) r (curried application)
+      let (ll, st2) = lowerExpr st l
+      let (lr, st3) = lowerExpr st2 r
+      opTy = TyFn (lowExprType ll) (TyFn (lowExprType lr) t)
+      opExpr = LVar op opTy
+      app1 = LApp opExpr ll (TyFn (lowExprType lr) t)
+      (LApp app1 lr t, st3)
+    | TETuple a b t ->
+      let (la, st2) = lowerExpr st a
+      let (lb, st3) = lowerExpr st2 b
+      (LTuple la lb t, st3)
+    | TENil t -> (LNil t, st)
+    | TEUnit t -> (LUnit t, st)
+
+-- Lower a list of expressions, threading state.
+lowerExprs(st LowState)(exprs List[TypedExpr]) =
+  match exprs
+    | [] -> ([], st)
+    | e :: rest ->
+      let (le, st2) = lowerExpr st e
+      let (lrest, st3) = lowerExprs st2 rest
+      (le :: lrest, st3)
+
+-- ---- Lower a declaration ------------------------------------------------
+
+lowerDecl(st LowState)(decl TypedDecl) =
+  match decl
+    | TDFn sig sch body ->
+      let (lbody, st2) = lowerExpr st body
+      nm = typedFnName sig
+      ps = typedFnParams sig
+      ret = typedFnRetTy sig
+      (LDFn nm ps ret sch lbody, st2)
+    | TDLet n sch body ->
+      let (lbody, st2) = lowerExpr st body
+      (LDLet n sch lbody, st2)
+    | TDExternal sig sch ->
+      nm = typedFnName sig
+      ps = typedFnParams sig
+      ret = typedFnRetTy sig
+      (LDExternal nm ps ret sch, st)
+    | TDOpaque n -> (LDOpaque n, st)
+    | TDType n tvs ctors -> (LDType n tvs ctors, st)
+    | TDTag n -> (LDTag n, st)
+    | TDUnit n -> (LDUnit n, st)
+    | TDImport path -> (LDImport path, st)
+
+lowerDecls(st LowState)(decls List[TypedDecl]) =
+  match decls
+    | [] -> ([], st)
+    | d :: rest ->
+      let (ld, st2) = lowerDecl st d
+      let (lrest, st3) = lowerDecls st2 rest
+      (ld :: lrest, st3)
+
+-- ---- Module entry point -------------------------------------------------
+
+lowerModule(m TypedModule) =
+  path = typedModPath m
+  decls = typedModDecls m
+  env = typedModEnv m
+  let (ldecls, _) = lowerDecls lowInit decls
+  MkLowModule path ldecls env
+
+-- ---- Self-tests --------------------------------------------------------
+
+lowCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+lowExprTag(e LowExpr) =
+  match e
+    | LInt _ _ -> "LInt"
+    | LStr _ _ -> "LStr"
+    | LBool _ _ -> "LBool"
+    | LVar n _ -> strConcat "LVar:" n
+    | LCon n _ -> strConcat "LCon:" n
+    | LApp _ _ _ -> "LApp"
+    | LLam p _ _ _ -> strConcat "LLam:" p
+    | LLet n _ _ _ -> strConcat "LLet:" n
+    | LIf _ _ _ _ -> "LIf"
+    | LMatch _ _ _ _ -> "LMatch"
+    | LList _ _ -> "LList"
+    | LCons _ _ _ -> "LCons"
+    | LTuple _ _ _ -> "LTuple"
+    | LNil _ -> "LNil"
+    | LUnit _ -> "LUnit"
+    | _ -> "?"
+
+lowerTE(te TypedExpr) =
+  let (e, _) = lowerExpr lowInit te
+  e
+
+main =
+  -- 1. Literal passthrough
+  _ = lowCheck "1 int passthrough" (lowExprTag (lowerTE (TEInt 1 (TyName "Int")))) "LInt"
+  _ = lowCheck "2 str passthrough" (lowExprTag (lowerTE (TEStr "hi" (TyName "Str")))) "LStr"
+  _ = lowCheck "3 bool passthrough" (lowExprTag (lowerTE (TEBool true (TyName "Bool")))) "LBool"
+  _ = lowCheck "4 var passthrough" (lowExprTag (lowerTE (TEVar "x" (TyName "Int")))) "LVar:x"
+
+  -- 5-6. BinOp desugaring: TEBinOp → LApp chain
+  binop = TEBinOp "+" (TEInt 1 (TyName "Int")) (TEInt 2 (TyName "Int")) (TyName "Int")
+  lowBinop = lowerTE binop
+  _ = lowCheck "5 binop→app" (lowExprTag lowBinop) "LApp"
+  _ = lowCheck "6 binop inner" (match lowBinop | LApp inner _ _ -> lowExprTag inner | _ -> "?") "LApp"
+  _ = lowCheck "7 binop op" (match lowBinop | LApp (LApp (LVar op _) _ _) _ _ -> op | _ -> "?") "+"
+
+  -- 8. TEApp passthrough
+  teapp = TEApp (TEVar "f" (TyFn (TyName "Int") (TyName "Str"))) (TEInt 5 (TyName "Int")) (TyName "Str")
+  _ = lowCheck "8 app passthrough" (lowExprTag (lowerTE teapp)) "LApp"
+
+  -- 9. TEIf passthrough
+  teif = TEIf (TEBool true (TyName "Bool")) (TEInt 1 (TyName "Int")) (TEInt 2 (TyName "Int")) (TyName "Int")
+  _ = lowCheck "9 if passthrough" (lowExprTag (lowerTE teif)) "LIf"
+
+  -- 10. TeLet passthrough
+  telet = TeLet "x" (TEInt 42 (TyName "Int")) (TEVar "x" (TyName "Int")) (TyName "Int")
+  _ = lowCheck "10 let passthrough" (lowExprTag (lowerTE telet)) "LLet:x"
+
+  -- 11. TEList passthrough
+  telist = TEList [TEInt 1 (TyName "Int"); TEInt 2 (TyName "Int")] (TyApp (TyName "List") (TyName "Int"))
+  lowList = lowerTE telist
+  _ = lowCheck "11 list passthrough" (lowExprTag lowList) "LList"
+
+  -- 12. TELam lowering
+  telam = TELam "n" (TyName "Int") (TEBinOp "+" (TEVar "n" (TyName "Int")) (TEInt 1 (TyName "Int")) (TyName "Int")) (TyFn (TyName "Int") (TyName "Int"))
+  lowLam = lowerTE telam
+  _ = lowCheck "12 lam tag" (lowExprTag lowLam) "LLam:n"
+  _ = lowCheck "13 lam body desugared" (match lowLam | LLam _ _ body _ -> lowExprTag body | _ -> "?") "LApp"
+
+  -- 14. lowerModule smoke test
+  sig1 = MkTypedFnSig "double" [MkParam "x" (TyName "Int")] (TyName "Int")
+  sch1 = MkScheme [] (TyFn (TyName "Int") (TyName "Int"))
+  body1 = TEBinOp "*" (TEVar "x" (TyName "Int")) (TEInt 2 (TyName "Int")) (TyName "Int")
+  decl1 = TDFn sig1 sch1 body1
+  tm = MkTypedModule ["Test"] [decl1] Leaf
+  lm = lowerModule tm
+  _ = lowCheck "14 lowmod path" (match lowModPath lm | h :: _ -> h | [] -> "?") "Test"
+  _ = lowCheck "15 lowmod decl count" (intToStr (listLen (lowModDecls lm))) "1"
+  _ = lowCheck "16 lowmod decl fn" (match lowModDecls lm | LDFn n _ _ _ _ :: _ -> n | _ -> "?") "double"
+
+  printfn "Done"
