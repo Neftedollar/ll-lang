@@ -1,0 +1,215 @@
+module Std.ProjectLoader
+
+import Std.Maybe
+import Std.List
+import Std.Toml
+
+-- ============================================================
+-- Project loader for ll-lang v2 self-hosted compiler.
+-- Canonical owner: Compiler.Project.Loader
+--
+-- Reads a project from disk:
+--   1. findManifest    — locate lll.toml or ll.toml in a dir
+--   2. listSourceFiles — list .lll files in a src/ directory
+--   3. loadProject     — read all source files, return (path, content) pairs
+--
+-- Actual filesystem I/O via FFI externals declared below.
+-- ============================================================
+
+-- ---- FFI externals -------------------------------------------------
+
+external fileReadAll(path Str) Str
+external fileExists(path Str) Bool
+external dirList(path Str) List[Str]
+external dirExists(path Str) Bool
+
+-- ---- String helpers ------------------------------------------------
+
+-- Check whether a string ends with a given suffix.
+strEndsWith(suffix Str)(s Str) =
+  slen = strLen s
+  tlen = strLen suffix
+  if tlen > slen
+    false
+  else
+    strSlice s (slen - tlen) tlen == suffix
+
+-- Join two path segments with "/" (avoids double slash).
+pathJoin(base Str)(name Str) =
+  blen = strLen base
+  if blen == 0
+    name
+  else
+    lastChar = strSlice base (blen - 1) 1
+    if lastChar == "/"
+      strConcat base name
+    else
+      strConcat base (strConcat "/" name)
+
+-- Take the prefix of s up to (not including) the first occurrence of needle.
+-- Returns s unchanged if needle is not found.
+strTakeUntil(needle Str)(s Str) =
+  idx = strIndexOf needle s
+  if idx < 0
+    s
+  else strSlice s 0 idx
+
+-- ---- Manifest discovery --------------------------------------------
+-- Look for lll.toml first (preferred), then ll.toml (legacy).
+
+findManifest(dir Str) =
+  lllToml = pathJoin dir "lll.toml"
+  llToml  = pathJoin dir "ll.toml"
+  if fileExists lllToml
+    Some lllToml
+  else if fileExists llToml
+    Some llToml
+  else
+    None
+
+-- ---- Source file listing -------------------------------------------
+-- List all .lll files in srcDir (single-level; dirList is non-recursive).
+
+filterLllFiles(files List[Str]) =
+  listFilter (\f. strEndsWith ".lll" f) files
+
+listSourceFiles(srcDir Str) =
+  if dirExists srcDir
+    filterLllFiles (dirList srcDir)
+  else
+    []
+
+-- ---- Project loading -----------------------------------------------
+-- Given a root dir, collect .lll source files from src/, and return a
+-- list of (filePath, fileContent) pairs.
+
+readFilePairs(paths List[Str]) =
+  match paths
+    | [] -> []
+    | p :: rest ->
+      content = fileReadAll p
+      (p, content) :: readFilePairs rest
+
+-- Load a project rooted at rootDir.
+-- Returns a list of (filePath, content) pairs for all .lll source files.
+loadProject(rootDir Str) =
+  srcDir = pathJoin rootDir "src"
+  files = listSourceFiles srcDir
+  readFilePairs files
+
+-- ---- Manifest reading ----------------------------------------------
+-- Read and parse the manifest from a project directory.
+-- Returns Some Manifest or None.
+
+readManifest(dir Str) =
+  match findManifest dir
+    | None -> None
+    | Some path ->
+      content = fileReadAll path
+      parseManifest content
+
+-- ---- Self-tests ----------------------------------------------------
+
+loaderCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+boolStr(b Bool) =
+  if b
+    "true"
+  else "false"
+
+countPairs(n Int)(pairs) =
+  match pairs
+    | [] -> n
+    | _ :: rest -> countPairs (n + 1) rest
+
+allEndLll(pairs) =
+  match pairs
+    | [] -> true
+    | (p, _) :: rest ->
+      if strEndsWith ".lll" p
+        allEndLll rest
+      else false
+
+allNonEmpty(pairs) =
+  match pairs
+    | [] -> true
+    | (_, c) :: rest ->
+      if strLen c > 0
+        allNonEmpty rest
+      else false
+
+main =
+  -- Tests use real files from the repo; run from the worktree root.
+
+  -- 1. fileExists: a known file should exist
+  _ = loaderCheck "1 fileExists known file" (boolStr (fileExists "stdlib/src/Lexer.lll")) "true"
+
+  -- 2. fileExists: missing file should return false
+  _ = loaderCheck "2 fileExists missing" (boolStr (fileExists "stdlib/src/DoesNotExist.lll")) "false"
+
+  -- 3. dirExists: stdlib/src should exist
+  _ = loaderCheck "3 dirExists stdlib/src" (boolStr (dirExists "stdlib/src")) "true"
+
+  -- 4. dirExists: nonexistent dir
+  _ = loaderCheck "4 dirExists missing" (boolStr (dirExists "stdlib/src/nonexistent_dir_xyz")) "false"
+
+  -- 5. listSourceFiles returns some .lll files
+  srcFiles = listSourceFiles "stdlib/src"
+  _ = loaderCheck "5 listSourceFiles non-empty" (boolStr (listIsEmpty srcFiles == false)) "true"
+
+  -- 6. listSourceFiles: all results end in .lll
+  allLll = listAll (\f. strEndsWith ".lll" f) srcFiles
+  _ = loaderCheck "6 listSourceFiles all .lll" (boolStr allLll) "true"
+
+  -- 7. findManifest: stdlib has lll.toml
+  _ = loaderCheck "7 findManifest found" (boolStr (isSome (findManifest "stdlib"))) "true"
+
+  -- 8. findManifest: no manifest in stdlib/src
+  _ = loaderCheck "8 findManifest missing" (boolStr (isSome (findManifest "stdlib/src"))) "false"
+
+  -- 9. pathJoin basic
+  _ = loaderCheck "9 pathJoin" (pathJoin "stdlib" "src") "stdlib/src"
+
+  -- 10. pathJoin trailing slash
+  _ = loaderCheck "10 pathJoin trailing slash" (pathJoin "stdlib/" "src") "stdlib/src"
+
+  -- 11. pathJoin empty base
+  _ = loaderCheck "11 pathJoin empty base" (pathJoin "" "src") "src"
+
+  -- 12. strEndsWith positive
+  _ = loaderCheck "12 strEndsWith .lll" (boolStr (strEndsWith ".lll" "Lexer.lll")) "true"
+
+  -- 13. strEndsWith negative
+  _ = loaderCheck "13 strEndsWith negative" (boolStr (strEndsWith ".lll" "Lexer.fs")) "false"
+
+  -- 14. readManifest: stdlib has a valid manifest
+  stdlibManifest = readManifest "stdlib"
+  _ = loaderCheck "14 readManifest found" (boolStr (isSome stdlibManifest)) "true"
+
+  -- 15. readManifest: manifest name is "std"
+  _ = loaderCheck "15 readManifest name" (match stdlibManifest | Some m -> mName m | None -> "?") "std"
+
+  -- 16. loadProject: stdlib returns non-empty list of pairs
+  pairs = loadProject "stdlib"
+  pairCount = countPairs 0 pairs
+  _ = loaderCheck "16 loadProject non-empty" (boolStr (pairCount > 0)) "true"
+
+  -- 17. loadProject: all pairs have .lll paths
+  _ = loaderCheck "17 loadProject all .lll" (boolStr (allEndLll pairs)) "true"
+
+  -- 18. loadProject: all pairs have non-empty content
+  _ = loaderCheck "18 loadProject non-empty content" (boolStr (allNonEmpty pairs)) "true"
+
+  -- 19. fileReadAll: read a known file, content is non-empty
+  lexerContent = fileReadAll "stdlib/src/Lexer.lll"
+  _ = loaderCheck "19 fileReadAll non-empty" (boolStr (strLen lexerContent > 0)) "true"
+
+  -- 20. fileReadAll: known file starts with "module"
+  firstPart = strTakeUntil "module" lexerContent
+  _ = loaderCheck "20 fileReadAll contains module keyword" (boolStr (strLen firstPart < strLen lexerContent)) "true"
+
+  printfn "Done"
