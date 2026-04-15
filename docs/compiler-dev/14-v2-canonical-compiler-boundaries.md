@@ -36,10 +36,10 @@ A subsystem is considered **migrated** only when all of the following are true:
 | Lexer | `src/LLLangCompiler/Lexer.fs` | `Compiler.Syntax.Lexer` (file: `stdlib/src/Lexer.lll`) | transitional bootstrap | self-hosted impl exists; needs feature-parity gate |
 | Parser | `src/LLLangCompiler/Parser.fs`, `FParsecParser.fs` | `Compiler.Syntax.Parser` (file: `stdlib/src/Parser.lll`) | transitional bootstrap | self-hosted impl exists; parser contract must be defined |
 | Elaborator | `src/LLLangCompiler/Elaborator.fs` | `Compiler.Frontend.Elaborator` (file: `stdlib/src/Elaborator.lll`) | transitional bootstrap | self-hosted impl exists; behavioral gap vs stage0 to close |
-| Type representations | `src/LLLangCompiler/Types.fs` | `Compiler.Types` | gap to fill — stage0 only | no ll-lang counterpart; must be designed and landed |
-| Typed IR shapes | `src/LLLangCompiler/TypedAST.fs` | `Compiler.Typed` | gap to fill — stage0 only | no ll-lang counterpart; separate from inference |
-| HM inference | `src/LLLangCompiler/HMInfer.fs` | `Compiler.Infer` | gap to fill — stage0 only | no ll-lang counterpart; Algorithm W to be self-hosted |
-| Backend-neutral lowering | implicit in `Codegen*.fs` | `Compiler.Lower` | gap to fill — missing as a layer | no explicit lowering phase; backends re-derive semantics; must be introduced |
+| Type representations | `src/LLLangCompiler/Types.fs` | `Compiler.Types` (file: `stdlib/src/CompilerTypes.lll`) | transitional bootstrap | ll-lang impl landed; 20/20 tests pass |
+| Typed IR shapes | `src/LLLangCompiler/TypedAST.fs` | `Compiler.Typed` (file: `stdlib/src/CompilerTyped.lll`) | transitional bootstrap | ll-lang impl landed; 15/15 tests pass |
+| HM inference | `src/LLLangCompiler/HMInfer.fs` | `Compiler.Infer` (file: `stdlib/src/CompilerInfer.lll`) | transitional bootstrap | ll-lang impl landed; Algorithm W active; 12/12 tests pass |
+| Backend-neutral lowering | implicit in `Codegen*.fs` | `Compiler.Lower` (file: `stdlib/src/CompilerLower.lll`) | transitional bootstrap | ll-lang impl landed; BinOp desugaring active; full match/lambda lowering transitional |
 | F# backend | `src/LLLangCompiler/Codegen.fs` | `Compiler.Backend.FSharp` (file: `stdlib/src/Codegen.lll`) | transitional bootstrap | self-hosted emitter exists; formalize as canonical |
 | TypeScript backend | `src/LLLangCompiler/CodegenTS.fs` | `Compiler.Backend.TypeScript` (file: `stdlib/src/CodegenTS.lll`) | transitional bootstrap | self-hosted emitter exists; parity targets needed |
 | Python backend | `src/LLLangCompiler/CodegenPy.fs` | `Compiler.Backend.Python` (file: `stdlib/src/CodegenPy.lll`) | transitional bootstrap | self-hosted emitter exists; parity targets needed |
@@ -134,7 +134,9 @@ The following definitions are currently duplicated between stage0 and self-hoste
 - [ ] `01-architecture-overview.md` updated to not read as stage0-only
 - [ ] `stdlib-reference.md` updated to distinguish reusable stdlib from compiler impl modules
 - [ ] pass fixture shapes defined per phase (issue #50 / M1.E)
-- [ ] `Compiler.Types`, `Compiler.Typed`, `Compiler.Infer` implemented in ll-lang
-- [ ] `Compiler.Lower` implemented in ll-lang
+- [x] `Compiler.Types` implemented in ll-lang (`stdlib/src/CompilerTypes.lll`, 20/20 tests)
+- [x] `Compiler.Typed` implemented in ll-lang (`stdlib/src/CompilerTyped.lll`, 15/15 tests)
+- [x] `Compiler.Infer` implemented in ll-lang (`stdlib/src/CompilerInfer.lll`, 12/12 tests)
+- [x] `Compiler.Lower` implemented in ll-lang (`stdlib/src/CompilerLower.lll`, 16/16 tests)
 - [ ] `Compiler.Project.Manifest`, `Compiler.Project.Loader`, `Compiler.Cli` implemented in ll-lang
 - [ ] direct tests for each ll-lang-owned subsystem

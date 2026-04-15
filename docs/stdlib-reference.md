@@ -940,6 +940,45 @@ checkSource(src Str) =
 
 ---
 
+### `Std.CompilerLower` — backend-neutral lowering pass
+
+**Import:** `import Std.CompilerLower`  
+**LOC:** 296  
+**Description:** Lowering pass for the v2 self-hosted compiler. Takes a `TypedModule` (from `Std.CompilerTyped`) and produces a `LowModule` — a backend-neutral lowered IR. Primary active transformation: `TEBinOp` desugaring into curried `LApp` chains. Match/lambda lowering is architecture-complete but semantically stubbed (issue #48).
+
+**Key types:**
+
+```lll
+LowExpr =
+  | LInt Int TypeExpr
+  | LStr Str TypeExpr
+  | LVar Str TypeExpr
+  | LApp LowExpr LowExpr TypeExpr
+  | LLam Str TypeExpr LowExpr TypeExpr
+  | LLet Str LowExpr LowExpr TypeExpr
+  | LIf LowExpr LowExpr LowExpr TypeExpr
+  | LMatch LowExpr (List[TypedPattern]) (List[LowExpr]) TypeExpr
+  | ...
+
+LowDecl =
+  | LDFn Str (List[Param]) TypeExpr Scheme LowExpr
+  | LDLet Str Scheme LowExpr
+  | ...
+
+LowModule = MkLowModule (List[Str]) (List[LowDecl]) (RBMap[Str][Scheme])
+```
+
+**Key functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `lowerModule` | `TypedModule -> LowModule` | Lower entire typed module |
+| `lowerExpr` | `LowState -> TypedExpr -> (LowExpr, LowState)` | Lower one typed expression |
+| `lowerDecl` | `LowState -> TypedDecl -> (LowDecl, LowState)` | Lower one typed declaration |
+| `lowExprType` | `LowExpr -> TypeExpr` | Extract type from a lowered expression |
+
+---
+
 ### `Std.Compiler` — full pipeline (source → F#)
 
 **Import:** `import Std.Compiler`  
@@ -994,6 +1033,7 @@ buildFile(path Str) =
 | Type inference | `Std.CompilerTypes` | HM substitutions, unification, schemes |
 | Type inference | `Std.CompilerTyped` | Typed IR shapes (TypedExpr, TypedDecl, TypedModule) |
 | Type inference | `Std.CompilerInfer` | Algorithm W for Expr/Decl |
+| Lowering | `Std.CompilerLower` | BinOp desugaring; TypedModule → LowModule |
 | Full pipeline | `Std.Compiler` | Source pipeline helpers |
 
 ---
@@ -1010,6 +1050,7 @@ application-library APIs:
 - `Std.CompilerTypes`
 - `Std.CompilerTyped`
 - `Std.CompilerInfer`
+- `Std.CompilerLower`
 - `Std.Codegen`
 - `Std.CodegenTS`
 - `Std.CodegenPy`

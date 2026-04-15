@@ -178,7 +178,7 @@ definitions.
 - [x] `Compiler.Types` implemented in ll-lang — `stdlib/src/CompilerTypes.lll` (336 LOC, 20/20 tests)
 - [x] `Compiler.Infer` implemented in ll-lang — `stdlib/src/CompilerInfer.lll` (471 LOC, 12/12 tests)
 - [x] `Compiler.Typed` implemented in ll-lang — `stdlib/src/CompilerTyped.lll` (206 LOC, 15/15 tests)
-- [ ] `Compiler.Lower` implemented in ll-lang
+- [x] `Compiler.Lower` implemented in ll-lang — `stdlib/src/CompilerLower.lll` (296 LOC, 16/16 tests)
 - [ ] `Compiler.Project.Manifest`, `Compiler.Project.Loader`, `Compiler.Cli` implemented in ll-lang
 - [x] `Compiler.Backend.CSharp` (ll-lang) — `stdlib/src/CodegenCSharp.lll` added (548 LOC, 20 tests)
 - [ ] direct tests for each ll-lang-owned subsystem
