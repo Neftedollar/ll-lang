@@ -39,7 +39,11 @@ checkContains(label Str)(got Str)(needle Str) =
   if strContains needle got
     printfn (strConcat "OK " label)
   else
-    printfn (strConcat "FAIL " (strConcat label (strConcat " | expected: " (strConcat needle (strConcat " | got (first 200 chars): " (strSlice got 0 200))))))
+    snip =
+      if strLen got <= 200
+        got
+      else strSlice got 0 200
+    printfn (strConcat "FAIL " (strConcat label (strConcat " | expected: " (strConcat needle (strConcat " | got: " snip)))))
 
 checkNotEmpty(label Str)(got Str) =
   if strLen got == 0
@@ -50,7 +54,7 @@ checkNotEmpty(label Str)(got Str) =
 -- A simple corpus source: two functions + a constant.
 -- This is a subset of spec/examples/valid/01-basics.lll.
 corpusSrc =
-  "module Examples.Basics\nadd(a Int)(b Int) = a + b\ndouble(x Int) = x * 2\nlet greeting = \"hello\"\n"
+  "module Examples.Basics\nadd(a Int)(b Int) = a + b\ndouble(x Int) = x * 2\ngreeting = \"hello\"\n"
 
 main =
   -- ── Self-hosted pipeline (Std.Compiler.compile) ────────────────────────
@@ -63,8 +67,8 @@ main =
   _ = checkContains "5 self-hosted has 'double'"  selfHosted "double"
   _ = checkContains "6 self-hosted has 'greeting'" selfHosted "greeting"
 
-  -- Current Codegen emits `let rec` for all functions — document this
-  _ = checkContains "7 self-hosted uses let rec (current Codegen)" selfHosted "let rec"
+  -- Codegen now emits `let` for non-recursive, `let rec` for recursive
+  _ = checkContains "7 self-hosted uses let for non-recursive" selfHosted "let add"
 
   -- ── Stage0 comparison via SelfHostedRun.compileSingleFile ──────────────
   -- compileSingleFile reads a .lll file from disk and compiles it.
@@ -83,11 +87,10 @@ main =
   -- injects the stdlib prelude; stage0 does not for non-executable files.
   -- We verify the prelude is present in self-hosted output and not in
   -- stage0-produced single-file output from 01-basics (no main).
-  _ = checkContains "13 self-hosted has prelude marker" selfHosted "// --- ll-lang stdlib prelude"
+  -- Self-hosted Codegen now emits `open LLLang.Prelude` (matches stage0)
+  _ = checkContains "13 self-hosted has prelude open" selfHosted "open LLLang.Prelude"
 
-  -- 01-basics.lll has no `main`, so lllc build --target fs omits the prelude.
-  -- SelfHostedRun.compileSingleFile uses Std.Compiler.compile which always
-  -- injects the prelude — so both match here.
-  _ = checkContains "14 compileSingleFile also has prelude" stage0Like "// --- ll-lang stdlib prelude"
+  -- compileSingleFile uses self-hosted pipeline which also emits open LLLang.Prelude
+  _ = checkContains "14 compileSingleFile also has prelude open" stage0Like "open LLLang.Prelude"
 
   printfn "Done"

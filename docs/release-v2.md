@@ -32,18 +32,18 @@ This document is the binding checklist for `v2` readiness. A gate is either
 
 | # | Gate | Status | How to verify |
 |---|------|--------|---------------|
-| G3.1 | All `spec/examples/valid/*.lll` parse and elaborate without errors | BLOCK | `dotnet test --filter Category=Corpus` |
-| G3.2 | All `spec/examples/invalid/*.lll` trigger the expected error code | BLOCK | `dotnet test --filter Category=Corpus` |
-| G3.3 | xUnit test suite green (`dotnet test`) | BLOCK | `dotnet test` |
-| G3.4 | No `fn`, `type`, `in`, `then`, `with` keywords in ll-lang docs code blocks | BLOCK | audit `docs/user-guide/` |
+| G3.1 | All `spec/examples/valid/*.lll` run without errors | PASS | `for f in spec/examples/valid/*.lll; do lllc run "$f"; done` — 0 failures |
+| G3.2 | All `spec/examples/invalid/*.lll` trigger the expected error code | BLOCK | manual audit: xUnit Category=Corpus filter not implemented |
+| G3.3 | xUnit test suite green (`dotnet test`) | BLOCK | 752 pass, 1 pre-existing failure: `BootstrapPlatformCompilerEmitTests` (C# backend type-erasure issue with `RBMap<object,object>`) |
+| G3.4 | No `fn`, `type`, `in`, `then`, `with` keywords in ll-lang docs code blocks | PASS | audited `docs/user-guide/` — fixed stale `fn` in 07-error-codes.md |
 
 ## G4 — Stdlib correctness
 
 | # | Gate | Status | How to verify |
 |---|------|--------|---------------|
-| G4.1 | All stdlib modules with `main` pass their self-tests | BLOCK | run each stdlib module |
-| G4.2 | `Std.Compiler` 11-test suite passes | BLOCK | `lllc run stdlib/src/Compiler.lll` |
-| G4.3 | `Std.CompilerLoader` 12-test suite passes | BLOCK | `lllc run stdlib/src/CompilerLoader.lll` |
+| G4.1 | All stdlib modules with `main` pass their self-tests | PASS | All 33 stdlib modules run cleanly; `Std.Test` FAILs are expected (testing failure-detection) |
+| G4.2 | `Std.Compiler` 11-test suite passes | PASS | `lllc run stdlib/src/Compiler.lll` — 11/11 OK |
+| G4.3 | `Std.CompilerLoader` 12-test suite passes | PASS | `lllc run stdlib/src/CompilerLoader.lll` — 12/12 OK |
 
 ## G5 — Benchmark thresholds
 
