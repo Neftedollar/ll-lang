@@ -160,5 +160,5 @@ lllc build   # → bin/hello.fs (both modules concatenated)
 ## Practical advice
 
 - For learning/scripts: use a single `.lll` file with no `lll.toml`. The implicit prelude (`listMap`, `strLen`, `printfn`, `readFile`, …) is always available.
-- For `Maybe` / `Result` in single-file mode: declare them locally — `type Maybe A = Some A | None`.
+- For `Maybe` / `Result` in single-file mode: declare them locally — `Maybe A = Some A | None`.
 - For multi-file projects: use `lllc new <name>` to get the right directory structure, then add `.lll` files to `src/`.

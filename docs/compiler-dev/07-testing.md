@@ -109,8 +109,8 @@ Usage:
 
 ```fsharp
 [<Fact>]
-let ``fn id has polymorphic scheme`` () =
-    let tm = inferOk "module M\nfn id(x A) A = x"
+let ``id has polymorphic scheme`` () =
+    let tm = inferOk "module M\nid(x A) A = x"
     let sch = schemeOf tm "id"
     Assert.Contains("A", sch.Vars)
 ```
@@ -133,12 +133,12 @@ Tests assert substring containment on the emitted F# string:
 ```fsharp
 [<Fact>]
 let ``TDType sum type emits DU header`` () =
-    let src = "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    let src = "module M\nShape = Circle Float | Rect Float Float | Empty"
     Assert.Contains("type Shape =", codegenSrc src)
 
 [<Fact>]
 let ``TDType sum type emits multi-arg branch`` () =
-    let src = "module M\ntype Shape = Circle Float | Rect Float Float | Empty"
+    let src = "module M\nShape = Circle Float | Rect Float Float | Empty"
     Assert.Contains("| Rect of float * float", codegenSrc src)
 ```
 
