@@ -845,6 +845,54 @@ Fresh = MkFresh Int
 
 ---
 
+### `Std.CompilerTyped` — typed IR shapes
+
+**Import:** `import Std.CompilerTyped`  
+**LOC:** 206  
+**Description:** Typed intermediate representation (IR) for the v2 self-hosted compiler. Defines `TypedExpr`, `TypedPattern`, `TypedFnSig`, `TypedDecl`, and `TypedModule`. These are the output shapes produced by `Std.CompilerInfer` and consumed by lowering and backend passes. Flat sum-type design avoids mutual-recursion constraints.
+
+**Key types:**
+
+```lll
+-- Pattern with resolved type
+TypedPattern = MkTypedPat Pattern TypeExpr
+
+-- Expression nodes (last arg is always the expression's TypeExpr)
+TypedExpr =
+  | TEInt Int TypeExpr
+  | TEStr Str TypeExpr
+  | TEBool Bool TypeExpr
+  | TEVar Str TypeExpr
+  | TECon Str TypeExpr
+  | TEApp TypedExpr TypedExpr TypeExpr
+  | TELam Str TypeExpr TypedExpr TypeExpr
+  | TeLet Str TypedExpr TypedExpr TypeExpr
+  | TEIf TypedExpr TypedExpr TypedExpr TypeExpr
+  | TEMatch TypedExpr (List[TypedPattern]) (List[TypedExpr]) TypeExpr
+  | TEBinOp Str TypedExpr TypedExpr TypeExpr
+  | ...
+
+TypedDecl =
+  | TDFn TypedFnSig Scheme TypedExpr
+  | TDLet Str Scheme TypedExpr
+  | TDType Str (List[Str]) (List[Constructor])
+  | ...
+
+TypedModule = MkTypedModule (List[Str]) (List[TypedDecl]) (RBMap[Str][Scheme])
+```
+
+**Key functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `typedExprType` | `TypedExpr -> TypeExpr` | Extract type from any node |
+| `typedPatType` | `TypedPattern -> TypeExpr` | Extract type from pattern |
+| `typedFnName` | `TypedFnSig -> Str` | Function name |
+| `typedModDecls` | `TypedModule -> List[TypedDecl]` | Module declarations |
+| `renderTypedExprTag` | `TypedExpr -> Str` | Tag name for debugging |
+
+---
+
 ### `Std.CompilerInfer` — HM Algorithm W inference
 
 **Import:** `import Std.CompilerInfer`  
@@ -944,6 +992,7 @@ buildFile(path Str) =
 | Rendering | `Std.Render` | Shared rendering helpers |
 | Testing | `Std.Test` | Test assertions/utilities |
 | Type inference | `Std.CompilerTypes` | HM substitutions, unification, schemes |
+| Type inference | `Std.CompilerTyped` | Typed IR shapes (TypedExpr, TypedDecl, TypedModule) |
 | Type inference | `Std.CompilerInfer` | Algorithm W for Expr/Decl |
 | Full pipeline | `Std.Compiler` | Source pipeline helpers |
 
@@ -959,6 +1008,7 @@ application-library APIs:
 - `Std.Parser`
 - `Std.Elaborator`
 - `Std.CompilerTypes`
+- `Std.CompilerTyped`
 - `Std.CompilerInfer`
 - `Std.Codegen`
 - `Std.CodegenTS`

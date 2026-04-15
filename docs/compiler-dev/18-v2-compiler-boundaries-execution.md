@@ -40,7 +40,8 @@ Still not done enough for `v2`:
 - [x] lowering is explicit as a phase — `Compiler.Lower` is a required phase in the ownership table
 - [x] project/CLI phases are treated as compiler architecture — frozen in ownership table and pass contracts
 - [x] pass fixtures and invariants are defined — `15-v2-pass-contracts.md` § Pass fixture shapes
-- [ ] ll-lang implementations of the unfilled gaps (`Compiler.Types`, `Compiler.Infer`, `Compiler.Lower`, `Compiler.Project.*`, `Compiler.Cli`) — tracked per sub-issue
+- [x] `Compiler.Types` and `Compiler.Infer` and `Compiler.Typed` ll-lang implementations landed
+- [ ] `Compiler.Lower`, `Compiler.Project.*`, `Compiler.Cli` ll-lang implementations — tracked per sub-issue
 
 ## Work package A — Freeze subsystem ownership
 
@@ -174,7 +175,9 @@ definitions.
 
 `Milestone 1` doc/policy phase is complete. Remaining work:
 
-- [ ] `Compiler.Types`, `Compiler.Typed`, `Compiler.Infer` implemented in ll-lang
+- [x] `Compiler.Types` implemented in ll-lang — `stdlib/src/CompilerTypes.lll` (336 LOC, 20/20 tests)
+- [x] `Compiler.Infer` implemented in ll-lang — `stdlib/src/CompilerInfer.lll` (471 LOC, 12/12 tests)
+- [x] `Compiler.Typed` implemented in ll-lang — `stdlib/src/CompilerTyped.lll` (206 LOC, 15/15 tests)
 - [ ] `Compiler.Lower` implemented in ll-lang
 - [ ] `Compiler.Project.Manifest`, `Compiler.Project.Loader`, `Compiler.Cli` implemented in ll-lang
 - [x] `Compiler.Backend.CSharp` (ll-lang) — `stdlib/src/CodegenCSharp.lll` added (548 LOC, 20 tests)
