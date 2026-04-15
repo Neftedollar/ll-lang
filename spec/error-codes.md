@@ -42,6 +42,34 @@ Type unification would produce an infinite type (occurs-check failure).
 
 Compact: `E008 3:1 InfiniteType var:a cycle:a=List[a]`
 
+### E020 ModulePathMismatch
+The `module` declaration in a file does not match the file's location in the project tree.
+
+Compact: `E020 0:0 ModulePathMismatch file:src/Foo/bar.lll expected:Foo.Bar got:Foo.Baz`
+
+Repair: rename the file or fix the `module X.Y` declaration so they agree.
+
+### E024 ModuleCycle
+A circular dependency was detected in the module import graph.
+
+Compact: `E024 0:0 ModuleCycle Foo -> Bar -> Foo`
+
+Repair: break the cycle — extract shared definitions into a third module that both can import.
+
+### E025 NoProjectForImport
+A non-`Std.*` import was used in single-file mode (no `lll.toml` project file found).
+
+Compact: `E025 0:0 NoProjectForImport import:App.Utils`
+
+Repair: either run in project mode (`lllc build`) or restrict imports to `import Std.*` in single-file mode.
+
+### E026 UnknownExternalMapping
+An `external` declaration has no mapping for the selected compile target.
+
+Compact: `E026 5:1 UnknownExternalMapping target:typescript name:httpGet`
+
+Repair: add the function to the target's Platform SDK or provide a companion implementation file.
+
 ## Invalid example convention
 
 Every file in `spec/examples/invalid/` declares its expected error on line 1:
