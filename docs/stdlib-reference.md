@@ -355,8 +355,10 @@ import Std.Map
 
 -- String comparator (lexicographic)
 strCmp(a Str)(b Str) =
-  if a < b then -1
-  else if a > b then 1
+  if a < b
+    -1
+  else if a > b
+    1
   else 0
 
 -- Build a map

@@ -19,7 +19,7 @@ module Examples.Modules
 import Std.List
 import Std.Maybe
 
-fn firstDoubled(xs List[Int]) Maybe[Int] =
+firstDoubled(xs List[Int]) Maybe[Int] =
   xs -> head -> map (\x. x * 2)
 ```
 
@@ -124,7 +124,7 @@ greet(name Str) Str = "Hello, " ++ name ++ "!"
 module Hello.Main
 import Hello.Greet
 
-fn main() Str = greet "World"
+main() = greet "World"
 ```
 
 `lll.toml`:

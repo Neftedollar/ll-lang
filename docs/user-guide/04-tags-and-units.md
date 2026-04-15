@@ -27,8 +27,8 @@ A tag has no body — it's a pure type-level label.
 Postfix `[Tag]` syntax:
 
 ```lll
-let uid = "user-42"[UserId]     -- Str[UserId]
-let dist = 5.0[m]               -- Float[m]
+uid = "user-42"[UserId]     -- Str[UserId]
+dist = 5.0[m]               -- Float[m]
 ```
 
 The base type is whatever the inner expression had; the tag is attached on
@@ -39,8 +39,8 @@ top. Internally this is `TyTagged(baseType, UName tagName)`.
 Write the full `BaseType[Tag]` in the annotation:
 
 ```lll
-fn getUser(id Str[UserId]) Maybe[Str] = Some "alice"
-fn sendEmail(to Str[Email]) = to
+getUser(id Str[UserId]) Maybe[Str] = Some "alice"
+sendEmail(to Str[Email]) = to
 ```
 
 Calling `getUser "raw-string"` is a compile error (`E005 TagViolation`):
@@ -56,7 +56,7 @@ tracks units through arithmetic operations:
 tag m
 tag s
 
-fn speed(d Float[m])(t Float[s]) = d / t
+speed(d Float[m])(t Float[s]) = d / t
 -- inferred return: Float[m/s]
 ```
 
@@ -79,16 +79,17 @@ zero runtime cost:
 tag Validated
 tag Raw
 
-type Email[state] = Str
+Email[state] = Str
 
-fn validate(s Str) Result[Email[Validated] Str] =
-  if s != "" then Ok s
+validate(s Str) Result[Email[Validated] Str] =
+  if s != ""
+    Ok s
   else Err "empty"
 ```
 
 `Email[Validated]` and `Email[Raw]` are distinct types even though both
 erase to `Str` at runtime. A function declared as
-`fn send(e Email[Validated]) ...` cannot be called with an unvalidated
+`send(e Email[Validated]) ...` cannot be called with an unvalidated
 email — the compiler enforces the state transition.
 
 ## What's enforced
@@ -108,8 +109,8 @@ From `spec/examples/valid/03-tags.lll`:
 ```lll
 module Examples.Tags
 
-type Maybe A = Some A | None
-type Result A E = Ok A | Err E
+Maybe A = Some A | None
+Result A E = Ok A | Err E
 
 tag UserId
 tag Email
@@ -117,20 +118,21 @@ tag m
 tag s
 tag kg
 
-let uid = "user-42"[UserId]
+uid = "user-42"[UserId]
 
-fn getUser(id Str[UserId]) Maybe[Str] = Some "alice"
-fn sendEmail(to Str[Email]) = to
+getUser(id Str[UserId]) Maybe[Str] = Some "alice"
+sendEmail(to Str[Email]) = to
 
-fn speed(d Float[m])(t Float[s]) = d / t
+speed(d Float[m])(t Float[s]) = d / t
 
 tag Validated
 tag Raw
 
-type Email[state] = Str
+Email[state] = Str
 
-fn validate(s Str) Result[Email[Validated] Str] =
-  if s != "" then Ok s
+validate(s Str) Result[Email[Validated] Str] =
+  if s != ""
+    Ok s
   else Err "empty"
 ```
 

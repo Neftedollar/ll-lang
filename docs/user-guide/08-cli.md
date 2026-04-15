@@ -175,9 +175,9 @@ Given `foo.lll`:
 ```lll
 module Demo.Foo
 
-type Shape = Circle Float | Rect Float Float | Empty
+Shape = Circle Float | Rect Float Float | Empty
 
-fn area(s Shape) Float =
+area(s Shape) =
   | Circle r -> 3.14159 * r * r
   | Rect w h -> w * h
   | Empty -> 0.0

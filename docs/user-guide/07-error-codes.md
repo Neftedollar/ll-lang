@@ -31,9 +31,9 @@ Below: the minimal program that reproduces each error, sourced from
 -- expect: E001
 module Invalid.E001
 
-fn greet(name Str) Str = name
+greet(name Str) = name
 
-let bad = greet 42
+bad = greet 42
 ```
 
 `greet` expects `Str`, got `Int`.
@@ -43,7 +43,7 @@ let bad = greet 42
 E001 TypeMismatch Int vs Str
 ```
 
-**Fix:** pass a string, not an int. `let bad = greet "alice"`.
+**Fix:** pass a string, not an int. `bad = greet "alice"`.
 
 ## E002 — UnboundVar
 
@@ -51,7 +51,7 @@ E001 TypeMismatch Int vs Str
 -- expect: E002
 module Invalid.E002
 
-fn broken = undefinedFunction 42
+broken = undefinedFunction 42
 ```
 
 `undefinedFunction` is not declared anywhere in the module and has no builtin.
@@ -69,9 +69,9 @@ E002 UnboundVar undefinedFunction
 -- expect: E003
 module Invalid.E003
 
-type Shape = Circle Float | Rect Float Float | Empty
+Shape = Circle Float | Rect Float Float | Empty
 
-fn area(s Shape) Float =
+area(s Shape) =
   | Circle r -> 3.14159 * r * r
   | Rect w h -> w * h
 ```
@@ -95,12 +95,12 @@ module Invalid.E004
 unit m
 unit kg
 
-fn mkM(x Float) Float[m] = x
-fn mkKg(x Float) Float[kg] = x
+mkM(x Float) = x[m]
+mkKg(x Float) = x[kg]
 
-fn speed(d Float[m])(t Float[kg]) = d / t
+speed(d Float[m])(t Float[kg]) = d / t
 
-let bad = speed (mkKg 5.0) (mkM 2.0)
+bad = speed (mkKg 5.0) (mkM 2.0)
 ```
 
 `speed` is declared with `d Float[m]` but receives `Float[kg]`.
@@ -121,9 +121,9 @@ module Invalid.E005
 
 tag UserId
 
-fn getUser(id Str[UserId]) Str = id
+getUser(id Str[UserId]) = id
 
-let bad = getUser "raw-string"
+bad = getUser "raw-string"
 ```
 
 `getUser` expects `Str[UserId]`; a raw `Str` is not automatically tagged.
@@ -142,13 +142,13 @@ E005 TaggedUntaggedMismatch Str vs Str[UserId]
 module Invalid.E006
 
 trait Functor F =
-  fn map(f A->B)(fa F[A]) F[B]
+  map(f A -> B)(fa F[A]) F[B]
 
-type Box A = Box A
+Box A = Box A
 
-fn doubled[F: Functor](xs F[Int]) F[Int] = map (\x. x * 2) xs
+doubled[F: Functor](xs F[Int]) = map (\x. x * 2) xs
 
-let bad = doubled (Box 5)
+bad = doubled (Box 5)
 ```
 
 `doubled` is constrained to any `Functor F`, but there's no
@@ -179,7 +179,7 @@ platform-specific import.
 
 ```lll
 -- no corpus file (triggered by recursive lambda without annotation)
-let oops = \x. x x
+oops = \x. x x
 ```
 
 The unifier tries to solve `a = a -> b`, which creates a cycle. The

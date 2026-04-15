@@ -63,7 +63,7 @@ lllc build --target ts file.lll  # emits file.ts
 Sum types become TypeScript discriminated unions:
 
 ```ll-lang
-type Shape = Circle Float | Rect Float Float | Empty
+Shape = Circle Float | Rect Float Float | Empty
 ```
 
 Emits:
@@ -84,7 +84,7 @@ const Empty: Shape = { _tag: `Empty` as const };
 Functions are curried arrow functions:
 
 ```ll-lang
-fn add(a Int)(b Int) Int = a + b
+add(a Int)(b Int) = a + b
 ```
 
 Emits:
@@ -127,7 +127,7 @@ lllc build --target py file.lll  # emits file.py
 Sum types become immutable `@dataclass(frozen=True)` classes with a `_tag` field, collected into a `Union` type alias:
 
 ```ll-lang
-type Shape = Circle Float | Rect Float Float | Empty
+Shape = Circle Float | Rect Float Float | Empty
 ```
 
 Emits:
@@ -157,7 +157,7 @@ Shape = Union[Circle, Rect, Empty]
 Curried functions become nested `def` statements with `return`:
 
 ```ll-lang
-fn add(a Int)(b Int) Int = a + b
+add(a Int)(b Int) = a + b
 ```
 
 Emits:

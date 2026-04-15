@@ -37,7 +37,7 @@ Create `hello.lll`:
 ```lll
 module Examples.Hello
 
-fn main() = printfn "Hello, ll-lang!"
+main() = printfn "Hello, ll-lang!"
 ```
 
 Run it:

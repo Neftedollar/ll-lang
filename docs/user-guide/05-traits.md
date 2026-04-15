@@ -8,11 +8,11 @@ and `Monad`.
 
 ```lll
 trait Functor F =
-  fn map(f A->B)(fa F[A]) F[B]
+  map(f A -> B)(fa F[A]) F[B]
 ```
 
 The trait name (`Functor`) is followed by one or more type variables (here
-`F`). The body is an indented block of function signatures — no bodies.
+`F`). The body is an indented block of method signatures — no bodies, no `fn`.
 
 `F` has kind `* -> *` because it's applied to `A` and `B` inside the signature.
 `map` takes a function `A -> B`, an `F[A]`, and returns an `F[B]`.
@@ -21,22 +21,22 @@ Multiple methods:
 
 ```lll
 trait Monad F =
-  fn pure(a A) F[A]
-  fn bind(fa F[A])(f A->F[B]) F[B]
+  pure(a A) F[A]
+  bind(fa F[A])(f A -> F[B]) F[B]
 ```
 
 ## Implementing a trait
 
 ```lll
-type Maybe A = Some A | None
+Maybe A = Some A | None
 
 impl Functor Maybe =
-  fn map(f A->B)(fa Maybe[A]) Maybe[B] =
+  map(f A -> B)(fa Maybe[A]) Maybe[B] =
     | Some a -> Some (f a)
     | None -> None
 ```
 
-`impl TraitName TypeName = <indented block of fn decls>`. Each function must
+`impl TraitName TypeName = <indented block of method decls>`. Each method must
 match the signature declared in the trait, with `F` replaced by the impl
 type (`Maybe`).
 
@@ -55,7 +55,7 @@ Internally the compiler mangles impl method names as `TypeName_method` (so
 Declare a bracket constraint before the parameter list:
 
 ```lll
-fn transform[F: Functor](xs F[A])(f A->B) F[B] = map f xs
+transform[F: Functor](xs F[A])(f A -> B) = map f xs
 ```
 
 Read as: "for any `F` that has a `Functor` impl". Inside the body you can
@@ -70,26 +70,26 @@ From `spec/examples/valid/04-traits.lll`:
 module Examples.Traits
 
 trait Functor F =
-  fn map(f A->B)(fa F[A]) F[B]
+  map(f A -> B)(fa F[A]) F[B]
 
 trait Monad F =
-  fn pure(a A) F[A]
-  fn bind(fa F[A])(f A->F[B]) F[B]
+  pure(a A) F[A]
+  bind(fa F[A])(f A -> F[B]) F[B]
 
-type Maybe A = Some A | None
+Maybe A = Some A | None
 
 impl Functor Maybe =
-  fn map(f A->B)(fa Maybe[A]) Maybe[B] =
+  map(f A -> B)(fa Maybe[A]) Maybe[B] =
     | Some a -> Some (f a)
     | None -> None
 
 impl Monad Maybe =
-  fn pure(a A) Maybe[A] = Some a
-  fn bind(fa Maybe[A])(f A->Maybe[B]) Maybe[B] =
+  pure(a A) Maybe[A] = Some a
+  bind(fa Maybe[A])(f A -> Maybe[B]) Maybe[B] =
     | Some a -> f a
     | None -> None
 
-fn transform[F: Functor](xs F[A])(f A->B) F[B] = map f xs
+transform[F: Functor](xs F[A])(f A -> B) = map f xs
 ```
 
 ## Current limits

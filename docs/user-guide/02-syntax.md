@@ -1,12 +1,17 @@
 # Syntax
 
 Every ll-lang file begins with `module`, followed by optional `import`
-declarations, then top-level `let`, `fn`, `type`, `tag`, `trait`, and `impl`
-declarations.
+declarations, then top-level declarations: type declarations (Uppercase),
+function declarations (lowercase + params), value bindings (lowercase),
+`tag`, `unit`, `trait`, `impl`, `external`, and `opaque`.
 
 Indentation is significant. Comments start with `--` and run to end of line;
 both full-line (`-- header`) and trailing (`x + 1 -- increment`) forms are
 accepted. ASCII only. No semicolons, no braces.
+
+**Active keywords:** `let`, `tag`, `unit`, `trait`, `impl`, `import`, `export`,
+`module`, `external`, `opaque`, `if`, `else`, `true`, `false`, `match`.
+There is no `fn`, `type`, `in`, `then`, or `with` keyword.
 
 ## Module header
 
@@ -17,178 +22,174 @@ module Examples.Basics
 The module path is one or more uppercase-starting segments separated by dots.
 Must be the first non-comment token in the file.
 
-## `let`: top-level constants
+## Value declarations
 
-```lll
-let pi = 3.14159
-let greeting = "hello"
-let ready = true
-let bang = '!'
-```
+Three declaration forms at the top level:
 
-Type is inferred from the literal. Integer literals default to `Int` (emitted
-as `int64`), decimal literals to `Float`, quoted text to `Str`, `true`/`false`
-to `Bool`, and single-quoted characters to `Char`.
+| Form | Description | Example |
+|------|-------------|---------|
+| `name = expr` | value binding (no params) | `pi = 3.14159` |
+| `name(p T)... = expr` | function declaration | `add(a Int)(b Int) = a + b` |
+| `let name = expr` | constant (explicit `let`) | `let greeting = "hello"` |
 
-### Literals in detail
+`let` is optional for simple constants without parameters. Both `pi = 3.14159`
+and `let pi = 3.14159` are accepted at the top level.
 
-| Form        | Type   | Notes                                       |
-|-------------|--------|---------------------------------------------|
-| `42`        | `Int`  | 64-bit signed                               |
-| `3.14`      | `Float`| requires a decimal point                    |
-| `"hi"`      | `Str`  | supports escapes `\n`, `\t`, `\\`, `\"`     |
-| `true` / `false` | `Bool` | keywords, not constructors             |
-| `'c'`       | `Char` | supports escapes `\n`, `\t`, `\\`, `\'`     |
+### Literals
 
-## `fn`: functions
+| Form | Type | Notes |
+|------|------|-------|
+| `42` | `Int` | 64-bit signed |
+| `3.14` | `Float` | requires a decimal point |
+| `"hi"` | `Str` | supports escapes `\n`, `\t`, `\\`, `\"` |
+| `true` / `false` | `Bool` | keywords, not constructors |
+| `'c'` | `Char` | supports escapes `\n`, `\t`, `\\`, `\'` |
+
+## Functions
 
 Parameters come in individual `(name Type)` groups. Juxtaposition with
 separate parens means currying, not multi-arg:
 
 ```lll
-fn add(a Int)(b Int) Int = a + b
-fn double(x Int) = x * 2
+add(a Int)(b Int) = a + b
+double(x Int) = x * 2
 ```
 
 The return type after the last param is optional when H-M can infer it.
-`fn double` above has no return annotation — the inferred type is
-`Int -> Int`.
+`double` above has no return annotation — the inferred type is `Int -> Int`.
 
 ### Multi-line body
 
 Indent the body one level:
 
 ```lll
-fn clamp(x Int)(lo Int)(hi Int) Int =
-  if x < lo then lo
-  else if x > hi then hi
+clamp(x Int)(lo Int)(hi Int) =
+  if x < lo
+    lo
+  else if x > hi
+    hi
   else x
 ```
 
 ### Zero-arg functions
 
-Use empty parens:
+Use empty parens (or bare binding):
 
 ```lll
-fn main() = printfn "Hello, ll-lang!"
+main() = printfn "Hello, ll-lang!"
 ```
 
-### Local `let`
+### Local bindings
+
+Chain bindings by layout — no `let...in`:
 
 ```lll
-fn example = let y = double 5 in y + 1
+example =
+  y = double 5
+  y + 1
 ```
-
-The `in` form introduces a local binding. It's an expression and returns the
-body's value.
 
 ## Lambdas
 
 ```lll
-let triple = \x. x * 3
+triple = \x. x * 3
 ```
 
 Backslash, parameter names, a period, then the body expression. Multiple
-parameters are supported:
+parameters:
 
 ```lll
-let add = \a b. a + b
+add = \a b. a + b
 ```
 
-## `if` / `then` / `else`
+## `if` / `else`
+
+`if` is an expression — both arms must have the same type. Body is indented
+on the next line; `else` follows at the same indent as `if`. There is no
+`then` keyword.
 
 ```lll
-fn abs(n Int) Int =
-  if n < 0 then 0 - n
+abs(n Int) =
+  if n < 0
+    0 - n
   else n
 ```
 
-`if` is an expression — both arms must have the same type. There's no standalone
-statement form. Chain with `else if`:
+Chain with `else if`:
 
 ```lll
-if x < 0 then "neg"
-else if x == 0 then "zero"
-else "pos"
+sign(x Int) =
+  if x < 0
+    "neg"
+  else if x == 0
+    "zero"
+  else "pos"
 ```
 
-## `type`: algebraic data types
+## Type declarations
+
+Types start with an uppercase identifier — no `type` keyword required:
 
 ### Sum types (tagged unions)
 
 ```lll
-type Shape = Circle Float | Rect Float Float | Empty
+Shape = Circle Float | Rect Float Float | Empty
 ```
 
 Constructors are uppercase identifiers followed by zero or more type arguments.
 Branches are separated by `|`.
 
-A multi-line form with an optional leading `|` is also accepted for readability:
+Multi-line form with an optional leading `|`:
 
 ```lll
-type Color =
+Color =
   | Red
   | Green
   | Blue
 ```
-
-### Product types (records)
-
-```lll
-type Point = x Float, y Float
-```
-
-Field syntax is `name Type`, comma-separated. No braces.
 
 ### Parametric types
 
 Bare type parameters after the type name:
 
 ```lll
-type Maybe A = Some A | None
-type Result A E = Ok A | Err E
+Maybe A = Some A | None
+Result A E = Ok A | Err E
 ```
 
 ### Phantom type parameters
 
-Bracketed parameters carry no runtime value — they exist purely to distinguish
-types at compile time:
+Bracketed parameters carry no runtime value:
 
 ```lll
-type Email[state] = Str
+Email[state] = Str
 ```
 
 See [04-tags-and-units](04-tags-and-units.md) for the phantom state pattern.
 
 ## `match`: pattern matching
 
-There are two surface forms. The compiler enforces exhaustiveness (error
-`E003`) in both.
+The compiler enforces exhaustiveness (error `E003`) in all forms.
 
-**Shortcut form** — when a function body is a single match over its last
-parameter, omit the `match ... with` header and list branches directly:
+**Clause sugar** — when a function body is a match over its last parameter,
+list arms directly:
 
 ```lll
-fn area(s Shape) Float =
+area(s Shape) =
   | Circle r -> 3.14159 * r * r
   | Rect w h -> w * h
   | Empty -> 0.0
 ```
 
-**Explicit form** — `match <scrutinee> with` followed by branches. Useful
-inside a larger expression or after a `let ... in`:
+**Explicit form** — `match <scrutinee>` followed by indented arms (no `with`):
 
 ```lll
-fn describe(m Maybe[Int]) Int =
-  let fallback = 0 in
-  match m with
+describe(m Maybe[Int]) =
+  fallback = 0
+  match m
     | Some n -> n
     | None -> fallback
 ```
-
-Newlines are tolerated between `=` and `match`, between `in` and `match`,
-and before the first `|` — both `match m with | Some n -> n ...` on one
-line and the indented variant above parse identically.
 
 Supported patterns:
 
@@ -212,8 +213,8 @@ A `tag` declaration introduces a label with no runtime representation. Applied
 with postfix `[Tag]`:
 
 ```lll
-let uid = "user-42"[UserId]      -- type: Str[UserId]
-let dist = 5.0[m]                -- type: Float[m]
+uid = "user-42"[UserId]      -- type: Str[UserId]
+dist = 5.0[m]                -- type: Float[m]
 ```
 
 See [04-tags-and-units](04-tags-and-units.md).
@@ -222,20 +223,20 @@ See [04-tags-and-units](04-tags-and-units.md).
 
 ```lll
 trait Functor F =
-  fn map(f A->B)(fa F[A]) F[B]
+  map(f A -> B)(fa F[A]) F[B]
 
 trait Monad F =
-  fn pure(a A) F[A]
-  fn bind(fa F[A])(f A->F[B]) F[B]
+  pure(a A) F[A]
+  bind(fa F[A])(f A -> F[B]) F[B]
 ```
 
-The trait body is indented and contains function signatures (no bodies).
+The trait body is indented and contains method signatures (no bodies, no `fn`).
 
 ## `impl`: trait implementations
 
 ```lll
 impl Functor Maybe =
-  fn map(f A->B)(fa Maybe[A]) Maybe[B] =
+  map(f A -> B)(fa Maybe[A]) Maybe[B] =
     | Some a -> Some (f a)
     | None -> None
 ```
@@ -249,11 +250,10 @@ See [05-traits](05-traits.md).
 
 ```lll
 -- Declares a function implemented in the host platform (no ll-lang body).
--- The Platform SDK provides the actual implementation per compile target.
 external console_log(msg Str) Unit
 external JSON_parse(src Str) Str
 
-logGreeting(name Str) Unit =
+logGreeting(name Str) =
   console_log (strConcat "Hello, " name)
 ```
 
@@ -267,8 +267,6 @@ Pre-mapped names available on all targets: `console_log`, `JSON_parse`.
 
 ```lll
 -- Declares a type whose internals are managed by the host platform.
--- ll-lang code can hold and pass opaque values, but cannot pattern-match
--- or construct them directly.
 opaque HttpClient
 opaque Buffer
 ```
@@ -290,18 +288,19 @@ Whitespace between atoms is function application. Left-associative — curried.
 ### Lists
 
 ```lll
-let xs = [1 2 3]
-let ys = [1; 2; 3]
+xs = [1 2 3]
+ys = [1; 2; 3]
 ```
 
-Both space-separated and `;`-separated list elements are valid. Commas are not list separators (`[1, 2]` is tuple syntax).
+Both space-separated and `;`-separated list elements are valid. Commas are not
+list separators (`[1, 2]` is tuple syntax).
 
 ### Tuples
 
 Comma-separated inside parens in a grouping context:
 
 ```lll
-let t = (1, "hi")
+t = (1, "hi")
 ```
 
 ### Pipes

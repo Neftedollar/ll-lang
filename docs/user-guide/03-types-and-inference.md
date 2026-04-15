@@ -21,10 +21,10 @@ String and character literals share the escape set `\n \t \\ \" \'`.
 ## Inferred signatures
 
 ```lll
-fn double(x Int) = x * 2
+double(x Int) = x * 2
 -- inferred: Int -> Int
 
-fn square(x Int) = x * x
+square(x Int) = x * x
 -- inferred: Int -> Int
 ```
 
@@ -37,14 +37,14 @@ Type variables in ll-lang use single uppercase letters (`A`, `B`, `E`, ...).
 They are rigid and universally quantified over the function:
 
 ```lll
-fn id(x A) A = x
+id(x A) A = x
 -- ∀A. A -> A
 ```
 
-Constructors of a parametric `type` introduce their parameters automatically:
+Constructors of a parametric type introduce their parameters automatically:
 
 ```lll
-type Maybe A = Some A | None
+Maybe A = Some A | None
 -- Some : ∀A. A -> Maybe[A]
 -- None : ∀A. Maybe[A]
 ```
@@ -52,12 +52,12 @@ type Maybe A = Some A | None
 ## Let-generalization
 
 ```lll
-fn f =
-  let g = \x. x in
+f =
+  g = \x. x
   g
 ```
 
-Here `g` is generalized at the `let` — calling it with an `Int` and then a
+Here `g` is generalized at the binding — calling it with an `Int` and then a
 `Str` in the same scope would both type-check.
 
 ## When you must annotate
@@ -67,8 +67,8 @@ Here `g` is generalized at the `let` — calling it with an `Int` and then a
 The parser requires every parameter to carry a type:
 
 ```lll
-fn add(a Int)(b Int) = a + b      -- OK, each param annotated
-fn bad(a)(b) = a + b              -- parse error
+add(a Int)(b Int) = a + b      -- OK, each param annotated
+bad(a)(b) = a + b              -- parse error
 ```
 
 ### Ambiguous polymorphism
@@ -77,7 +77,7 @@ If a function is fully polymorphic and its return has no connection to its
 input, annotate the return:
 
 ```lll
-fn pure(a A) Maybe[A] = Some a
+pure(a A) Maybe[A] = Some a
 ```
 
 Without the `Maybe[A]` return annotation, the compiler cannot decide which
@@ -89,7 +89,7 @@ Tags are never inferred automatically on parameters. To require a tagged
 argument you must write the annotation:
 
 ```lll
-fn getUser(id Str[UserId]) Maybe[Str] = Some "alice"
+getUser(id Str[UserId]) Maybe[Str] = Some "alice"
 ```
 
 ### Trait-constrained generics
@@ -97,15 +97,15 @@ fn getUser(id Str[UserId]) Maybe[Str] = Some "alice"
 Use bracket syntax before the parameter list:
 
 ```lll
-fn transform[F: Functor](xs F[A])(f A->B) F[B] = map f xs
+transform[F: Functor](xs F[A])(f A -> B) = map f xs
 ```
 
 This reads as "for any `F` with a `Functor` impl, and any `A`, `B`".
 
 ## When you can elide
 
-- Return type of a `fn` whose body is a simple expression
-- Types of locals introduced by `let x = expr in body`
+- Return type of a function whose body is a simple expression
+- Types of local bindings chained by layout
 - Types of lambda parameters bound to a known context
 - Types of literals and constructor applications
 

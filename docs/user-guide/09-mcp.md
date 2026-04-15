@@ -140,7 +140,7 @@ Get detailed explanation + minimal repro snippet for a specific error code.
   "code": "E003",
   "name": "NonExhaustiveMatch",
   "description": "Pattern match does not cover all constructors of a sum type.",
-  "example": "-- expect: E003\nmodule Bad\n\ntype Shape = Circle Float | Rect Float Float\n\nfn area(s Shape) Float =\n  | Circle r -> r * r\n"
+  "example": "-- expect: E003\nmodule Bad\n\nShape = Circle Float | Rect Float Float\n\narea(s Shape) =\n  | Circle r -> r * r\n"
 }
 ```
 

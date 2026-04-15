@@ -29,7 +29,7 @@ In generic positions (type parameters), primitive types are boxed automatically 
 Sum types become sealed interfaces with inner record classes:
 
 ```ll-lang
-type Shape = Circle Float | Rect Float Float | Empty
+Shape = Circle Float | Rect Float Float | Empty
 ```
 
 Emits:
@@ -45,7 +45,7 @@ sealed interface Shape permits Shape.Circle, Shape.Rect, Shape.Empty {
 Parametric sum types use Java generics:
 
 ```ll-lang
-type Maybe A = Some A | None
+Maybe A = Some A | None
 ```
 
 Emits:
@@ -62,7 +62,7 @@ sealed interface Maybe<A> permits Maybe.Some, Maybe.None {
 Single-parameter functions become static methods:
 
 ```ll-lang
-fn double(x Int) Int = x * 2
+double(x Int) = x * 2
 ```
 
 Emits:
@@ -76,7 +76,7 @@ public static long double_(long x) {
 Curried (multi-parameter-group) functions return nested `Function`:
 
 ```ll-lang
-fn add(a Int)(b Int) Int = a + b
+add(a Int)(b Int) = a + b
 ```
 
 Emits:
@@ -94,7 +94,7 @@ The backend emits Java imports for commonly used JDK types (`List`, `Optional`, 
 Match expressions become ternary if/instanceof chains:
 
 ```ll-lang
-fn area(s Shape) Float =
+area(s Shape) =
   | Circle r -> r * r * 3.14
   | Rect w h -> w * h
   | Empty -> 0.0
@@ -116,7 +116,7 @@ Each ll-lang module compiles to a Java class. The class name is derived from the
 
 ```ll-lang
 module Examples.Hello
-fn main() = printfn "Hello!"
+main() = printfn "Hello!"
 ```
 
 Emits a class `Hello` wrapping all declarations as `public static` members, with a `public static void main(String[] args)` entry point.
