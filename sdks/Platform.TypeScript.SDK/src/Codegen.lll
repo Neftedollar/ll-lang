@@ -340,14 +340,25 @@ emitParamStr(p Param) =
 emitParams(ps List[Param]) =
   joinWith ") => (" (listMap emitParamStr ps)
 
+-- Platform.TypeScript.SDK native type mapping:
+--   Maybe A -> A | null  (TypeScript native nullable)
+-- Suppress custom tagged union for types covered by native equivalents.
+isNativeType(name Str) =
+  if name == "Maybe"
+    true
+  else false
+
 emitDecl(d Decl) =
   match d
     | DType name tvars ctors ->
-      tpStr = emitTypeParams tvars
-      variants = emitCtorVariants ctors
-      typeDecl = strConcat "type " (strConcat name (strConcat tpStr (strConcat " = " (strConcat variants ";"))))
-      ctorDecls = emitCtorConstructors name tpStr ctors
-      strConcat typeDecl (strConcat "\n" ctorDecls)
+      if isNativeType name
+        ""
+      else
+        tpStr = emitTypeParams tvars
+        variants = emitCtorVariants ctors
+        typeDecl = strConcat "type " (strConcat name (strConcat tpStr (strConcat " = " (strConcat variants ";"))))
+        ctorDecls = emitCtorConstructors name tpStr ctors
+        strConcat typeDecl (strConcat "\n" ctorDecls)
     | DFn name params _ body ->
       match params
         | [] ->
