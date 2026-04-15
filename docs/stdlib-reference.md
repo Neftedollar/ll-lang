@@ -381,7 +381,7 @@ total = mapFold (\acc _k v. acc + v) 0 scores  -- 274
 ### `Std.Toml` — TOML config parser
 
 **Import:** `import Std.Toml`  
-**LOC:** 292  
+**Self-tests:** 5/5  
 **Description:** Minimal TOML parser for project manifests. Parses `[table]` headers, `key = "value"` string pairs, and `key = ["a", "b"]` string arrays. Pure functional, no mutable state.
 
 **Types:**
@@ -420,7 +420,7 @@ loadConfig(path Str) =
 ### `Std.Json` — JSON parser and serializer
 
 **Import:** `import Std.Json`  
-**LOC:** ~420  
+**Self-tests:** 12/12  
 **Description:** JSON parser and serializer built on `Std.Parsec` combinators. Supports strict number shape validation, string escapes (`\uXXXX` + surrogate pairs), deterministic serializer, and structural equality helpers.
 
 **Key functions:**
@@ -534,6 +534,7 @@ main =
 ### `Std.Parsec` — parser combinator toolkit
 
 **Import:** `import Std.Parsec`  
+**Self-tests:** 12/12  
 **Description:** Reusable parser-combinator substrate for self-hosted parsing tasks. Works over source text with explicit position tracking and backtracking control.
 
 **Key types:**

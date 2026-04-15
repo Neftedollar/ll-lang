@@ -85,12 +85,12 @@ Detailed execution breakdown lives in
 Detailed execution breakdown lives in
 [v2 stdlib foundation execution](17-v2-stdlib-foundation-execution.md).
 
-- [ ] Stabilize compact canonical APIs for `Std.List`, `Std.Maybe`, `Std.Result`, `Std.Map`, and `Std.Str`.
-- [ ] Finish `Std.State` as the canonical state-threading foundation.
-- [ ] Finish `Std.Parsec` as the canonical parser-combinator foundation.
-- [ ] Keep `Std.Json` and `Std.Toml` as proof-of-use consumers of the parsing stack.
-- [ ] Finish `Std.Lazy` with explicit delay/force/memoization semantics.
-- [ ] Separate minimal prelude from self-hosting stdlib from backend helpers.
+- [x] Stabilize compact canonical APIs for `Std.List`, `Std.Maybe`, `Std.Result`, `Std.Map`, and `Std.Str`.
+- [x] Finish `Std.State` as the canonical state-threading foundation.
+- [x] Finish `Std.Parsec` as the canonical parser-combinator foundation.
+- [x] Keep `Std.Json` and `Std.Toml` as proof-of-use consumers of the parsing stack.
+- [x] Finish `Std.Lazy` with explicit delay/force/memoization semantics.
+- [x] Separate minimal prelude from self-hosting stdlib from backend helpers.
 
 **Exit criteria**
 
