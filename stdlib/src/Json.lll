@@ -397,3 +397,28 @@ export runRoundtripCase(name Str)(src Str) =
           if eqJsonValue v v2
             mkOk name
           else mkFail name "roundtrip-ast-mismatch"
+
+-- ---- Self-tests ----------------------------------------------------------------
+
+jsonPrint(result Str) = printfn result
+
+main =
+  -- 1-6: basic value kinds
+  _ = jsonPrint (runOkCase "1 null" "null" "null")
+  _ = jsonPrint (runOkCase "2 bool true" "true" "bool")
+  _ = jsonPrint (runOkCase "3 bool false" "false" "bool")
+  _ = jsonPrint (runOkCase "4 number" "42" "number")
+  _ = jsonPrint (runOkCase "5 string" "\"hello\"" "string")
+  _ = jsonPrint (runOkCase "6 array" "[1,2,3]" "array")
+  _ = jsonPrint (runOkCase "7 object" "{\"k\":1}" "object")
+
+  -- 8-10: round-trips
+  _ = jsonPrint (runRoundtripCase "8 roundtrip null" "null")
+  _ = jsonPrint (runRoundtripCase "9 roundtrip nested" "{\"a\":[1,true,null]}")
+  _ = jsonPrint (runRoundtripCase "10 roundtrip string escapes" "\"a\\nb\"")
+
+  -- 11-12: error cases
+  _ = jsonPrint (runErrCase "11 err empty" "")
+  _ = jsonPrint (runErrCase "12 err unclosed" "{\"k\":1")
+
+  printfn "Done"

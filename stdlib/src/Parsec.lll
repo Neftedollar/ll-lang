@@ -470,3 +470,75 @@ export parseQuotedString =
       | _ ->
         StepErr (mkErr "expected quoted string" st0) st0 false
   )
+
+-- ---- Self-tests ----------------------------------------------------------------
+
+parsecCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+-- Extract Int result from runParser
+intResult(r) =
+  match r
+    | Ok (v, _) -> intToStr v
+    | Err _ -> "err"
+
+-- Extract Str result from runParser
+strResult(r) =
+  match r
+    | Ok (v, _) -> v
+    | Err _ -> "err"
+
+-- Check if parser succeeded ("ok") or failed ("err")
+okResult(r) =
+  match r
+    | Ok _ -> "ok"
+    | Err _ -> "err"
+
+-- Extract list-length result (for parseMany tests)
+lenResult(r) =
+  match r
+    | Ok (cs, _) -> intToStr (listLen cs)
+    | Err _ -> "err"
+
+main =
+  -- 1. parsePure returns value without consuming input
+  _ = parsecCheck "1 parsePure" (strResult (runParser (parsePure "hello") "")) "hello"
+
+  -- 2. parseInt parses positive int
+  _ = parsecCheck "2 parseInt pos" (intResult (runParser parseInt "42")) "42"
+
+  -- 3. parseInt parses negative int
+  _ = parsecCheck "3 parseInt neg" (intResult (runParser parseInt "-7")) "-7"
+
+  -- 4. parseInt fails on non-digit
+  _ = parsecCheck "4 parseInt fail" (intResult (runParser parseInt "abc")) "err"
+
+  -- 5. parseChar succeeds on matching char
+  _ = parsecCheck "5 parseChar ok" (okResult (runParser (parseChar 'x') "x")) "ok"
+
+  -- 6. parseChar fails on wrong char
+  _ = parsecCheck "6 parseChar fail" (okResult (runParser (parseChar 'x') "y")) "err"
+
+  -- 7. parseString matches literal
+  _ = parsecCheck "7 parseString" (strResult (runParser (parseString "hi") "hi!")) "hi"
+
+  -- 8. parseMap transforms result
+  _ = parsecCheck "8 parseMap" (strResult (runParser (parseMap (\n. intToStr (n * 2)) parseInt) "5")) "10"
+
+  -- 9. parseBind sequences two parsers
+  addOneParsed = parseBind parseInt \n. parsePure (n + 1)
+  _ = parsecCheck "9 parseBind" (intResult (runParser addOneParsed "3")) "4"
+
+  -- 10. parseOrElse uses first on success
+  _ = parsecCheck "10 parseOrElse first" (strResult (runParser (parseOrElse (parsePure "a") (parsePure "b")) "")) "a"
+
+  -- 11. parseMany collects matching elements
+  _ = parsecCheck "11 parseMany" (lenResult (runParser (parseMany parseDigit) "123abc")) "3"
+
+  -- 12. parseQuotedString parses JSON-style string
+  _ = parsecCheck "12 quotedStr" (strResult (runParser parseQuotedString "\"hello\"")) "hello"
+
+  printfn "Done"

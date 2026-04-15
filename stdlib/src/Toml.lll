@@ -239,3 +239,24 @@ checkManifest(r Maybe[Manifest])(f Manifest -> Bool) =
     | Some m -> f m
     | None -> false
 
+
+main =
+  sample = strConcat "[project]\n" (strConcat "name = \"myapp\"\n" (strConcat "version = \"1.0.0\"\n" "entry = \"src/Main.lll\"\n"))
+
+  -- 1. valid minimal manifest parses
+  _ = tomlCheck "1 parse ok" (checkManifest (parseManifest sample) (\m. mName m == "myapp"))
+
+  -- 2. name extracted correctly
+  _ = tomlCheck "2 name" (checkManifest (parseManifest sample) (\m. mName m == "myapp"))
+
+  -- 3. version extracted correctly
+  _ = tomlCheck "3 version" (checkManifest (parseManifest sample) (\m. mVersion m == "1.0.0"))
+
+  -- 4. missing name → None
+  noName = "[project]\nversion = \"1.0.0\"\n"
+  _ = tomlCheck "4 no name → None" (match parseManifest noName | None -> true | Some _ -> false)
+
+  -- 5. empty input → None
+  _ = tomlCheck "5 empty → None" (match parseManifest "" | None -> true | Some _ -> false)
+
+  printfn "Done"
