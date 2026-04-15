@@ -424,13 +424,35 @@ emitPrelude =
 emitModulePath(parts List[Str]) =
   joinWith "." parts
 
+-- Returns true if the decl is a zero-param `main` function or value binding.
+-- Used to decide whether to inject the prelude open (only executable modules need it).
+declIsMain(d Decl) =
+  match d
+    | DFn n params _ _ ->
+      if n == "main"
+        listIsEmpty params
+      else false
+    | DLet n _ -> n == "main"
+    | _ -> false
+
+moduleHasMain(decls List[Decl]) =
+  match decls
+    | [] -> false
+    | d :: rest ->
+      if declIsMain d
+        true
+      else moduleHasMain rest
+
 emitModule(m Module) =
   match m
     | MkModule path decls ->
       header = strConcat "module " (emitModulePath path)
-      prelude = emitPrelude
       body = emitDecls decls
-      strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
+      if moduleHasMain decls
+        prelude = emitPrelude
+        strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
+      else
+        strConcat header (strConcat "\n\n" body)
 
 -- ---- Tests -----------------------------------------------------------------
 
@@ -445,6 +467,12 @@ checkContains(label Str)(got Str)(needle Str) =
     printfn (strConcat "OK " label)
   else
     printfn (strConcat "FAIL " (strConcat label (strConcat "\n  missing: " (strConcat needle (strConcat "\n  in: " got)))))
+
+checkNotContains(label Str)(got Str)(needle Str) =
+  if strContains needle got
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  unexpected: " (strConcat needle (strConcat "\n  in: " got)))))
+  else
+    printfn (strConcat "OK " label)
 
 main =
   -- 1. EInt
@@ -490,7 +518,7 @@ main =
   loopDecl = DFn "loop" loopParams None loopBody
   _ = checkContains "11b DFn loop rec" (emitDecl loopDecl) "let rec loop"
 
-  -- 12. Full module emit
+  -- 12. Full module emit — library module (no main) → no prelude
   idParams = MkParam "x" (TyName "Int") :: []
   modDecls = DType "Color" [] colorCtors :: DFn "id" idParams None (EVar "x") :: []
   m = MkModule ("Test" :: "Mod" :: []) modDecls
@@ -498,7 +526,14 @@ main =
   _ = checkContains "12 module header" out "module Test.Mod"
   _ = checkContains "12 module type" out "type Color"
   _ = checkContains "12 module fn non-rec" out "let id"
-  _ = checkContains "12 module prelude" out "open LLLang.Prelude"
+  _ = checkNotContains "12 library module: no prelude" out "open LLLang.Prelude"
+
+  -- 12b. Executable module (has main) → prelude injected
+  mainBody = EApp (EVar "printfn") (EStr "hello")
+  mainDecl = DFn "main" [] None mainBody
+  mainModule = MkModule ("Test" :: "Exe" :: []) (listAppend modDecls [mainDecl])
+  outExe = emitModule mainModule
+  _ = checkContains "12b executable module: has prelude" outExe "open LLLang.Prelude"
 
   -- 13. PWild pattern
   _ = codegenCheck "13 PWild" (emitPattern PWild) "_"
