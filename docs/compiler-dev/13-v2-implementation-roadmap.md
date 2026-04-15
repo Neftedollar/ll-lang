@@ -36,6 +36,9 @@ This is the execution plan for taking ll-lang from the current `1.x` state to `v
 
 ## Milestone 1 — Canonical compiler boundaries
 
+Detailed execution breakdown lives in
+[v2 compiler boundaries execution](18-v2-compiler-boundaries-execution.md).
+
 - [ ] Split the canonical compiler architecture into explicit front-end, typed-core, lowering, backend, and toolchain layers in docs and code layout.
 - [ ] Eliminate duplicated core type definitions between stage0 and self-hosted modules where a shared ll-lang definition can own the contract.
 - [ ] Define and document pass invariants and serialized fixture shapes for each major layer.
@@ -52,6 +55,9 @@ This is the execution plan for taking ll-lang from the current `1.x` state to `v
 - pass-level smoke fixtures exist for each major phase
 
 ## Milestone 2 — Project and dependency system
+
+Detailed execution breakdown lives in
+[v2 project system execution](16-v2-project-system-execution.md).
 
 - [ ] Make `lll.toml` the only canonical manifest path.
 - [ ] Define and implement lock/checksum semantics (`ll.sum` or equivalent canonical lock file).
@@ -76,6 +82,9 @@ This is the execution plan for taking ll-lang from the current `1.x` state to `v
 
 ## Milestone 3 — Stdlib foundation for self-hosting
 
+Detailed execution breakdown lives in
+[v2 stdlib foundation execution](17-v2-stdlib-foundation-execution.md).
+
 - [ ] Stabilize compact canonical APIs for `Std.List`, `Std.Maybe`, `Std.Result`, `Std.Map`, and `Std.Str`.
 - [ ] Finish `Std.State` as the canonical state-threading foundation.
 - [ ] Finish `Std.Parsec` as the canonical parser-combinator foundation.
@@ -99,6 +108,9 @@ This is the execution plan for taking ll-lang from the current `1.x` state to `v
 
 ## Milestone 4 — Syntax ergonomics for compiler-heavy code
 
+Detailed execution breakdown lives in
+[v2 syntax ergonomics execution](19-v2-syntax-ergonomics-execution.md).
+
 - [ ] Stabilize the fixed operator layer: `|>`, `>>=`, `>>`, `<|>`.
 - [ ] Define precedence and associativity once and enforce it in both parsers and all codegens.
 - [ ] Stabilize constructor/function passing where canonical.
@@ -121,6 +133,9 @@ This is the execution plan for taking ll-lang from the current `1.x` state to `v
 
 ## Milestone 5 — Canonical self-host transition
 
+Detailed execution breakdown lives in
+[v2 self-host transition execution](20-v2-self-host-transition-execution.md).
+
 - [ ] Promote the self-hosted compiler from side-path to canonical implementation path.
 - [ ] Ensure the self-hosted compiler can compile itself and a real dependency-bearing project.
 - [ ] Move F# stage0 into an isolated bootstrap role with explicit maintenance policy.
@@ -142,6 +157,9 @@ This is the execution plan for taking ll-lang from the current `1.x` state to `v
 
 ## Milestone 6 — LLM operating system around the language
 
+Detailed execution breakdown lives in
+[v2 llm operating system execution](21-v2-llm-operating-system-execution.md).
+
 - [ ] Expand MCP tools around authoring, diagnostics, stdlib discovery, project graph inspection, and benchmark reporting.
 - [ ] Version prompt packs and compact repair recipes alongside the compiler.
 - [ ] Publish ll-lang authoring conventions for LLM agents as canonical docs, not incidental notes.
@@ -160,6 +178,9 @@ This is the execution plan for taking ll-lang from the current `1.x` state to `v
 - prompt-pack regression samples round-trip through compile/check flows
 
 ## Milestone 7 — Benchmarks and release gates
+
+Detailed execution breakdown lives in
+[v2 benchmarks and release gates execution](22-v2-benchmarks-release-gates-execution.md).
 
 - [ ] Add a token-efficiency benchmark suite versus F#, TypeScript, Python, Java, and C#.
 - [ ] Add compile-latency and self-hosted-vs-stage0 benchmark baselines.

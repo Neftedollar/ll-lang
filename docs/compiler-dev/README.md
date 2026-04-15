@@ -22,6 +22,13 @@ front-end.
 13. [v2 implementation roadmap](13-v2-implementation-roadmap.md) — tracked execution plan with done/not-done checklists
 14. [v2 canonical compiler boundaries](14-v2-canonical-compiler-boundaries.md) — subsystem ownership map and migration targets
 15. [v2 pass contracts](15-v2-pass-contracts.md) — explicit input/output contracts for canonical compiler phases
+16. [v2 project system execution](16-v2-project-system-execution.md) — implementer-facing breakdown of the canonical manifest/resolver/lock/vendor lifecycle
+17. [v2 stdlib foundation execution](17-v2-stdlib-foundation-execution.md) — implementer-facing breakdown of the self-hosting foundation stdlib, including post-milestone clarification questions
+18. [v2 compiler boundaries execution](18-v2-compiler-boundaries-execution.md) — implementer-facing breakdown of canonical subsystem ownership and pass-boundary enforcement
+19. [v2 syntax ergonomics execution](19-v2-syntax-ergonomics-execution.md) — implementer-facing breakdown of operator, precedence, and compiler-heavy syntax cleanup
+20. [v2 self-host transition execution](20-v2-self-host-transition-execution.md) — implementer-facing breakdown of promoting ll-lang to canonical compiler path
+21. [v2 llm operating system execution](21-v2-llm-operating-system-execution.md) — implementer-facing breakdown of MCP, prompt packs, and machine-readable authoring workflows
+22. [v2 benchmarks and release gates execution](22-v2-benchmarks-release-gates-execution.md) — implementer-facing breakdown of evidence, benchmarks, and release-blocking gates
 
 ## Repository layout
 
