@@ -1,0 +1,206 @@
+module Std.CompilerTyped
+
+import Std.Parser
+import Std.Map
+import Std.List
+import Std.CompilerTypes
+
+-- ============================================================
+-- Typed IR shapes for ll-lang v2 self-hosted compiler.
+-- Canonical owner: Compiler.Typed (14-v2-canonical-compiler-boundaries.md)
+--
+-- These are the output of Compiler.Infer (Algorithm W) and the
+-- input to Compiler.Lower / backend codegens.
+--
+-- Design note: TypedExpr is a flat sum type (not a record wrapper
+-- around a kind-sum) to avoid mutual-type recursion, which ll-lang
+-- does not support without the F# `and` keyword.
+--
+-- Each TypedExpr constructor carries:
+--   - its sub-expressions (TypedExpr args)
+--   - its inferred TypeExpr (last argument, always present)
+-- ============================================================
+
+-- ---- Typed pattern --------------------------------------------------
+-- Pattern with its resolved type.
+
+TypedPattern = MkTypedPat Pattern TypeExpr
+
+typedPatPat(tp TypedPattern) =
+  match tp
+    | MkTypedPat p _ -> p
+
+typedPatType(tp TypedPattern) =
+  match tp
+    | MkTypedPat _ t -> t
+
+-- ---- Typed expression (flat, carries its own TypeExpr) --------------
+-- Each constructor's LAST argument is the type of the whole expression.
+-- Literal constructors match Expr from Std.Parser (no Literal wrapper type).
+
+TypedExpr =
+  | TEInt Int TypeExpr
+  | TEStr Str TypeExpr
+  | TEBool Bool TypeExpr
+  | TEChar Char TypeExpr
+  | TEFloat Str TypeExpr
+  | TEVar Str TypeExpr
+  | TECon Str TypeExpr
+  | TEApp TypedExpr TypedExpr TypeExpr
+  | TELam Str TypeExpr TypedExpr TypeExpr   -- param, paramTy, body, exprTy
+  | TeLet Str TypedExpr TypedExpr TypeExpr  -- name, val, body, exprTy
+  | TEIf TypedExpr TypedExpr TypedExpr TypeExpr   -- cond, then, else, exprTy
+  | TEMatch TypedExpr (List[TypedPattern]) (List[TypedExpr]) TypeExpr
+  | TEList (List[TypedExpr]) TypeExpr
+  | TECons TypedExpr TypedExpr TypeExpr     -- head, tail, exprTy
+  | TEBinOp Str TypedExpr TypedExpr TypeExpr  -- op, left, right, exprTy
+  | TETuple TypedExpr TypedExpr TypeExpr    -- fst, snd, exprTy
+  | TENil TypeExpr                          -- empty list
+  | TEUnit TypeExpr                         -- unit value
+
+-- Extract the TypeExpr from any TypedExpr node.
+typedExprType(te TypedExpr) =
+  match te
+    | TEInt _ t -> t
+    | TEStr _ t -> t
+    | TEBool _ t -> t
+    | TEChar _ t -> t
+    | TEFloat _ t -> t
+    | TEVar _ t -> t
+    | TECon _ t -> t
+    | TEApp _ _ t -> t
+    | TELam _ _ _ t -> t
+    | TeLet _ _ _ t -> t
+    | TEIf _ _ _ t -> t
+    | TEMatch _ _ _ t -> t
+    | TEList _ t -> t
+    | TECons _ _ t -> t
+    | TEBinOp _ _ _ t -> t
+    | TETuple _ _ t -> t
+    | TENil t -> t
+    | TEUnit t -> t
+
+-- ---- Typed function signature ----------------------------------------
+
+TypedFnSig = MkTypedFnSig Str (List[Param]) TypeExpr
+  -- name, typed params, return type
+
+typedFnName(sig TypedFnSig) =
+  match sig
+    | MkTypedFnSig n _ _ -> n
+
+typedFnParams(sig TypedFnSig) =
+  match sig
+    | MkTypedFnSig _ ps _ -> ps
+
+typedFnRetTy(sig TypedFnSig) =
+  match sig
+    | MkTypedFnSig _ _ r -> r
+
+-- ---- Typed declaration -----------------------------------------------
+
+TypedDecl =
+  | TDFn TypedFnSig Scheme TypedExpr
+  | TDLet Str Scheme TypedExpr
+  | TDExternal TypedFnSig Scheme
+  | TDOpaque Str
+  | TDType Str (List[Str]) (List[Constructor])
+  | TDTag Str
+  | TDUnit Str
+  | TDImport (List[Str])
+
+-- ---- Typed module ----------------------------------------------------
+-- path: module identifier segments
+-- decls: typed declarations in order
+-- env: final type environment after processing all decls
+
+TypedModule = MkTypedModule (List[Str]) (List[TypedDecl]) (RBMap[Str][Scheme])
+
+typedModPath(m TypedModule) =
+  match m
+    | MkTypedModule p _ _ -> p
+
+typedModDecls(m TypedModule) =
+  match m
+    | MkTypedModule _ ds _ -> ds
+
+typedModEnv(m TypedModule) =
+  match m
+    | MkTypedModule _ _ e -> e
+
+mkTypedModule(path List[Str])(decls List[TypedDecl])(env RBMap[Str][Scheme]) =
+  MkTypedModule path decls env
+
+-- ---- Pretty rendering helpers ----------------------------------------
+
+renderTypedExprTag(te TypedExpr) =
+  match te
+    | TEInt _ _ -> "TEInt"
+    | TEStr _ _ -> "TEStr"
+    | TEBool _ _ -> "TEBool"
+    | TEChar _ _ -> "TEChar"
+    | TEFloat _ _ -> "TEFloat"
+    | TEVar n _ -> strConcat "TEVar:" n
+    | TECon n _ -> strConcat "TECon:" n
+    | TEApp _ _ _ -> "TEApp"
+    | TELam p _ _ _ -> strConcat "TELam:" p
+    | TeLet n _ _ _ -> strConcat "TeLet:" n
+    | TEIf _ _ _ _ -> "TEIf"
+    | TEMatch _ _ _ _ -> "TEMatch"
+    | TEList _ _ -> "TEList"
+    | TECons _ _ _ -> "TECons"
+    | TEBinOp op _ _ _ -> strConcat "TEBinOp:" op
+    | TETuple _ _ _ -> "TeTuple"
+    | TENil _ -> "TENil"
+    | TEUnit _ -> "TEUnit"
+
+-- ---- Self-tests --------------------------------------------------------
+
+typedCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+main =
+  -- 1-2. TypedPattern accessors
+  pat1 = MkTypedPat (PVar "x") (TyName "Int")
+  _ = typedCheck "1 pat-pat" (match typedPatPat pat1 | PVar n -> n | _ -> "?") "x"
+  _ = typedCheck "2 pat-type" (renderType (typedPatType pat1)) "Int"
+
+  -- 3-5. TypedExpr accessors
+  te1 = TEVar "foo" (TyName "Str")
+  _ = typedCheck "3 texpr tag" (renderTypedExprTag te1) "TEVar:foo"
+  _ = typedCheck "4 texpr type" (renderType (typedExprType te1)) "Str"
+
+  te2 = TEInt 42 (TyName "Int")
+  _ = typedCheck "5 teint tag" (renderTypedExprTag te2) "TEInt"
+  _ = typedCheck "6 teint type" (renderType (typedExprType te2)) "Int"
+
+  -- 7. TEApp
+  te3 = TEApp (TEVar "f" (TyFn (TyName "Int") (TyName "Str"))) (TEInt 1 (TyName "Int")) (TyName "Str")
+  _ = typedCheck "7 teapp tag" (renderTypedExprTag te3) "TEApp"
+  _ = typedCheck "8 teapp type" (renderType (typedExprType te3)) "Str"
+
+  -- 9. TypedFnSig
+  sig1 = MkTypedFnSig "add" [MkParam "x" (TyName "Int"); MkParam "y" (TyName "Int")] (TyName "Int")
+  _ = typedCheck "9 fn-name" (typedFnName sig1) "add"
+  _ = typedCheck "10 fn-retty" (renderType (typedFnRetTy sig1)) "Int"
+
+  -- 11. TDFn
+  body1 = TEBinOp "+" (TEVar "x" (TyName "Int")) (TEVar "y" (TyName "Int")) (TyName "Int")
+  sch1 = MkScheme [] (TyFn (TyName "Int") (TyFn (TyName "Int") (TyName "Int")))
+  decl1 = TDFn sig1 sch1 body1
+  _ = typedCheck "11 tdfn" (match decl1 | TDFn s _ _ -> typedFnName s | _ -> "?") "add"
+
+  -- 12. TypedModule
+  mod1 = MkTypedModule ["My"; "Mod"] [decl1] Leaf
+  _ = typedCheck "12 mod-path" (match typedModPath mod1 | h :: _ -> h | [] -> "?") "My"
+  _ = typedCheck "13 mod-decl-count" (intToStr (listLen (typedModDecls mod1))) "1"
+
+  -- 14. TELam
+  te4 = TELam "n" (TyName "Int") (TEVar "n" (TyName "Int")) (TyFn (TyName "Int") (TyName "Int"))
+  _ = typedCheck "14 telam tag" (renderTypedExprTag te4) "TELam:n"
+  _ = typedCheck "15 telam type" (renderType (typedExprType te4)) "Int -> Int"
+
+  printfn "Done"
