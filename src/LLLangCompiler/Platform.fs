@@ -59,6 +59,12 @@ let private fsharpExternalTargetMap : Map<string, string> =
     [
         "console_log", "System.Console.WriteLine"
         "JSON_parse", "System.Text.Json.JsonSerializer.Deserialize<obj>"
+        "fileReadAll", "System.IO.File.ReadAllText"
+        "fileWriteAll", "System.IO.File.WriteAllText"
+        "fileExists", "System.IO.File.Exists"
+        "dirList", "ll_dirList"
+        "dirExists", "System.IO.Directory.Exists"
+        "processRun", "ll_processRun"
     ]
     |> Map.ofList
 
