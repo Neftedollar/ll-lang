@@ -54,3 +54,15 @@ check(label Str)(ok Bool) =
     _ = printfn (strConcat "FAIL " label)
     1
 
+main =
+  _ = check "1 clampInt lo" (clampInt 0 10 (0 - 5) == 0)
+  _ = check "2 clampInt hi" (clampInt 0 10 20 == 10)
+  _ = check "3 clampInt mid" (clampInt 0 10 5 == 5)
+  _ = check "4 betweenInt lo" (betweenInt 1 5 0 == false)
+  _ = check "5 betweenInt hi" (betweenInt 1 5 6 == false)
+  _ = check "6 betweenInt in" (betweenInt 1 5 3 == true)
+  _ = check "7 signInt pos" (signInt 7 == 1)
+  _ = check "8 signInt neg" (signInt (0 - 3) == (0 - 1))
+  _ = check "9 signInt zero" (signInt 0 == 0)
+  printfn "Done"
+
