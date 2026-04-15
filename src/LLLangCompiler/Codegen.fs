@@ -575,6 +575,50 @@ let private emitDeclGroup (group: (TypedDecl * bool) list) : string =
             + (rest |> List.map (fun c -> "and " + c) |> String.concat "\n\n")
         | [] -> ""
 
+/// Emit a group, inserting `private` for names in `collidingNames`.
+/// Only value/function/let bindings are scoped; type declarations stay public.
+/// `collidingNames` = names defined in ≥2 modules in the same project — these
+/// leak into consuming modules via `open` and cause F# ambiguity errors.
+/// F# syntax: `let rec private f` (not `let private rec f`).
+let private emitDeclGroupWithCollisionScope
+    (collidingNames: Set<string>)
+    (group: (TypedDecl * bool) list)
+    : string =
+    let declName (d: TypedDecl) =
+        match d with
+        | TDFn(sig_, _, _) -> Some sig_.Name
+        | TDLet(x, _, _) -> Some x
+        | _ -> None
+    let isColliding (d: TypedDecl) =
+        match declName d with
+        | Some name -> Set.contains name collidingNames
+        | None -> false
+    let insertPrivate (raw: string) =
+        if raw.StartsWith("let rec ") then "let rec private " + raw.[8..]
+        elif raw.StartsWith("let ") then "let private " + raw.[4..]
+        else raw
+    match group with
+    | [] -> ""
+    | [(d, _)] ->
+        let raw = emitDecl d
+        if isColliding d then insertPrivate raw else raw
+    | fns ->
+        // Mutually-recursive group. Make the whole block private only when ALL
+        // members are colliding names (avoids exposing the block under any alias).
+        let allCollide = fns |> List.forall (fun (d, _) -> isColliding d)
+        let clauses =
+            fns
+            |> List.map (fun (d, _) ->
+                match d with
+                | TDFn(sig_, _, body) -> emitFnClause sig_ body
+                | _ -> failwith "groupDecls invariant violated")
+        match clauses with
+        | first :: rest ->
+            let letKw = if allCollide then "let rec private " else "let rec "
+            letKw + first + "\n\n"
+            + (rest |> List.map (fun c -> "and " + c) |> String.concat "\n\n")
+        | [] -> ""
+
 // ---- F# prelude block (Phase 6 stdlib) --------------------------------------
 //
 // Emitted on demand to provide ll-lang stdlib bindings that
@@ -874,6 +918,23 @@ let emitProjectFiles (tms: TypedModule list) : (string * string) list =
             "module LLLang.Prelude\n\n" + combinedPrelude
     let preludeFile = ("Prelude.fs", preludeContent)
 
+    // Compute value/fn names defined in ≥2 modules.  These names leak into
+    // consuming modules via `open` and create F# ambiguity errors.  We scope
+    // them to `let private` so they are invisible outside their own .fs file.
+    let declValueName (d: TypedDecl) =
+        match d with
+        | TDFn(sig_, _, _) when not (isMainFn sig_) -> Some sig_.Name
+        | TDLet(x, _, _) -> Some x
+        | _ -> None
+    let allNames =
+        tms |> List.collect (fun tm ->
+            tm.Decls |> List.choose (fun (d, _) -> declValueName d))
+    let collidingNames =
+        allNames
+        |> List.countBy id
+        |> List.choose (fun (name, cnt) -> if cnt >= 2 then Some name else None)
+        |> Set.ofList
+
     let moduleFiles =
         let lastIdx = max 0 (List.length tms - 1)
         tms
@@ -904,7 +965,7 @@ let emitProjectFiles (tms: TypedModule list) : (string * string) list =
             let typeStr = emitTypeDecls typeDecls
             let otherStr =
                 groupDecls otherDecls
-                |> List.map emitDeclGroup
+                |> List.map (emitDeclGroupWithCollisionScope collidingNames)
                 |> List.filter (fun s -> s <> "")
                 |> String.concat "\n\n"
             let parts =
