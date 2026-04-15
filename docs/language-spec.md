@@ -159,6 +159,7 @@ Canonical `1.x` declaration forms:
 module My.App
 
 import Std.Map
+import "github.com/user/json/Parser"   -- remote import (M2)
 
 export { main, helper }
 
@@ -177,7 +178,7 @@ opaque Any
 Stable declaration categories:
 
 - module header
-- imports
+- imports (local: `import Std.Map`; remote: `import "github.com/user/repo/Module"`)
 - explicit export list
 - top-level value bindings
 - top-level function bindings

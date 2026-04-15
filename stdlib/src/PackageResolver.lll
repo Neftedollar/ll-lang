@@ -1,0 +1,142 @@
+module Std.PackageResolver
+
+-- Remote package resolution for ll-lang.
+-- Implements Go-style URL-based imports: import "github.com/user/pkg/Module"
+--
+-- Resolution algorithm:
+--   1. Parse URL: scheme://host/owner/repo/...path/Module
+--   2. Check local cache at cacheDir / urlHash
+--   3. If not cached: git clone --depth 1 into cache
+--   4. Locate src/<Module>.lll in the cached repo
+--   5. Return source text for compilation
+--
+-- Network and filesystem operations are platform-provided via FFI.
+
+-- ---- URL parsing ---------------------------------------------------------
+
+-- Parse a remote import URL into (host, path segments).
+-- "github.com/user/repo/Module" → ("github.com", ["user", "repo", "Module"])
+parseUrl(url Str) =
+  parts = strSplit "/" url
+  match parts
+    | [] -> ("", [])
+    | host :: rest -> (host, rest)
+
+-- Extract the module name from a URL path.
+-- "github.com/user/repo/Sub/Module" → "Sub.Module"
+-- The last two segments form the repo and module.
+urlToModuleName(url Str) =
+  let (host, parts) = parseUrl url
+  match parts
+    | [] -> ""
+    | _ -> joinDot (drop 2 parts)
+
+-- Extract the repo clone URL (https) from an import URL.
+-- "github.com/user/repo/Module" → "https://github.com/user/repo"
+urlToRepoUrl(url Str) =
+  let (host, parts) = parseUrl url
+  match parts
+    | [] -> ""
+    | owner :: repo :: _ ->
+      strConcat "https://" (strConcat host (strConcat "/" (strConcat owner (strConcat "/" repo))))
+    | _ -> ""
+
+-- Get the path to the module file within the cached repo.
+-- "github.com/user/repo/Sub/Module" → "src/Sub/Module.lll"
+urlToFilePath(url Str) =
+  let (host, parts) = parseUrl url
+  match parts
+    | [] -> ""
+    | _ ->
+      modParts = drop 2 parts
+      modPath = joinSlash modParts
+      strConcat "src/" (strConcat modPath ".lll")
+
+-- ---- Helpers -------------------------------------------------------------
+
+joinDot(parts List[Str]) =
+  match parts
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat "." (joinDot rest))
+
+joinSlash(parts List[Str]) =
+  match parts
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat "/" (joinSlash rest))
+
+-- Drop the first n elements from a list.
+drop(n Int)(xs List[Str]) =
+  if n <= 0
+    xs
+  else
+    match xs
+      | [] -> []
+      | _ :: rest -> drop (n - 1) rest
+
+-- ---- Lock file -----------------------------------------------------------
+
+-- A lock-file entry for a resolved remote package.
+LockEntry =
+  | MkLockEntry Str Str Str  -- url, version/tag, commit-hash
+
+showLockEntry(e LockEntry) =
+  match e
+    | MkLockEntry url version commit ->
+      strConcat url (strConcat " " (strConcat version (strConcat " " commit)))
+
+-- Parse a lock-file line into a LockEntry.
+parseLockLine(line Str) =
+  parts = strSplit " " line
+  match parts
+    | url :: version :: commit :: _ -> MkLockEntry url version commit
+    | url :: version :: _ -> MkLockEntry url version ""
+    | url :: _ -> MkLockEntry url "" ""
+    | _ -> MkLockEntry "" "" ""
+
+-- ---- Self-tests ----------------------------------------------------------
+
+resolverCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+main =
+  -- 1. parseUrl host
+  let (host1, parts1) = parseUrl "github.com/user/repo/Module"
+  _ = resolverCheck "1 parseUrl host" host1 "github.com"
+
+  -- 2. parseUrl parts
+  _ = resolverCheck "2 parseUrl parts" (joinDot parts1) "user.repo.Module"
+
+  -- 3. urlToRepoUrl
+  _ = resolverCheck "3 urlToRepoUrl" (urlToRepoUrl "github.com/user/repo/Module") "https://github.com/user/repo"
+
+  -- 4. urlToFilePath module
+  _ = resolverCheck "4 urlToFilePath" (urlToFilePath "github.com/user/repo/Module") "src/Module.lll"
+
+  -- 5. urlToFilePath nested
+  _ = resolverCheck "5 urlToFilePath nested" (urlToFilePath "github.com/user/repo/Sub/Module") "src/Sub/Module.lll"
+
+  -- 6. urlToModuleName flat
+  _ = resolverCheck "6 urlToModuleName flat" (urlToModuleName "github.com/user/repo/Module") "Module"
+
+  -- 7. urlToModuleName nested
+  _ = resolverCheck "7 urlToModuleName nested" (urlToModuleName "github.com/user/repo/Sub/Module") "Sub.Module"
+
+  -- 8. joinDot
+  _ = resolverCheck "8 joinDot" (joinDot ["a"; "b"; "c"]) "a.b.c"
+
+  -- 9. drop
+  _ = resolverCheck "9 drop 2" (joinDot (drop 2 ["a"; "b"; "c"; "d"])) "c.d"
+
+  -- 10. showLockEntry
+  _ = resolverCheck "10 showLockEntry" (showLockEntry (MkLockEntry "github.com/user/repo" "v1.0.0" "abc123")) "github.com/user/repo v1.0.0 abc123"
+
+  -- 11. parseLockLine
+  entry = parseLockLine "github.com/user/repo v1.0.0 abc123"
+  _ = resolverCheck "11 parseLockLine" (showLockEntry entry) "github.com/user/repo v1.0.0 abc123"
+
+  printfn "Done"

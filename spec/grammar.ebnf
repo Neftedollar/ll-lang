@@ -197,7 +197,8 @@ module ::= "module" module-path NEWLINE
            (import-decl | export-decl | decl)*
 
 module-path  ::= TYPEID (OP_DOT TYPEID)*
-import-decl  ::= "import" module-path
+import-decl  ::= "import" (module-path | STR_LIT)
+(* STR_LIT form is a remote import: import "github.com/user/repo/Module" *)
 export-decl  ::= "export" decl
 
 (* ============================================================

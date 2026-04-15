@@ -55,6 +55,7 @@ Decl =
   | DFn Str (List[Param]) (Maybe[TypeExpr]) Expr
   | DType Str (List[Str]) (List[Constructor])
   | DImport (List[Str])
+  | DImportUrl Str
   | DExport Decl
   | DLet Str Expr
   | DExternal Str (List[Param]) TypeExpr
@@ -524,6 +525,8 @@ parseImportDecl(toks List[Token]) =
     | KwImport :: TypeId head :: rest ->
       let (segs, rest2) = parseImportPath [head] rest
       (DImport segs, rest2)
+    | KwImport :: StrLit url :: rest ->
+      (DImportUrl url, rest)
     | _ -> (DImport [], toks)
 
 -- ---- External declaration parsing ------------------------------------
@@ -679,6 +682,8 @@ showDecl(d Decl) =
     | DImport segs ->
       path = joinDot segs
       strConcat "DImport " path
+    | DImportUrl url ->
+      strConcat "DImportUrl " url
     | DExport inner ->
       strConcat "DExport(" (strConcat (showDecl inner) ")")
     | DLet name body ->
