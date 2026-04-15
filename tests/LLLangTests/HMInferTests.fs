@@ -346,14 +346,8 @@ let ``bind operator accepts functional rhs`` () =
 
 [<Fact>]
 let ``bind operator rejects non-functional rhs`` () =
-    let src = "module M\nlet bad = 5 >>= 1"
-    match tokenize src |> Result.bind parseModuleWithPos with
-    | Error e -> failwith $"parse: {e}"
-    | Ok (m, pm) ->
-        match elaborate pm m with
-        | Ok _ -> Assert.True(false, "expected elaborator error for non-functional >>= rhs")
-        | Error errs ->
-            Assert.Contains(errs, fun e -> e.Code = E001)
+    let errs = inferErrs "module M\nlet bad = 5 >>= 1"
+    Assert.Contains(errs, fun e -> e.Code = E001)
 
 [<Fact>]
 let ``bind operator requires rhs to return same carrier`` () =
