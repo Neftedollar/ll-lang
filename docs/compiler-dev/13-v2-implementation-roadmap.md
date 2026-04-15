@@ -59,12 +59,12 @@ Detailed execution breakdown lives in
 Detailed execution breakdown lives in
 [v2 project system execution](16-v2-project-system-execution.md).
 
-- [ ] Make `lll.toml` the only canonical manifest path.
-- [ ] Define and implement lock/checksum semantics (`ll.sum` or equivalent canonical lock file).
-- [ ] Support deterministic path and git dependencies with a single resolver behavior.
-- [ ] Materialize a canonical `vendor/` layout.
-- [ ] Ship `lllc mod add`, `lllc mod tidy`, `lllc mod why`, and deterministic `install` semantics.
-- [ ] Remove legacy parallel dependency flows from the supported path.
+- [x] Make `lll.toml` the only canonical manifest path.
+- [x] Define and implement lock/checksum semantics (`ll.sum` or equivalent canonical lock file).
+- [x] Support deterministic path and git dependencies with a single resolver behavior.
+- [x] Materialize a canonical `vendor/` layout.
+- [x] Ship `lllc mod add`, `lllc mod tidy`, `lllc mod why`, and deterministic `install` semantics.
+- [x] Remove legacy parallel dependency flows from the supported path.
 
 **Exit criteria**
 
@@ -136,10 +136,10 @@ Detailed execution breakdown lives in
 Detailed execution breakdown lives in
 [v2 self-host transition execution](20-v2-self-host-transition-execution.md).
 
-- [ ] Promote the self-hosted compiler from side-path to canonical implementation path.
+- [x] Promote the self-hosted compiler from side-path to canonical implementation path.
 - [ ] Ensure the self-hosted compiler can compile itself and a real dependency-bearing project.
-- [ ] Move F# stage0 into an isolated bootstrap role with explicit maintenance policy.
-- [ ] Ensure new compiler features land in ll-lang first.
+- [x] Move F# stage0 into an isolated bootstrap role with explicit maintenance policy.
+- [x] Ensure new compiler features land in ll-lang first.
 - [ ] Remove active-development dependence on F# compiler internals.
 
 **Exit criteria**
