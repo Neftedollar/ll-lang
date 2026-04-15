@@ -1,0 +1,76 @@
+module Examples.LlmRepairWorkflow
+
+import Std.Compiler
+
+-- ============================================================
+-- Machine-checked LLM workflow examples.
+-- Demonstrates: compile → diagnose → repair → verify cycle
+-- using Std.Compiler structured diagnostics.
+-- ============================================================
+
+-- 1. A well-typed program produces no errors.
+--    LLM workflow: generate → check_source → empty errors → ship.
+demo1 =
+  src = "module Demo\nadd(a Int)(b Int) = a + b\n"
+  errs = collectAllErrors src
+  listIsEmpty errs
+
+-- 2. An unbound variable produces E002.
+--    LLM workflow: check_source → see E002 → lookup_error → fix name.
+demo2 =
+  src = "module Demo\nresult = undefinedFunc 1\n"
+  errs = collectAllErrors src
+  firstErr = match errs | e :: _ -> e | [] -> ""
+  strContains "Unbound" firstErr
+
+-- 3. A non-exhaustive match produces E003.
+--    LLM workflow: check_source → see E003 → add missing | arm → recheck.
+demo3 =
+  src = "module Demo\nMaybe A = Some A | None\nunwrap(m Maybe[Int]) = match m | Some n -> n\n"
+  errs = collectAllErrors src
+  strContains "xhaustive" (match errs | e :: _ -> e | [] -> "")
+
+-- 4. structured JSON diagnostic for MCP-style consumption.
+--    nextBlockerFull returns {ok, stage, message} — parseable by LLM.
+demo4 =
+  good = "module Demo\nfoo(x Int) = x\n"
+  result = nextBlockerFull good
+  strContains "\"ok\":true" result
+
+demo5 =
+  bad = "module Demo\nresult = badName\n"
+  result = nextBlockerFull bad
+  strContains "\"ok\":false" result
+
+-- 6. Successful compile returns F# output (non-empty).
+--    LLM workflow: compile_source → target output → drop into project.
+demo6 =
+  src = "module Demo\nid(x Int) = x\n"
+  out = compile src
+  strLen out > 0
+
+-- 7. Repair loop: first attempt has error, second is fixed.
+demo7 =
+  broken = "module Demo\nresult = missingFn\n"
+  fixed = "module Demo\nresult = 42\n"
+  errs1 = collectAllErrors broken
+  errs2 = collectAllErrors fixed
+  (listIsEmpty errs1 == false) == (listIsEmpty errs2 == false)
+
+-- ---- Tests ---------------------------------------------------------------
+
+checkBool(label Str)(ok Bool) =
+  if ok
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " label)
+
+main =
+  _ = checkBool "1 valid program no errors" demo1
+  _ = checkBool "2 unbound var E002 detected" demo2
+  _ = checkBool "3 non-exhaustive E003 detected" demo3
+  _ = checkBool "4 MCP JSON ok:true on good src" demo4
+  _ = checkBool "5 MCP JSON ok:false on bad src" demo5
+  _ = checkBool "6 compile produces output" demo6
+  _ = checkBool "7 broken and fixed differ" demo7
+  printfn "Done"

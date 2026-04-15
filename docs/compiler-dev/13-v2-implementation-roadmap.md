@@ -163,7 +163,7 @@ Detailed execution breakdown lives in
 - [x] Expand MCP tools around authoring, diagnostics, stdlib discovery, project graph inspection, and benchmark reporting.
 - [x] Version prompt packs and compact repair recipes alongside the compiler.
 - [x] Publish ll-lang authoring conventions for LLM agents as canonical docs, not incidental notes.
-- [ ] Add machine-checked examples for common LLM workflows.
+- [x] Add machine-checked examples for common LLM workflows.
 
 **Exit criteria**
 
