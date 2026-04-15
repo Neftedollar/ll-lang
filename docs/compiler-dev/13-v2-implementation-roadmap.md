@@ -39,9 +39,9 @@ This is the execution plan for taking ll-lang from the current `1.x` state to `v
 Detailed execution breakdown lives in
 [v2 compiler boundaries execution](18-v2-compiler-boundaries-execution.md).
 
-- [ ] Split the canonical compiler architecture into explicit front-end, typed-core, lowering, backend, and toolchain layers in docs and code layout.
-- [ ] Eliminate duplicated core type definitions between stage0 and self-hosted modules where a shared ll-lang definition can own the contract.
-- [ ] Define and document pass invariants and serialized fixture shapes for each major layer.
+- [x] Split the canonical compiler architecture into explicit front-end, typed-core, lowering, backend, and toolchain layers in docs and code layout.
+- [x] Eliminate duplicated core type definitions between stage0 and self-hosted modules where a shared ll-lang definition can own the contract.
+- [x] Define and document pass invariants and serialized fixture shapes for each major layer.
 
 **Exit criteria**
 
