@@ -44,3 +44,17 @@ run(results List[TestResult]) =
 
 -- ---- Self-checks -------------------------------------------------------------
 
+main =
+  results =
+    [ assertTrue "1 assertTrue pass" true
+    ; assertTrue "2 assertTrue fail" false
+    ; assertEqInt "3 assertEqInt pass" 42 42
+    ; assertEqInt "4 assertEqInt fail" 1 2
+    ; assertEqStr "5 assertEqStr pass" "hi" "hi"
+    ; assertEqStr "6 assertEqStr fail" "a" "b"
+    ; assertEqBool "7 assertEqBool pass" true true
+    ; assertEqBool "8 assertEqBool fail" true false
+    ]
+  failCount = run results
+  printfn (strConcat "Done failCount=" (intToStr failCount))
+

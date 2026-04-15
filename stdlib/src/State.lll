@@ -76,3 +76,38 @@ export let stateModify =
       s1 = f s
       MkStatePair StateUnit s1
     )
+
+-- ---- Self-tests ---------------------------------------------------------------
+
+stateCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+main =
+  -- 1. statePure + stateEval
+  _ = stateCheck "1 statePure eval" (intToStr (stateEval (statePure 42) 0)) "42"
+
+  -- 2. stateExec (initial state unchanged by pure)
+  _ = stateCheck "2 statePure exec" (intToStr (stateExec (statePure 42) 99)) "99"
+
+  -- 3. stateMap
+  mapped = stateMap (\x. x * 2) (statePure 5)
+  _ = stateCheck "3 stateMap" (intToStr (stateEval mapped 0)) "10"
+
+  -- 4. stateBind: sequence two stateful steps
+  prog = stateBind (statePut 10) (\ignored. stateGet 0)
+  _ = stateCheck "4 stateBind get after put" (intToStr (stateEval prog 0)) "10"
+
+  -- 5. stateGet retrieves current state
+  _ = stateCheck "5 stateGet" (intToStr (stateEval (stateGet 0) 7)) "7"
+
+  -- 6. stateModify increments state
+  prog6 = stateBind (stateModify (\s. s + 1)) (\ignored. stateGet 0)
+  _ = stateCheck "6 stateModify" (intToStr (stateEval prog6 3)) "4"
+
+  -- 7. stateExec after statePut
+  _ = stateCheck "7 stateExec put" (intToStr (stateExec (statePut 42) 0)) "42"
+
+  printfn "Done"

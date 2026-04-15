@@ -115,6 +115,23 @@ public static class LlLangProject
 
     public static Maybe<long> doubleInMaybe(long x) => new Some<long>((x * 2L));
 
+    public static Func<string, Func<string, object>> maybeCheck(string label) => got => expected => ((got == expected) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat(" expected="))(strConcat(expected)((strConcat(" got="))(got)))))));
+
+    public static string boolStr(bool b) => (b ? (("true")?.ToString() ?? "") : (("false")?.ToString() ?? ""));
+
+    public static string maybeIntStr(Maybe<long> m) => "";
+
+    public static void __ll_main_Std_Maybe()
+    {
+        ((maybeCheck("1 isSome"))(boolStr(isSome(new Some<long>(1L)))))("true");
+        ((maybeCheck("2 isSome None"))(boolStr(isSome(new None<object>()))))("false");
+        ((maybeCheck("3 isNone"))(boolStr(isNone(new None<object>()))))("true");
+        ((maybeCheck("4 isNone Some"))(boolStr(isNone(new Some<long>(5L)))))("false");
+        ((maybeCheck("5 withDefault Some"))(maybeIntStr(new Some<long>(42L))))("42");
+        ((maybeCheck("6 withDefault None"))(maybeIntStr(new None<long>())))("none");
+        printfn("Done");
+    }
+
     public interface Token { }
     public sealed record KwLet() : Token;
     public sealed record KwTag() : Token;
@@ -272,6 +289,7 @@ public static class LlLangProject
     public sealed record DFn(string _0, List<Param> _1, Maybe<TypeExpr> _2, Expr _3) : Decl;
     public sealed record DType(string _0, List<string> _1, List<Constructor> _2) : Decl;
     public sealed record DImport(List<string> _0) : Decl;
+    public sealed record DImportUrl(string _0) : Decl;
     public sealed record DExport(Decl _0) : Decl;
     public sealed record DLet(string _0, Expr _1) : Decl;
     public sealed record DExternal(string _0, List<Param> _1, TypeExpr _2) : Decl;
