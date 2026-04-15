@@ -7,14 +7,12 @@ open LLLang.Parser
 open LLLang.AST
 open LLLang.Elaborator
 
-/// Lex + parse + elaborate. Returns error list (empty = clean).
+/// Lex + parse + elaborate + HMInfer. Returns error list (empty = clean).
+/// Uses the full pipeline so that E001/E002/E004/E005 from HMInfer are included.
 let elab src =
-    match tokenize src |> Result.bind parseModuleWithPos with
-    | Error e -> failwith $"parse: {e}"
-    | Ok (m, pm) ->
-        match elaborate pm m with
-        | Ok _ -> []
-        | Error errs -> errs
+    match LLLang.Compiler.check src with
+    | Ok _ -> []
+    | Error errs -> errs
 
 /// Lex + parse + elaborate. Returns TypeEnv or fails.
 let elabOk src =
@@ -122,7 +120,7 @@ let ``E005 tag violation untagged Str where Str[UserId] expected`` () =
 
 [<Fact>]
 let ``no error when correct tag applied`` () =
-    let src = "module M\ntag UserId\nf(x Str[UserId]) Str = x\nlet ok = f \"id\"[UserId]"
+    let src = "module M\ntag UserId\nf(x Str[UserId]) Str[UserId] = x\nlet ok = f \"id\"[UserId]"
     Assert.Empty(elab src)
 
 [<Fact>]
@@ -140,7 +138,7 @@ let ``E003 nonexhaustive match missing one branch`` () =
 
 [<Fact>]
 let ``no E003 when all constructors covered`` () =
-    let src = "module M\nC = A | B\nf(x C) Int =\n  | A -> 1\n  | B -> 2"
+    let src = "module M\nColor = Red | Blue\nf(x Color) Int =\n  | Red -> 1\n  | Blue -> 2"
     Assert.Empty(elab src)
 
 [<Fact>]

@@ -16,25 +16,9 @@ type LLError = {
     Message: string
 }
 
-let private e001 line col got expected = {
-    Code = E001; Line = line; Col = col
-    Message = sprintf "E001 %d:%d TypeMismatch %s %s" line col (typeExprToStr got) (typeExprToStr expected) }
-
-let private e002 line col name = {
-    Code = E002; Line = line; Col = col
-    Message = sprintf "E002 %d:%d UnboundVar %s" line col name }
-
 let private e003 line col typeName missing = {
     Code = E003; Line = line; Col = col
     Message = sprintf "E003 %d:%d NonExhaustiveMatch %s missing:%s" line col typeName missing }
-
-let private e004 line col got expected = {
-    Code = E004; Line = line; Col = col
-    Message = sprintf "E004 %d:%d UnitMismatch %s %s" line col (typeExprToStr got) (typeExprToStr expected) }
-
-let private e005 line col paramType argType = {
-    Code = E005; Line = line; Col = col
-    Message = sprintf "E005 %d:%d TagViolation %s %s" line col (typeExprToStr paramType) (typeExprToStr argType) }
 
 let private e026 line col target name = {
     Code = E026; Line = line; Col = col
@@ -294,61 +278,6 @@ let private collectDecls (m: LLModule) : TypeEnv =
 
     env
 
-/// Normalize a type annotation that the parser may represent as either
-/// TyApp(base, TyName tag) or TyTagged(base, UName tag).
-/// Returns Some(base, tagName) if the type is a tagged/app form, else None.
-/// `TyApp(base, TyVar t)` is only treated as a tagged numeric form when `base`
-/// is `Float`/`Int` — otherwise (e.g. `List[A]`, `Maybe[A]`) it's a real type
-/// application and must NOT be classified as tagged.
-let private asTagged (ty: TypeExpr) : (TypeExpr * string) option =
-    match ty with
-    | TyTagged(base', UName tag) -> Some(base', tag)
-    | TyApp((TyName "Float" | TyName "Int") as base', TyName tag) -> Some(base', tag)
-    | TyApp((TyName "Float" | TyName "Int") as base', TyVar tag)  -> Some(base', tag)
-    | _                          -> None
-
-/// Structural equality for types. TyVar matches anything (wildcard).
-/// Treats TyApp(b, TyName t) and TyTagged(b, UName t) as equivalent for
-/// numeric tagged types. Numeric tagged forms are checked BEFORE structural
-/// TyApp recursion so that `Float[m]` vs `Float[kg]` is a mismatch (E004)
-/// rather than a TyVar-wildcard match.
-let rec private tyEqual (a: TypeExpr) (b: TypeExpr) : bool =
-    match a, b with
-    | TyVar _, _          -> true
-    | _, TyVar _          -> true
-    | TyName x, TyName y  -> x = y
-    | TyTagged(b1, u1), TyTagged(b2, u2) -> tyEqual b1 b2 && u1 = u2
-    | TyFn(a1, r1), TyFn(a2, r2)         -> tyEqual a1 a2 && tyEqual r1 r2
-    | TyApp(a1, b1), TyApp(a2, b2) ->
-        // Numeric tagged form takes precedence: Float[m] vs Float[kg] must
-        // compare by tag name, not via TyVar wildcards.
-        match asTagged a, asTagged b with
-        | Some(ba, ta), Some(bb, tb) -> tyEqual ba bb && ta = tb
-        | _ -> tyEqual a1 a2 && tyEqual b1 b2
-    | _ ->
-        match asTagged a, asTagged b with
-        | Some(ba, ta), Some(bb, tb) -> tyEqual ba bb && ta = tb
-        | _ -> false
-
-/// Extract the base type from a tagged/app type (or return the type itself).
-let private baseOf (ty: TypeExpr) : TypeExpr =
-    match asTagged ty with
-    | Some(base', _) -> base'
-    | None           -> ty
-
-/// Classify the mismatch between paramType and argType into E001/E004/E005.
-let private classifyMismatch (paramType: TypeExpr) (argType: TypeExpr) line col : LLError =
-    match asTagged paramType, asTagged argType with
-    | Some(pBase, pTag), Some(aBase, aTag) when tyEqual pBase aBase && pTag <> aTag ->
-        // Same base type, different unit/tag annotation
-        match pBase with
-        | TyName "Float" | TyName "Int" -> e004 line col argType paramType
-        | _                              -> e001 line col argType paramType
-    | Some(pBase, _), None when tyEqual argType pBase ->
-        // arg has the right base type but is missing the tag
-        e005 line col paramType argType
-    | _ ->
-        e001 line col argType paramType
 
 /// Look up the source position of an AST node in the PosMap side-table.
 /// Returns 0:0 when a node was synthesized (no source location recorded).
@@ -356,174 +285,7 @@ let private posOf (pm: PosMap) (node: obj | null) : int * int =
     let p = PosMap.tryFind pm node
     (p.Line, p.Col)
 
-/// Pass 2: type-check an expression, accumulating errors.
-/// Returns (inferred type, errors). Does NOT throw — errors are collected.
-/// `pm` is the side-table populated by the parser so error emitters can
-/// attach real line:col to each error.
-let rec private typeOf (pm: PosMap) (expr: Expr) (env: TypeEnv) : TypeExpr * LLError list =
-    match expr with
-    | ELit(LInt _)   -> (TyName "Int",   [])
-    | ELit(LFloat _) -> (TyName "Float", [])
-    | ELit(LStr _)   -> (TyName "Str",   [])
-    | ELit(LBool _)  -> (TyName "Bool",  [])
-    | ELit(LChar _)  -> (TyName "Char",  [])
-
-    | ETagged(e, tag) ->
-        let (innerType, errs) = typeOf pm e env
-        (TyTagged(innerType, UName tag), errs)
-
-    | EVar x ->
-        match Map.tryFind x env with
-        | Some ty -> (ty, [])
-        | None    ->
-            let (ln, col) = posOf pm (box expr)
-            (TyVar "?", [e002 ln col x])
-
-    | ECon c ->
-        match Map.tryFind c env with
-        | Some ty -> (ty, [])
-        | None    ->
-            let (ln, col) = posOf pm (box expr)
-            (TyVar "?", [e002 ln col c])
-
-    | EApp(f, arg) ->
-        let (fType, fe) = typeOf pm f env
-        let (argType, ae) = typeOf pm arg env
-        let allErrors = fe @ ae
-        match fType with
-        | TyFn(paramType, returnType) ->
-            if tyEqual argType paramType then
-                (returnType, allErrors)
-            else
-                let (ln, col) = posOf pm (box expr)
-                let err = classifyMismatch paramType argType ln col
-                (returnType, allErrors @ [err])
-        | _ ->
-            (TyVar "?", allErrors)
-
-    | ELam(_, _) -> (TyVar "?", [])
-
-    | EIf(cond, t, e) ->
-        let (_, ce) = typeOf pm cond env
-        let (_, te) = typeOf pm t env
-        let (_, ee) = typeOf pm e env
-        (TyVar "?", ce @ te @ ee)
-
-    | ELet(x, e, bodyOpt) ->
-        let (eTy, eErrs) = typeOf pm e env
-        let env' = Map.add x eTy env
-        match bodyOpt with
-        | Some body ->
-            let (bTy, bErrs) = typeOf pm body env'
-            (bTy, eErrs @ bErrs)
-        | None -> (eTy, eErrs)
-
-    | ELetPat(pat, e, bodyOpt) ->
-        // Type-check e, then bind every var from the pattern as a wildcard.
-        // HMInfer does the real work.
-        let rec patVars (p: Pattern) : string list =
-            match p with
-            | PVar n -> [n]
-            | PCon(_, ps) -> ps |> List.collect patVars
-            | PTuple ps -> ps |> List.collect patVars
-            | PCons(h, t) -> patVars h @ patVars t
-            | PLit _ | PWild -> []
-        let (eTy, eErrs) = typeOf pm e env
-        let env' =
-            patVars pat
-            |> List.fold (fun acc n -> Map.add n (TyVar "?") acc) env
-        match bodyOpt with
-        | Some body ->
-            let (bTy, bErrs) = typeOf pm body env'
-            (bTy, eErrs @ bErrs)
-        | None -> (eTy, eErrs)
-
-    | EMatch(branches) ->
-        // Collect all variable names bound by a pattern
-        let rec patVars (pat: Pattern) : string list =
-            match pat with
-            | PVar n -> [n]
-            | PCon(_, pats) -> pats |> List.collect patVars
-            | PTuple pats -> pats |> List.collect patVars
-            | PCons(h, t) -> patVars h @ patVars t
-            | PLit _ | PWild -> []
-        let errs =
-            branches
-            |> List.collect (fun (pat, branchExpr) ->
-                let localEnv =
-                    patVars pat
-                    |> List.fold (fun acc n -> Map.add n (TyVar "?") acc) env
-                snd (typeOf pm branchExpr localEnv))
-        (TyVar "?", errs)
-
-    | EMatchOf(scrut, branches) ->
-        // Same as EMatch but with explicit scrutinee — type-check it too.
-        let rec patVars (pat: Pattern) : string list =
-            match pat with
-            | PVar n -> [n]
-            | PCon(_, pats) -> pats |> List.collect patVars
-            | PTuple pats -> pats |> List.collect patVars
-            | PCons(h, t) -> patVars h @ patVars t
-            | PLit _ | PWild -> []
-        let (_, sErrs) = typeOf pm scrut env
-        let bErrs =
-            branches
-            |> List.collect (fun (pat, branchExpr) ->
-                let localEnv =
-                    patVars pat
-                    |> List.fold (fun acc n -> Map.add n (TyVar "?") acc) env
-                snd (typeOf pm branchExpr localEnv))
-        (TyVar "?", sErrs @ bErrs)
-
-    | ECons(h, t) ->
-        let (_, hErrs) = typeOf pm h env
-        let (_, tErrs) = typeOf pm t env
-        (TyVar "?", hErrs @ tErrs)
-
-    | EPipe(e, f) ->
-        let (_, ee) = typeOf pm e env
-        let (_, fe) = typeOf pm f env
-        (TyVar "?", ee @ fe)
-
-    | EList(elems) ->
-        let errs = elems |> List.collect (fun el -> snd (typeOf pm el env))
-        (TyVar "?", errs)
-
-    | ETuple(elems) ->
-        let errs = elems |> List.collect (fun el -> snd (typeOf pm el env))
-        (TyVar "?", errs)
-
-/// Check a single declaration for errors, given the already-built TypeEnv.
-let private checkDecl (pm: PosMap) (decl: Decl) (env: TypeEnv) : LLError list =
-    match decl with
-    | DFn(sigRecord, body) ->
-        // Extend env with the function's own parameters (normalize type params)
-        let localEnv =
-            sigRecord.Params
-            |> List.fold (fun acc (paramName, paramType) -> Map.add paramName (normalizeFnTy paramType) acc) env
-        snd (typeOf pm body localEnv)
-
-    | DLet(_, expr) ->
-        snd (typeOf pm expr env)
-
-    | DLetPat(_, expr) ->
-        snd (typeOf pm expr env)
-
-    | DImpl(_, _, fns) ->
-        fns |> List.collect (fun (sigRecord, body) ->
-            let localEnv =
-                sigRecord.Params
-                |> List.fold (fun acc (paramName, paramType) -> Map.add paramName (normalizeFnTy paramType) acc) env
-            snd (typeOf pm body localEnv))
-
-    | DType _ | DTag _ | DUnit _ | DTrait _ | DExternal _ | DOpaque _ -> []
-
-/// Check all declarations in a module, accumulating errors.
-let private checkDecls (pm: PosMap) (m: LLModule) (env: TypeEnv) : LLError list =
-    m.Decls
-    |> List.collect (fun (decl, _isExported) -> checkDecl pm decl env)
-
-/// Pass 3: exhaustiveness check for match expressions.
+/// Pass 2: exhaustiveness check for match expressions.
 /// For each DFn whose body is a clause-sugar top-level `EMatch` (i.e.
 /// `fn f(..)(x T) = | PatA -> .. | PatB -> ..`) AND whose LAST parameter
 /// type is a named sum type, verify that the body's branches cover all
@@ -613,12 +375,14 @@ let private exhaustivenessCheck (pm: PosMap) (m: LLModule) (_env: TypeEnv) : LLE
 // modelled here — a return type like `d / t` stays as whatever the H-M
 // pass infers (typically a fresh flex var); this is a known limitation.
 
-/// Collect all tag names declared in the module (from `tag X` / `tag x`).
+/// Collect all tag and unit names declared in the module (from `tag X` / `unit x`).
+/// Both use TyTagged in the type system and need the TyApp→TyTagged rewrite.
 let private collectTagNames (m: LLModule) : Set<string> =
     m.Decls
     |> List.choose (fun (decl, _) ->
         match decl with
         | DTag name -> Some name
+        | DUnit name -> Some name
         | _ -> None)
     |> Set.ofList
 
@@ -678,10 +442,8 @@ let rewriteTagsInModule (m: LLModule) : LLModule =
 let elaborate (pm: PosMap) (m: LLModule) : Result<LLModule * TypeEnv, LLError list> =
     let m' = rewriteTagsInModule m
     let env = collectDecls m'
-    let checkErrors = checkDecls pm m' env
     let exhaustErrors = exhaustivenessCheck pm m' env
-    let errors = checkErrors @ exhaustErrors
-    if errors.IsEmpty then Ok (m', env) else Error errors
+    if exhaustErrors.IsEmpty then Ok (m', env) else Error exhaustErrors
 
 /// Elaborate an LLModule with an additional imported environment (from previously
 /// compiled files). The imported bindings are merged into the initial env before
@@ -699,7 +461,5 @@ let elaborateWithImports (pm: PosMap) (m: LLModule) (importedEnv: TypeEnv) : Res
     // on top of the result (module-local decls win over imports).
     let localEnv = collectDecls m'
     let env = Map.fold (fun acc k v -> Map.add k v acc) baseEnv localEnv
-    let checkErrors = checkDecls pm m' env
     let exhaustErrors = exhaustivenessCheck pm m' env
-    let errors = checkErrors @ exhaustErrors
-    if errors.IsEmpty then Ok (m', env) else Error errors
+    if exhaustErrors.IsEmpty then Ok (m', env) else Error exhaustErrors
