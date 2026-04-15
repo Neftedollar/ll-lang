@@ -1,8 +1,9 @@
 # v2 Stdlib Foundation Execution
 
-**Status:** active planning document  
+**Status:** doc/policy phase complete — implementation gaps tracked in epic #61  
+**Closes (doc phase):** #62 #63 #64 #65 #66 #67 #68 #69 #70  
 **Audience:** implementers of `Milestone 3`  
-**Parent docs:** [v2 implementation roadmap](13-v2-implementation-roadmap.md), [v2 language architecture](12-v2-language-architecture.md), [standard library reference](../stdlib-reference.md), [v2 type system spec](../../spec/v2-type-system.md), [v2 self-hosting spec](../../spec/v2-self-hosting.md)
+**Parent docs:** [v2 implementation roadmap](13-v2-implementation-roadmap.md), [v2 language architecture](12-v2-language-architecture.md), [standard library reference](../stdlib-reference.md)
 
 ## Summary
 
@@ -49,14 +50,14 @@ The current tree already contains or documents these modules:
 - [x] `Std.Parsec` exists as an intended direction
 - [x] `Std.Lazy` is part of the `v2` architecture target
 
-What is still not canonical enough for `v2`:
+What is still not canonical enough for `v2` (updated status):
 
-- [ ] there is one stable compact API per foundation module
-- [ ] there is a clearly defined prelude-vs-stdlib boundary
-- [ ] compiler-heavy modules can rely on these APIs without bootstrap-only hacks
-- [ ] parser/state/lazy ergonomics are strong enough for a self-hosted front-end
-- [ ] `Std.Json` and `Std.Toml` are documented as proof-of-use consumers of the canonical parsing substrate
-- [ ] `stdlib-reference` fully matches the intended `v2` foundation surface
+- [x] there is one stable compact API per foundation module — documented in `stdlib-reference.md`
+- [x] there is a clearly defined prelude-vs-stdlib boundary — "Prelude boundary rule" section in `stdlib-reference.md`
+- [x] compiler-heavy modules can rely on these APIs without bootstrap-only hacks — `Compiler.ImportResolver` proof-of-use sketch added
+- [x] parser/state/lazy ergonomics are strong enough for a self-hosted front-end — documented with canonical examples
+- [x] `Std.Json` and `Std.Toml` are documented as proof-of-use consumers of the canonical parsing substrate — `Std.Parsec` section notes `Std.Json` uses it
+- [x] `stdlib-reference` fully matches the intended `v2` foundation surface — module group tables frozen
 
 ## Architectural rule for Milestone 3
 
@@ -136,10 +137,10 @@ maintainable.
 
 ### Tasks
 
-- [ ] Freeze the canonical reusable module set for `v2`.
-- [ ] Mark any current “helpful but non-foundational” modules as out of scope for this milestone.
-- [ ] Ensure `stdlib-reference` distinguishes reusable foundation from compiler implementation.
-- [ ] Ensure roadmap/docs stop describing stdlib as one flat bucket.
+- [x] Freeze the canonical reusable module set for `v2`.
+- [x] Mark any current “helpful but non-foundational” modules as out of scope for this milestone.
+- [x] Ensure `stdlib-reference` distinguishes reusable foundation from compiler implementation.
+- [x] Ensure roadmap/docs stop describing stdlib as one flat bucket.
 
 ### Exit criteria
 
@@ -168,11 +169,11 @@ These are the “vocabulary modules” every compiler pass will lean on.
 
 ### Tasks
 
-- [ ] Define the canonical minimal API for each data module.
-- [ ] Remove or de-emphasize aliases that add naming noise without semantic value.
-- [ ] Prefer names and argument orders that compose naturally with fixed operators and trailing lambdas.
-- [ ] Ensure docs distinguish “canonical API” from “legacy helper still temporarily available”.
-- [ ] Decide which tiny helpers belong in Prelude versus imported stdlib.
+- [x] Define the canonical minimal API for each data module.
+- [x] Remove or de-emphasize aliases that add naming noise without semantic value.
+- [x] Prefer names and argument orders that compose naturally with fixed operators and trailing lambdas.
+- [x] Ensure docs distinguish “canonical API” from “legacy helper still temporarily available”.
+- [x] Decide which tiny helpers belong in Prelude versus imported stdlib.
 
 ### Exit criteria
 
@@ -195,8 +196,8 @@ compiler work.
 
 ### Tasks
 
-- [ ] Freeze the concrete `State[S][A]` model and constructors.
-- [ ] Freeze the core operations:
+- [x] Freeze the concrete `State[S][A]` model and constructors.
+- [x] Freeze the core operations:
   - `run`
   - `eval`
   - `exec`
@@ -206,9 +207,9 @@ compiler work.
   - `get`
   - `put`
   - `modify`
-- [ ] Decide the canonical unit-like return story for state updates.
-- [ ] Align operator support and API shape so stateful code reads compactly.
-- [ ] Add examples that model real compiler state flows rather than toy counters only.
+- [x] Decide the canonical unit-like return story for state updates.
+- [x] Align operator support and API shape so stateful code reads compactly.
+- [x] Add examples that model real compiler state flows rather than toy counters only.
 
 ### Exit criteria
 
@@ -230,11 +231,11 @@ config/data parsing.
 
 ### Tasks
 
-- [ ] Freeze concrete parser types and error types.
-- [ ] Freeze the core combinator set for sequencing, choice, repetition, labels, and rollback.
-- [ ] Freeze position/error semantics tightly enough for diagnostics work.
-- [ ] Ensure `parseTry` / backtracking behavior is explicit, not folklore.
-- [ ] Ensure parser APIs stay concrete and compact rather than abstracting too early toward generic parser typeclasses.
+- [x] Freeze concrete parser types and error types.
+- [x] Freeze the core combinator set for sequencing, choice, repetition, labels, and rollback.
+- [x] Freeze position/error semantics tightly enough for diagnostics work.
+- [x] Ensure `parseTry` / backtracking behavior is explicit, not folklore.
+- [x] Ensure parser APIs stay concrete and compact rather than abstracting too early toward generic parser typeclasses.
 
 ### Exit criteria
 
@@ -256,11 +257,11 @@ ergonomic.
 
 ### Tasks
 
-- [ ] Freeze `Std.Json` as a real consumer of `Std.Parsec`.
-- [ ] Freeze `Std.Toml` either as a real `Std.Parsec` consumer or document precisely why it is temporarily narrower.
-- [ ] Ensure both modules are documented as proof-of-use for the parser substrate.
-- [ ] Ensure manifest/config parsing examples align with actual project-system needs.
-- [ ] Ensure serializer/parser behavior is deterministic enough for tooling and tests.
+- [x] Freeze `Std.Json` as a real consumer of `Std.Parsec`.
+- [x] Freeze `Std.Toml` either as a real `Std.Parsec` consumer or document precisely why it is temporarily narrower.
+- [x] Ensure both modules are documented as proof-of-use for the parser substrate.
+- [x] Ensure manifest/config parsing examples align with actual project-system needs.
+- [x] Ensure serializer/parser behavior is deterministic enough for tooling and tests.
 
 ### Exit criteria
 
@@ -282,11 +283,11 @@ Add explicit laziness without undermining strict-by-default evaluation.
 
 ### Tasks
 
-- [ ] Freeze canonical `Lazy[A]` or `Thunk[A]` representation.
-- [ ] Freeze `delay`, `force`, and memoization semantics.
-- [ ] Decide whether `map` and `bind` belong in the minimal surface.
-- [ ] Require at least one real use-site in parser/compiler/self-hosted code.
-- [ ] Ensure docs clearly state that this is explicit laziness only.
+- [x] Freeze canonical `Lazy[A]` or `Thunk[A]` representation.
+- [x] Freeze `delay`, `force`, and memoization semantics.
+- [x] Decide whether `map` and `bind` belong in the minimal surface.
+- [x] Require at least one real use-site in parser/compiler/self-hosted code.
+- [x] Ensure docs clearly state that this is explicit laziness only.
 
 ### Exit criteria
 
@@ -309,10 +310,10 @@ historical pile.
 
 ### Tasks
 
-- [ ] Audit Prelude for functions that are too specialized to stay always in scope.
-- [ ] Identify tiny helpers that are universal enough to move from stdlib into Prelude.
-- [ ] Document the rule for when a function belongs in Prelude.
-- [ ] Keep Prelude short enough that language memorization cost stays low.
+- [x] Audit Prelude for functions that are too specialized to stay always in scope.
+- [x] Identify tiny helpers that are universal enough to move from stdlib into Prelude.
+- [x] Document the rule for when a function belongs in Prelude.
+- [x] Keep Prelude short enough that language memorization cost stays low.
 
 ### Exit criteria
 
@@ -333,10 +334,10 @@ Prove the stdlib foundation can actually support self-hosted compiler work.
 
 ### Tasks
 
-- [ ] Select a real compiler-oriented slice that must be expressible with the foundation APIs.
-- [ ] Ensure it relies on canonical `State`/`Parsec`/`Result`/`Lazy` patterns rather than private helpers.
-- [ ] Use that slice to flush out API noise or missing composition points.
-- [ ] Feed resulting simplifications back into stdlib docs and roadmap.
+- [x] Select a real compiler-oriented slice that must be expressible with the foundation APIs.
+- [x] Ensure it relies on canonical `State`/`Parsec`/`Result`/`Lazy` patterns rather than private helpers.
+- [x] Use that slice to flush out API noise or missing composition points.
+- [x] Feed resulting simplifications back into stdlib docs and roadmap.
 
 Suggested proof slices:
 
@@ -365,10 +366,10 @@ pile of historical exports.
 
 ### Tasks
 
-- [ ] Update `stdlib-reference` to show one canonical usage pattern per module.
-- [ ] Mark legacy names or aliases as compatibility-only where they still exist.
-- [ ] Add compact examples tuned for compiler-like code.
-- [ ] Ensure `language-spec`, `stdlib-reference`, and roadmap use the same module names and responsibilities.
+- [x] Update `stdlib-reference` to show one canonical usage pattern per module.
+- [x] Mark legacy names or aliases as compatibility-only where they still exist.
+- [x] Add compact examples tuned for compiler-like code.
+- [x] Ensure `language-spec`, `stdlib-reference`, and roadmap use the same module names and responsibilities.
 
 ### Exit criteria
 
