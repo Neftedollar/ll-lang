@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-11",
+  "generated": "2026-04-15",
   "tokenizer": "cl100k_base",
   "tier1": [
     {
@@ -12,19 +12,19 @@
     },
     {
       "label": "Map (RBTree)",
-      "lll_tokens": 1771,
-      "fs_tokens_no_prelude": 2073,
-      "fs_tokens_with_prelude": 2849,
+      "lll_tokens": 1570,
+      "fs_tokens_no_prelude": 1132,
+      "fs_tokens_with_prelude": 1132,
       "ts_tokens": null,
-      "ratio_fs_lll": 1.17
+      "ratio_fs_lll": 0.72
     },
     {
       "label": "Toml parser",
-      "lll_tokens": 2030,
+      "lll_tokens": 1749,
       "fs_tokens_no_prelude": 2359,
       "fs_tokens_with_prelude": 3135,
       "ts_tokens": null,
-      "ratio_fs_lll": 1.16
+      "ratio_fs_lll": 1.35
     },
     {
       "label": "Bootstrap",
@@ -38,9 +38,9 @@
   "tier2": [
     {
       "label": "TOML parser",
-      "lll_tokens": 2030,
+      "lll_tokens": 1749,
       "fs_handwritten_tokens": 1823,
-      "ratio": 0.9
+      "ratio": 1.04
     }
   ],
   "tier3": [
@@ -48,33 +48,33 @@
       "label": "sum_type_3_ctor",
       "variants": {
         "lll": {
-          "tokens_raw": 11,
-          "tokens_code": 11,
-          "bytes": 52
+          "tokens_raw": 10,
+          "tokens_code": 10,
+          "bytes": 47
         },
         "fs": {
           "tokens_raw": 14,
           "tokens_code": 14,
           "bytes": 60,
-          "ratio_vs_lll": 1.27
+          "ratio_vs_lll": 1.4
         },
         "ts": {
           "tokens_raw": 36,
           "tokens_code": 36,
           "bytes": 104,
-          "ratio_vs_lll": 3.27
+          "ratio_vs_lll": 3.6
         },
         "py": {
           "tokens_raw": 49,
           "tokens_code": 49,
           "bytes": 180,
-          "ratio_vs_lll": 4.45
+          "ratio_vs_lll": 4.9
         },
         "java": {
           "tokens_raw": 35,
           "tokens_code": 35,
           "bytes": 188,
-          "ratio_vs_lll": 3.18
+          "ratio_vs_lll": 3.5
         }
       }
     },
@@ -82,33 +82,33 @@
       "label": "pattern_match",
       "variants": {
         "lll": {
-          "tokens_raw": 39,
-          "tokens_code": 39,
-          "bytes": 92
+          "tokens_raw": 41,
+          "tokens_code": 41,
+          "bytes": 99
         },
         "fs": {
           "tokens_raw": 43,
           "tokens_code": 43,
           "bytes": 105,
-          "ratio_vs_lll": 1.1
+          "ratio_vs_lll": 1.05
         },
         "ts": {
           "tokens_raw": 58,
           "tokens_code": 58,
           "bytes": 175,
-          "ratio_vs_lll": 1.49
+          "ratio_vs_lll": 1.41
         },
         "py": {
           "tokens_raw": 52,
           "tokens_code": 52,
           "bytes": 192,
-          "ratio_vs_lll": 1.33
+          "ratio_vs_lll": 1.27
         },
         "java": {
           "tokens_raw": 58,
           "tokens_code": 58,
           "bytes": 177,
-          "ratio_vs_lll": 1.49
+          "ratio_vs_lll": 1.41
         }
       }
     },
@@ -116,33 +116,33 @@
       "label": "curried_fn",
       "variants": {
         "lll": {
-          "tokens_raw": 13,
-          "tokens_code": 13,
-          "bytes": 32
+          "tokens_raw": 11,
+          "tokens_code": 11,
+          "bytes": 25
         },
         "fs": {
           "tokens_raw": 21,
           "tokens_code": 21,
           "bytes": 45,
-          "ratio_vs_lll": 1.62
+          "ratio_vs_lll": 1.91
         },
         "ts": {
           "tokens_raw": 20,
           "tokens_code": 20,
           "bytes": 56,
-          "ratio_vs_lll": 1.54
+          "ratio_vs_lll": 1.82
         },
         "py": {
           "tokens_raw": 18,
           "tokens_code": 18,
           "bytes": 48,
-          "ratio_vs_lll": 1.38
+          "ratio_vs_lll": 1.64
         },
         "java": {
           "tokens_raw": 16,
           "tokens_code": 16,
           "bytes": 49,
-          "ratio_vs_lll": 1.23
+          "ratio_vs_lll": 1.45
         }
       }
     },
@@ -150,33 +150,33 @@
       "label": "parametric_adt",
       "variants": {
         "lll": {
-          "tokens_raw": 8,
-          "tokens_code": 8,
-          "bytes": 28
+          "tokens_raw": 7,
+          "tokens_code": 7,
+          "bytes": 23
         },
         "fs": {
           "tokens_raw": 12,
           "tokens_code": 12,
           "bytes": 34,
-          "ratio_vs_lll": 1.5
+          "ratio_vs_lll": 1.71
         },
         "ts": {
           "tokens_raw": 23,
           "tokens_code": 23,
           "bytes": 60,
-          "ratio_vs_lll": 2.88
+          "ratio_vs_lll": 3.29
         },
         "py": {
           "tokens_raw": 47,
           "tokens_code": 47,
           "bytes": 172,
-          "ratio_vs_lll": 5.88
+          "ratio_vs_lll": 6.71
         },
         "java": {
           "tokens_raw": 31,
           "tokens_code": 31,
           "bytes": 140,
-          "ratio_vs_lll": 3.88
+          "ratio_vs_lll": 4.43
         }
       }
     }
@@ -217,33 +217,33 @@
     {
       "path": "/Users/roman/Documents/dev/tens/code/ll-lang/stdlib/src/Map.lll",
       "lang": "lll",
-      "lines": 235,
-      "code_lines": 164,
-      "tokens_raw": 2194,
-      "tokens_code": 1771,
-      "bytes": 6393,
+      "lines": 205,
+      "code_lines": 137,
+      "tokens_raw": 1988,
+      "tokens_code": 1570,
+      "bytes": 5902,
       "functions": 0
     },
     {
       "path": "/Users/roman/Documents/dev/tens/code/ll-lang/stdlib/src/Map.fs",
       "lang": "fs",
-      "lines": 109,
-      "code_lines": 88,
-      "tokens_raw": 2871,
-      "tokens_code": 2849,
-      "bytes": 8049,
-      "functions": 44,
-      "tokens_no_prelude": 2073,
-      "prelude_tokens": 795
+      "lines": 54,
+      "code_lines": 37,
+      "tokens_raw": 1134,
+      "tokens_code": 1132,
+      "bytes": 3066,
+      "functions": 1,
+      "tokens_no_prelude": 1132,
+      "prelude_tokens": 0
     },
     {
       "path": "/Users/roman/Documents/dev/tens/code/ll-lang/stdlib/src/Toml.lll",
       "lang": "lll",
-      "lines": 292,
-      "code_lines": 214,
-      "tokens_raw": 2379,
-      "tokens_code": 2030,
-      "bytes": 8002,
+      "lines": 266,
+      "code_lines": 194,
+      "tokens_raw": 2046,
+      "tokens_code": 1749,
+      "bytes": 7125,
       "functions": 0
     },
     {

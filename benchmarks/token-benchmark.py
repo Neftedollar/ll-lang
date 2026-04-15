@@ -27,28 +27,32 @@ except ImportError:
 # ---------------------------------------------------------------------------
 MICRO = {
     "sum_type_3_ctor": {
-        "lll": 'type Shape = Circle Float | Rect Float Float | Empty',
+        # v2 canonical syntax: no 'type' keyword
+        "lll": 'Shape = Circle Float | Rect Float Float | Empty',
         "fs": 'type Shape = Circle of float | Rect of float * float | Empty',
         "ts": 'type Shape = { tag: "Circle"; value: number } | { tag: "Rect"; w: number; h: number } | { tag: "Empty" }',
         "py": 'from dataclasses import dataclass\n\n@dataclass\nclass Circle:\n    value: float\n\n@dataclass\nclass Rect:\n    w: float\n    h: float\n\nclass Empty:\n    pass\n\nShape = Circle | Rect | Empty',
         "java": 'sealed interface Shape permits Circle, Rect, Empty {}\nrecord Circle(double value) implements Shape {}\nrecord Rect(double w, double h) implements Shape {}\nrecord Empty() implements Shape {}',
     },
     "pattern_match": {
-        "lll": 'fn area(s Shape) Float =\n  | Circle r -> 3.14 * r * r\n  | Rect w h -> w * h\n  | Empty -> 0.0',
+        # v2 canonical syntax: no 'fn' keyword, match without 'with', no 'then'
+        "lll": 'area(s Shape) =\n  match s\n    | Circle r -> 3.14 * r * r\n    | Rect w h -> w * h\n    | Empty -> 0.0',
         "fs": 'let area s =\n    match s with\n    | Circle r -> 3.14 * r * r\n    | Rect(w, h) -> w * h\n    | Empty -> 0.0',
         "ts": 'function area(s: Shape): number {\n  switch (s.tag) {\n    case "Circle": return 3.14 * s.value * s.value;\n    case "Rect": return s.w * s.h;\n    case "Empty": return 0.0;\n  }\n}',
         "py": 'def area(s: Shape) -> float:\n    match s:\n        case Circle(r):\n            return 3.14 * r * r\n        case Rect(w, h):\n            return w * h\n        case Empty():\n            return 0.0',
         "java": 'static double area(Shape s) {\n    return switch (s) {\n        case Circle(var r) -> 3.14 * r * r;\n        case Rect(var w, var h) -> w * h;\n        case Empty() -> 0.0;\n    };\n}',
     },
     "curried_fn": {
-        "lll": 'fn add(a Int)(b Int) Int = a + b',
+        # v2 canonical syntax: no 'fn' keyword, no return type annotation needed
+        "lll": 'add(a Int)(b Int) = a + b',
         "fs": 'let add (a: int64) (b: int64) : int64 = a + b',
         "ts": 'const add = (a: number) => (b: number): number => a + b;',
         "py": 'def add(a: int, b: int) -> int:\n    return a + b',
         "java": 'static long add(long a, long b) { return a + b; }',
     },
     "parametric_adt": {
-        "lll": 'type Maybe A = Some A | None',
+        # v2 canonical syntax: no 'type' keyword
+        "lll": 'Maybe A = Some A | None',
         "fs": "type Maybe<'A> = Some of 'A | None",
         "ts": 'type Maybe<A> = { tag: "Some"; value: A } | { tag: "None" };',
         "py": 'from typing import Generic, TypeVar\nT = TypeVar("T")\nclass Some(Generic[T]):\n    def __init__(self, value: T): self.value = value\nclass Nothing: pass\nMaybe = Some | Nothing',
