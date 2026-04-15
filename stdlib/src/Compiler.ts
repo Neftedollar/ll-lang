@@ -17,13 +17,23 @@ const intToStr = (n: number): string => String(n);
 
 const listAppend = <T>(xs: T[]) => (ys: T[]): T[] => [...xs, ...ys];
 
+const listConcat = <T>(xss: T[][]): T[] => xss.flat();
+
+const listFilter = <A>(p: (x: A) => boolean) => (xs: A[]): A[] => xs.filter(p);
+
 const listFold = <A, B>(f: (acc: B) => (x: A) => B) => (z: B) => (xs: A[]): B => xs.reduce((a, x) => f(a)(x), z);
+
+const listHead = <T>(xs: T[]): T | null => xs.length > 0 ? xs[0] : null;
 
 const listIsEmpty = <T>(xs: T[]): boolean => xs.length === 0;
 
 const listLen = <T>(xs: T[]): number => xs.length;
 
 const listMap = <A, B>(f: (x: A) => B) => (xs: A[]): B[] => xs.map(f);
+
+const listReverse = <T>(xs: T[]): T[] => [...xs].reverse();
+
+const maybeWithDefault = <A>(d: A) => (m: A | null): A => m !== null ? m : d;
 
 const printfn = (s: string): void => { console.log(s) };
 
@@ -36,6 +46,8 @@ const strContains = (needle: string) => (hay: string): boolean => hay.includes(n
 const strFromChars = (cs: string[]): string => cs.join('');
 
 const strLen = (s: string): number => s.length;
+
+const strSlice = (s: string) => (start: number) => (len: number): string => s.slice(start, start + len);
 
 const strToInt = (s: string): number | null => { const n = parseInt(s, 10); return isNaN(n) ? null : n };
 
@@ -55,7 +67,171 @@ const check = (label: string) => (ok: boolean) => (ok ? ((_) => 0)((printfn)(((s
 
 const doubleInMaybe = (x: number) => Some((x * 2));
 
-type Token = { _tag: `KwLet` } | { _tag: `KwTag` } | { _tag: `KwUnit` } | { _tag: `KwTrait` } | { _tag: `KwImpl` } | { _tag: `KwImport` } | { _tag: `KwExport` } | { _tag: `KwModule` } | { _tag: `KwIf` } | { _tag: `KwElse` } | { _tag: `KwTrue` } | { _tag: `KwFalse` } | { _tag: `KwMatch` } | { _tag: `Ident`; _0: string } | { _tag: `TypeId`; _0: string } | { _tag: `IntLit`; _0: number } | { _tag: `FloatLit`; _0: string } | { _tag: `StrLit`; _0: string } | { _tag: `CharLit`; _0: string } | { _tag: `Arrow` } | { _tag: `Backslash` } | { _tag: `Dot` } | { _tag: `Comma` } | { _tag: `Colon` } | { _tag: `ColonColon` } | { _tag: `Eq` } | { _tag: `Bar` } | { _tag: `LBrack` } | { _tag: `RBrack` } | { _tag: `LParen` } | { _tag: `RParen` } | { _tag: `Plus` } | { _tag: `Minus` } | { _tag: `Star` } | { _tag: `Slash` } | { _tag: `Caret` } | { _tag: `Lt` } | { _tag: `Gt` } | { _tag: `Le` } | { _tag: `Ge` } | { _tag: `EqEq` } | { _tag: `Neq` } | { _tag: `Underscore` } | { _tag: `Newline` } | { _tag: `Indent` } | { _tag: `Dedent` } | { _tag: `Eof` } | { _tag: `TError`; _0: string };
+const maybeCheck = (label: string) => (got: string) => (expected: string) => ((got === expected) ? (printfn)(((strConcat)(`OK `))(label)) : (printfn)(((strConcat)(`FAIL `))(((strConcat)(label))(((strConcat)(` expected=`))(((strConcat)(expected))(((strConcat)(` got=`))(got)))))));
+
+const boolStr = (b: boolean) => (b ? `true` : `false`);
+
+const maybeIntStr = (m: number | null) => (() => {
+  if (m?._tag === `Some`) { const v = (m as Record<string, unknown>)[`_0`]; return (intToStr)(v); }
+  if (m?._tag === `None`) { return `none`; }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const __ll_main_Std_Maybe = () => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => (printfn)(`Done`))((((maybeCheck)(`6 withDefault None`))((maybeIntStr)(None)))(`none`)))((((maybeCheck)(`5 withDefault Some`))((maybeIntStr)(Some(42))))(`42`)))((((maybeCheck)(`4 isNone Some`))((boolStr)((isNone)(Some(5)))))(`false`)))((((maybeCheck)(`3 isNone`))((boolStr)((isNone)(None))))(`true`)))((((maybeCheck)(`2 isSome None`))((boolStr)((isSome)(None))))(`false`)))((((maybeCheck)(`1 isSome`))((boolStr)((isSome)(Some(1)))))(`true`));
+
+type Color = { _tag: `Red` } | { _tag: `Black` };
+const Red: Color = { _tag: `Red` as const };
+const Black: Color = { _tag: `Black` as const };
+
+type RBMap<K, V> = { _tag: `Leaf` } | { _tag: `Node`; _0: Color; _1: RBMap<unknown, unknown>; _2: unknown; _3: unknown; _4: RBMap<unknown, unknown> };
+const Leaf: RBMap<unknown> = { _tag: `Leaf` as const };
+const Node = <K, V>(_0: Color, _1: RBMap<unknown, unknown>, _2: unknown, _3: unknown, _4: RBMap<unknown, unknown>): RBMap<K, V> => ({ _tag: `Node` as const, _0, _1, _2, _3, _4 });
+
+const mapEmpty = () => Leaf;
+
+const mapSize = (m: RBMap<unknown, unknown>) => (() => {
+  if (m?._tag === `Leaf`) { return 0; }
+  if (m?._tag === `Node`) { const left = (m as Record<string, unknown>)[`_1`]; const right = (m as Record<string, unknown>)[`_4`]; return ((1 + (mapSize)(left)) + (mapSize)(right)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const balanceLeft = (left: RBMap<unknown, unknown>) => (k: unknown) => (v: unknown) => (right: RBMap<unknown, unknown>) => (() => {
+  if (left?._tag === `Node`) { const ll = (left as Record<string, unknown>)[`_1`]; const lk = (left as Record<string, unknown>)[`_2`]; const lv = (left as Record<string, unknown>)[`_3`]; const lr = (left as Record<string, unknown>)[`_4`]; return (() => {
+  if (ll?._tag === `Node`) { const a = (ll as Record<string, unknown>)[`_1`]; const xk = (ll as Record<string, unknown>)[`_2`]; const xv = (ll as Record<string, unknown>)[`_3`]; const b = (ll as Record<string, unknown>)[`_4`]; return Node(Red, Node(Black, a, xk, xv, b), lk, lv, Node(Black, lr, k, v, right)); }
+  return (() => {
+  if (lr?._tag === `Node`) { const b = (lr as Record<string, unknown>)[`_1`]; const yk = (lr as Record<string, unknown>)[`_2`]; const yv = (lr as Record<string, unknown>)[`_3`]; const c = (lr as Record<string, unknown>)[`_4`]; return Node(Red, Node(Black, ll, lk, lv, b), yk, yv, Node(Black, c, k, v, right)); }
+  return Node(Black, left, k, v, right);
+  throw new Error(`Non-exhaustive match`);
+})();
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  return Node(Black, left, k, v, right);
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const balanceRight = (left: RBMap<unknown, unknown>) => (k: unknown) => (v: unknown) => (right: RBMap<unknown, unknown>) => (() => {
+  if (right?._tag === `Node`) { const rl = (right as Record<string, unknown>)[`_1`]; const rk = (right as Record<string, unknown>)[`_2`]; const rv = (right as Record<string, unknown>)[`_3`]; const rr = (right as Record<string, unknown>)[`_4`]; return (() => {
+  if (rl?._tag === `Node`) { const b = (rl as Record<string, unknown>)[`_1`]; const yk = (rl as Record<string, unknown>)[`_2`]; const yv = (rl as Record<string, unknown>)[`_3`]; const c = (rl as Record<string, unknown>)[`_4`]; return Node(Red, Node(Black, left, k, v, b), yk, yv, Node(Black, c, rk, rv, rr)); }
+  return (() => {
+  if (rr?._tag === `Node`) { const c = (rr as Record<string, unknown>)[`_1`]; const zk = (rr as Record<string, unknown>)[`_2`]; const zv = (rr as Record<string, unknown>)[`_3`]; const d = (rr as Record<string, unknown>)[`_4`]; return Node(Red, Node(Black, left, k, v, rl), rk, rv, Node(Black, c, zk, zv, d)); }
+  return Node(Black, left, k, v, right);
+  throw new Error(`Non-exhaustive match`);
+})();
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  return Node(Black, left, k, v, right);
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const balance = (c: Color) => (left: RBMap<unknown, unknown>) => (k: unknown) => (v: unknown) => (right: RBMap<unknown, unknown>) => (() => {
+  if (c?._tag === `Red`) { return Node(Red, left, k, v, right); }
+  if (c?._tag === `Black`) { return (() => {
+  if (left?._tag === `Node`) {  return ((result) => (() => {
+  if (result?._tag === `Node`) {  return result; }
+  return ((((balanceRight)(left))(k))(v))(right);
+  throw new Error(`Non-exhaustive match`);
+})())(((((balanceLeft)(left))(k))(v))(right)); }
+  return ((((balanceRight)(left))(k))(v))(right);
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const ins = (cmp: unknown) => (k: unknown) => (v: unknown) => (m: RBMap<unknown, unknown>) => (() => {
+  if (m?._tag === `Leaf`) { return Node(Red, Leaf, k, v, Leaf); }
+  if (m?._tag === `Node`) { const c = (m as Record<string, unknown>)[`_0`]; const left = (m as Record<string, unknown>)[`_1`]; const nk = (m as Record<string, unknown>)[`_2`]; const nv = (m as Record<string, unknown>)[`_3`]; const right = (m as Record<string, unknown>)[`_4`]; return ((d) => ((d < 0) ? (((((balance)(c))(((((ins)(cmp))(k))(v))(left)))(nk))(nv))(right) : ((d > 0) ? (((((balance)(c))(left))(nk))(nv))(((((ins)(cmp))(k))(v))(right)) : Node(c, left, nk, v, right))))(((cmp)(k))(nk)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const mapInsert = (cmp: unknown) => (k: unknown) => (v: unknown) => (m: RBMap<unknown, unknown>) => ((t) => (() => {
+  if (t?._tag === `Leaf`) { return Leaf; }
+  if (t?._tag === `Node`) { const left = (t as Record<string, unknown>)[`_1`]; const nk = (t as Record<string, unknown>)[`_2`]; const nv = (t as Record<string, unknown>)[`_3`]; const right = (t as Record<string, unknown>)[`_4`]; return Node(Black, left, nk, nv, right); }
+  throw new Error(`Non-exhaustive match`);
+})())(((((ins)(cmp))(k))(v))(m));
+
+const mapLookup = (cmp: unknown) => (k: unknown) => (m: RBMap<unknown, unknown>) => (() => {
+  if (m?._tag === `Leaf`) { return None; }
+  if (m?._tag === `Node`) { const left = (m as Record<string, unknown>)[`_1`]; const nk = (m as Record<string, unknown>)[`_2`]; const nv = (m as Record<string, unknown>)[`_3`]; const right = (m as Record<string, unknown>)[`_4`]; return ((d) => ((d < 0) ? (((mapLookup)(cmp))(k))(left) : ((d > 0) ? (((mapLookup)(cmp))(k))(right) : Some(nv))))(((cmp)(k))(nk)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const mapContains = (cmp: unknown) => (k: unknown) => (m: RBMap<unknown, unknown>) => (() => {
+  if ((((mapLookup)(cmp))(k))(m)?._tag === `Some`) {  return true; }
+  if ((((mapLookup)(cmp))(k))(m)?._tag === `None`) { return false; }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const mapFold = (f: unknown) => (acc: unknown) => (m: RBMap<unknown, unknown>) => (() => {
+  if (m?._tag === `Leaf`) { return acc; }
+  if (m?._tag === `Node`) { const left = (m as Record<string, unknown>)[`_1`]; const k = (m as Record<string, unknown>)[`_2`]; const v = (m as Record<string, unknown>)[`_3`]; const right = (m as Record<string, unknown>)[`_4`]; return ((acc1) => ((acc2) => (((mapFold)(f))(acc2))(right))((((f)(acc1))(k))(v)))((((mapFold)(f))(acc))(left)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const mapKeys = (m: RBMap<unknown, unknown>) => (() => {
+  if (m?._tag === `Leaf`) { return []; }
+  if (m?._tag === `Node`) { const left = (m as Record<string, unknown>)[`_1`]; const k = (m as Record<string, unknown>)[`_2`]; const right = (m as Record<string, unknown>)[`_4`]; return ((lkeys) => ((rkeys) => ((listAppend)(lkeys))([k, ...rkeys]))((mapKeys)(right)))((mapKeys)(left)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const intCmp = (a: number) => (b: number) => ((a < b) ? (0 - 1) : ((a > b) ? 1 : 0));
+
+const strCmp = (a: string) => (b: string) => ((a < b) ? (0 - 1) : ((a > b) ? 1 : 0));
+
+const mapCheck = (label: string) => (ok: boolean) => (ok ? ((_) => 0)((printfn)(((strConcat)(`OK `))(label))) : ((_) => 1)((printfn)(((strConcat)(`FAIL `))(label))));
+
+const __ll_main_Std_Map = () => ((m0) => ((_) => ((m1) => ((m2) => ((m3) => ((m4) => ((m5) => ((_) => ((r3) => ((_) => ((r4) => ((_) => ((_) => ((_) => ((sumV) => ((_) => ((ks) => ((_) => ((sm) => ((r9) => ((_) => ((m10) => ((_) => ((m11) => ((r11) => ((_) => ((ksSorted) => ((h) => ((_) => (printfn)(`Done`))(((mapCheck)(`12 sorted order`))((((maybeWithDefault)(0))(h) === 1))))((listHead)(ksSorted)))((mapKeys)(m5)))(((mapCheck)(`11 duplicate key insert`))((((maybeWithDefault)(0))(r11) === 99))))((((mapLookup)(intCmp))(1))(m11)))(((((mapInsert)(intCmp))(1))(99))(m5)))(((mapCheck)(`10 mapEmpty size=0`))(((mapSize)(Leaf) === 0))))(((((mapInsert)(intCmp))(42))(1))(Leaf)))(((mapCheck)(`9 strCmp lookup`))((((maybeWithDefault)(0))(r9) === 1))))((((mapLookup)(strCmp))(`a`))(sm)))(((((mapInsert)(strCmp))(`b`))(2))(((((mapInsert)(strCmp))(`a`))(1))(Leaf))))(((mapCheck)(`8 mapKeys length`))(((listLen)(ks) === 5))))((mapKeys)(m5)))(((mapCheck)(`7 mapFold sum vals`))((sumV === 150))))((((mapFold)((acc: number) => (k: number) => (v: number) => (acc + v)))(0))(m5)))(((mapCheck)(`6 mapContains absent`))(((((mapContains)(intCmp))(9))(m5) === false))))(((mapCheck)(`5 mapContains present`))((((mapContains)(intCmp))(2))(m5))))(((mapCheck)(`4 mapLookup missing`))((r4 === None))))((((mapLookup)(intCmp))(9))(m5)))(((mapCheck)(`3 mapLookup found`))((((maybeWithDefault)(0))(r3) === 30))))((((mapLookup)(intCmp))(3))(m5)))(((mapCheck)(`2 mapInsert size=5`))(((mapSize)(m5) === 5))))(((((mapInsert)(intCmp))(5))(50))(m4)))(((((mapInsert)(intCmp))(2))(20))(m3)))(((((mapInsert)(intCmp))(4))(40))(m2)))(((((mapInsert)(intCmp))(1))(10))(m1)))(((((mapInsert)(intCmp))(3))(30))(m0)))(((mapCheck)(`1 mapEmpty size=0`))(((mapSize)(m0) === 0))))(Leaf);
+
+const listTake = (n: number) => (xs: unknown[]) => ((n <= 0) ? [] : (() => {
+  if (xs.length > 0) { const h = xs[0], t = xs.slice(1); return [h, ...((listTake)((n - 1)))(t)]; }
+  if (xs.length === 0) { return []; }
+  throw new Error(`Non-exhaustive match`);
+})());
+
+const listDrop = (n: number) => (xs: unknown[]) => ((n <= 0) ? xs : (() => {
+  return ((listDrop)((n - 1)))(t);
+  if (xs.length === 0) { return []; }
+  throw new Error(`Non-exhaustive match`);
+})());
+
+const listFlatMap = (f: unknown) => (xs: unknown[]) => (listConcat)(((listMap)(f))(xs));
+
+const listAny = (p: unknown) => (xs: unknown[]) => (((listFold)((acc: boolean) => (x: unknown) => (acc ? true : (p)(x))))(false))(xs);
+
+const listAll = (p: unknown) => (xs: unknown[]) => (((listFold)((acc: boolean) => (x: unknown) => (acc ? (p)(x) : false)))(true))(xs);
+
+const listFind = (p: unknown) => (xs: unknown[]) => (() => {
+  if (xs.length > 0) { const h = xs[0], t = xs.slice(1); return ((p)(h) ? Some(h) : ((listFind)(p))(t)); }
+  if (xs.length === 0) { return None; }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const listFindIndexFrom = (i: number) => (p: unknown) => (xs: unknown[]) => (() => {
+  if (xs.length > 0) { const h = xs[0], t = xs.slice(1); return ((p)(h) ? Some(i) : (((listFindIndexFrom)((i + 1)))(p))(t)); }
+  if (xs.length === 0) { return None; }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const listFindIndex = (p: unknown) => (xs: unknown[]) => (((listFindIndexFrom)(0))(p))(xs);
+
+const listPartition = (p: unknown) => (xs: unknown[]) => ((foldedPair) => (() => {
+  { const ys = foldedPair[0]; const ns = foldedPair[1]; return [(listReverse)(ys), (listReverse)(ns)] as const; }
+  throw new Error(`Non-exhaustive match`);
+})())((((listFold)((acc: Tuple<unknown[], unknown[]>) => (x: unknown) => (() => {
+  { const ys = acc[0]; const ns = acc[1]; return ((p)(x) ? [[x, ...ys], ns] as const : [ys, [x, ...ns]] as const); }
+  throw new Error(`Non-exhaustive match`);
+})()))([[], []] as const))(xs));
+
+const check = (label: string) => (ok: boolean) => (ok ? ((_) => 0)((printfn)(((strConcat)(`OK `))(label))) : ((_) => 1)((printfn)(((strConcat)(`FAIL `))(label))));
+
+const listCheck = (label: string) => (got: string) => (expected: string) => ((got === expected) ? (printfn)(((strConcat)(`OK `))(label)) : (printfn)(((strConcat)(`FAIL `))(((strConcat)(label))(((strConcat)(` expected=`))(((strConcat)(expected))(((strConcat)(` got=`))(got)))))));
+
+const boolStr = (b: boolean) => (b ? `true` : `false`);
+
+const showIntList = (xs: number[]) => ((strs) => (((listFold)((acc: string) => (s: string) => ((strConcat)(acc))(((strConcat)(`,`))(s))))(``))(strs))(((listMap)(intToStr))(xs));
+
+const __ll_main_Std_List = () => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((r12) => ((_) => ((r13) => ((_) => ((r14) => ((_) => ((r15) => ((_) => (([yes, no]) => ((_) => ((_) => (printfn)(`Done`))((((listCheck)(`16 partition no`))((showIntList)(no)))(`,1,2`)))((((listCheck)(`16 partition yes`))((showIntList)(yes)))(`,3,4`)))(((listPartition)((x: number) => (x > 2)))([1, 2, 3, 4])))((((listCheck)(`15 listFindIndex none`))((intToStr)(((maybeWithDefault)(-1))(r15))))(`-1`)))(((listFindIndex)((x: number) => (x === 9)))([1, 2, 3])))((((listCheck)(`14 listFindIndex`))((intToStr)(((maybeWithDefault)(-1))(r14))))(`1`)))(((listFindIndex)((x: number) => (x === 2)))([1, 2, 3])))((((listCheck)(`13 listFind none`))((intToStr)(((maybeWithDefault)(0))(r13))))(`0`)))(((listFind)((x: number) => (x > 10)))([1, 2, 3])))((((listCheck)(`12 listFind found`))((intToStr)(((maybeWithDefault)(0))(r12))))(`3`)))(((listFind)((x: number) => (x > 2)))([1, 2, 3])))((((listCheck)(`11 listAll false`))((boolStr)(((listAll)((x: number) => (x > 1)))([1, 2, 3]))))(`false`)))((((listCheck)(`10 listAll true`))((boolStr)(((listAll)((x: number) => (x > 0)))([1, 2, 3]))))(`true`)))((((listCheck)(`9 listAny false`))((boolStr)(((listAny)((x: number) => (x > 5)))([1, 2, 3]))))(`false`)))((((listCheck)(`8 listAny true`))((boolStr)(((listAny)((x: number) => (x > 2)))([1, 2, 3]))))(`true`)))((((listCheck)(`7 listFlatMap`))((showIntList)(((listFlatMap)((x: number) => [x, x]))([1, 2, 3]))))(`,1,1,2,2,3,3`)))((((listCheck)(`6 listDrop all`))((showIntList)(((listDrop)(10))([1, 2, 3]))))(``)))((((listCheck)(`5 listDrop 2`))((showIntList)(((listDrop)(2))([1, 2, 3]))))(`,3`)))((((listCheck)(`4 listDrop 0`))((showIntList)(((listDrop)(0))([1, 2, 3]))))(`,1,2,3`)))((((listCheck)(`3 listTake all`))((showIntList)(((listTake)(10))([1, 2, 3]))))(`,1,2,3`)))((((listCheck)(`2 listTake 2`))((showIntList)(((listTake)(2))([1, 2, 3]))))(`,1,2`)))((((listCheck)(`1 listTake 0`))((showIntList)(((listTake)(0))([1, 2, 3]))))(``));
+
+type Token = { _tag: `KwLet` } | { _tag: `KwTag` } | { _tag: `KwUnit` } | { _tag: `KwTrait` } | { _tag: `KwImpl` } | { _tag: `KwImport` } | { _tag: `KwExport` } | { _tag: `KwModule` } | { _tag: `KwExternal` } | { _tag: `KwOpaque` } | { _tag: `KwIf` } | { _tag: `KwElse` } | { _tag: `KwTrue` } | { _tag: `KwFalse` } | { _tag: `KwMatch` } | { _tag: `Ident`; _0: string } | { _tag: `TypeId`; _0: string } | { _tag: `IntLit`; _0: number } | { _tag: `FloatLit`; _0: string } | { _tag: `StrLit`; _0: string } | { _tag: `CharLit`; _0: string } | { _tag: `Arrow` } | { _tag: `Backslash` } | { _tag: `Dot` } | { _tag: `Comma` } | { _tag: `Colon` } | { _tag: `ColonColon` } | { _tag: `Eq` } | { _tag: `Bar` } | { _tag: `LBrack` } | { _tag: `RBrack` } | { _tag: `LParen` } | { _tag: `RParen` } | { _tag: `Plus` } | { _tag: `Minus` } | { _tag: `Star` } | { _tag: `Slash` } | { _tag: `Caret` } | { _tag: `Lt` } | { _tag: `Gt` } | { _tag: `Le` } | { _tag: `Ge` } | { _tag: `EqEq` } | { _tag: `Neq` } | { _tag: `Underscore` } | { _tag: `Newline` } | { _tag: `Indent` } | { _tag: `Dedent` } | { _tag: `Eof` } | { _tag: `TError`; _0: string };
 const KwLet: Token = { _tag: `KwLet` as const };
 const KwTag: Token = { _tag: `KwTag` as const };
 const KwUnit: Token = { _tag: `KwUnit` as const };
@@ -64,6 +240,8 @@ const KwImpl: Token = { _tag: `KwImpl` as const };
 const KwImport: Token = { _tag: `KwImport` as const };
 const KwExport: Token = { _tag: `KwExport` as const };
 const KwModule: Token = { _tag: `KwModule` as const };
+const KwExternal: Token = { _tag: `KwExternal` as const };
+const KwOpaque: Token = { _tag: `KwOpaque` as const };
 const KwIf: Token = { _tag: `KwIf` as const };
 const KwElse: Token = { _tag: `KwElse` as const };
 const KwTrue: Token = { _tag: `KwTrue` as const };
@@ -146,6 +324,8 @@ const classifyIdent = (s: string) => (() => {
   if (s === `import`) { return KwImport; }
   if (s === `export`) { return KwExport; }
   if (s === `module`) { return KwModule; }
+  if (s === `external`) { return KwExternal; }
+  if (s === `opaque`) { return KwOpaque; }
   if (s === `if`) { return KwIf; }
   if (s === `else`) { return KwElse; }
   if (s === `true`) { return KwTrue; }
@@ -346,6 +526,8 @@ const stripNewlines = (ts: Token[]) => (() => {
 
 const checkTokens = (label: string) => (src: string) => (expected: string) => ((got) => ((got === expected) ? (printfn)(((strConcat)(`OK `))(label)) : ((p1) => ((p2) => ((p3) => ((p4) => ((p5) => (printfn)(p5))(((strConcat)(p4))(got)))(((strConcat)(p3))(`\n  got:      `)))(((strConcat)(p2))(expected)))(((strConcat)(p1))(`\n  expected: `)))(((strConcat)(`FAIL `))(label))))((showTokens)((stripNewlines)((tokenize)(src))));
 
+const __ll_main_Std_Lexer = () => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => (printfn)(`Done`))((((checkTokens)(`15 import`))(`import`))(`KwImport Eof`)))((((checkTokens)(`14 module`))(`module`))(`KwModule Eof`)))((((checkTokens)(`13 let`))(`let`))(`KwLet Eof`)))((((checkTokens)(`12 equals`))(`=`))(`Eq Eof`)))((((checkTokens)(`11 pipe`))(`|`))(`Bar Eof`)))((((checkTokens)(`10 backslash`))(`\\`))(`Backslash Eof`)))((((checkTokens)(`9 arrow`))(`->`))(`Arrow Eof`)))((((checkTokens)(`8 upper ident`))(`Foo`))(`TypeId:Foo Eof`)))((((checkTokens)(`7 ident`))(`foo`))(`Ident:foo Eof`)))((((checkTokens)(`6 match`))(`match`))(`KwMatch Eof`)))((((checkTokens)(`5 if`))(`if`))(`KwIf Eof`)))((((checkTokens)(`4 false`))(`false`))(`KwFalse Eof`)))((((checkTokens)(`3 true`))(`true`))(`KwTrue Eof`)))((((checkTokens)(`2 str literal`))(`"hi"`))(`Str:hi Eof`)))((((checkTokens)(`1 int literal`))(`42`))(`Int:42 Eof`));
+
 type Pattern = { _tag: `PVar`; _0: string } | { _tag: `PWild` } | { _tag: `PCon`; _0: string; _1: Pattern[] } | { _tag: `PLitInt`; _0: number } | { _tag: `PLitStr`; _0: string } | { _tag: `PCons`; _0: Pattern; _1: Pattern } | { _tag: `PNil` };
 const PVar = (_0: string): Pattern => ({ _tag: `PVar` as const, _0 });
 const PWild: Pattern = { _tag: `PWild` as const };
@@ -355,7 +537,7 @@ const PLitStr = (_0: string): Pattern => ({ _tag: `PLitStr` as const, _0 });
 const PCons = (_0: Pattern, _1: Pattern): Pattern => ({ _tag: `PCons` as const, _0, _1 });
 const PNil: Pattern = { _tag: `PNil` as const };
 
-type Expr = { _tag: `EInt`; _0: number } | { _tag: `EStr`; _0: string } | { _tag: `EBool`; _0: boolean } | { _tag: `EChar`; _0: string } | { _tag: `EFloat`; _0: string } | { _tag: `EVar`; _0: string } | { _tag: `ECon`; _0: string } | { _tag: `EApp`; _0: Expr; _1: Expr } | { _tag: `EIf`; _0: Expr; _1: Expr; _2: Expr } | { _tag: `EMatch`; _0: Expr; _1: Pattern[]; _2: Expr[] } | { _tag: `ELam`; _0: string; _1: Expr } | { _tag: `ELet`; _0: string; _1: Expr; _2: Expr } | { _tag: `EList`; _0: Expr[] } | { _tag: `EBinOp`; _0: string; _1: Expr; _2: Expr } | { _tag: `ETuple`; _0: Expr; _1: Expr } | { _tag: `ENil` } | { _tag: `ECons`; _0: Expr; _1: Expr };
+type Expr = { _tag: `EInt`; _0: number } | { _tag: `EStr`; _0: string } | { _tag: `EBool`; _0: boolean } | { _tag: `EChar`; _0: string } | { _tag: `EFloat`; _0: string } | { _tag: `EVar`; _0: string } | { _tag: `ECon`; _0: string } | { _tag: `EApp`; _0: Expr; _1: Expr } | { _tag: `EIf`; _0: Expr; _1: Expr; _2: Expr } | { _tag: `EMatch`; _0: Expr; _1: Pattern[]; _2: Expr[] } | { _tag: `ELam`; _0: string; _1: Expr } | { _tag: `ELet`; _0: string; _1: Expr; _2: Expr } | { _tag: `ELetTuple`; _0: string; _1: string; _2: Expr; _3: Expr } | { _tag: `EList`; _0: Expr[] } | { _tag: `EBinOp`; _0: string; _1: Expr; _2: Expr } | { _tag: `ETuple`; _0: Expr; _1: Expr } | { _tag: `ENil` } | { _tag: `ECons`; _0: Expr; _1: Expr };
 const EInt = (_0: number): Expr => ({ _tag: `EInt` as const, _0 });
 const EStr = (_0: string): Expr => ({ _tag: `EStr` as const, _0 });
 const EBool = (_0: boolean): Expr => ({ _tag: `EBool` as const, _0 });
@@ -368,6 +550,7 @@ const EIf = (_0: Expr, _1: Expr, _2: Expr): Expr => ({ _tag: `EIf` as const, _0,
 const EMatch = (_0: Expr, _1: Pattern[], _2: Expr[]): Expr => ({ _tag: `EMatch` as const, _0, _1, _2 });
 const ELam = (_0: string, _1: Expr): Expr => ({ _tag: `ELam` as const, _0, _1 });
 const ELet = (_0: string, _1: Expr, _2: Expr): Expr => ({ _tag: `ELet` as const, _0, _1, _2 });
+const ELetTuple = (_0: string, _1: string, _2: Expr, _3: Expr): Expr => ({ _tag: `ELetTuple` as const, _0, _1, _2, _3 });
 const EList = (_0: Expr[]): Expr => ({ _tag: `EList` as const, _0 });
 const EBinOp = (_0: string, _1: Expr, _2: Expr): Expr => ({ _tag: `EBinOp` as const, _0, _1, _2 });
 const ETuple = (_0: Expr, _1: Expr): Expr => ({ _tag: `ETuple` as const, _0, _1 });
@@ -385,12 +568,15 @@ const MkParam = (_0: string, _1: TypeExpr): Param => ({ _tag: `MkParam` as const
 type Constructor = { _tag: `MkCon`; _0: string; _1: TypeExpr[] };
 const MkCon = (_0: string, _1: TypeExpr[]): Constructor => ({ _tag: `MkCon` as const, _0, _1 });
 
-type Decl = { _tag: `DFn`; _0: string; _1: Param[]; _2: TypeExpr | null; _3: Expr } | { _tag: `DType`; _0: string; _1: string[]; _2: Constructor[] } | { _tag: `DImport`; _0: string[] } | { _tag: `DExport`; _0: Decl } | { _tag: `DLet`; _0: string; _1: Expr };
+type Decl = { _tag: `DFn`; _0: string; _1: Param[]; _2: TypeExpr | null; _3: Expr } | { _tag: `DType`; _0: string; _1: string[]; _2: Constructor[] } | { _tag: `DImport`; _0: string[] } | { _tag: `DImportUrl`; _0: string } | { _tag: `DExport`; _0: Decl } | { _tag: `DLet`; _0: string; _1: Expr } | { _tag: `DExternal`; _0: string; _1: Param[]; _2: TypeExpr } | { _tag: `DOpaque`; _0: string };
 const DFn = (_0: string, _1: Param[], _2: TypeExpr | null, _3: Expr): Decl => ({ _tag: `DFn` as const, _0, _1, _2, _3 });
 const DType = (_0: string, _1: string[], _2: Constructor[]): Decl => ({ _tag: `DType` as const, _0, _1, _2 });
 const DImport = (_0: string[]): Decl => ({ _tag: `DImport` as const, _0 });
+const DImportUrl = (_0: string): Decl => ({ _tag: `DImportUrl` as const, _0 });
 const DExport = (_0: Decl): Decl => ({ _tag: `DExport` as const, _0 });
 const DLet = (_0: string, _1: Expr): Decl => ({ _tag: `DLet` as const, _0, _1 });
+const DExternal = (_0: string, _1: Param[], _2: TypeExpr): Decl => ({ _tag: `DExternal` as const, _0, _1, _2 });
+const DOpaque = (_0: string): Decl => ({ _tag: `DOpaque` as const, _0 });
 
 type Module = { _tag: `MkModule`; _0: string[]; _1: Decl[] };
 const MkModule = (_0: string[], _1: Decl[]): Module => ({ _tag: `MkModule` as const, _0, _1 });
@@ -564,14 +750,10 @@ const parseIf = (toks: Token[]) => (([cond, rest]) => ((rest2) => (([thenE, rest
   throw new Error(`Non-exhaustive match`);
 })()))((skipNewlines)(rest3)))((parseExpr)(rest2)))((skipNewlines)(rest)))((parseExpr)(toks));
 
-const skipKwIn = (toks: Token[]) => (() => {
-  return (skipNewlines)(r);
-  return (skipNewlines)(toks);
-  throw new Error(`Non-exhaustive match`);
-})();
+const skipKwIn = (toks: Token[]) => (skipNewlines)(toks);
 
 const parseLetIn = (toks: Token[]) => (() => {
-  return ((rest0) => (([e1, rest2]) => ((rest3) => (([e2, rest4]) => [ELet(a, e1, ELet(b, ETuple(e1, e2), e2)), rest4] as const)((parseExpr)(rest3)))((skipKwIn)(rest2)))((parseExpr)(rest0)))((skipNewlines)(rest));
+  return ((rest0) => (([e1, rest2]) => ((rest3) => (([e2, rest4]) => [ELetTuple(a, b, e1, e2), rest4] as const)((parseExpr)(rest3)))((skipKwIn)(rest2)))((parseExpr)(rest0)))((skipNewlines)(rest));
   return ((rest0) => (([e1, rest2]) => ((rest3) => (([e2, rest4]) => [ELet(name, e1, e2), rest4] as const)((parseExpr)(rest3)))((skipKwIn)(rest2)))((parseExpr)(rest0)))((skipNewlines)(rest));
   return [EInt(0), toks] as const;
   throw new Error(`Non-exhaustive match`);
@@ -731,7 +913,24 @@ const parseImportPath = (acc: string[]) => (toks: Token[]) => (() => {
 
 const parseImportDecl = (toks: Token[]) => (() => {
   return (([segs, rest2]) => [DImport(segs), rest2] as const)(((parseImportPath)([head]))(rest));
+  return [DImportUrl(url), rest] as const;
   return [DImport([]), toks] as const;
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const parseExternalDecl = (toks: Token[]) => (() => {
+  return (([prms, rest2]) => (([retTy, rest3]) => ((retFinal) => [DExternal(name, prms, retFinal), rest3] as const)((() => {
+  if (retTy?._tag === `Some`) { const ty = (retTy as Record<string, unknown>)[`_0`]; return ty; }
+  if (retTy?._tag === `None`) { return TyName(`?`); }
+  throw new Error(`Non-exhaustive match`);
+})()))((parseReturnType)(rest2)))((parseParamGroups)(rest));
+  return [DExternal(`?`, [], TyName(`?`)), toks] as const;
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const parseOpaqueDecl = (toks: Token[]) => (() => {
+  return [DOpaque(name), rest] as const;
+  return [DOpaque(`?`), toks] as const;
   throw new Error(`Non-exhaustive match`);
 })();
 
@@ -740,6 +939,8 @@ const parseOneDecl = (toks: Token[]) => (() => {
   return (parseLetDecl)(toks);
   return (parseFnDecl)(toks);
   return (parseImportDecl)(toks);
+  return (parseExternalDecl)(toks);
+  return (parseOpaqueDecl)(toks);
   return (([inner, rest2]) => [DExport(inner), rest2] as const)((parseOneDecl)(rest));
   return [DLet(`?`, EInt(0)), toks] as const;
   throw new Error(`Non-exhaustive match`);
@@ -752,6 +953,8 @@ const parseDecls = (toks: Token[]) => ((toks2) => (() => {
   return (([d, rest]) => [d, ...(parseDecls)(rest)])((parseLetDecl)(toks2));
   return (([d, rest]) => [d, ...(parseDecls)(rest)])((parseFnDecl)(toks2));
   return (([d, rest]) => [d, ...(parseDecls)(rest)])((parseImportDecl)(toks2));
+  return (([d, rest]) => [d, ...(parseDecls)(rest)])((parseExternalDecl)(toks2));
+  return (([d, rest]) => [d, ...(parseDecls)(rest)])((parseOpaqueDecl)(toks2));
   return (([inner, rest2]) => [DExport(inner), ...(parseDecls)(rest2)])((parseOneDecl)(rest));
   return [];
   throw new Error(`Non-exhaustive match`);
@@ -817,8 +1020,11 @@ const showDecl = (d: Decl) => (() => {
   if (d?._tag === `DFn`) { const name = (d as Record<string, unknown>)[`_0`]; const prms = (d as Record<string, unknown>)[`_1`]; const retTy = (d as Record<string, unknown>)[`_2`]; const body = (d as Record<string, unknown>)[`_3`]; return ((strConcat)(`DFn `))(((strConcat)(name))(((strConcat)(` body=(`))(((strConcat)((showExpr)(body)))(`)`)))); }
   if (d?._tag === `DType`) { const name = (d as Record<string, unknown>)[`_0`]; const prms = (d as Record<string, unknown>)[`_1`]; const ctors = (d as Record<string, unknown>)[`_2`]; return ((strConcat)(`DType `))(name); }
   if (d?._tag === `DImport`) { const segs = (d as Record<string, unknown>)[`_0`]; return ((path) => ((strConcat)(`DImport `))(path))((joinDot)(segs)); }
+  if (d?._tag === `DImportUrl`) { const url = (d as Record<string, unknown>)[`_0`]; return ((strConcat)(`DImportUrl `))(url); }
   if (d?._tag === `DExport`) { const inner = (d as Record<string, unknown>)[`_0`]; return ((strConcat)(`DExport(`))(((strConcat)((showDecl)(inner)))(`)`)); }
   if (d?._tag === `DLet`) { const name = (d as Record<string, unknown>)[`_0`]; const body = (d as Record<string, unknown>)[`_1`]; return ((strConcat)(`DLet `))(((strConcat)(name))(((strConcat)(`=(`))(((strConcat)((showExpr)(body)))(`)`)))); }
+  if (d?._tag === `DExternal`) { const name = (d as Record<string, unknown>)[`_0`]; const _prms = (d as Record<string, unknown>)[`_1`]; const _retTy = (d as Record<string, unknown>)[`_2`]; return ((strConcat)(`DExternal `))(name); }
+  if (d?._tag === `DOpaque`) { const name = (d as Record<string, unknown>)[`_0`]; return ((strConcat)(`DOpaque `))(name); }
   throw new Error(`Non-exhaustive match`);
 })();
 
@@ -831,11 +1037,16 @@ const parserCheckModule = (label: string) => (toks: Token[]) => (expectedDeclCou
   throw new Error(`Non-exhaustive match`);
 })())((parseModule)(toks));
 
+const __ll_main_Std_Parser = () => ((_) => ((_) => ((_) => ((_) => ((toks5) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((toks18) => ((_) => (printfn)(`Done`))((((parserCheckDecl)(`18 DFn`))(toks18))(`DFn add body=(EBinOp(+ EVar a EVar b))`)))([Ident(`add`), ...[LParen, ...[Ident(`a`), ...[TypeId(`Int`), ...[RParen, ...[LParen, ...[Ident(`b`), ...[TypeId(`Int`), ...[RParen, ...[Eq, ...[Ident(`a`), ...[Plus, ...[Ident(`b`), ...[Eof, ...[]]]]]]]]]]]]]]]))((((parserCheckDecl)(`17 value binding`))([Ident(`x`), ...[Eq, ...[IntLit(42), ...[Eof, ...[]]]]]))(`DFn x body=(EInt 42)`)))((((parserCheckDecl)(`16 DImport`))([KwImport, ...[TypeId(`Std`), ...[Dot, ...[TypeId(`Map`), ...[Eof, ...[]]]]]]))(`DImport Std.Map`)))((((parserCheckExpr)(`15 EApp`))([Ident(`f`), ...[Ident(`x`), ...[Eof, ...[]]]]))(`EApp(EVar f EVar x)`)))((((parserCheckExpr)(`14 EBinOp`))([IntLit(1), ...[Plus, ...[IntLit(2), ...[Eof, ...[]]]]]))(`EBinOp(+ EInt 1 EInt 2)`)))((((parserCheckExpr)(`13 ELam`))([Backslash, ...[Ident(`x`), ...[Dot, ...[Ident(`x`), ...[Eof, ...[]]]]]]))(`ELam x.EVar x`)))((((parserCheckExpr)(`12 ENil`))([LBrack, ...[RBrack, ...[Eof, ...[]]]]))(`ENil`)))((((parserCheckExpr)(`11 ECon`))([TypeId(`None`), ...[Eof, ...[]]]))(`ECon None`)))((((parserCheckExpr)(`10 EVar`))([Ident(`x`), ...[Eof, ...[]]]))(`EVar x`)))((((parserCheckExpr)(`9 EBool false`))([KwFalse, ...[Eof, ...[]]]))(`EBool false`)))((((parserCheckExpr)(`8 EBool true`))([KwTrue, ...[Eof, ...[]]]))(`EBool true`)))((((parserCheckExpr)(`7 EStr`))([StrLit(`hi`), ...[Eof, ...[]]]))(`EStr hi`)))((((parserCheckExpr)(`6 EInt`))([IntLit(42), ...[Eof, ...[]]]))(`EInt 42`)))((((parserCheckModule)(`5 module 2 decls`))(toks5))(2)))([KwModule, ...[TypeId(`M`), ...[Newline, ...[KwExternal, ...[Ident(`connect`), ...[LParen, ...[Ident(`url`), ...[TypeId(`Str`), ...[RParen, ...[TypeId(`Bool`), ...[Newline, ...[KwOpaque, ...[TypeId(`Conn`), ...[Eof, ...[]]]]]]]]]]]]]]]))((((parserCheckDecl)(`4 opaque2`))([KwOpaque, ...[TypeId(`Promise`), ...[Eof, ...[]]]]))(`DOpaque Promise`)))((((parserCheckDecl)(`3 opaque`))([KwOpaque, ...[TypeId(`HttpClient`), ...[Eof, ...[]]]]))(`DOpaque HttpClient`)))((((parserCheckDecl)(`2 external no args`))([KwExternal, ...[Ident(`ping`), ...[LParen, ...[RParen, ...[TypeId(`Bool`), ...[Eof, ...[]]]]]]]))(`DExternal ping`)))((((parserCheckDecl)(`1 external fn`))([KwExternal, ...[Ident(`httpGet`), ...[LParen, ...[Ident(`url`), ...[TypeId(`Str`), ...[RParen, ...[TypeId(`Str`), ...[Eof, ...[]]]]]]]]]))(`DExternal httpGet`));
+
 type ElabError = { _tag: `MkError`; _0: string };
 const MkError = (_0: string): ElabError => ({ _tag: `MkError` as const, _0 });
 
 type Env = { _tag: `MkEnv`; _0: string[] };
 const MkEnv = (_0: string[]): Env => ({ _tag: `MkEnv` as const, _0 });
+
+type TypeEntry = { _tag: `MkTypeEntry`; _0: string; _1: string[] };
+const MkTypeEntry = (_0: string, _1: string[]): TypeEntry => ({ _tag: `MkTypeEntry` as const, _0, _1 });
 
 const errMsg = (e: ElabError) => (() => {
   if (e?._tag === `MkError`) { const msg = (e as Record<string, unknown>)[`_0`]; return msg; }
@@ -905,6 +1116,8 @@ const declName = (d: Decl) => (() => {
   if (d?._tag === `DType`) { const name = (d as Record<string, unknown>)[`_0`]; return Some(name); }
   if (d?._tag === `DImport`) {  return None; }
   if (d?._tag === `DExport`) { const inner = (d as Record<string, unknown>)[`_0`]; return (declName)(inner); }
+  if (d?._tag === `DExternal`) { const name = (d as Record<string, unknown>)[`_0`]; return Some(name); }
+  if (d?._tag === `DOpaque`) {  return None; }
   throw new Error(`Non-exhaustive match`);
 })();
 
@@ -922,6 +1135,8 @@ const collectDecl = (d: Decl) => (env: Env) => (() => {
   if (d?._tag === `DType`) { const ctors = (d as Record<string, unknown>)[`_2`]; return ((envAddAll)((conNames)(ctors)))(env); }
   if (d?._tag === `DImport`) {  return env; }
   if (d?._tag === `DExport`) { const inner = (d as Record<string, unknown>)[`_0`]; return ((collectDecl)(inner))(env); }
+  if (d?._tag === `DExternal`) { const name = (d as Record<string, unknown>)[`_0`]; return ((envAdd)(name))(env); }
+  if (d?._tag === `DOpaque`) {  return env; }
   throw new Error(`Non-exhaustive match`);
 })();
 
@@ -941,6 +1156,7 @@ const checkExpr = (env: Env) => (e: Expr) => (() => {
   if (e?._tag === `EIf`) { const cnd = (e as Record<string, unknown>)[`_0`]; const thn = (e as Record<string, unknown>)[`_1`]; const els = (e as Record<string, unknown>)[`_2`]; return ((listAppend)(((listAppend)(((checkExpr)(env))(cnd)))(((checkExpr)(env))(thn))))(((checkExpr)(env))(els)); }
   if (e?._tag === `ELam`) { const param = (e as Record<string, unknown>)[`_0`]; const body = (e as Record<string, unknown>)[`_1`]; return ((env2) => ((checkExpr)(env2))(body))(((envAdd)(param))(env)); }
   if (e?._tag === `ELet`) { const name = (e as Record<string, unknown>)[`_0`]; const rhs = (e as Record<string, unknown>)[`_1`]; const body = (e as Record<string, unknown>)[`_2`]; return ((rhsErrs) => ((env2) => ((bodyErrs) => ((listAppend)(rhsErrs))(bodyErrs))(((checkExpr)(env2))(body)))(((envAdd)(name))(env)))(((checkExpr)(env))(rhs)); }
+  if (e?._tag === `ELetTuple`) { const a = (e as Record<string, unknown>)[`_0`]; const b = (e as Record<string, unknown>)[`_1`]; const rhs = (e as Record<string, unknown>)[`_2`]; const body = (e as Record<string, unknown>)[`_3`]; return ((rhsErrs) => ((env2) => ((bodyErrs) => ((listAppend)(rhsErrs))(bodyErrs))(((checkExpr)(env2))(body)))(((envAdd)(b))(((envAdd)(a))(env))))(((checkExpr)(env))(rhs)); }
   if (e?._tag === `EMatch`) { const scrut = (e as Record<string, unknown>)[`_0`]; const pats = (e as Record<string, unknown>)[`_1`]; const bodies = (e as Record<string, unknown>)[`_2`]; return ((scrutErrs) => ((armErrs) => ((listAppend)(scrutErrs))(armErrs))((((checkArms)(env))(pats))(bodies)))(((checkExpr)(env))(scrut)); }
   if (e?._tag === `EList`) { const items = (e as Record<string, unknown>)[`_0`]; return (((listFold)((acc: ElabError[]) => (item: Expr) => ((listAppend)(acc))(((checkExpr)(env))(item))))([]))(items); }
   if (e?._tag === `ECons`) { const h = (e as Record<string, unknown>)[`_0`]; const t = (e as Record<string, unknown>)[`_1`]; return ((listAppend)(((checkExpr)(env))(h)))(((checkExpr)(env))(t)); }
@@ -966,6 +1182,8 @@ const checkDecl = (env: Env) => (d: Decl) => (() => {
   if (d?._tag === `DType`) {  return []; }
   if (d?._tag === `DImport`) {  return []; }
   if (d?._tag === `DExport`) { const inner = (d as Record<string, unknown>)[`_0`]; return ((checkDecl)(env))(inner); }
+  if (d?._tag === `DExternal`) {  return []; }
+  if (d?._tag === `DOpaque`) {  return []; }
   throw new Error(`Non-exhaustive match`);
 })();
 
@@ -977,8 +1195,73 @@ const checkDuplicates = (decls: Decl[]) => ((names) => ((dups) => ((listMap)((na
 
 const builtinNames = () => [`abs`, ...[`absf`, ...[`sqrt`, ...[`min`, ...[`max`, ...[`listLen`, ...[`listMap`, ...[`listFilter`, ...[`listFold`, ...[`listReverse`, ...[`listAppend`, ...[`listConcat`, ...[`listIsEmpty`, ...[`listHead`, ...[`listTail`, ...[`listAt`, ...[`strLen`, ...[`strConcat`, ...[`strTrim`, ...[`strContains`, ...[`strChars`, ...[`strFromChars`, ...[`strReverse`, ...[`strSlice`, ...[`strIndexOf`, ...[`strSplit`, ...[`strToInt`, ...[`charToInt`, ...[`intToChar`, ...[`intToStr`, ...[`charIsDigit`, ...[`charIsAlpha`, ...[`charIsSpace`, ...[`print`, ...[`printfn`, ...[`readFile`, ...[`writeFile`, ...[`fileExists`, ...[`exit`, ...[`getArgs`, ...[`maybeMap`, ...[`maybeBind`, ...[`maybeWithDefault`, ...[`true`, ...[`false`, ...[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]];
 
+const buildTypeMap = (decls: Decl[]) => (((listFold)((acc: TypeEntry[]) => (d: Decl) => (() => {
+  if (d?._tag === `DType`) { const ctors = (d as Record<string, unknown>)[`_2`]; return ((allNms) => (((listFold)((acc2: TypeEntry[]) => (c: string) => [MkTypeEntry(c, allNms), ...acc2]))(acc))(allNms))((conNames)(ctors)); }
+  return acc;
+  throw new Error(`Non-exhaustive match`);
+})()))([]))(decls);
+
+const typeMapLookup = (nm: string) => (m: TypeEntry[]) => (() => {
+  if (m.length === 0) { return []; }
+  if (m.length > 0) { const entry = m[0], rest = m.slice(1); return (() => {
+  if (entry?._tag === `MkTypeEntry`) { const k = (entry as Record<string, unknown>)[`_0`]; const vs = (entry as Record<string, unknown>)[`_1`]; return ((k === nm) ? vs : ((typeMapLookup)(nm))(rest)); }
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const hasWildOrVar = (pats: Pattern[]) => (() => {
+  if (pats.length === 0) { return false; }
+  if (pats.length > 0) { const p = pats[0], rest = pats.slice(1); return (() => {
+  if (p?._tag === `PWild`) { return true; }
+  if (p?._tag === `PVar`) {  return true; }
+  return (hasWildOrVar)(rest);
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const extractConNamesFromPats = (pats: Pattern[]) => (((listFold)((acc: string[]) => (p: Pattern) => (() => {
+  if (p?._tag === `PCon`) { const name = (p as Record<string, unknown>)[`_0`]; return ((listAppend)(acc))([name]); }
+  return acc;
+  throw new Error(`Non-exhaustive match`);
+})()))([]))(pats);
+
+const buildMissingMsg = (missing: string[]) => (((listFold)((acc: string) => (nm: string) => (((strLen)(acc) === 0) ? nm : ((strConcat)(acc))(((strConcat)(`, `))(nm)))))(``))(missing);
+
+const checkExhaustPats = (typeMap: TypeEntry[]) => (pats: Pattern[]) => ((hasWildOrVar)(pats) ? [] : ((conNms) => (() => {
+  if (conNms.length === 0) { return []; }
+  return ((allCons) => ((listIsEmpty)(allCons) ? [] : ((missing) => ((listIsEmpty)(missing) ? [] : ((msg) => [MkError(msg)])(((strConcat)(`Non-exhaustive match: missing `))((buildMissingMsg)(missing)))))(((listFilter)((c: string) => (((listContains)(c))(conNms) === false)))(allCons))))(((typeMapLookup)(first))(typeMap));
+  throw new Error(`Non-exhaustive match`);
+})())((extractConNamesFromPats)(pats)));
+
+const checkExhaustExpr = (typeMap: TypeEntry[]) => (e: Expr) => (() => {
+  if (e?._tag === `EMatch`) { const pats = (e as Record<string, unknown>)[`_1`]; const bodies = (e as Record<string, unknown>)[`_2`]; return ((patErrs) => ((bodyErrs) => ((listAppend)(patErrs))(bodyErrs))((((listFold)((acc: ElabError[]) => (b: Expr) => ((listAppend)(acc))(((checkExhaustExpr)(typeMap))(b))))([]))(bodies)))(((checkExhaustPats)(typeMap))(pats)); }
+  if (e?._tag === `EApp`) { const f = (e as Record<string, unknown>)[`_0`]; const x = (e as Record<string, unknown>)[`_1`]; return ((listAppend)(((checkExhaustExpr)(typeMap))(f)))(((checkExhaustExpr)(typeMap))(x)); }
+  if (e?._tag === `ELam`) { const body = (e as Record<string, unknown>)[`_1`]; return ((checkExhaustExpr)(typeMap))(body); }
+  if (e?._tag === `ELet`) { const v = (e as Record<string, unknown>)[`_1`]; const body = (e as Record<string, unknown>)[`_2`]; return ((listAppend)(((checkExhaustExpr)(typeMap))(v)))(((checkExhaustExpr)(typeMap))(body)); }
+  if (e?._tag === `ELetTuple`) { const v = (e as Record<string, unknown>)[`_2`]; const body = (e as Record<string, unknown>)[`_3`]; return ((listAppend)(((checkExhaustExpr)(typeMap))(v)))(((checkExhaustExpr)(typeMap))(body)); }
+  if (e?._tag === `EIf`) { const c = (e as Record<string, unknown>)[`_0`]; const t = (e as Record<string, unknown>)[`_1`]; const f = (e as Record<string, unknown>)[`_2`]; return ((listAppend)(((listAppend)(((checkExhaustExpr)(typeMap))(c)))(((checkExhaustExpr)(typeMap))(t))))(((checkExhaustExpr)(typeMap))(f)); }
+  if (e?._tag === `EBinOp`) { const l = (e as Record<string, unknown>)[`_1`]; const r = (e as Record<string, unknown>)[`_2`]; return ((listAppend)(((checkExhaustExpr)(typeMap))(l)))(((checkExhaustExpr)(typeMap))(r)); }
+  if (e?._tag === `EList`) { const items = (e as Record<string, unknown>)[`_0`]; return (((listFold)((acc: ElabError[]) => (i: Expr) => ((listAppend)(acc))(((checkExhaustExpr)(typeMap))(i))))([]))(items); }
+  if (e?._tag === `ECons`) { const h = (e as Record<string, unknown>)[`_0`]; const t = (e as Record<string, unknown>)[`_1`]; return ((listAppend)(((checkExhaustExpr)(typeMap))(h)))(((checkExhaustExpr)(typeMap))(t)); }
+  if (e?._tag === `ETuple`) { const a = (e as Record<string, unknown>)[`_0`]; const b = (e as Record<string, unknown>)[`_1`]; return ((listAppend)(((checkExhaustExpr)(typeMap))(a)))(((checkExhaustExpr)(typeMap))(b)); }
+  return [];
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const checkExhaustDecl = (typeMap: TypeEntry[]) => (d: Decl) => (() => {
+  if (d?._tag === `DFn`) { const body = (d as Record<string, unknown>)[`_3`]; return ((checkExhaustExpr)(typeMap))(body); }
+  if (d?._tag === `DLet`) { const body = (d as Record<string, unknown>)[`_1`]; return ((checkExhaustExpr)(typeMap))(body); }
+  if (d?._tag === `DExport`) { const inner = (d as Record<string, unknown>)[`_0`]; return ((checkExhaustDecl)(typeMap))(inner); }
+  return [];
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const checkExhaustDecls = (typeMap: TypeEntry[]) => (decls: Decl[]) => (((listFold)((acc: ElabError[]) => (d: Decl) => ((listAppend)(acc))(((checkExhaustDecl)(typeMap))(d))))([]))(decls);
+
 const elaborate = (m: Module) => (() => {
-  if (m?._tag === `MkModule`) { const decls = (m as Record<string, unknown>)[`_1`]; return ((builtinEnv) => ((env) => ((dupErrs) => ((bodyErrs) => ((listAppend)(dupErrs))(bodyErrs))(((checkDecls)(env))(decls)))((checkDuplicates)(decls)))(((collectDecls)(decls))(builtinEnv)))(((envAddAll)(builtinNames))(emptyEnv)); }
+  if (m?._tag === `MkModule`) { const decls = (m as Record<string, unknown>)[`_1`]; return ((builtinEnv) => ((env) => ((dupErrs) => ((bodyErrs) => ((typeMap) => ((exhaustErrs) => ((listAppend)(dupErrs))(((listAppend)(bodyErrs))(exhaustErrs)))(((checkExhaustDecls)(typeMap))(decls)))((buildTypeMap)(decls)))(((checkDecls)(env))(decls)))((checkDuplicates)(decls)))(((collectDecls)(decls))(builtinEnv)))(((envAddAll)(builtinNames))(emptyEnv)); }
   throw new Error(`Non-exhaustive match`);
 })();
 
@@ -992,7 +1275,203 @@ const hasErrorWith = (needle: string) => (errs: ElabError[]) => (((listFold)((ac
 
 const assertHasError = (label: string) => (needle: string) => (errs: ElabError[]) => (((hasErrorWith)(needle))(errs) ? (printfn)(((strConcat)(`OK `))(label)) : (printfn)(((strConcat)(`FAIL `))(((strConcat)(label))(((strConcat)(` — expected error: `))(needle)))));
 
-const __ll_main_Std_Elaborator = () => ((colorCtors1) => ((decls1) => ((m1) => ((_) => ((decls2) => ((m2) => ((_) => ((decls3) => ((m3) => ((_) => ((matchExpr) => ((colorCtors4) => ((decls4) => ((m4) => ((_) => ((decls5) => ((m5) => ((_) => ((letExpr) => ((decls6) => ((m6) => ((_) => 0)(((assertNoErrors)(`6 let binding scoping`))((elaborate)(m6))))(MkModule([`M`, ...[]], decls6)))([DFn(`useZ`, [], None, letExpr), ...[]]))(ELet(`z`, EInt(10), EBinOp(`+`, EVar(`z`), EInt(1)))))((((assertHasError)(`5 unbound constructor`))(`Nope`))((elaborate)(m5))))(MkModule([`M`, ...[]], decls5)))([DFn(`bad`, [MkParam(`x`, TyName(`Int`)), ...[]], None, ECon(`Nope`)), ...[]]))(((assertNoErrors)(`4 valid match with constructors`))((elaborate)(m4))))(MkModule([`M`, ...[]], decls4)))([DType(`Color`, [], colorCtors4), ...[DFn(`describeColor`, [MkParam(`x`, TyName(`Color`)), ...[]], None, matchExpr), ...[]]]))([MkCon(`Red`, []), ...[MkCon(`Black`, []), ...[]]]))(EMatch(EVar(`x`), [PCon(`Red`, []), ...[PCon(`Black`, []), ...[]]], [EInt(1), ...[EInt(2), ...[]]])))((((assertHasError)(`3 duplicate function`))(`foo`))((elaborate)(m3))))(MkModule([`M`, ...[]], decls3)))([DFn(`foo`, [MkParam(`x`, TyName(`Int`)), ...[]], None, EVar(`x`)), ...[DFn(`foo`, [MkParam(`y`, TyName(`Int`)), ...[]], None, EVar(`y`)), ...[]]]))((((assertHasError)(`2 unbound variable`))(`y`))((elaborate)(m2))))(MkModule([`M`, ...[]], decls2)))([DFn(`broken`, [MkParam(`x`, TyName(`Int`)), ...[]], None, EVar(`y`)), ...[]]))(((assertNoErrors)(`1 valid program`))((elaborate)(m1))))(MkModule([`M`, ...[]], decls1)))([DType(`Color`, [], colorCtors1), ...[DFn(`id`, [MkParam(`x`, TyName(`Int`)), ...[]], None, EVar(`x`)), ...[]]]))([MkCon(`Red`, []), ...[MkCon(`Black`, []), ...[]]]);
+const __ll_main_Std_Elaborator = () => ((colorCtors1) => ((decls1) => ((m1) => ((_) => ((decls2) => ((m2) => ((_) => ((decls3) => ((m3) => ((_) => ((matchExpr) => ((colorCtors4) => ((decls4) => ((m4) => ((_) => ((decls5) => ((m5) => ((_) => ((letExpr) => ((decls6) => ((m6) => ((_) => ((decls7) => ((m7) => ((_) => ((decls8) => ((m8) => ((_) => ((nonExhMatch) => ((colorCtors9) => ((decls9) => ((m9) => ((_) => 0)((((assertHasError)(`9 non-exhaustive match`))(`Non-exhaustive`))((elaborate)(m9))))(MkModule([`M`, ...[]], decls9)))([DType(`Color`, [], colorCtors9), ...[DFn(`describePartial`, [MkParam(`x`, TyName(`Color`)), ...[]], None, nonExhMatch), ...[]]]))([MkCon(`Red`, []), ...[MkCon(`Black`, []), ...[]]]))(EMatch(EVar(`x`), [PCon(`Red`, []), ...[]], [EInt(1), ...[]])))(((assertNoErrors)(`8 opaque type and external`))((elaborate)(m8))))(MkModule([`M`, ...[]], decls8)))([DOpaque(`HttpClient`), ...[DExternal(`createClient`, [], TyName(`HttpClient`)), ...[]]]))(((assertNoErrors)(`7 external decl registers name`))((elaborate)(m7))))(MkModule([`M`, ...[]], decls7)))([DExternal(`httpGet`, [MkParam(`url`, TyName(`Str`)), ...[]], TyName(`Str`)), ...[DFn(`fetch`, [MkParam(`u`, TyName(`Str`)), ...[]], None, EApp(EVar(`httpGet`), EVar(`u`))), ...[]]]))(((assertNoErrors)(`6 let binding scoping`))((elaborate)(m6))))(MkModule([`M`, ...[]], decls6)))([DFn(`useZ`, [], None, letExpr), ...[]]))(ELet(`z`, EInt(10), EBinOp(`+`, EVar(`z`), EInt(1)))))((((assertHasError)(`5 unbound constructor`))(`Nope`))((elaborate)(m5))))(MkModule([`M`, ...[]], decls5)))([DFn(`bad`, [MkParam(`x`, TyName(`Int`)), ...[]], None, ECon(`Nope`)), ...[]]))(((assertNoErrors)(`4 valid match with constructors`))((elaborate)(m4))))(MkModule([`M`, ...[]], decls4)))([DType(`Color`, [], colorCtors4), ...[DFn(`describeColor`, [MkParam(`x`, TyName(`Color`)), ...[]], None, matchExpr), ...[]]]))([MkCon(`Red`, []), ...[MkCon(`Black`, []), ...[]]]))(EMatch(EVar(`x`), [PCon(`Red`, []), ...[PCon(`Black`, []), ...[]]], [EInt(1), ...[EInt(2), ...[]]])))((((assertHasError)(`3 duplicate function`))(`foo`))((elaborate)(m3))))(MkModule([`M`, ...[]], decls3)))([DFn(`foo`, [MkParam(`x`, TyName(`Int`)), ...[]], None, EVar(`x`)), ...[DFn(`foo`, [MkParam(`y`, TyName(`Int`)), ...[]], None, EVar(`y`)), ...[]]]))((((assertHasError)(`2 unbound variable`))(`y`))((elaborate)(m2))))(MkModule([`M`, ...[]], decls2)))([DFn(`broken`, [MkParam(`x`, TyName(`Int`)), ...[]], None, EVar(`y`)), ...[]]))(((assertNoErrors)(`1 valid program`))((elaborate)(m1))))(MkModule([`M`, ...[]], decls1)))([DType(`Color`, [], colorCtors1), ...[DFn(`id`, [MkParam(`x`, TyName(`Int`)), ...[]], None, EVar(`x`)), ...[]]]))([MkCon(`Red`, []), ...[MkCon(`Black`, []), ...[]]]);
+
+type InferResult<A> = { _tag: `InferOk`; _0: unknown } | { _tag: `InferErr`; _0: string };
+const InferOk = <A>(_0: unknown): InferResult<A> => ({ _tag: `InferOk` as const, _0 });
+const InferErr = <A>(_0: string): InferResult<A> => ({ _tag: `InferErr` as const, _0 });
+
+type Scheme = { _tag: `MkScheme`; _0: string[]; _1: TypeExpr };
+const MkScheme = (_0: string[], _1: TypeExpr): Scheme => ({ _tag: `MkScheme` as const, _0, _1 });
+
+type Fresh = { _tag: `MkFresh`; _0: number };
+const MkFresh = (_0: number): Fresh => ({ _tag: `MkFresh` as const, _0 });
+
+const isFlex = (name: string) => (((strLen)(name) > 0) ? ((((strSlice)(name))(0))(1) === `\$`) : false);
+
+const freshVarName = (n: number) => ((strConcat)(`\$`))((intToStr)(n));
+
+const schemeMono = (t: TypeExpr) => MkScheme([], t);
+
+const schemeVars = (s: Scheme) => (() => {
+  if (s?._tag === `MkScheme`) { const vs = (s as Record<string, unknown>)[`_0`]; return vs; }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const schemeBody = (s: Scheme) => (() => {
+  if (s?._tag === `MkScheme`) { const body = (s as Record<string, unknown>)[`_1`]; return body; }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const substEmpty = () => Leaf;
+
+const substInsert = (v: string) => (t: TypeExpr) => (s: RBMap<string, TypeExpr>) => ((((mapInsert)(strCmp))(v))(t))(s);
+
+const substLookup = (v: string) => (s: RBMap<string, TypeExpr>) => (((mapLookup)(strCmp))(v))(s);
+
+const substRemove = (v: string) => (s: RBMap<string, TypeExpr>) => (((mapFold)((acc: RBMap<string, TypeExpr>) => (nk: string) => (nv: TypeExpr) => ((((strCmp)(v))(nk) === 0) ? acc : ((((mapInsert)(strCmp))(nk))(nv))(acc))))(Leaf))(s);
+
+const applyType = (s: RBMap<string, TypeExpr>) => (t: TypeExpr) => (() => {
+  if (t?._tag === `TyName`) { const v = (t as Record<string, unknown>)[`_0`]; return ((isFlex)(v) ? (() => {
+  if (((substLookup)(v))(s)?._tag === `Some`) { const t2 = (((substLookup)(v))(s) as Record<string, unknown>)[`_0`]; return ((applyType)(s))(t2); }
+  if (((substLookup)(v))(s)?._tag === `None`) { return t; }
+  throw new Error(`Non-exhaustive match`);
+})() : t); }
+  if (t?._tag === `TyApp`) { const a = (t as Record<string, unknown>)[`_0`]; const b = (t as Record<string, unknown>)[`_1`]; return TyApp(((applyType)(s))(a), ((applyType)(s))(b)); }
+  if (t?._tag === `TyFn`) { const a = (t as Record<string, unknown>)[`_0`]; const b = (t as Record<string, unknown>)[`_1`]; return TyFn(((applyType)(s))(a), ((applyType)(s))(b)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const applyScheme = (s: RBMap<string, TypeExpr>) => (sch: Scheme) => (() => {
+  if (sch?._tag === `MkScheme`) { const vs = (sch as Record<string, unknown>)[`_0`]; const body = (sch as Record<string, unknown>)[`_1`]; return ((s2) => MkScheme(vs, ((applyType)(s2))(body)))((((listFold)((acc: RBMap<string, TypeExpr>) => (v: string) => ((substRemove)(v))(acc)))(s))(vs)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const applyEnv = (s: RBMap<string, TypeExpr>) => (env: RBMap<string, Scheme>) => (((mapFold)((acc: RBMap<string, Scheme>) => (k: string) => (sch: Scheme) => ((((mapInsert)(strCmp))(k))(((applyScheme)(s))(sch)))(acc)))(Leaf))(env);
+
+const substCompose = (s1: RBMap<string, TypeExpr>) => (s2: RBMap<string, TypeExpr>) => ((s2Applied) => (((mapFold)((acc: RBMap<string, TypeExpr>) => (k: string) => (v: TypeExpr) => (() => {
+  if (((substLookup)(k))(acc)?._tag === `None`) { return ((((mapInsert)(strCmp))(k))(v))(acc); }
+  if (((substLookup)(k))(acc)?._tag === `Some`) {  return acc; }
+  throw new Error(`Non-exhaustive match`);
+})()))(s2Applied))(s1))((((mapFold)((acc: RBMap<string, TypeExpr>) => (k: string) => (t: TypeExpr) => ((((mapInsert)(strCmp))(k))(((applyType)(s1))(t)))(acc)))(Leaf))(s2));
+
+const ftvTypeList = (t: TypeExpr) => (() => {
+  if (t?._tag === `TyName`) { const v = (t as Record<string, unknown>)[`_0`]; return ((isFlex)(v) ? [v] : []); }
+  if (t?._tag === `TyApp`) { const a = (t as Record<string, unknown>)[`_0`]; const b = (t as Record<string, unknown>)[`_1`]; return (strNub)(((listAppend)((ftvTypeList)(a)))((ftvTypeList)(b))); }
+  if (t?._tag === `TyFn`) { const a = (t as Record<string, unknown>)[`_0`]; const b = (t as Record<string, unknown>)[`_1`]; return (strNub)(((listAppend)((ftvTypeList)(a)))((ftvTypeList)(b))); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const ftvSchemeList = (sch: Scheme) => (() => {
+  if (sch?._tag === `MkScheme`) { const vs = (sch as Record<string, unknown>)[`_0`]; const body = (sch as Record<string, unknown>)[`_1`]; return ((listFilter)((v: string) => ((listAll)((q: string) => (v !== q)))(vs)))((ftvTypeList)(body)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const strNub = (xs: string[]) => (((listFold)((acc: string[]) => (x: string) => (((listAny)((y: string) => (x === y)))(acc) ? acc : ((listAppend)(acc))([x]))))([]))(xs);
+
+const ftvEnvList = (env: RBMap<string, Scheme>) => (strNub)((((mapFold)((acc: string[]) => (k: string) => (sch: Scheme) => ((listAppend)(acc))((ftvSchemeList)(sch))))([]))(env));
+
+const freshInit = () => MkFresh(0);
+
+const freshNext = (f: Fresh) => (() => {
+  if (f?._tag === `MkFresh`) { const n = (f as Record<string, unknown>)[`_0`]; return [TyName((freshVarName)(n)), MkFresh((n + 1))] as const; }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const generalize = (env: RBMap<string, Scheme>) => (t: TypeExpr) => ((envFtv) => ((toQuant) => MkScheme(toQuant, t))(((listFilter)((v: string) => ((listAll)((e: string) => (v !== e)))(envFtv)))((ftvTypeList)(t))))((ftvEnvList)(env));
+
+const instantiateWith = (f: Fresh) => (vs: string[]) => (body: TypeExpr) => (() => {
+  if (vs.length === 0) { return [body, f] as const; }
+  if (vs.length > 0) { const v = vs[0], rest = vs.slice(1); return (([tv, f2]) => ((s) => ((body2) => (((instantiateWith)(f2))(rest))(body2))(((applyType)(s))(body)))((((substInsert)(v))(tv))(substEmpty)))((freshNext)(f)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const instantiate = (f: Fresh) => (sch: Scheme) => (() => {
+  if (sch?._tag === `MkScheme`) { const vs = (sch as Record<string, unknown>)[`_0`]; const body = (sch as Record<string, unknown>)[`_1`]; return (((instantiateWith)(f))(vs))(body); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const unify = (t1: TypeExpr) => (t2: TypeExpr) => (() => {
+  if (t1?._tag === `TyName`) { const a = (t1 as Record<string, unknown>)[`_0`]; return (() => {
+  if (t2?._tag === `TyName`) { const b = (t2 as Record<string, unknown>)[`_0`]; return ((a === b) ? InferOk(substEmpty) : ((isFlex)(a) ? ((bindVar)(a))(t2) : ((isFlex)(b) ? ((bindVar)(b))(t1) : InferErr(((unifyErrMsg)(t1))(t2))))); }
+  return ((isFlex)(a) ? ((bindVar)(a))(t2) : InferErr(((unifyErrMsg)(t1))(t2)));
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  if (t1?._tag === `TyApp`) { const a1 = (t1 as Record<string, unknown>)[`_0`]; const b1 = (t1 as Record<string, unknown>)[`_1`]; return (() => {
+  if (t2?._tag === `TyApp`) { const a2 = (t2 as Record<string, unknown>)[`_0`]; const b2 = (t2 as Record<string, unknown>)[`_1`]; return (() => {
+  if (((unify)(a1))(a2)?._tag === `InferErr`) { const e = (((unify)(a1))(a2) as Record<string, unknown>)[`_0`]; return InferErr(e); }
+  if (((unify)(a1))(a2)?._tag === `InferOk`) { const s1 = (((unify)(a1))(a2) as Record<string, unknown>)[`_0`]; return (() => {
+  if (((unify)(((applyType)(s1))(b1)))(((applyType)(s1))(b2))?._tag === `InferErr`) { const e = (((unify)(((applyType)(s1))(b1)))(((applyType)(s1))(b2)) as Record<string, unknown>)[`_0`]; return InferErr(e); }
+  if (((unify)(((applyType)(s1))(b1)))(((applyType)(s1))(b2))?._tag === `InferOk`) { const s2 = (((unify)(((applyType)(s1))(b1)))(((applyType)(s1))(b2)) as Record<string, unknown>)[`_0`]; return InferOk(((substCompose)(s2))(s1)); }
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  if (t2?._tag === `TyName`) { const v = (t2 as Record<string, unknown>)[`_0`]; return ((isFlex)(v) ? ((bindVar)(v))(t1) : InferErr(((unifyErrMsg)(t1))(t2))); }
+  return InferErr(((unifyErrMsg)(t1))(t2));
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  if (t1?._tag === `TyFn`) { const a1 = (t1 as Record<string, unknown>)[`_0`]; const b1 = (t1 as Record<string, unknown>)[`_1`]; return (() => {
+  if (t2?._tag === `TyFn`) { const a2 = (t2 as Record<string, unknown>)[`_0`]; const b2 = (t2 as Record<string, unknown>)[`_1`]; return (() => {
+  if (((unify)(a1))(a2)?._tag === `InferErr`) { const e = (((unify)(a1))(a2) as Record<string, unknown>)[`_0`]; return InferErr(e); }
+  if (((unify)(a1))(a2)?._tag === `InferOk`) { const s1 = (((unify)(a1))(a2) as Record<string, unknown>)[`_0`]; return (() => {
+  if (((unify)(((applyType)(s1))(b1)))(((applyType)(s1))(b2))?._tag === `InferErr`) { const e = (((unify)(((applyType)(s1))(b1)))(((applyType)(s1))(b2)) as Record<string, unknown>)[`_0`]; return InferErr(e); }
+  if (((unify)(((applyType)(s1))(b1)))(((applyType)(s1))(b2))?._tag === `InferOk`) { const s2 = (((unify)(((applyType)(s1))(b1)))(((applyType)(s1))(b2)) as Record<string, unknown>)[`_0`]; return InferOk(((substCompose)(s2))(s1)); }
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  if (t2?._tag === `TyName`) { const v = (t2 as Record<string, unknown>)[`_0`]; return ((isFlex)(v) ? ((bindVar)(v))(t1) : InferErr(((unifyErrMsg)(t1))(t2))); }
+  return InferErr(((unifyErrMsg)(t1))(t2));
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const unifyErrMsg = (t1: TypeExpr) => (t2: TypeExpr) => ((strConcat)(`Cannot unify `))(((strConcat)((renderType)(t1)))(((strConcat)(` with `))((renderType)(t2))));
+
+const bindVar = (v: string) => (t: TypeExpr) => (() => {
+  if (t?._tag === `TyName`) { const w = (t as Record<string, unknown>)[`_0`]; return ((v === w) ? InferOk(substEmpty) : InferOk((((substInsert)(v))(t))(substEmpty))); }
+  return (((occursIn)(v))(t) ? InferErr(((strConcat)(`Infinite type: `))(((strConcat)(v))(((strConcat)(` in `))((renderType)(t))))) : InferOk((((substInsert)(v))(t))(substEmpty)));
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const occursIn = (v: string) => (t: TypeExpr) => ((listAny)((w: string) => (v === w)))((ftvTypeList)(t));
+
+const renderType = (t: TypeExpr) => (() => {
+  if (t?._tag === `TyName`) { const n = (t as Record<string, unknown>)[`_0`]; return n; }
+  if (t?._tag === `TyApp`) { const f = (t as Record<string, unknown>)[`_0`]; const a = (t as Record<string, unknown>)[`_1`]; return ((aStr) => ((strConcat)((renderType)(f)))(((strConcat)(` `))(aStr)))((() => {
+  if (a?._tag === `TyApp`) {  return ((strConcat)(`(`))(((strConcat)((renderType)(a)))(`)`)); }
+  if (a?._tag === `TyFn`) {  return ((strConcat)(`(`))(((strConcat)((renderType)(a)))(`)`)); }
+  return (renderType)(a);
+  throw new Error(`Non-exhaustive match`);
+})()); }
+  if (t?._tag === `TyFn`) { const a = (t as Record<string, unknown>)[`_0`]; const b = (t as Record<string, unknown>)[`_1`]; return ((aStr) => ((strConcat)(aStr))(((strConcat)(` -> `))((renderType)(b))))((() => {
+  if (a?._tag === `TyFn`) {  return ((strConcat)(`(`))(((strConcat)((renderType)(a)))(`)`)); }
+  return (renderType)(a);
+  throw new Error(`Non-exhaustive match`);
+})()); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const typeEnvEmpty = () => Leaf;
+
+const typeEnvInsert = (name: string) => (sch: Scheme) => (env: RBMap<string, Scheme>) => ((((mapInsert)(strCmp))(name))(sch))(env);
+
+const typeEnvLookup = (name: string) => (env: RBMap<string, Scheme>) => (((mapLookup)(strCmp))(name))(env);
+
+const typeEnvApply = (s: RBMap<string, TypeExpr>) => (env: RBMap<string, Scheme>) => ((applyEnv)(s))(env);
+
+const extractBound = (v: string) => (r: InferResult<RBMap<string, TypeExpr>>) => (() => {
+  if (r?._tag === `InferOk`) { const s = (r as Record<string, unknown>)[`_0`]; return (() => {
+  if (((substLookup)(v))(s)?._tag === `Some`) { const t = (((substLookup)(v))(s) as Record<string, unknown>)[`_0`]; return (renderType)(t); }
+  if (((substLookup)(v))(s)?._tag === `None`) { return `none`; }
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  if (r?._tag === `InferErr`) { const e = (r as Record<string, unknown>)[`_0`]; return e; }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const typesCheck = (label: string) => (got: string) => (expected: string) => ((got === expected) ? (printfn)(((strConcat)(`OK `))(label)) : (printfn)(((strConcat)(`FAIL `))(((strConcat)(label))(((strConcat)(` expected=`))(((strConcat)(expected))(((strConcat)(` got=`))(got)))))));
+
+const boolStr = (b: boolean) => (b ? `true` : `false`);
+
+const strJoin = (xs: string[]) => (() => {
+  if (xs.length === 0) { return ``; }
+  return x;
+  if (xs.length > 0) { const x = xs[0], rest = xs.slice(1); return ((strConcat)(x))(((strConcat)(` `))((strJoin)(rest))); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const __ll_main_Std_CompilerTypes = () => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((s0) => ((_) => ((s1) => ((_) => ((_) => ((_) => ((_) => ((_) => ((u3) => ((_) => ((u4) => ((_) => ((sch1) => ((_) => ((sch2) => (([t5, _]) => ((_) => ((_) => ((_) => (printfn)(`Done`))((((typesCheck)(`20 occursIn false`))((boolStr)(((occursIn)(`\$0`))(TyApp(TyName(`List`), TyName(`\$1`))))))(`false`)))((((typesCheck)(`19 occursIn true`))((boolStr)(((occursIn)(`\$0`))(TyApp(TyName(`List`), TyName(`\$0`))))))(`true`)))((((typesCheck)(`18 instantiate`))((renderType)(t5)))(`\$1 -> \$1`)))(((instantiate)(MkFresh(1)))(sch2)))(MkScheme([`\$0`], TyFn(TyName(`\$0`), TyName(`\$0`)))))((((typesCheck)(`17 generalize`))((strJoin)((schemeVars)(sch1))))(`\$0`)))(((generalize)(Leaf))(TyFn(TyName(`\$0`), TyName(`\$0`)))))((((typesCheck)(`16 unify TyFn`))(((extractBound)(`\$0`))(u4)))(`Int`)))(((unify)(TyFn(TyName(`\$0`), TyName(`\$1`))))(TyFn(TyName(`Int`), TyName(`Str`)))))((((typesCheck)(`15 unify flex=Int`))(((extractBound)(`\$0`))(u3)))(`Int`)))(((unify)(TyName(`\$0`)))(TyName(`Int`))))((((typesCheck)(`14 unify mismatch`))((() => {
+  if (((unify)(TyName(`Int`)))(TyName(`Str`))?._tag === `InferOk`) {  return `ok`; }
+  if (((unify)(TyName(`Int`)))(TyName(`Str`))?._tag === `InferErr`) {  return `err`; }
+  throw new Error(`Non-exhaustive match`);
+})()))(`err`)))((((typesCheck)(`13 unify same`))((() => {
+  if (((unify)(TyName(`Int`)))(TyName(`Int`))?._tag === `InferOk`) {  return `ok`; }
+  if (((unify)(TyName(`Int`)))(TyName(`Int`))?._tag === `InferErr`) {  return `err`; }
+  throw new Error(`Non-exhaustive match`);
+})()))(`ok`)))((((typesCheck)(`12 applyType TyFn`))((renderType)(((applyType)(s1))(TyFn(TyName(`\$0`), TyName(`Int`))))))(`Str -> Int`)))((((typesCheck)(`11 applyType rigid`))((renderType)(((applyType)(s1))(TyName(`a`)))))(`a`)))((((typesCheck)(`10 applyType flex->Str`))((renderType)(((applyType)(s1))(TyName(`\$0`)))))(`Str`)))((((substInsert)(`\$0`))(TyName(`Str`)))(substEmpty)))((((typesCheck)(`9 applyType no-op`))((renderType)(((applyType)(s0))(TyName(`Int`)))))(`Int`)))(substEmpty))((((typesCheck)(`8 renderType App`))((renderType)(TyApp(TyName(`Maybe`), TyName(`Int`)))))(`Maybe Int`)))((((typesCheck)(`7 renderType Fn`))((renderType)(TyFn(TyName(`Int`), TyName(`Str`)))))(`Int -> Str`)))((((typesCheck)(`6 renderType Name`))((renderType)(TyName(`Int`))))(`Int`)))((((typesCheck)(`5 freshVarName 42`))((freshVarName)(42)))(`\$42`)))((((typesCheck)(`4 freshVarName 0`))((freshVarName)(0)))(`\$0`)))((((typesCheck)(`3 isFlex a=false`))((boolStr)((isFlex)(`a`))))(`false`)))((((typesCheck)(`2 isFlex Int=false`))((boolStr)((isFlex)(`Int`))))(`false`)))((((typesCheck)(`1 isFlex \$0=true`))((boolStr)((isFlex)(`\$0`))))(`true`));
 
 const joinWith = (sep: string) => (items: string[]) => (() => {
   if (items.length === 0) { return ``; }
@@ -1164,6 +1643,7 @@ const emitExpr = (e: Expr) => (() => {
   if (e?._tag === `EMatch`) { const scrut = (e as Record<string, unknown>)[`_0`]; const pats = (e as Record<string, unknown>)[`_1`]; const bodies = (e as Record<string, unknown>)[`_2`]; return ((arms) => ((strConcat)(`(match `))(((strConcat)((emitExpr)(scrut)))(((strConcat)(` with `))(((strConcat)(arms))(`)`)))))(((emitArms)(pats))(bodies)); }
   if (e?._tag === `ELam`) { const x = (e as Record<string, unknown>)[`_0`]; const body = (e as Record<string, unknown>)[`_1`]; return ((strConcat)(`(fun `))(((strConcat)((safeIdent)(x)))(((strConcat)(` -> `))(((strConcat)((emitExpr)(body)))(`)`)))); }
   if (e?._tag === `ELet`) { const x = (e as Record<string, unknown>)[`_0`]; const e = (e as Record<string, unknown>)[`_1`]; const body = (e as Record<string, unknown>)[`_2`]; return ((strConcat)(`(let `))(((strConcat)((safeIdent)(x)))(((strConcat)(` = `))(((strConcat)((emitExpr)(e)))(((strConcat)(` in `))(((strConcat)((emitExpr)(body)))(`)`)))))); }
+  if (e?._tag === `ELetTuple`) { const a = (e as Record<string, unknown>)[`_0`]; const b = (e as Record<string, unknown>)[`_1`]; const e = (e as Record<string, unknown>)[`_2`]; const body = (e as Record<string, unknown>)[`_3`]; return ((strConcat)(`(let (`))(((strConcat)((safeIdent)(a)))(((strConcat)(`, `))(((strConcat)((safeIdent)(b)))(((strConcat)(`) = `))(((strConcat)((emitExpr)(e)))(((strConcat)(` in `))(((strConcat)((emitExpr)(body)))(`)`)))))))); }
   if (e?._tag === `EList`) { const items = (e as Record<string, unknown>)[`_0`]; return ((strConcat)(`[`))(((strConcat)(((joinWith)(`; `))(((listMap)(emitExpr))(items))))(`]`)); }
   if (e?._tag === `EBinOp`) { const op = (e as Record<string, unknown>)[`_0`]; const l = (e as Record<string, unknown>)[`_1`]; const r = (e as Record<string, unknown>)[`_2`]; return ((strConcat)(`(`))(((strConcat)((emitExpr)(l)))(((strConcat)(` `))(((strConcat)((mapOp)(op)))(((strConcat)(` `))(((strConcat)((emitExpr)(r)))(`)`)))))); }
   if (e?._tag === `ETuple`) { const a = (e as Record<string, unknown>)[`_0`]; const b = (e as Record<string, unknown>)[`_1`]; return ((strConcat)(`(`))(((strConcat)((emitExpr)(a)))(((strConcat)(`, `))(((strConcat)((emitExpr)(b)))(`)`)))); }
@@ -1251,18 +1731,42 @@ const emitParamStr = (ps: Param[]) => (() => {
   throw new Error(`Non-exhaustive match`);
 })();
 
+const containsVarExprs = (name: string) => (exprs: Expr[]) => (() => {
+  if (exprs.length === 0) { return false; }
+  if (exprs.length > 0) { const e = exprs[0], rest = exprs.slice(1); return (((containsVarExpr)(name))(e) ? true : ((containsVarExprs)(name))(rest)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const containsVarExpr = (name: string) => (expr: Expr) => (() => {
+  if (expr?._tag === `EVar`) { const n = (expr as Record<string, unknown>)[`_0`]; return (n === name); }
+  if (expr?._tag === `EApp`) { const f = (expr as Record<string, unknown>)[`_0`]; const arg = (expr as Record<string, unknown>)[`_1`]; return (((containsVarExpr)(name))(f) ? true : ((containsVarExpr)(name))(arg)); }
+  if (expr?._tag === `EIf`) { const c = (expr as Record<string, unknown>)[`_0`]; const t = (expr as Record<string, unknown>)[`_1`]; const e = (expr as Record<string, unknown>)[`_2`]; return (((containsVarExpr)(name))(c) ? true : (((containsVarExpr)(name))(t) ? true : ((containsVarExpr)(name))(e))); }
+  if (expr?._tag === `EMatch`) { const scrut = (expr as Record<string, unknown>)[`_0`]; const bodies = (expr as Record<string, unknown>)[`_2`]; return (((containsVarExpr)(name))(scrut) ? true : ((containsVarExprs)(name))(bodies)); }
+  if (expr?._tag === `ELam`) { const body = (expr as Record<string, unknown>)[`_1`]; return ((containsVarExpr)(name))(body); }
+  if (expr?._tag === `ELet`) { const v = (expr as Record<string, unknown>)[`_1`]; const body = (expr as Record<string, unknown>)[`_2`]; return (((containsVarExpr)(name))(v) ? true : ((containsVarExpr)(name))(body)); }
+  if (expr?._tag === `ELetTuple`) { const v = (expr as Record<string, unknown>)[`_2`]; const body = (expr as Record<string, unknown>)[`_3`]; return (((containsVarExpr)(name))(v) ? true : ((containsVarExpr)(name))(body)); }
+  if (expr?._tag === `EList`) { const xs = (expr as Record<string, unknown>)[`_0`]; return ((containsVarExprs)(name))(xs); }
+  if (expr?._tag === `EBinOp`) { const l = (expr as Record<string, unknown>)[`_1`]; const r = (expr as Record<string, unknown>)[`_2`]; return (((containsVarExpr)(name))(l) ? true : ((containsVarExpr)(name))(r)); }
+  if (expr?._tag === `ETuple`) { const l = (expr as Record<string, unknown>)[`_0`]; const r = (expr as Record<string, unknown>)[`_1`]; return (((containsVarExpr)(name))(l) ? true : ((containsVarExpr)(name))(r)); }
+  if (expr?._tag === `ECons`) { const l = (expr as Record<string, unknown>)[`_0`]; const r = (expr as Record<string, unknown>)[`_1`]; return (((containsVarExpr)(name))(l) ? true : ((containsVarExpr)(name))(r)); }
+  return false;
+  throw new Error(`Non-exhaustive match`);
+})();
+
 const emitDecl = (d: Decl) => (() => {
   if (d?._tag === `DType`) { const name = (d as Record<string, unknown>)[`_0`]; const tvars = (d as Record<string, unknown>)[`_1`]; const ctors = (d as Record<string, unknown>)[`_2`]; return ((header) => ((body) => ((strConcat)(header))(((strConcat)(` =\n`))(body)))((emitCtors)(ctors)))(((strConcat)(`type `))(((strConcat)(name))((emitTypeParams)(tvars)))); }
-  if (d?._tag === `DFn`) { const name = (d as Record<string, unknown>)[`_0`]; const params = (d as Record<string, unknown>)[`_1`]; const body = (d as Record<string, unknown>)[`_3`]; return ((paramStr) => ((strConcat)(`let rec `))(((strConcat)((safeIdent)(name)))(((strConcat)(paramStr))(((strConcat)(` =\n    `))((emitExpr)(body))))))((emitParamStr)(params)); }
+  if (d?._tag === `DFn`) { const name = (d as Record<string, unknown>)[`_0`]; const params = (d as Record<string, unknown>)[`_1`]; const body = (d as Record<string, unknown>)[`_3`]; return ((paramStr) => ((kw) => ((strConcat)(kw))(((strConcat)((safeIdent)(name)))(((strConcat)(paramStr))(((strConcat)(` =\n    `))((emitExpr)(body))))))((((containsVarExpr)(name))(body) ? `let rec ` : `let `)))((emitParamStr)(params)); }
   if (d?._tag === `DLet`) { const name = (d as Record<string, unknown>)[`_0`]; const body = (d as Record<string, unknown>)[`_1`]; return ((strConcat)(`let `))(((strConcat)((safeIdent)(name)))(((strConcat)(` = `))((emitExpr)(body)))); }
   if (d?._tag === `DImport`) { const parts = (d as Record<string, unknown>)[`_0`]; return ((strConcat)(`// import `))(((joinWith)(`.`))(parts)); }
   if (d?._tag === `DExport`) { const inner = (d as Record<string, unknown>)[`_0`]; return (emitDecl)(inner); }
+  if (d?._tag === `DExternal`) { const name = (d as Record<string, unknown>)[`_0`]; const params = (d as Record<string, unknown>)[`_1`]; const retTy = (d as Record<string, unknown>)[`_2`]; return ((paramStr) => ((strConcat)(`let `))(((strConcat)((safeIdent)(name)))(((strConcat)(paramStr))(((strConcat)(` = failwith "external: `))(((strConcat)(name))(`"`))))))((emitParamStr)(params)); }
+  if (d?._tag === `DOpaque`) { const name = (d as Record<string, unknown>)[`_0`]; return ((strConcat)(`type `))(((strConcat)(name))(` = obj`)); }
   throw new Error(`Non-exhaustive match`);
 })();
 
 const emitDecls = (ds: Decl[]) => ((joinWith)(`\n\n`))(((listMap)(emitDecl))(ds));
 
-const emitPrelude = () => `// --- ll-lang stdlib prelude (auto-generated) ---\nlet listLen (xs: 'a list) : int64 = int64 (List.length xs)\nlet listMap f xs = List.map f xs\nlet listFilter p xs = List.filter p xs\nlet listFold f z xs = List.fold f z xs\nlet listReverse xs = List.rev xs\nlet listAppend xs ys = List.append xs ys\nlet listConcat xss = List.concat xss\nlet listIsEmpty xs = List.isEmpty xs\nlet strLen (s: string) : int64 = int64 s.Length\nlet strConcat (a: string) (b: string) = a + b\nlet strChars (s: string) = s |> Seq.toList\nlet strFromChars (cs: char list) = System.String(cs |> List.toArray)\nlet intToStr (n: int64) = string n\nlet charToInt (c: char) = int64 (int c)\nlet printfn (s: string) = System.Console.WriteLine(s)\nlet print (s: string) = System.Console.Write(s)\nlet listHead xs = match xs with [] -> None | x :: _ -> Some x\nlet listTail xs = match xs with [] -> None | _ :: t -> Some t\n// --- end prelude ---`;
+const emitPrelude = () => `open LLLang.Prelude`;
 
 const emitModulePath = (parts: string[]) => ((joinWith)(`.`))(parts);
 
@@ -1275,12 +1779,312 @@ const codegenCheck = (label: string) => (got: string) => (expected: string) => (
 
 const checkContains = (label: string) => (got: string) => (needle: string) => (((strContains)(needle))(got) ? (printfn)(((strConcat)(`OK `))(label)) : (printfn)(((strConcat)(`FAIL `))(((strConcat)(label))(((strConcat)(`\n  missing: `))(((strConcat)(needle))(((strConcat)(`\n  in: `))(got)))))));
 
-const __ll_main_Std_Codegen = () => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((colorCtors) => ((colorDecl) => ((_) => ((addParams) => ((addDecl) => ((_) => ((idParams) => ((modDecls) => ((m) => ((out) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((twoItems) => ((_) => ((_) => ((_) => ((_) => ((_) => 0)((((codegenCheck)(`20 TyFn`))((emitType)(TyFn(TyName(`Int`), TyName(`Bool`)))))(`int64 -> bool`)))((((codegenCheck)(`19 safeIdent foo`))((safeIdent)(`foo`)))(`foo`)))((((codegenCheck)(`18 safeIdent let`))((safeIdent)(`let`)))(`__ll_let`)))((((codegenCheck)(`17 ETuple`))((emitExpr)(ETuple(EVar(`a`), EVar(`b`)))))(`(a, b)`)))((((codegenCheck)(`16 EList`))((emitExpr)(EList(twoItems))))(`[1L; 2L]`)))([EInt(1), ...[EInt(2), ...[]]]))((((codegenCheck)(`15 ELam`))((emitExpr)(ELam(`x`, EVar(`x`)))))(`(fun x -> x)`)))((((codegenCheck)(`14 PNil`))((emitPattern)(PNil)))(`[]`)))((((codegenCheck)(`13 PWild`))((emitPattern)(PWild)))(`_`)))((((checkContains)(`12 module fn`))(out))(`let rec id`)))((((checkContains)(`12 module type`))(out))(`type Color`)))((((checkContains)(`12 module header`))(out))(`module Test.Mod`)))((emitModule)(m)))(MkModule([`Test`, ...[`Mod`, ...[]]], modDecls)))([DType(`Color`, [], colorCtors), ...[DFn(`id`, idParams, None, EVar(`x`)), ...[]]]))([MkParam(`x`, TyName(`Int`)), ...[]]))((((checkContains)(`11 DFn add`))((emitDecl)(addDecl)))(`let rec add`)))(DFn(`add`, addParams, None, EBinOp(`+`, EVar(`x`), EVar(`y`)))))([MkParam(`x`, TyName(`Int`)), ...[MkParam(`y`, TyName(`Int`)), ...[]]]))((((checkContains)(`10 DType Color`))((emitDecl)(colorDecl)))(`type Color`)))(DType(`Color`, [], colorCtors)))([MkCon(`Red`, []), ...[MkCon(`Blue`, []), ...[]]]))((((codegenCheck)(`9 TyApp List Int`))((emitType)(TyApp(TyName(`List`), TyName(`Int`)))))(`int64 list`)))((((codegenCheck)(`8 TyName Int`))((emitType)(TyName(`Int`))))(`int64`)))((((codegenCheck)(`7 PCon Some v`))((emitPattern)(PCon(`Some`, [PVar(`v`), ...[]]))))(`Some(v)`)))((((codegenCheck)(`6 ELet`))((emitExpr)(ELet(`x`, EInt(1), EVar(`x`)))))(`(let x = 1L in x)`)))((((codegenCheck)(`5 EIf`))((emitExpr)(EIf(EBool(true), EInt(1), EInt(0)))))(`(if true then 1L else 0L)`)))((((codegenCheck)(`4 EApp f x`))((emitExpr)(EApp(EVar(`f`), EVar(`x`)))))(`(f x)`)))((((codegenCheck)(`3 EBinOp +`))((emitExpr)(EBinOp(`+`, EInt(1), EInt(2)))))(`(1L + 2L)`)))((((codegenCheck)(`2 EStr hello`))((emitExpr)(EStr(`hello`))))(`"hello"`)))((((codegenCheck)(`1 EInt 42`))((emitExpr)(EInt(42))))(`42L`));
+const __ll_main_Std_Codegen = () => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((colorCtors) => ((colorDecl) => ((_) => ((addParams) => ((addDecl) => ((_) => ((loopParams) => ((loopBody) => ((loopDecl) => ((_) => ((idParams) => ((modDecls) => ((m) => ((out) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((twoItems) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((extDecl) => ((_) => ((_) => 0)((((codegenCheck)(`22 DOpaque obj alias`))((emitDecl)(DOpaque(`HttpClient`))))(`type HttpClient = obj`)))((((checkContains)(`21 DExternal stub`))((emitDecl)(extDecl)))(`failwith "external: httpGet"`)))(DExternal(`httpGet`, [MkParam(`url`, TyName(`Str`)), ...[]], TyName(`Str`))))((((codegenCheck)(`20 TyFn`))((emitType)(TyFn(TyName(`Int`), TyName(`Bool`)))))(`int64 -> bool`)))((((codegenCheck)(`19 safeIdent foo`))((safeIdent)(`foo`)))(`foo`)))((((codegenCheck)(`18 safeIdent let`))((safeIdent)(`let`)))(`__ll_let`)))((((codegenCheck)(`17b ELetTuple`))((emitExpr)(ELetTuple(`a`, `b`, EVar(`pair`), EVar(`a`)))))(`(let (a, b) = pair in a)`)))((((codegenCheck)(`17 ETuple`))((emitExpr)(ETuple(EVar(`a`), EVar(`b`)))))(`(a, b)`)))((((codegenCheck)(`16 EList`))((emitExpr)(EList(twoItems))))(`[1L; 2L]`)))([EInt(1), ...[EInt(2), ...[]]]))((((codegenCheck)(`15 ELam`))((emitExpr)(ELam(`x`, EVar(`x`)))))(`(fun x -> x)`)))((((codegenCheck)(`14 PNil`))((emitPattern)(PNil)))(`[]`)))((((codegenCheck)(`13 PWild`))((emitPattern)(PWild)))(`_`)))((((checkContains)(`12 module prelude`))(out))(`open LLLang.Prelude`)))((((checkContains)(`12 module fn non-rec`))(out))(`let id`)))((((checkContains)(`12 module type`))(out))(`type Color`)))((((checkContains)(`12 module header`))(out))(`module Test.Mod`)))((emitModule)(m)))(MkModule([`Test`, ...[`Mod`, ...[]]], modDecls)))([DType(`Color`, [], colorCtors), ...[DFn(`id`, idParams, None, EVar(`x`)), ...[]]]))([MkParam(`x`, TyName(`Int`)), ...[]]))((((checkContains)(`11b DFn loop rec`))((emitDecl)(loopDecl)))(`let rec loop`)))(DFn(`loop`, loopParams, None, loopBody)))(EIf(EBinOp(`==`, EVar(`n`), EInt(0)), EInt(0), EApp(EVar(`loop`), EBinOp(`-`, EVar(`n`), EInt(1))))))([MkParam(`n`, TyName(`Int`)), ...[]]))((((checkContains)(`11 DFn add non-rec`))((emitDecl)(addDecl)))(`let add`)))(DFn(`add`, addParams, None, EBinOp(`+`, EVar(`x`), EVar(`y`)))))([MkParam(`x`, TyName(`Int`)), ...[MkParam(`y`, TyName(`Int`)), ...[]]]))((((checkContains)(`10 DType Color`))((emitDecl)(colorDecl)))(`type Color`)))(DType(`Color`, [], colorCtors)))([MkCon(`Red`, []), ...[MkCon(`Blue`, []), ...[]]]))((((codegenCheck)(`9 TyApp List Int`))((emitType)(TyApp(TyName(`List`), TyName(`Int`)))))(`int64 list`)))((((codegenCheck)(`8 TyName Int`))((emitType)(TyName(`Int`))))(`int64`)))((((codegenCheck)(`7 PCon Some v`))((emitPattern)(PCon(`Some`, [PVar(`v`), ...[]]))))(`Some(v)`)))((((codegenCheck)(`6 ELet`))((emitExpr)(ELet(`x`, EInt(1), EVar(`x`)))))(`(let x = 1L in x)`)))((((codegenCheck)(`5 EIf`))((emitExpr)(EIf(EBool(true), EInt(1), EInt(0)))))(`(if true then 1L else 0L)`)))((((codegenCheck)(`4 EApp f x`))((emitExpr)(EApp(EVar(`f`), EVar(`x`)))))(`(f x)`)))((((codegenCheck)(`3 EBinOp +`))((emitExpr)(EBinOp(`+`, EInt(1), EInt(2)))))(`(1L + 2L)`)))((((codegenCheck)(`2 EStr hello`))((emitExpr)(EStr(`hello`))))(`"hello"`)))((((codegenCheck)(`1 EInt 42`))((emitExpr)(EInt(42))))(`42L`));
+
+type InferState = { _tag: `MkInferState`; _0: RBMap<string, Scheme>; _1: Fresh; _2: string[]; _3: RBMap<string, TypeExpr> };
+const MkInferState = (_0: RBMap<string, Scheme>, _1: Fresh, _2: string[], _3: RBMap<string, TypeExpr>): InferState => ({ _tag: `MkInferState` as const, _0, _1, _2, _3 });
+
+const inferEnv = (st: InferState) => (() => {
+  if (st?._tag === `MkInferState`) { const env = (st as Record<string, unknown>)[`_0`]; return env; }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const inferFresh = (st: InferState) => (() => {
+  if (st?._tag === `MkInferState`) { const f = (st as Record<string, unknown>)[`_1`]; return f; }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const inferErrors = (st: InferState) => (() => {
+  if (st?._tag === `MkInferState`) { const errs = (st as Record<string, unknown>)[`_2`]; return errs; }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const inferSubst = (st: InferState) => (() => {
+  if (st?._tag === `MkInferState`) { const s = (st as Record<string, unknown>)[`_3`]; return s; }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const inferAddErr = (msg: string) => (st: InferState) => (() => {
+  if (st?._tag === `MkInferState`) { const env = (st as Record<string, unknown>)[`_0`]; const f = (st as Record<string, unknown>)[`_1`]; const errs = (st as Record<string, unknown>)[`_2`]; const s = (st as Record<string, unknown>)[`_3`]; return MkInferState(env, f, ((listAppend)(errs))([msg]), s); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const inferWithEnv = (env: RBMap<string, Scheme>) => (st: InferState) => (() => {
+  if (st?._tag === `MkInferState`) { const f = (st as Record<string, unknown>)[`_1`]; const errs = (st as Record<string, unknown>)[`_2`]; const s = (st as Record<string, unknown>)[`_3`]; return MkInferState(env, f, errs, s); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const inferWithFresh = (f: Fresh) => (st: InferState) => (() => {
+  if (st?._tag === `MkInferState`) { const env = (st as Record<string, unknown>)[`_0`]; const errs = (st as Record<string, unknown>)[`_2`]; const s = (st as Record<string, unknown>)[`_3`]; return MkInferState(env, f, errs, s); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const inferWithSubst = (s2: RBMap<string, TypeExpr>) => (st: InferState) => (() => {
+  if (st?._tag === `MkInferState`) { const env = (st as Record<string, unknown>)[`_0`]; const f = (st as Record<string, unknown>)[`_1`]; const errs = (st as Record<string, unknown>)[`_2`]; return MkInferState(env, f, errs, s2); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const inferFreshVar = (st: InferState) => ((f) => (([tv, f2]) => [tv, ((inferWithFresh)(f2))(st)] as const)((freshNext)(f)))((inferFresh)(st));
+
+const tyInt = () => TyName(`Int`);
+
+const tyStr = () => TyName(`Str`);
+
+const tyBool = () => TyName(`Bool`);
+
+const tyChar = () => TyName(`Char`);
+
+const tyUnit = () => TyName(`Unit`);
+
+const tyList = (a: TypeExpr) => TyApp(TyName(`List`), a);
+
+const baseScheme = (t: TypeExpr) => (schemeMono)(t);
+
+const tyArith = () => TyFn(tyInt, TyFn(tyInt, tyInt));
+
+const tyCmp = () => TyFn(tyInt, TyFn(tyInt, tyBool));
+
+const tyFloat = () => TyName(`Float`);
+
+const tyMaybe = (a: TypeExpr) => TyApp(TyName(`Maybe`), a);
+
+const scheme1 = (v: string) => (t: TypeExpr) => MkScheme([v], t);
+
+const scheme2 = (v1: string) => (v2: string) => (t: TypeExpr) => MkScheme([v1, v2], t);
+
+const baseEnv = () => ((e0) => ((e1) => ((e2) => ((e3) => ((e4) => ((e5) => ((e6) => ((e7) => ((e8) => ((e9) => ((e10) => ((e11) => ((e11a) => ((e12) => ((e12a) => ((e12b) => ((e13) => ((e13a) => ((e13b) => ((e13c) => ((e13d) => ((e13e) => ((e13f) => ((e13g) => ((e13h) => ((e13i) => ((e13j) => ((e14) => ((e14a) => ((e14b) => ((e15) => ((e15a) => ((e15b) => ((e15c) => ((e15d) => ((e16) => ((e16a) => ((e16b) => ((e16c) => ((e16d) => ((e17) => ((e17a) => ((e17b) => ((e17c) => ((e17d) => ((e17e) => ((e17f) => ((e17g) => ((e17h) => ((e17i) => ((e17j) => ((e18) => ((e18a) => ((e18b) => e18b)((((typeEnvInsert)(`maybeWithDefault`))(((scheme1)(`a`))(TyFn(TyName(`a`), TyFn((tyMaybe)(TyName(`a`)), TyName(`a`))))))(e18a)))((((typeEnvInsert)(`maybeBind`))((((scheme2)(`a`))(`b`))(TyFn((tyMaybe)(TyName(`a`)), TyFn(TyFn(TyName(`a`), (tyMaybe)(TyName(`b`))), (tyMaybe)(TyName(`b`)))))))(e18)))((((typeEnvInsert)(`maybeMap`))((((scheme2)(`a`))(`b`))(TyFn(TyFn(TyName(`a`), TyName(`b`)), TyFn((tyMaybe)(TyName(`a`)), (tyMaybe)(TyName(`b`)))))))(e17j)))((((typeEnvInsert)(`listFold`))((((scheme2)(`a`))(`b`))(TyFn(TyFn(TyName(`b`), TyFn(TyName(`a`), TyName(`b`))), TyFn(TyName(`b`), TyFn((tyList)(TyName(`a`)), TyName(`b`)))))))(e17i)))((((typeEnvInsert)(`listFilter`))(((scheme1)(`a`))(TyFn(TyFn(TyName(`a`), tyBool), TyFn((tyList)(TyName(`a`)), (tyList)(TyName(`a`)))))))(e17h)))((((typeEnvInsert)(`listMap`))((((scheme2)(`a`))(`b`))(TyFn(TyFn(TyName(`a`), TyName(`b`)), TyFn((tyList)(TyName(`a`)), (tyList)(TyName(`b`)))))))(e17g)))((((typeEnvInsert)(`listAt`))(((scheme1)(`a`))(TyFn((tyList)(TyName(`a`)), TyFn(tyInt, (tyMaybe)(TyName(`a`)))))))(e17f)))((((typeEnvInsert)(`listTail`))(((scheme1)(`a`))(TyFn((tyList)(TyName(`a`)), (tyMaybe)((tyList)(TyName(`a`)))))))(e17e)))((((typeEnvInsert)(`listHead`))(((scheme1)(`a`))(TyFn((tyList)(TyName(`a`)), (tyMaybe)(TyName(`a`))))))(e17d)))((((typeEnvInsert)(`listConcat`))(((scheme1)(`a`))(TyFn((tyList)((tyList)(TyName(`a`))), (tyList)(TyName(`a`))))))(e17c)))((((typeEnvInsert)(`listAppend`))(((scheme1)(`a`))(TyFn((tyList)(TyName(`a`)), TyFn((tyList)(TyName(`a`)), (tyList)(TyName(`a`)))))))(e17b)))((((typeEnvInsert)(`listReverse`))(((scheme1)(`a`))(TyFn((tyList)(TyName(`a`)), (tyList)(TyName(`a`))))))(e17a)))((((typeEnvInsert)(`listIsEmpty`))(((scheme1)(`a`))(TyFn((tyList)(TyName(`a`)), tyBool))))(e17)))((((typeEnvInsert)(`listLen`))(((scheme1)(`a`))(TyFn((tyList)(TyName(`a`)), tyInt))))(e16d)))((((typeEnvInsert)(`getArgs`))((baseScheme)((tyList)(tyStr))))(e16c)))((((typeEnvInsert)(`exit`))((baseScheme)(TyFn(tyInt, tyUnit))))(e16b)))((((typeEnvInsert)(`fileExists`))((baseScheme)(TyFn(tyStr, tyBool))))(e16a)))((((typeEnvInsert)(`writeFile`))((baseScheme)(TyFn(tyStr, TyFn(tyStr, tyUnit)))))(e16)))((((typeEnvInsert)(`readFile`))((baseScheme)(TyFn(tyStr, tyStr))))(e15d)))((((typeEnvInsert)(`max`))((baseScheme)(TyFn(tyInt, TyFn(tyInt, tyInt)))))(e15c)))((((typeEnvInsert)(`min`))((baseScheme)(TyFn(tyInt, TyFn(tyInt, tyInt)))))(e15b)))((((typeEnvInsert)(`sqrt`))((baseScheme)(TyFn(tyFloat, tyFloat))))(e15a)))((((typeEnvInsert)(`absf`))((baseScheme)(TyFn(tyFloat, tyFloat))))(e15)))((((typeEnvInsert)(`abs`))((baseScheme)(TyFn(tyInt, tyInt))))(e14b)))((((typeEnvInsert)(`charIsSpace`))((baseScheme)(TyFn(tyChar, tyBool))))(e14a)))((((typeEnvInsert)(`charIsAlpha`))((baseScheme)(TyFn(tyChar, tyBool))))(e14)))((((typeEnvInsert)(`charIsDigit`))((baseScheme)(TyFn(tyChar, tyBool))))(e13j)))((((typeEnvInsert)(`strFromChars`))((baseScheme)(TyFn((tyList)(tyChar), tyStr))))(e13i)))((((typeEnvInsert)(`strChars`))((baseScheme)(TyFn(tyStr, (tyList)(tyChar)))))(e13h)))((((typeEnvInsert)(`strToInt`))((baseScheme)(TyFn(tyStr, (tyMaybe)(tyInt)))))(e13g)))((((typeEnvInsert)(`strSplit`))((baseScheme)(TyFn(tyStr, TyFn(tyStr, (tyList)(tyStr))))))(e13f)))((((typeEnvInsert)(`strIndexOf`))((baseScheme)(TyFn(tyStr, TyFn(tyStr, tyInt)))))(e13e)))((((typeEnvInsert)(`strSlice`))((baseScheme)(TyFn(tyStr, TyFn(tyInt, TyFn(tyInt, tyStr))))))(e13d)))((((typeEnvInsert)(`strContains`))((baseScheme)(TyFn(tyStr, TyFn(tyStr, tyBool)))))(e13c)))((((typeEnvInsert)(`strTrim`))((baseScheme)(TyFn(tyStr, tyStr))))(e13b)))((((typeEnvInsert)(`strReverse`))((baseScheme)(TyFn(tyStr, tyStr))))(e13a)))((((typeEnvInsert)(`strLen`))((baseScheme)(TyFn(tyStr, tyInt))))(e13)))((((typeEnvInsert)(`strConcat`))((baseScheme)(TyFn(tyStr, TyFn(tyStr, tyStr)))))(e12b)))((((typeEnvInsert)(`charToInt`))((baseScheme)(TyFn(tyChar, tyInt))))(e12a)))((((typeEnvInsert)(`intToChar`))((baseScheme)(TyFn(tyInt, tyChar))))(e12)))((((typeEnvInsert)(`intToStr`))((baseScheme)(TyFn(tyInt, tyStr))))(e11a)))((((typeEnvInsert)(`print`))((baseScheme)(TyFn(tyStr, tyUnit))))(e11)))((((typeEnvInsert)(`printfn`))((baseScheme)(TyFn(tyStr, tyUnit))))(e10)))((((typeEnvInsert)(`>=`))((baseScheme)(tyCmp)))(e9)))((((typeEnvInsert)(`<=`))((baseScheme)(tyCmp)))(e8)))((((typeEnvInsert)(`>`))((baseScheme)(tyCmp)))(e7)))((((typeEnvInsert)(`<`))((baseScheme)(tyCmp)))(e6)))((((typeEnvInsert)(`!=`))((baseScheme)(tyCmp)))(e5)))((((typeEnvInsert)(`==`))((baseScheme)(tyCmp)))(e4)))((((typeEnvInsert)(`/`))((baseScheme)(tyArith)))(e3)))((((typeEnvInsert)(`*`))((baseScheme)(tyArith)))(e2)))((((typeEnvInsert)(`-`))((baseScheme)(tyArith)))(e1)))((((typeEnvInsert)(`+`))((baseScheme)(tyArith)))(e0)))(typeEnvEmpty);
+
+const inferPattern = (st: InferState) => (pat: Pattern) => (() => {
+  if (pat?._tag === `PVar`) { const name = (pat as Record<string, unknown>)[`_0`]; return (([tv, st2]) => [[[name, (schemeMono)(tv)] as const], tv, st2] as const)((inferFreshVar)(st)); }
+  if (pat?._tag === `PWild`) { return (([tv, st2]) => [[], tv, st2] as const)((inferFreshVar)(st)); }
+  if (pat?._tag === `PCon`) { const ctorName = (pat as Record<string, unknown>)[`_0`]; const args = (pat as Record<string, unknown>)[`_1`]; return ((ctorSchemeOpt) => (() => {
+  if (ctorSchemeOpt?._tag === `None`) { return (([tv, st2]) => ((st3) => [[], tv, st3] as const)(((inferAddErr)(((strConcat)(`E002 UnboundVar `))(ctorName)))(st2)))((inferFreshVar)(st)); }
+  if (ctorSchemeOpt?._tag === `Some`) { const sch = (ctorSchemeOpt as Record<string, unknown>)[`_0`]; return (([ctorTy, st2]) => (([bindings, st3]) => ((retTy) => [bindings, retTy, st3] as const)(((ctorResultType)(ctorTy))((listLen)(args))))(((inferPatternArgs)(st2))(args)))(((inferInstantiate)(st))(sch)); }
+  throw new Error(`Non-exhaustive match`);
+})())(((typeEnvLookup)(ctorName))((inferEnv)(st))); }
+  if (pat?._tag === `PLitInt`) {  return [[], tyInt, st] as const; }
+  if (pat?._tag === `PLitStr`) {  return [[], tyStr, st] as const; }
+  if (pat?._tag === `PCons`) { const h = (pat as Record<string, unknown>)[`_0`]; const t = (pat as Record<string, unknown>)[`_1`]; return (([hbinds, hTy, st2]) => (([tbinds, tTy, st3]) => ((st4) => [((listAppend)(hbinds))(tbinds), (tyList)(hTy), st4] as const)(((((inferUnify)(st3))(tTy))((tyList)(hTy)))(`pattern cons`)))(((inferPattern)(st2))(t)))(((inferPattern)(st))(h)); }
+  if (pat?._tag === `PNil`) { return (([tv, st2]) => [[], (tyList)(tv), st2] as const)((inferFreshVar)(st)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const inferPatternArgs = (st: InferState) => (args: Pattern[]) => (() => {
+  if (args.length === 0) { return [[], st] as const; }
+  if (args.length > 0) { const p = args[0], rest = args.slice(1); return (([binds, _, st2]) => (([restBinds, st3]) => [((listAppend)(binds))(restBinds), st3] as const)(((inferPatternArgs)(st2))(rest)))(((inferPattern)(st))(p)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const ctorResultType = (ty: TypeExpr) => (n: number) => ((n <= 0) ? ty : (() => {
+  if (ty?._tag === `TyFn`) { const ret = (ty as Record<string, unknown>)[`_1`]; return ((ctorResultType)(ret))((n - 1)); }
+  return ty;
+  throw new Error(`Non-exhaustive match`);
+})());
+
+const inferInstantiate = (st: InferState) => (sch: Scheme) => ((f) => (([ty, f2]) => [ty, ((inferWithFresh)(f2))(st)] as const)(((instantiate)(f))(sch)))((inferFresh)(st));
+
+const inferUnify = (st: InferState) => (t1: TypeExpr) => (t2: TypeExpr) => (ctx: string) => ((t1a) => ((t2a) => (() => {
+  if (((unify)(t1a))(t2a)?._tag === `InferOk`) { const s = (((unify)(t1a))(t2a) as Record<string, unknown>)[`_0`]; return ((s2) => ((env2) => ((st2) => ((inferWithSubst)(s2))(st2))(((inferWithEnv)(env2))(st)))(((typeEnvApply)(s))((inferEnv)(st))))(((substCompose)(s))((inferSubst)(st))); }
+  if (((unify)(t1a))(t2a)?._tag === `InferErr`) { const msg = (((unify)(t1a))(t2a) as Record<string, unknown>)[`_0`]; return ((inferAddErr)(((strConcat)(ctx))(((strConcat)(`: `))(msg))))(st); }
+  throw new Error(`Non-exhaustive match`);
+})())(((applyType)((inferSubst)(st)))(t2)))(((applyType)((inferSubst)(st)))(t1));
+
+const inferExpr = (st: InferState) => (expr: Expr) => (() => {
+  if (expr?._tag === `EInt`) {  return [tyInt, st] as const; }
+  if (expr?._tag === `EStr`) {  return [tyStr, st] as const; }
+  if (expr?._tag === `EBool`) {  return [tyBool, st] as const; }
+  if (expr?._tag === `EChar`) {  return [tyChar, st] as const; }
+  if (expr?._tag === `EFloat`) {  return [TyName(`Float`), st] as const; }
+  if (expr?._tag === `ENil`) { return (([tv, st2]) => [(tyList)(tv), st2] as const)((inferFreshVar)(st)); }
+  if (expr?._tag === `EVar`) { const name = (expr as Record<string, unknown>)[`_0`]; return ((schOpt) => (() => {
+  if (schOpt?._tag === `None`) { return (([tv, st2]) => ((st3) => [tv, st3] as const)(((inferAddErr)(((strConcat)(`E002 UnboundVar `))(name)))(st2)))((inferFreshVar)(st)); }
+  if (schOpt?._tag === `Some`) { const sch = (schOpt as Record<string, unknown>)[`_0`]; return (([ty, st2]) => [ty, st2] as const)(((inferInstantiate)(st))(sch)); }
+  throw new Error(`Non-exhaustive match`);
+})())(((typeEnvLookup)(name))((inferEnv)(st))); }
+  if (expr?._tag === `ECon`) { const name = (expr as Record<string, unknown>)[`_0`]; return ((schOpt) => (() => {
+  if (schOpt?._tag === `None`) { return (([tv, st2]) => ((st3) => [tv, st3] as const)(((inferAddErr)(((strConcat)(`E002 UnboundCon `))(name)))(st2)))((inferFreshVar)(st)); }
+  if (schOpt?._tag === `Some`) { const sch = (schOpt as Record<string, unknown>)[`_0`]; return (([ty, st2]) => [ty, st2] as const)(((inferInstantiate)(st))(sch)); }
+  throw new Error(`Non-exhaustive match`);
+})())(((typeEnvLookup)(name))((inferEnv)(st))); }
+  if (expr?._tag === `EApp`) { const f = (expr as Record<string, unknown>)[`_0`]; const a = (expr as Record<string, unknown>)[`_1`]; return (([fTy, st2]) => (([aTy, st3]) => (([retTy, st4]) => ((st5) => ((retTy2) => [retTy2, st5] as const)(((applyType)((inferEnvSubst)(st5)))(retTy)))(((((inferUnify)(st4))(fTy))(TyFn(aTy, retTy)))(`application`)))((inferFreshVar)(st3)))(((inferExpr)(st2))(a)))(((inferExpr)(st))(f)); }
+  if (expr?._tag === `ELam`) { const param = (expr as Record<string, unknown>)[`_0`]; const body = (expr as Record<string, unknown>)[`_1`]; return (([paramTy, st2]) => ((env2) => ((st3) => (([bodyTy, st4]) => ((paramTy2) => [TyFn(paramTy2, bodyTy), st4] as const)(((applyType)((inferEnvSubst)(st4)))(paramTy)))(((inferExpr)(st3))(body)))(((inferWithEnv)(env2))(st2)))((((typeEnvInsert)(param))((schemeMono)(paramTy)))((inferEnv)(st2))))((inferFreshVar)(st)); }
+  if (expr?._tag === `ELet`) { const name = (expr as Record<string, unknown>)[`_0`]; const val = (expr as Record<string, unknown>)[`_1`]; const body = (expr as Record<string, unknown>)[`_2`]; return (([valTy, st2]) => ((sch) => ((env2) => ((st3) => ((inferExpr)(st3))(body))(((inferWithEnv)(env2))(st2)))((((typeEnvInsert)(name))(sch))((inferEnv)(st2))))(((generalize)((inferEnv)(st2)))(valTy)))(((inferExpr)(st))(val)); }
+  if (expr?._tag === `ELetTuple`) { const a = (expr as Record<string, unknown>)[`_0`]; const b = (expr as Record<string, unknown>)[`_1`]; const val = (expr as Record<string, unknown>)[`_2`]; const body = (expr as Record<string, unknown>)[`_3`]; return (([valTy, st2]) => (([ta, st3]) => (([tb, st4]) => ((st5) => ((schA) => ((schB) => ((env2) => ((st6) => ((inferExpr)(st6))(body))(((inferWithEnv)(env2))(st5)))((((typeEnvInsert)(b))(schB))((((typeEnvInsert)(a))(schA))((inferEnv)(st5)))))(((generalize)((inferEnv)(st5)))(tb)))(((generalize)((inferEnv)(st5)))(ta)))(((((inferUnify)(st4))(valTy))(TyApp(TyApp(TyName(`Tuple`), ta), tb)))(`tuple let`)))((inferFreshVar)(st3)))((inferFreshVar)(st2)))(((inferExpr)(st))(val)); }
+  if (expr?._tag === `EIf`) { const cond = (expr as Record<string, unknown>)[`_0`]; const then_ = (expr as Record<string, unknown>)[`_1`]; const else_ = (expr as Record<string, unknown>)[`_2`]; return (([condTy, st2]) => ((st3) => (([thenTy, st4]) => (([elseTy, st5]) => ((st6) => ((thenTy2) => [thenTy2, st6] as const)(((applyType)((inferEnvSubst)(st6)))(thenTy)))(((((inferUnify)(st5))(thenTy))(elseTy))(`if branches`)))(((inferExpr)(st4))(else_)))(((inferExpr)(st3))(then_)))(((((inferUnify)(st2))(condTy))(tyBool))(`if condition`)))(((inferExpr)(st))(cond)); }
+  if (expr?._tag === `EMatch`) { const scrut = (expr as Record<string, unknown>)[`_0`]; const pats = (expr as Record<string, unknown>)[`_1`]; const bodies = (expr as Record<string, unknown>)[`_2`]; return (([scrutTy, st2]) => (([tv, st3]) => ((st4) => ((resultTy) => [resultTy, st4] as const)(((applyType)((inferEnvSubst)(st4)))(tv)))((((((inferMatchArms)(st3))(scrutTy))(tv))(pats))(bodies)))((inferFreshVar)(st2)))(((inferExpr)(st))(scrut)); }
+  if (expr?._tag === `EBinOp`) { const op = (expr as Record<string, unknown>)[`_0`]; const l = (expr as Record<string, unknown>)[`_1`]; const r = (expr as Record<string, unknown>)[`_2`]; return (([opTy, st2]) => (([lTy, st3]) => (([rTy, st4]) => (([retTy, st5]) => ((st6) => ((retTy2) => [retTy2, st6] as const)(((applyType)((inferEnvSubst)(st6)))(retTy)))(((((inferUnify)(st5))(opTy))(TyFn(lTy, TyFn(rTy, retTy))))(`binary op`)))((inferFreshVar)(st4)))(((inferExpr)(st3))(r)))(((inferExpr)(st2))(l)))(((inferExpr)(st))(EVar(op))); }
+  if (expr?._tag === `ETuple`) { const a = (expr as Record<string, unknown>)[`_0`]; const b = (expr as Record<string, unknown>)[`_1`]; return (([aTy, st2]) => (([bTy, st3]) => [TyApp(TyApp(TyName(`Tuple`), aTy), bTy), st3] as const)(((inferExpr)(st2))(b)))(((inferExpr)(st))(a)); }
+  if (expr?._tag === `EList`) { const elems = (expr as Record<string, unknown>)[`_0`]; return (([tv, st2]) => ((st3) => ((elemTy) => [(tyList)(elemTy), st3] as const)(((applyType)((inferEnvSubst)(st3)))(tv)))((((listFold)((acc: InferState) => (e: Expr) => (([eTy, acc2]) => ((((inferUnify)(acc2))(eTy))(tv))(`list element`))(((inferExpr)(acc))(e))))(st2))(elems)))((inferFreshVar)(st)); }
+  if (expr?._tag === `ECons`) { const h = (expr as Record<string, unknown>)[`_0`]; const t = (expr as Record<string, unknown>)[`_1`]; return (([hTy, st2]) => (([tTy, st3]) => ((st4) => [(tyList)(hTy), st4] as const)(((((inferUnify)(st3))(tTy))((tyList)(hTy)))(`list cons`)))(((inferExpr)(st2))(t)))(((inferExpr)(st))(h)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const inferMatchArms = (st: InferState) => (scrutTy: TypeExpr) => (retTy: TypeExpr) => (pats: Pattern[]) => (bodies: Expr[]) => (() => {
+  if (pats.length === 0) { return st; }
+  if (pats.length > 0) { const pat = pats[0], restPats = pats.slice(1); return (() => {
+  if (bodies.length === 0) { return st; }
+  if (bodies.length > 0) { const body = bodies[0], restBodies = bodies.slice(1); return (([bindings, patTy, st2]) => ((st3) => ((env2) => ((st4) => (([bodyTy, st5]) => ((st6) => ((st7) => (((((inferMatchArms)(st7))(scrutTy))(retTy))(restPats))(restBodies))(((inferWithEnv)((inferEnv)(st3)))(st6)))(((((inferUnify)(st5))(bodyTy))(retTy))(`match arm`)))(((inferExpr)(st4))(body)))(((inferWithEnv)(env2))(st3)))((((listFold)((acc: RBMap<string, Scheme>) => (pair: Tuple<string, Scheme>) => (([name, sch]) => (((typeEnvInsert)(name))(sch))(acc))(pair)))((inferEnv)(st3)))(bindings)))(((((inferUnify)(st2))(scrutTy))(patTy))(`match scrutinee`)))(((inferPattern)(st))(pat)); }
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const inferEnvSubst = (st: InferState) => (inferSubst)(st);
+
+const inferDecl = (st: InferState) => (decl: Decl) => (() => {
+  if (decl?._tag === `DFn`) { const name = (decl as Record<string, unknown>)[`_0`]; const params = (decl as Record<string, unknown>)[`_1`]; const retTyOpt = (decl as Record<string, unknown>)[`_2`]; const body = (decl as Record<string, unknown>)[`_3`]; return (([paramSchemes, paramTys, st2]) => ((env2) => (([selfTy, st3]) => ((env3) => ((st4) => (([bodyTy, st5]) => ((st6) => ((fnTy) => ((sch) => ((env4) => ((inferWithEnv)(env4))(st6))((((typeEnvInsert)(name))(sch))((inferEnv)(st6))))(((generalize)((inferEnv)(st6)))(fnTy)))(((buildFnType)(paramTys))(bodyTy)))((() => {
+  if (retTyOpt?._tag === `None`) { return st5; }
+  if (retTyOpt?._tag === `Some`) { const retTy = (retTyOpt as Record<string, unknown>)[`_0`]; return ((((inferUnify)(st5))(bodyTy))(retTy))(`declared return type`); }
+  throw new Error(`Non-exhaustive match`);
+})()))(((inferExpr)(st4))(body)))(((inferWithEnv)(env3))(st3)))((((typeEnvInsert)(name))((schemeMono)(selfTy)))((inferEnv)(st3))))((inferFreshVar)(((inferWithEnv)(env2))(st2))))((((listFold)((acc: RBMap<string, Scheme>) => (pair: Tuple<string, Scheme>) => (([pname, sch]) => (((typeEnvInsert)(pname))(sch))(acc))(pair)))((inferEnv)(st2)))(paramSchemes)))(((inferParams)(st))(params)); }
+  if (decl?._tag === `DType`) { const typeName = (decl as Record<string, unknown>)[`_0`]; const tvars = (decl as Record<string, unknown>)[`_1`]; const ctors = (decl as Record<string, unknown>)[`_2`]; return ((st2) => st2)((((listFold)((acc: InferState) => (ctor: Constructor) => (() => {
+  if (ctor?._tag === `MkCon`) { const ctorName = (ctor as Record<string, unknown>)[`_0`]; const argTys = (ctor as Record<string, unknown>)[`_1`]; return ((retTy) => ((ctorTy) => ((ctorSch) => ((inferWithEnv)((((typeEnvInsert)(ctorName))(ctorSch))((inferEnv)(acc))))(acc))(MkScheme(tvars, ctorTy)))(((buildFnType)(argTys))(retTy)))(((applyTypeVars)(typeName))(tvars)); }
+  throw new Error(`Non-exhaustive match`);
+})()))(st))(ctors)); }
+  if (decl?._tag === `DLet`) { const name = (decl as Record<string, unknown>)[`_0`]; const expr = (decl as Record<string, unknown>)[`_1`]; return (([ty, st2]) => ((sch) => ((inferWithEnv)((((typeEnvInsert)(name))(sch))((inferEnv)(st2))))(st2))(((generalize)((inferEnv)(st2)))(ty)))(((inferExpr)(st))(expr)); }
+  if (decl?._tag === `DExternal`) { const name = (decl as Record<string, unknown>)[`_0`]; const params = (decl as Record<string, unknown>)[`_1`]; const retTy = (decl as Record<string, unknown>)[`_2`]; return ((paramTys) => ((fnTy) => ((sch) => ((inferWithEnv)((((typeEnvInsert)(name))(sch))((inferEnv)(st))))(st))((schemeMono)(fnTy)))(((buildFnType)(paramTys))(retTy)))(((listMap)((p: Param) => (() => {
+  if (p?._tag === `MkParam`) { const t = (p as Record<string, unknown>)[`_1`]; return t; }
+  throw new Error(`Non-exhaustive match`);
+})()))(params)); }
+  if (decl?._tag === `DOpaque`) { const typeName = (decl as Record<string, unknown>)[`_0`]; return st; }
+  if (decl?._tag === `DImport`) {  return st; }
+  if (decl?._tag === `DImportUrl`) {  return st; }
+  if (decl?._tag === `DExport`) { const inner = (decl as Record<string, unknown>)[`_0`]; return ((inferDecl)(st))(inner); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const inferParams = (st: InferState) => (params: Param[]) => (() => {
+  if (params.length === 0) { return [[], [], st] as const; }
+  if (params.length > 0) { const p = params[0], rest = params.slice(1); return (() => {
+  if (p?._tag === `MkParam`) { const pname = (p as Record<string, unknown>)[`_0`]; const pty = (p as Record<string, unknown>)[`_1`]; return ((pty2) => (([restPairs, restTys, st2]) => ((sch) => [((listAppend)([[pname, sch] as const]))(restPairs), ((listAppend)([pty2]))(restTys), st2] as const)((schemeMono)(pty2)))(((inferParams)(st))(rest)))((() => {
+  if (pty?._tag === `TyName`) {  return (([tv, _]) => tv)((inferFreshVar)(st)); }
+  return pty;
+  throw new Error(`Non-exhaustive match`);
+})()); }
+  throw new Error(`Non-exhaustive match`);
+})(); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const buildFnType = (argTys: TypeExpr[]) => (retTy: TypeExpr) => (() => {
+  if (argTys.length === 0) { return retTy; }
+  if (argTys.length > 0) { const a = argTys[0], rest = argTys.slice(1); return TyFn(a, ((buildFnType)(rest))(retTy)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const applyTypeVars = (base: string) => (vars: string[]) => (() => {
+  if (vars.length === 0) { return TyName(base); }
+  if (vars.length > 0) { const v = vars[0], rest = vars.slice(1); return TyApp(((applyTypeVars)(base))(rest), TyName(v)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const inferModule = (decls: Decl[]) => ((st0) => ((stFinal) => (inferErrors)(stFinal))((((listFold)(inferDecl))(st0))(decls)))(MkInferState(baseEnv, freshInit, [], substEmpty));
+
+const inferModuleStep = (env: RBMap<string, Scheme>) => (decls: Decl[]) => ((st0) => ((stFinal) => [(inferErrors)(stFinal), (inferEnv)(stFinal)] as const)((((listFold)(inferDecl))(st0))(decls)))(MkInferState(env, freshInit, [], substEmpty));
+
+const strStartsWith = (prefix: string) => (s: string) => ((plen) => ((slen) => ((plen > slen) ? false : ((((strSlice)(s))(0))(plen) === prefix)))((strLen)(s)))((strLen)(prefix));
+
+const inferCheck = (label: string) => (got: string) => (expected: string) => ((got === expected) ? (printfn)(((strConcat)(`OK `))(label)) : (printfn)(((strConcat)(`FAIL `))(((strConcat)(label))(((strConcat)(` expected=`))(((strConcat)(expected))(((strConcat)(` got=`))(got)))))));
+
+const runInfer = (expr: Expr) => ((st0) => (([ty, st1]) => ((errs) => ((listIsEmpty)(errs) ? (renderType)(((applyType)((inferSubst)(st1)))(ty)) : ((strConcat)(`error: `))((() => {
+  return e;
+  if (errs.length === 0) { return `?`; }
+  throw new Error(`Non-exhaustive match`);
+})())))((inferErrors)(st1)))(((inferExpr)(st0))(expr)))(MkInferState(baseEnv, freshInit, [], substEmpty));
+
+const __ll_main_Std_CompilerInfer = () => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((_) => ((r11) => ((_) => ((_) => (printfn)(`Done`))((((inferCheck)(`12 lambda arith`))((runInfer)(ELam(`n`, EBinOp(`+`, EVar(`n`), EInt(1))))))(`Int -> Int`)))((((inferCheck)(`11 unbound`))((() => {
+  if (((strStartsWith)(`error:`))(r11) === true) { return `err`; }
+  if (((strStartsWith)(`error:`))(r11) === false) { return `ok`; }
+  throw new Error(`Non-exhaustive match`);
+})()))(`err`)))((runInfer)(EVar(`noSuchName`))))((((inferCheck)(`10 list`))((runInfer)(EList([EInt(1), EInt(2), EInt(3)]))))(`List Int`)))((((inferCheck)(`9 binop +`))((runInfer)(EBinOp(`+`, EInt(1), EInt(2)))))(`Int`)))((((inferCheck)(`8 if`))((runInfer)(EIf(EBool(true), EInt(1), EInt(2)))))(`Int`)))((((inferCheck)(`7 let`))((runInfer)(ELet(`x`, EInt(42), EVar(`x`)))))(`Int`)))((((inferCheck)(`6 app id`))((runInfer)(EApp(ELam(`x`, EVar(`x`)), EInt(42)))))(`Int`)))((((inferCheck)(`5 lambda const`))((runInfer)(ELam(`x`, EInt(42)))))(`\$0 -> Int`)))((((inferCheck)(`4 lambda id`))((runInfer)(ELam(`x`, EVar(`x`)))))(`\$0 -> \$0`)))((((inferCheck)(`3 EBool`))((runInfer)(EBool(true))))(`Bool`)))((((inferCheck)(`2 EStr`))((runInfer)(EStr(`hello`))))(`Str`)))((((inferCheck)(`1 EInt`))((runInfer)(EInt(42))))(`Int`));
 
 const showErrors = (errs: ElabError[]) => (((listFold)((acc: string) => (e: ElabError) => ((msg) => (((strLen)(acc) === 0) ? msg : ((strConcat)(acc))(((strConcat)(`\n`))(msg))))((errMsg)(e))))(``))(errs);
 
-const compile = (src: string) => ((tokens) => ((ast) => ((errors) => ((listIsEmpty)(errors) ? (emitModule)(ast) : (showErrors)(errors)))((elaborate)(ast)))((parseModule)(tokens)))((tokenize)(src));
+const compile = (src: string) => ((tokens) => ((ast) => ((elabErrs) => ((listIsEmpty)(elabErrs) ? (emitModule)(ast) : (showErrors)(elabErrs)))((elaborate)(ast)))((parseModule)(tokens)))((tokenize)(src));
+
+const collectErrors = (src: string) => ((tokens) => ((ast) => (elaborate)(ast))((parseModule)(tokens)))((tokenize)(src));
+
+const firstErrorMessage = (errs: ElabError[]) => (() => {
+  return (errMsg)(e);
+  if (errs.length === 0) { return ``; }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const checkCompact = (src: string) => ((errors) => ((listIsEmpty)(errors) ? `{"ok":true,"stage":"ok","primary_error":"","secondary_count":0}` : ((msg) => ((secondary) => ((p1) => ((p2) => ((p3) => ((p4) => ((strConcat)(p4))(`}`))(((strConcat)(p3))((intToStr)(secondary))))(((strConcat)(p2))(`","secondary_count":`)))(((strConcat)(p1))(msg)))(`{"ok":false,"stage":"elaborator","primary_error":"`))(((listLen)(errors) - 1)))((firstErrorMessage)(errors))))((collectErrors)(src));
+
+const renderCompact = (src: string) => src;
+
+const tokenEstimate = (src: string) => ((toks) => ((n) => ((p1) => ((p2) => ((strConcat)(p2))(`}`))(((strConcat)(p1))((intToStr)(n))))(`{"ok":true,"tokens":`))((listLen)(toks)))((tokenize)(src));
+
+const nextBlocker = (src: string) => ((errors) => ((listIsEmpty)(errors) ? `{"ok":true,"stage":"none","message":""}` : ((msg) => ((p1) => ((p2) => ((strConcat)(p2))(`"}`))(((strConcat)(p1))(msg)))(`{"ok":false,"stage":"elaborator","message":"`))((firstErrorMessage)(errors))))((collectErrors)(src));
+
+const declKind = (d: Decl) => (name: string) => (() => {
+  if (d?._tag === `DFn`) { const n = (d as Record<string, unknown>)[`_0`]; return ((n === name) ? `fn` : ``); }
+  if (d?._tag === `DType`) { const n = (d as Record<string, unknown>)[`_0`]; return ((n === name) ? `type` : ``); }
+  if (d?._tag === `DLet`) { const n = (d as Record<string, unknown>)[`_0`]; return ((n === name) ? `let` : ``); }
+  if (d?._tag === `DExternal`) { const n = (d as Record<string, unknown>)[`_0`]; return ((n === name) ? `external` : ``); }
+  if (d?._tag === `DOpaque`) {  return ``; }
+  if (d?._tag === `DImport`) {  return ``; }
+  if (d?._tag === `DExport`) { const inner = (d as Record<string, unknown>)[`_0`]; return ((declKind)(inner))(name); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const findDeclKind = (decls: Decl[]) => (name: string) => (() => {
+  if (decls.length === 0) { return ``; }
+  if (decls.length > 0) { const d = decls[0], rest = decls.slice(1); return ((kind) => (((strLen)(kind) === 0) ? ((findDeclKind)(rest))(name) : kind))(((declKind)(d))(name)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const lookupSymbol = (src: string) => (name: string) => ((tokens) => ((ast) => (() => {
+  if (ast?._tag === `MkModule`) { const decls = (ast as Record<string, unknown>)[`_1`]; return ((kind) => (((strLen)(kind) === 0) ? ((p1) => ((p2) => ((strConcat)(p2))(`"}`))(((strConcat)(p1))(name)))(`{"found":false,"name":"`) : ((p1) => ((p2) => ((p3) => ((p4) => ((strConcat)(p4))(`"}`))(((strConcat)(p3))(kind)))(((strConcat)(p2))(`","kind":"`)))(((strConcat)(p1))(name)))(`{"found":true,"name":"`)))(((findDeclKind)(decls))(name)); }
+  throw new Error(`Non-exhaustive match`);
+})())((parseModule)(tokens)))((tokenize)(src));
+
+const compileFiles = (srcs: string[]) => (env: RBMap<string, Scheme>) => (() => {
+  if (srcs.length === 0) { return [[], env] as const; }
+  if (srcs.length > 0) { const src = srcs[0], rest = srcs.slice(1); return ((tokens) => ((ast) => ((elabErrs) => ((listIsEmpty)(elabErrs) ? (() => {
+  if (ast?._tag === `MkModule`) { const decls = (ast as Record<string, unknown>)[`_1`]; return (([typeErrs, env2]) => ((listIsEmpty)(typeErrs) ? ((compileFiles)(rest))(env2) : [typeErrs, env2] as const))(((inferModuleStep)(env))(decls)); }
+  throw new Error(`Non-exhaustive match`);
+})() : [((listMap)(errMsg))(elabErrs), env] as const))((elaborate)(ast)))((parseModule)(tokens)))((tokenize)(src)); }
+  throw new Error(`Non-exhaustive match`);
+})();
+
+const compileProject = (srcs: string[]) => (([errs, _]) => errs)(((compileFiles)(srcs))(baseEnv));
+
+const showTypeErrors = (errs: string[]) => (((listFold)((acc: string) => (e: string) => (((strLen)(acc) === 0) ? e : ((strConcat)(acc))(((strConcat)(`\n`))(e)))))(``))(errs);
+
+const compileWithInfer = (src: string) => ((tokens) => ((ast) => ((elabErrs) => ((listIsEmpty)(elabErrs) ? (() => {
+  if (ast?._tag === `MkModule`) { const decls = (ast as Record<string, unknown>)[`_1`]; return ((typeErrs) => ((listIsEmpty)(typeErrs) ? (emitModule)(ast) : (showTypeErrors)(typeErrs)))((inferModule)(decls)); }
+  throw new Error(`Non-exhaustive match`);
+})() : (showErrors)(elabErrs)))((elaborate)(ast)))((parseModule)(tokens)))((tokenize)(src));
+
+const collectAllErrors = (src: string) => ((tokens) => ((ast) => ((elabErrs) => ((listIsEmpty)(elabErrs) ? (() => {
+  if (ast?._tag === `MkModule`) { const decls = (ast as Record<string, unknown>)[`_1`]; return (inferModule)(decls); }
+  throw new Error(`Non-exhaustive match`);
+})() : ((listMap)(errMsg))(elabErrs)))((elaborate)(ast)))((parseModule)(tokens)))((tokenize)(src));
+
+const nextBlockerFull = (src: string) => ((tokens) => ((ast) => ((elabErrs) => ((listIsEmpty)(elabErrs) ? (() => {
+  if (ast?._tag === `MkModule`) { const decls = (ast as Record<string, unknown>)[`_1`]; return ((typeErrs) => ((listIsEmpty)(typeErrs) ? `{"ok":true,"stage":"none","message":""}` : ((msg) => ((p1) => ((strConcat)(p1))(((strConcat)(msg))(`"}`)))(`{"ok":false,"stage":"inference","message":"`))((() => {
+  return e;
+  if (typeErrs.length === 0) { return ``; }
+  throw new Error(`Non-exhaustive match`);
+})())))((inferModule)(decls)); }
+  throw new Error(`Non-exhaustive match`);
+})() : ((msg) => ((p1) => ((strConcat)(p1))(((strConcat)(msg))(`"}`)))(`{"ok":false,"stage":"elaborator","message":"`))((firstErrorMessage)(elabErrs))))((elaborate)(ast)))((parseModule)(tokens)))((tokenize)(src));
 
 const compilerCheckContains = (label: string) => (got: string) => (needle: string) => (((strContains)(needle))(got) ? (printfn)(((strConcat)(`OK `))(label)) : (printfn)(((strConcat)(`FAIL `))(((strConcat)(label))(((strConcat)(`\n  missing:  `))(((strConcat)(needle))(((strConcat)(`\n  in output:\n`))(got)))))));
 
 const checkHasError = (label: string) => (got: string) => (needle: string) => (((strContains)(needle))(got) ? (printfn)(((strConcat)(`OK `))(label)) : (printfn)(((strConcat)(`FAIL `))(((strConcat)(label))(((strConcat)(`\n  expected error containing: `))(((strConcat)(needle))(((strConcat)(`\n  got: `))(got)))))));
+
+const compilerCheck = (label: string) => (got: string) => (expected: string) => ((got === expected) ? (printfn)(((strConcat)(`OK `))(label)) : (printfn)(((strConcat)(`FAIL `))(((strConcat)(label))(((strConcat)(` expected=`))(((strConcat)(expected))(((strConcat)(` got=`))(got)))))));
+
+function main(): void {
+  ((src1) => ((_) => ((src2) => ((_) => ((errs3) => ((_) => ((_) => ((nb5) => ((_) => ((nb6) => ((_) => ((sym7) => ((_) => ((sym8) => ((_) => ((te9) => ((_) => ((srcA) => ((srcB) => ((proj10) => ((_) => ((srcBad) => ((proj11) => ((proj11status) => ((_) => (printfn)(`Done`))((((compilerCheck)(`11 compileProject unbound err`))(proj11status))(`err`)))((() => {
+  if (proj11.length === 0) { return `none`; }
+  return `err`;
+  throw new Error(`Non-exhaustive match`);
+})()))((compileProject)([srcBad])))(`module Bad\nresult = badFn 1\n`))((((compilerCheck)(`10 compileProject no errs`))((intToStr)((listLen)(proj10))))(`0`)))((compileProject)([srcA, srcB])))(`module B\nbar(x Int) = x\n`))(`module A\nfoo(x Int) = x\n`))((((compilerCheckContains)(`9 tokenEstimate ok`))(te9))(`"ok":true`)))((tokenEstimate)(src1)))((((compilerCheckContains)(`8 lookupSymbol not found`))(sym8))(`"found":false`)))(((lookupSymbol)(src1))(`unknown`)))((((compilerCheckContains)(`7 lookupSymbol found`))(sym7))(`"found":true`)))(((lookupSymbol)(src1))(`add`)))((((compilerCheckContains)(`6 nextBlockerFull elab`))(nb6))(`"stage":"elaborator"`)))((nextBlockerFull)(src2)))((((compilerCheckContains)(`5 nextBlockerFull ok`))(nb5))(`"ok":true`)))((nextBlockerFull)(src1)))((((compilerCheckContains)(`4 compileWithInfer basic`))((compileWithInfer)(src1)))(`add`)))((((compilerCheck)(`3 no errors on valid`))((intToStr)((listLen)(errs3))))(`0`)))((collectAllErrors)(src1)))((((checkHasError)(`2 elab error undeclared`))((compile)(src2)))(`undeclared`)))(`module Test\nfoo = undeclaredName\n`))((((compilerCheckContains)(`1 compile basic fn`))((compile)(src1)))(`add`)))(`module Test\nadd(a Int)(b Int) = a + b\n`);
+}
+
+
+main();

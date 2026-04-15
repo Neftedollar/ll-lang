@@ -220,6 +220,10 @@ let rec private emitDefaultExpr (t: TypeExpr) : string =
     | TyApp(TyName "List", a) -> "new " + emitType (TyApp(TyName "List", a)) + "()"
     | TyApp(TyName "Maybe", _) -> "default"
     | TyTagged(inner, _) -> emitDefaultExpr inner
+    | t when (match collectTyApp t with TyName "RBMap", (_ :: _) -> true | _ -> false) ->
+        // RBMap<K,V> — default is an empty Leaf<K,V>
+        let typeArgs = constructorTypeArgSuffix t
+        "new Leaf" + typeArgs + "()"
     | _ -> "default!"
 
 let private tryListElemType (t: TypeExpr) : TypeExpr option =
@@ -227,9 +231,85 @@ let private tryListElemType (t: TypeExpr) : TypeExpr option =
     | TyApp(TyName "List", a) -> Some a
     | _ -> None
 
+let rec private containsFlexVar (t: TypeExpr) : bool =
+    match t with
+    | TyVar v when v.Length > 0 && v.[0] = '$' -> true
+    | TyVar _ | TyName _ -> false
+    | TyApp(a, b) | TyFn(a, b) -> containsFlexVar a || containsFlexVar b
+    | TyTagged(inner, _) -> containsFlexVar inner
+
+let rec private collectFlexVars (t: TypeExpr) : string list =
+    match t with
+    | TyVar v when v.Length > 0 && v.[0] = '$' -> [v]
+    | TyVar _ | TyName _ -> []
+    | TyApp(a, b) | TyFn(a, b) ->
+        let av = collectFlexVars a
+        let bv = collectFlexVars b
+        av @ (bv |> List.filter (fun x -> not (List.contains x av)))
+    | TyTagged(inner, _) -> collectFlexVars inner
+
+let private renameFlexVars (mapping: System.Collections.Generic.Dictionary<string, string>) (t: TypeExpr) : TypeExpr =
+    let rec go t =
+        match t with
+        | TyVar v when mapping.ContainsKey(v) -> TyName mapping.[v]
+        | TyApp(a, b) -> TyApp(go a, go b)
+        | TyFn(a, b) -> TyFn(go a, go b)
+        | TyTagged(inner, tag) -> TyTagged(go inner, tag)
+        | _ -> t
+    go t
+
+// Track names emitted as polymorphic zero-arg generic methods (e.g. substEmpty<K,V>())
+let private polymorphicZeroArgMethods = System.Collections.Generic.HashSet<string>()
+
+/// Find the first CONCRETE (no flex vars) type for variable `name` in the expression.
+/// Used to propagate a concrete monomorphic type back to a let-binding whose
+/// RHS was inferred with unresolved flex vars (e.g. `s0 = substEmpty`).
+let rec private firstConcreteVarType (name: Ident) (te: TypedExpr) : TypeExpr option =
+    match te.Expr with
+    | TEVar n when n = name ->
+        if containsFlexVar te.Type then None else Some te.Type
+    | TELet(n, _, v, cont) ->
+        if n = name then None  // shadowed by inner binding
+        else
+            firstConcreteVarType name v
+            |> Option.orElse (cont |> Option.bind (firstConcreteVarType name))
+    | TELetPat(_, v, cont) ->
+        firstConcreteVarType name v
+        |> Option.orElse (cont |> Option.bind (firstConcreteVarType name))
+    | TEApp(f, a) ->
+        firstConcreteVarType name f |> Option.orElse (firstConcreteVarType name a)
+    | TELam(ps, b) ->
+        if List.exists (fun (p, _) -> p = name) ps then None
+        else firstConcreteVarType name b
+    | TEIf(c, t, e) ->
+        firstConcreteVarType name c
+        |> Option.orElse (firstConcreteVarType name t)
+        |> Option.orElse (firstConcreteVarType name e)
+    | TEMatch(s, bs) | TEMatchOf(s, bs) ->
+        firstConcreteVarType name s
+        |> Option.orElse (bs |> List.tryPick (fun (_, b) -> firstConcreteVarType name b))
+    | TEList es | TETuple es -> es |> List.tryPick (firstConcreteVarType name)
+    | TECons(h, t) ->
+        firstConcreteVarType name h |> Option.orElse (firstConcreteVarType name t)
+    | TETagged(e, _) -> firstConcreteVarType name e
+    | TEPipe(a, b) ->
+        firstConcreteVarType name a |> Option.orElse (firstConcreteVarType name b)
+    | _ -> None
+
 let private tryStdlibGenericHead (name: string) (args: TypedExpr list) (retTy: TypeExpr) : string option =
     let mk2 a b = "<" + emitTypeBoxed a + "," + emitTypeBoxed b + ">"
     let mk1 a = "<" + emitTypeBoxed a + ">"
+    let mk3 a b c = "<" + emitTypeBoxed a + "," + emitTypeBoxed b + "," + emitTypeBoxed c + ">"
+    // Extract K from a comparator type: Func<K, Func<K, long>>
+    let tryKFromCmp (t: TypeExpr) =
+        match t with
+        | TyFn(k, _) -> Some k
+        | _ -> None
+    // Extract (K, V) from RBMap<K, V>
+    let tryKVFromRBMap (t: TypeExpr) =
+        match collectTyApp t with
+        | TyName "RBMap", [k; v] -> Some (k, v)
+        | _ -> None
     match name, args with
     | "listMap", a0 :: _ ->
         match a0.Type with
@@ -255,6 +335,111 @@ let private tryStdlibGenericHead (name: string) (args: TypedExpr list) (retTy: T
     | "listConcat", a0 :: _ ->
         match a0.Type with
         | TyApp(TyName "List", TyApp(TyName "List", a)) -> Some ("listConcat" + mk1 a)
+        | _ -> None
+    // List functions with first arg = count (long): A must come from second arg (the list)
+    | "listTake", [a0] ->
+        match retTy with
+        | TyFn(TyApp(TyName "List", a), _) | TyApp(TyName "List", a) -> Some ("listTake" + mk1 a)
+        | _ -> None
+    | "listTake", _ :: a1 :: _ ->
+        tryListElemType a1.Type |> Option.map (fun a -> "listTake" + mk1 a)
+    | "listDrop", [a0] ->
+        match retTy with
+        | TyFn(TyApp(TyName "List", a), _) | TyApp(TyName "List", a) -> Some ("listDrop" + mk1 a)
+        | _ -> None
+    | "listDrop", _ :: a1 :: _ ->
+        tryListElemType a1.Type |> Option.map (fun a -> "listDrop" + mk1 a)
+    // Functions where A comes from predicate arg type
+    | "listAny", a0 :: _
+    | "listAll", a0 :: _
+    | "listFind", a0 :: _
+    | "listPartition", a0 :: _ ->
+        match a0.Type with
+        | TyFn(a, _) when not (containsFlexVar a) -> Some (name + mk1 a)
+        | _ ->
+            // Fallback: try the list arg (second arg) element type
+            match args with
+            | _ :: a1 :: _ -> tryListElemType a1.Type |> Option.map (fun a -> name + mk1 a)
+            | _ -> None
+    | "listFlatMap", a0 :: _ ->
+        // signature: listFlatMap<B, A>(Func<A, List<B>> f)
+        match a0.Type with
+        | TyFn(a, TyApp(TyName "List", b)) -> Some ("listFlatMap" + mk2 b a)
+        | _ -> None
+    | "listFindIndex", a0 :: _ ->
+        match a0.Type with
+        | TyFn(a, _) when not (containsFlexVar a) -> Some ("listFindIndex" + mk1 a)
+        | _ ->
+            match args with
+            | _ :: a1 :: _ -> tryListElemType a1.Type |> Option.map (fun a -> "listFindIndex" + mk1 a)
+            | _ -> None
+    // listFindIndexFrom<A>(long i): A from second arg (predicate) or third (list)
+    | "listFindIndexFrom", _ :: a1 :: _ ->
+        match a1.Type with
+        | TyFn(a, _) when not (containsFlexVar a) -> Some ("listFindIndexFrom" + mk1 a)
+        | _ ->
+            match args with
+            | _ :: _ :: a2 :: _ -> tryListElemType a2.Type |> Option.map (fun a -> "listFindIndexFrom" + mk1 a)
+            | _ -> None
+    | "listFindIndexFrom", _ ->
+        match retTy with
+        | TyFn(TyFn(a, _), _) | TyFn(a, _) -> Some ("listFindIndexFrom" + mk1 a)
+        | _ -> None
+    // Map functions: C# can't infer all type params from only the first curried argument.
+    // Provide explicit type arguments so the compiler doesn't reject partially-applied calls.
+    // Only emit explicit params when the types are concrete (no flex vars).
+    | "mapInsert", a0 :: _ ->
+        match tryKFromCmp a0.Type with
+        | Some k when not (containsFlexVar k) ->
+            let v =
+                match collectTyApp retTy with
+                | TyName "RBMap", [_; v] when not (containsFlexVar v) -> v
+                | _ ->
+                    match args with
+                    | _ :: _ :: a2 :: _ when not (containsFlexVar a2.Type) -> a2.Type
+                    | _ -> TyName "object"
+            if containsFlexVar v then None  // let C# try
+            else Some ("mapInsert" + mk2 k v)
+        | _ -> None
+    | "mapLookup", a0 :: _ ->
+        // C# signature is mapLookup<V, K> (V first)
+        match tryKFromCmp a0.Type with
+        | Some k when not (containsFlexVar k) ->
+            let v =
+                match retTy with
+                | TyApp(TyName "Maybe", v) when not (containsFlexVar v) -> v
+                | _ -> TyName "object"
+            if containsFlexVar v then None
+            else Some ("mapLookup<" + emitTypeBoxed v + "," + emitTypeBoxed k + ">")
+        | _ -> None
+    | "mapContains", a0 :: _ ->
+        match tryKFromCmp a0.Type with
+        | Some k when not (containsFlexVar k) ->
+            let v =
+                match args with
+                | _ :: _ :: a2 :: _ ->
+                    match tryKVFromRBMap a2.Type with
+                    | Some (_, v) when not (containsFlexVar v) -> v
+                    | _ -> TyName "object"
+                | _ -> TyName "object"
+            if containsFlexVar v then None
+            else Some ("mapContains" + mk2 k v)
+        | _ -> None
+    | "mapFold", a0 :: _ ->
+        // signature: mapFold<B, K, V>(Func<B, Func<K, Func<V, B>>> f)
+        // C# order: B, K, V
+        match a0.Type with
+        | TyFn(b, TyFn(k, TyFn(v, _))) when not (containsFlexVar b || containsFlexVar k || containsFlexVar v) ->
+            Some ("mapFold" + mk3 b k v)
+        | _ -> None
+    | "mapKeys", a0 :: _ ->
+        match tryKVFromRBMap a0.Type with
+        | Some (k, v) when not (containsFlexVar k || containsFlexVar v) -> Some ("mapKeys" + mk2 k v)
+        | _ -> None
+    | "mapSize", a0 :: _ ->
+        // Only emit explicit type params when they're concrete; otherwise let C# infer from arg
+        match tryKVFromRBMap a0.Type with
+        | Some (k, v) when not (containsFlexVar k || containsFlexVar v) -> Some ("mapSize" + mk2 k v)
         | _ -> None
     | _ ->
         match name with
@@ -353,11 +538,15 @@ let rec private isErasedType (t: TypeExpr) : bool =
     | TyTagged(inner, _) -> isErasedType inner
     | _ -> false
 
-let private castArgIfNeeded (expectedTy: TypeExpr) (actualTy: TypeExpr) (argExpr: string) : string =
+let private castArgIfNeeded (expectedTy: TypeExpr) (actualTy: TypeExpr) (isErasingArg: bool) (argExpr: string) : string =
     let expectedCs = emitTypeBoxed expectedTy
     if expectedCs = "object" then argExpr
-    elif isErasedType actualTy then
+    elif isErasedType actualTy || isErasingArg then
         "(" + expectedCs + ")(" + argExpr + ")"
+    elif containsFlexVar actualTy && not (containsFlexVar expectedTy) then
+        // Erasing container (e.g. RBMap<$0,$1>) where concrete type expected —
+        // replace with a type-correct default (e.g. new Leaf<K,V>())
+        emitDefaultExpr expectedTy
     else argExpr
 
 let private emitCtorCastType (ctor: string) (patTy: TypeExpr) : string =
@@ -371,6 +560,19 @@ let private emitCtorCastType (ctor: string) (patTy: TypeExpr) : string =
 let private isSimpleMatchReturnType (t: TypeExpr) : bool =
     match t with
     | TyName "Int" -> true
+    | _ -> false
+
+// Returns true when 'te' is a call to a known type-erasing prelude function
+// (those declared with object/object? in Map.cs) whose C# result is 'object'
+// even though the TypedAST has a concrete type.
+let rec private isErasingCallExpr (te: TypedExpr) : bool =
+    match te.Expr with
+    | TEApp(f, _) -> isErasingCallExpr f
+    | TEVar name ->
+        match name with
+        | "maybeWithDefault" | "maybeDefault" | "maybeBind" | "maybeMap"
+        | "listHead" | "listTail" | "listAt" -> true
+        | _ -> false
     | _ -> false
 
 let rec private tryEmitExpr (te: TypedExpr) : string option =
@@ -395,12 +597,48 @@ let rec private tryEmitExpr (te: TypedExpr) : string option =
         match tryAsBinOp te with
         | Some (op, a, b) ->
             match tryEmitExpr a, tryEmitExpr b with
-            | Some aStr, Some bStr -> Some ("(" + aStr + " " + op + " " + bStr + ")")
+            | Some aStr, Some bStr ->
+                // String ordering comparisons (<, >, <=, >=) are not valid C# operators
+                // for System.String.  Emit string.Compare(...) instead.
+                let isStrTy (t: TypeExpr) =
+                    match t with
+                    | TyName "Str" -> true
+                    | _ -> false
+                let isOrderOp o = o = "<" || o = ">" || o = "<=" || o = ">="
+                let isEqOp o = o = "==" || o = "!="
+                // Check if a type is a C# reference type that can't use == with primitives
+                let isObjectLikeTy (t: TypeExpr) =
+                    match t with
+                    | TyVar _ -> true  // erased flex var → object
+                    | _ -> false
+                // True when the expression will produce 'object' in C# due to prelude type erasure
+                let isErasingOrObjectLike (expr: TypedExpr) =
+                    isObjectLikeTy expr.Type || isErasingCallExpr expr
+                let isPrimitiveTy (t: TypeExpr) =
+                    match t with
+                    | TyName "Int" | TyName "Float" | TyName "Bool" | TyName "Char" -> true
+                    | _ -> false
+                if isStrTy a.Type && isOrderOp op then
+                    Some ("(string.Compare(" + aStr + ", " + bStr + ", System.StringComparison.Ordinal) " + op + " 0)")
+                elif isEqOp op && isErasingOrObjectLike a && isPrimitiveTy b.Type then
+                    // `object == long` etc. — use Equals to avoid CS0019
+                    let neg = if op = "!=" then " == false" else ""
+                    Some ("(System.Object.Equals(" + aStr + ", " + bStr + ")" + neg + ")")
+                elif isEqOp op && isPrimitiveTy a.Type && isErasingOrObjectLike b then
+                    let neg = if op = "!=" then " == false" else ""
+                    Some ("(System.Object.Equals(" + bStr + ", " + aStr + ")" + neg + ")")
+                else
+                    Some ("(" + aStr + " " + op + " " + bStr + ")")
             | _ -> None
         | None ->
             match te.Expr with
             | TELit l -> Some (emitLit l)
-            | TEVar x -> Some (safeIdent x)
+            | TEVar x ->
+                // Polymorphic zero-arg generic methods (e.g. substEmpty<K,V>()) need type args + () at call sites
+                if polymorphicZeroArgMethods.Contains(x) && not (containsFlexVar te.Type) then
+                    Some (safeIdent x + constructorTypeArgSuffix te.Type + "()")
+                else
+                    Some (safeIdent x)
             | TECon c ->
                 match c with
                 | "true"
@@ -427,7 +665,9 @@ let rec private tryEmitExpr (te: TypedExpr) : string option =
                         | None -> None
                         | Some argStr ->
                             match List.tryItem i expectedArgTypes with
-                            | Some expectedTy -> Some (castArgIfNeeded expectedTy arg.Type argStr)
+                            | Some expectedTy ->
+                                // Fix C: also cast when the arg is an erasing prelude call
+                                Some (castArgIfNeeded expectedTy arg.Type (isErasingCallExpr arg) argStr)
                             | None -> Some argStr)
                     |> List.fold (fun acc x ->
                         match acc, x with
@@ -439,14 +679,20 @@ let rec private tryEmitExpr (te: TypedExpr) : string option =
                     let ctorTypeArgs = constructorTypeArgSuffix te.Type
                     Some ("new " + safeTypeIdent c + ctorTypeArgs + "(" + String.concat ", " argsStr + ")")
                 | TEVar fname, Some argsStr ->
-                    let callHead =
-                        match tryStdlibGenericHead fname args te.Type with
-                        | Some h -> h
-                        | None ->
+                    match tryStdlibGenericHead fname args te.Type with
+                    | Some h ->
+                        // Fix A: apply first arg directly to avoid (genericHead<T with spaces>)(arg)
+                        // C# cast syntax. After first application the head already has `=>`
+                        // from the lambda arg, so subsequent emitCall wraps correctly.
+                        match argsStr with
+                        | first :: rest -> Some (rest |> List.fold emitCall (h + "(" + first + ")"))
+                        | [] -> Some h
+                    | None ->
+                        let callHead =
                             match tryEmitExpr head with
                             | Some h -> h
                             | None -> safeIdent fname
-                    Some (argsStr |> List.fold emitCall callHead)
+                        Some (argsStr |> List.fold emitCall callHead)
                 | _, Some argsStr ->
                     match tryEmitExpr head with
                     | Some headStr ->
@@ -465,7 +711,17 @@ let rec private tryEmitExpr (te: TypedExpr) : string option =
                         let lambda = List.foldBack (fun p acc -> p + " => " + acc) names bodyStr
                         Some lambda
             | TELet(x, _, e, Some body) ->
-                match tryEmitExpr e, tryEmitExpr body with
+                // When binding value is a polymorphic zero-arg method with unresolved flex vars
+                // (e.g. `e0 = typeEnvEmpty` where typeEnvEmpty : RBMap<$k,$v>), find the first
+                // concrete type of `x` in the body to emit e.g. typeEnvEmpty<string,Scheme>().
+                let resolvedE =
+                    match e.Expr with
+                    | TEVar v when polymorphicZeroArgMethods.Contains(v) && containsFlexVar e.Type ->
+                        match firstConcreteVarType x body with
+                        | Some concreteTy when not (containsFlexVar concreteTy) -> { e with Type = concreteTy }
+                        | _ -> e
+                    | _ -> e
+                match tryEmitExpr resolvedE, tryEmitExpr body with
                 | Some eStr, Some bodyStr ->
                     let retType = emitType te.Type
                     if retType = "void" then
@@ -522,7 +778,14 @@ let rec private tryEmitExpr (te: TypedExpr) : string option =
                 match emittedElems with
                 | Some [] -> Some "default"
                 | Some [_] -> None
-                | Some elems -> Some ("(" + String.concat ", " elems + ")")
+                | Some elems ->
+                    // Fix E: ll-lang tuples are reference Tuple<>, not C# value tuples (a, b)
+                    match collectTyApp te.Type with
+                    | TyName "Tuple", (_ :: _) ->
+                        let tpArgs = constructorTypeArgSuffix te.Type
+                        Some ("new Tuple" + tpArgs + "(" + String.concat ", " elems + ")")
+                    | _ ->
+                        Some ("(" + String.concat ", " elems + ")")
                 | None -> None
             | TECons(_, _) -> None
 
@@ -633,7 +896,25 @@ let private isUnitType (t: TypeExpr) : bool =
 let rec private flattenMainPrelude (te: TypedExpr) : string list * TypedExpr =
     match te.Expr with
     | TELet(name, _, valueExpr, Some body) ->
-        let valueText = emitExprOrDefault valueExpr.Type valueExpr
+        // For constructors/vars with erased type params (e.g. `m0 = Leaf`, `s0 = substEmpty`),
+        // find the concrete type from the first use of the variable in the body.
+        // For TECon, just update the type (constructor suffix picks up the concrete args).
+        // For TEVar (erasing globals like substEmpty), also replace the expr itself with a
+        // type-correct default (e.g. new Leaf<K,V>()) so the C# variable gets the right type.
+        let (effectiveValueExpr, useDefault) =
+            match valueExpr.Expr with
+            | TECon _ when containsFlexVar valueExpr.Type ->
+                match firstConcreteVarType name body with
+                | Some t -> ({ valueExpr with Type = t }, false)
+                | None -> (valueExpr, false)
+            | TEVar _ when containsFlexVar valueExpr.Type ->
+                match firstConcreteVarType name body with
+                | Some t when not (containsFlexVar t) -> ({ valueExpr with Type = t }, true)
+                | _ -> (valueExpr, false)
+            | _ -> (valueExpr, false)
+        let valueText =
+            if useDefault then emitDefaultExpr effectiveValueExpr.Type
+            else emitExprOrDefault effectiveValueExpr.Type effectiveValueExpr
         let bindLine =
             if isUnitType valueExpr.Type then
                 valueText + ";"
@@ -643,16 +924,26 @@ let rec private flattenMainPrelude (te: TypedExpr) : string list * TypedExpr =
         (bindLine :: rest, tail)
     | TELetPat(tp, valueExpr, Some body) ->
         let valueText = emitExprOrDefault valueExpr.Type valueExpr
-        let bindLine =
-            match tp.Pat with
-            | PWild ->
-                valueText + ";"
-            | PVar name when not (isUnitType valueExpr.Type) ->
-                "var " + safeIdent name + " = " + valueText + ";"
-            | _ ->
-                valueText + ";"
         let rest, tail = flattenMainPrelude body
-        (bindLine :: rest, tail)
+        match tp.Pat with
+        | PWild ->
+            (valueText + ";" :: rest, tail)
+        | PVar name when not (isUnitType valueExpr.Type) ->
+            ("var " + safeIdent name + " = " + valueText + ";" :: rest, tail)
+        | PTuple pats ->
+            // Fix D: destructure tuple into named vars via a temp
+            // pats : Pattern list (AST.PTuple of Pattern list)
+            let tmpName = "__ll_tup_" + string (abs (hash valueText) % 99991)
+            let tmpBind = "var " + tmpName + " = " + valueText + ";"
+            let elemBinds =
+                pats |> List.mapi (fun i pat ->
+                    match pat with
+                    | PVar n -> "var " + safeIdent n + " = " + tmpName + ".Item" + string (i + 1) + ";"
+                    | _ -> "")
+                |> List.filter (fun s -> s <> "")
+            (tmpBind :: elemBinds @ rest, tail)
+        | _ ->
+            (valueText + ";" :: rest, tail)
     | _ -> ([], te)
 
 /// Emit the body of a void (Unit-returning) function as C# statements.
@@ -735,19 +1026,48 @@ let private emitFnCSharp (sig_: TypedFnSig) (body: TypedExpr) : string =
     else
         let tpStr = emitMethodTypeParams sig_
         let isUnit = isUnitType sig_.ReturnType
+        // Fix F: when sig_ return type has unresolved flex vars but the body type is concrete,
+        // use body.Type — this fixes cases where a function is declared before its return-type
+        // dependency is in scope (e.g. ftvEnvList calling strNub before strNub is processed).
+        let effectiveRetTy =
+            if containsFlexVar sig_.ReturnType && not (containsFlexVar body.Type)
+            then body.Type
+            else sig_.ReturnType
         match sig_.Params with
         | [] ->
-            let ret = emitType sig_.ReturnType
+            let ret = emitType effectiveRetTy
             if isUnit || ret = "void" then
                 let bodyBlock = emitVoidBody "        " body
                 if bodyBlock = "" then
                     "    public static void " + safeIdent sig_.Name + tpStr + "() { }"
                 else
                     "    public static void " + safeIdent sig_.Name + tpStr + "()\n    {\n" + bodyBlock + "\n    }"
+            elif tpStr = "" && containsFlexVar effectiveRetTy then
+                // Polymorphic zero-arg (e.g. substEmpty = Leaf, typeEnvEmpty = Leaf):
+                // emit as generic method substEmpty<K,V>() => new Leaf<K,V>() so call sites
+                // can supply concrete type args instead of RBMap<object,object>.
+                let flexVars = collectFlexVars effectiveRetTy
+                let paramLetters = [| "K"; "V"; "W"; "T"; "U"; "A"; "B"; "C" |]
+                let paramNames = flexVars |> List.mapi (fun i _ -> paramLetters.[min i (paramLetters.Length - 1)])
+                let mapping = System.Collections.Generic.Dictionary<string, string>()
+                List.iter2 (fun fv pn -> mapping.[fv] <- pn) flexVars paramNames
+                let renamedTy = renameFlexVars mapping effectiveRetTy
+                let tpStr2 = "<" + String.concat ", " paramNames + ">"
+                let bodyStr =
+                    match body.Expr with
+                    | TECon c ->
+                        "new " + safeTypeIdent c + constructorTypeArgSuffix renamedTy + "()"
+                    | _ -> emitExprOrDefault renamedTy body
+                polymorphicZeroArgMethods.Add(sig_.Name) |> ignore
+                "    public static " + emitType renamedTy + " " + safeIdent sig_.Name + tpStr2 + "() => " + bodyStr + ";"
+            elif tpStr = "" then
+                // Zero-arg non-void with no type params: emit as static readonly field
+                // so it can be used as a value in C# without () (avoids "method group" errors)
+                "    public static readonly " + ret + " " + safeIdent sig_.Name + " = " + emitExprOrDefault effectiveRetTy body + ";"
             else
-                "    public static " + ret + " " + safeIdent sig_.Name + tpStr + "() => " + emitExprOrDefault sig_.ReturnType body + ";"
+                "    public static " + ret + " " + safeIdent sig_.Name + tpStr + "() => " + emitExprOrDefault effectiveRetTy body + ";"
         | [(p, pt)] ->
-            let ret = emitType sig_.ReturnType
+            let ret = emitType effectiveRetTy
             if isUnit || ret = "void" then
                 let bodyBlock = emitVoidBody "        " body
                 if bodyBlock = "" then
@@ -755,11 +1075,11 @@ let private emitFnCSharp (sig_: TypedFnSig) (body: TypedExpr) : string =
                 else
                     "    public static void " + safeIdent sig_.Name + tpStr + "(" + emitType pt + " " + safeIdent p + ")\n    {\n" + bodyBlock + "\n    }"
             else
-                "    public static " + ret + " " + safeIdent sig_.Name + tpStr + "(" + emitType pt + " " + safeIdent p + ") => " + emitExprOrDefault sig_.ReturnType body + ";"
+                "    public static " + ret + " " + safeIdent sig_.Name + tpStr + "(" + emitType pt + " " + safeIdent p + ") => " + emitExprOrDefault effectiveRetTy body + ";"
         | (p, pt) :: rest ->
             let restTypes = rest |> List.map snd
-            let ret = buildCurriedRetType restTypes sig_.ReturnType
-            let lambda = buildCurriedLambda (rest |> List.map fst) (emitExprOrDefault sig_.ReturnType body)
+            let ret = buildCurriedRetType restTypes effectiveRetTy
+            let lambda = buildCurriedLambda (rest |> List.map fst) (emitExprOrDefault effectiveRetTy body)
             "    public static " + ret + " " +
             safeIdent sig_.Name + tpStr + "(" + emitType pt + " " + safeIdent p + ") => " + lambda + ";"
 

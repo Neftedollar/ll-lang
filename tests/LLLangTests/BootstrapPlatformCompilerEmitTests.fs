@@ -130,7 +130,7 @@ let ``stdlib Compiler.lll emits compiler artifacts for every Platform.*.SDK targ
                 if toolExists "tsc" then
                     let outDir = LLLang.Tests.TestCompat.directoryNameOrCurrent outPath
                     let fileName = LLLang.Tests.TestCompat.fileNameOrEmpty outPath
-                    let (code, so, se) = runProc outDir "tsc" [fileName; "--target"; "es2022"; "--module"; "esnext"; "--noEmit"]
+                    let (code, so, se) = runProc outDir "tsc" [fileName; "--target"; "es2022"; "--module"; "esnext"; "--lib"; "es2022"; "--noEmit"]
                     Assert.True((code = 0), $"tsc --noEmit failed for {target}\nstdout:\n{so}\nstderr:\n{se}")
             | "Platform.LLVM.SDK" ->
                 if toolExists "llvm-as" then
