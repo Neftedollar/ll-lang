@@ -413,7 +413,8 @@ errorCodes = [
   MkTriple "E008" "InfiniteType" "Occurs-check failure in unification";
   MkTriple "E020" "ModulePathMismatch" "Module header does not match file location";
   MkTriple "E024" "ModuleCycle" "Import graph has a cycle";
-  MkTriple "E025" "NoProjectForImport" "Non-std import in single-file mode"
+  MkTriple "E025" "NoProjectForImport" "Non-std import in single-file mode";
+  MkTriple "E026" "UnknownExternalMapping" "External declaration has no mapping for selected target"
 ]
 
 handleListErrors(params JsonVal) =

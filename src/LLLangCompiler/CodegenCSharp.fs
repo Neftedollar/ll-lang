@@ -655,6 +655,25 @@ let rec private flattenMainPrelude (te: TypedExpr) : string list * TypedExpr =
         (bindLine :: rest, tail)
     | _ -> ([], te)
 
+/// Emit the body of a void (Unit-returning) function as C# statements.
+/// Uses flattenMainPrelude to convert let-binding chains into statement lines,
+/// then emits the final expression as a statement.
+/// Lines that reduce to bare "null;" or "default!;" are filtered out — these
+/// represent expressions the C# codegen can't yet lower; omitting them is no
+/// worse than the previous behaviour (empty body).
+let private emitVoidBody (indent: string) (body: TypedExpr) : string =
+    let preludeLines, finalExpr = flattenMainPrelude body
+    let validLines = preludeLines |> List.filter (fun l -> l <> "null;" && l <> "default!;")
+    let finalText = emitExprOrDefault finalExpr.Type finalExpr
+    let finalLine =
+        if finalText = "null" || finalText = "default!" then ""
+        elif isUnitType finalExpr.Type then finalText + ";"
+        else "var _ = (" + finalText + ");"
+    let allLines = validLines @ (if finalLine = "" then [] else [finalLine])
+    allLines
+    |> List.map (fun line -> indent + line)
+    |> String.concat "\n"
+
 let private emitMainBody (body: TypedExpr) : string =
     let preludeLines, finalExpr = flattenMainPrelude body
     let preludeBlock =
@@ -715,17 +734,26 @@ let private emitFnCSharp (sig_: TypedFnSig) (body: TypedExpr) : string =
         "    public static int Main(string[] args)\n    {\n" + emitMainBody body + "\n    }"
     else
         let tpStr = emitMethodTypeParams sig_
+        let isUnit = isUnitType sig_.ReturnType
         match sig_.Params with
         | [] ->
             let ret = emitType sig_.ReturnType
-            if ret = "void" then
-                "    public static void " + safeIdent sig_.Name + tpStr + "() { }"
+            if isUnit || ret = "void" then
+                let bodyBlock = emitVoidBody "        " body
+                if bodyBlock = "" then
+                    "    public static void " + safeIdent sig_.Name + tpStr + "() { }"
+                else
+                    "    public static void " + safeIdent sig_.Name + tpStr + "()\n    {\n" + bodyBlock + "\n    }"
             else
                 "    public static " + ret + " " + safeIdent sig_.Name + tpStr + "() => " + emitExprOrDefault sig_.ReturnType body + ";"
         | [(p, pt)] ->
             let ret = emitType sig_.ReturnType
-            if ret = "void" then
-                "    public static void " + safeIdent sig_.Name + tpStr + "(" + emitType pt + " " + safeIdent p + ") { }"
+            if isUnit || ret = "void" then
+                let bodyBlock = emitVoidBody "        " body
+                if bodyBlock = "" then
+                    "    public static void " + safeIdent sig_.Name + tpStr + "(" + emitType pt + " " + safeIdent p + ") { }"
+                else
+                    "    public static void " + safeIdent sig_.Name + tpStr + "(" + emitType pt + " " + safeIdent p + ")\n    {\n" + bodyBlock + "\n    }"
             else
                 "    public static " + ret + " " + safeIdent sig_.Name + tpStr + "(" + emitType pt + " " + safeIdent p + ") => " + emitExprOrDefault sig_.ReturnType body + ";"
         | (p, pt) :: rest ->

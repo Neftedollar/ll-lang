@@ -560,13 +560,20 @@ let private emitFnJava (sig_: TypedFnSig) (body: TypedExpr) : string =
             "    public static void main(String[] args) {\n        var _ll_unused = " + bodyExpr + ";\n    }"
     else
         let methodTp = methodTypeParamsPrefix sig_
+        let isUnit = isUnitType sig_.ReturnType
         match sig_.Params with
         | [] ->
             let retType = emitType sig_.ReturnType
-            "    public static " + methodTp + retType + " " + safeIdent sig_.Name + "() {\n        return " + emitExprJava body + ";\n    }"
+            if isUnit then
+                "    public static " + methodTp + retType + " " + safeIdent sig_.Name + "() {\n        " + emitExprJava body + ";\n    }"
+            else
+                "    public static " + methodTp + retType + " " + safeIdent sig_.Name + "() {\n        return " + emitExprJava body + ";\n    }"
         | [(p, pt)] ->
             let retType = emitType sig_.ReturnType
-            "    public static " + methodTp + retType + " " + safeIdent sig_.Name + "(" + emitType pt + " " + safeIdent p + ") {\n        return " + emitExprJava body + ";\n    }"
+            if isUnit then
+                "    public static " + methodTp + retType + " " + safeIdent sig_.Name + "(" + emitType pt + " " + safeIdent p + ") {\n        " + emitExprJava body + ";\n    }"
+            else
+                "    public static " + methodTp + retType + " " + safeIdent sig_.Name + "(" + emitType pt + " " + safeIdent p + ") {\n        return " + emitExprJava body + ";\n    }"
         | (p, pt) :: rest ->
             // Curried: fn takes first param, returns Function<...>
             let restTypes = rest |> List.map snd

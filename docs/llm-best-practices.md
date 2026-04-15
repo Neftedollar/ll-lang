@@ -323,7 +323,7 @@ Use `external` to declare a function implemented in the target platform (no ll-l
 
 ```lll
 -- Platform-native function (no body)
-external console_log(msg Str) Str
+external console_log(msg Str) Unit
 
 -- Platform-native type (hold/pass, no match)
 opaque HttpClient

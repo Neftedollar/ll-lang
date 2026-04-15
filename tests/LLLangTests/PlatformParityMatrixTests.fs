@@ -58,7 +58,7 @@ let ``platform parity matrix: core cases compile and pass target-native checks``
               ("constrained_dispatch",
                "module Case.Constrained\n\ntrait Functor F =\n  map(f A->B)(fa F[A]) F[B]\nMaybe A = Some A | None\nimpl Functor Maybe =\n  map(f A->B)(fa Maybe[A]) Maybe[B] =\n    | Some a -> Some (f a)\n    | None -> None\ntransform[F: Functor](xs F[Int])(f Int->Int) F[Int] = map f xs\nmain() Int = 0\n")
               ("external_opaque",
-               "module Case.ExternalOpaque\n\nexternal console_log(msg Str) Str\nopaque Buffer\ngreet(name Str) = console_log name\nmain() Int = 0\n")
+               "module Case.ExternalOpaque\n\nexternal console_log(msg Str) Unit\nopaque Buffer\ngreet(name Str) Unit = console_log name\nmain() Int = 0\n")
               ]
 
         let targets =

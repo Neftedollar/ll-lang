@@ -105,14 +105,17 @@ let private emitUnionCaseFieldType (t: TypeExpr) : string =
     | _ -> rendered
 
 let private emitExternalDecl (sig_: TypedFnSig) : string =
-    let pnames = sig_.Params |> List.map (fst >> safeIdent)
+    // Emit typed params to resolve overloads (e.g. Console.WriteLine(value: string)).
+    let emitParam (name: string, ty: TypeExpr) =
+        sprintf "(%s: %s)" (safeIdent name) (emitType ty)
     let paramPart =
-        if List.isEmpty pnames then " ()"
-        else " " + String.concat " " pnames
+        match sig_.Params with
+        | [] -> " ()"
+        | ps -> " " + String.concat " " (ps |> List.map emitParam)
     match tryGetExternalTarget FSharp sig_.Name with
     | None -> ""
     | Some target ->
-        let callArgs = String.concat ", " pnames
+        let callArgs = String.concat ", " (sig_.Params |> List.map (fst >> safeIdent))
         let callExpr = target + "(" + callArgs + ")"
         "let " + safeIdent sig_.Name + paramPart + " = " + callExpr
 

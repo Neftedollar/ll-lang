@@ -10,13 +10,13 @@ module Examples.ExternalOpaque
 --   pass to other functions, but cannot pattern-match or construct.
 
 -- External: maps to System.Console.WriteLine / console.log / print / ...
--- The return type is the platform's native string return (idiomatic per target).
-external console_log(msg Str) Str
+-- Returns Unit (all target implementations return void/unit/None).
+external console_log(msg Str) Unit
 
 -- Opaque: a platform-native handle type. ll-lang code can receive it from
 -- external functions and pass it around but cannot inspect its internals.
 opaque Buffer
 
 -- Use the external function — no different from a regular call.
-greet(name Str) =
+greet(name Str) Unit =
   console_log (strConcat "Hello, " (strConcat name "!"))

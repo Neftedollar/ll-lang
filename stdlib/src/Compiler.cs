@@ -124,6 +124,8 @@ public static class LlLangProject
     public sealed record KwImport() : Token;
     public sealed record KwExport() : Token;
     public sealed record KwModule() : Token;
+    public sealed record KwExternal() : Token;
+    public sealed record KwOpaque() : Token;
     public sealed record KwIf() : Token;
     public sealed record KwElse() : Token;
     public sealed record KwTrue() : Token;
@@ -272,6 +274,8 @@ public static class LlLangProject
     public sealed record DImport(List<string> _0) : Decl;
     public sealed record DExport(Decl _0) : Decl;
     public sealed record DLet(string _0, Expr _1) : Decl;
+    public sealed record DExternal(string _0, List<Param> _1, TypeExpr _2) : Decl;
+    public sealed record DOpaque(string _0) : Decl;
 
     public interface Module { }
     public sealed record MkModule(List<string> _0, List<Decl> _1) : Module;
@@ -372,6 +376,10 @@ public static class LlLangProject
 
     public static Tuple<Decl, List<Token>> parseImportDecl(List<Token> toks) => default!;
 
+    public static Tuple<Decl, List<Token>> parseExternalDecl(List<Token> toks) => default!;
+
+    public static Tuple<Decl, List<Token>> parseOpaqueDecl(List<Token> toks) => default!;
+
     public static Tuple<Decl, List<Token>> parseOneDecl(List<Token> toks) => default!;
 
     public static List<Decl> parseDecls(List<Token> toks) => new List<Decl>();
@@ -399,6 +407,12 @@ public static class LlLangProject
     public static Func<List<Token>, Func<string, object>> parserCheckDecl(string label) => toks => expected => null;
 
     public static Func<List<Token>, Func<long, object>> parserCheckModule(string label) => toks => expectedDeclCount => null;
+
+    public static void __ll_main_Std_Parser()
+    {
+        var toks = new List<Token>();
+        parserCheckModule("5")(toks)(2L);
+    }
 
     public interface ElabError { }
     public sealed record MkError(string _0) : ElabError;
@@ -553,6 +567,24 @@ public static class LlLangProject
     public static string showErrors(List<ElabError> errs) => ((listFold<ElabError,string>(acc => e => ((Func<string>)(() => { var msg = errMsg(e); return ((strLen(acc) == 0L) ? ((msg)?.ToString() ?? "") : ((strConcat(acc)(strConcat("\n")(msg)))?.ToString() ?? "")); }))()))(""))(errs);
 
     public static string compile(string src) => ((Func<string>)(() => { var tokens = tokenize(src); return ((Func<string>)(() => { var ast = parseModule(tokens); return ((Func<string>)(() => { var errors = elaborate(ast); return (listIsEmpty<ElabError>(errors) ? ((emitModule(ast))?.ToString() ?? "") : ((showErrors(errors))?.ToString() ?? "")); }))(); }))(); }))();
+
+    public static List<ElabError> collectErrors(string src) => ((Func<List<ElabError>>)(() => { var tokens = tokenize(src); return ((Func<List<ElabError>>)(() => { var ast = parseModule(tokens); return elaborate(ast); }))(); }))();
+
+    public static string firstErrorMessage(List<ElabError> errs) => "";
+
+    public static string checkCompact(string src) => ((Func<string>)(() => { var errors = collectErrors(src); return (listIsEmpty<ElabError>(errors) ? (("{\"ok\":true,\"stage\":\"ok\",\"primary_error\":\"\",\"secondary_count\":0}")?.ToString() ?? "") : ((((Func<string>)(() => { var msg = firstErrorMessage(errors); return ((Func<string>)(() => { var secondary = (listLen<ElabError>(errors) - 1L); return ((Func<string>)(() => { var p1 = "{\"ok\":false,\"stage\":\"elaborator\",\"primary_error\":\""; return ((Func<string>)(() => { var p2 = strConcat(p1)(msg); return ((Func<string>)(() => { var p3 = strConcat(p2)("\",\"secondary_count\":"); return ((Func<string>)(() => { var p4 = strConcat(p3)(intToStr(secondary)); return strConcat(p4)("}"); }))(); }))(); }))(); }))(); }))(); }))())?.ToString() ?? "")); }))();
+
+    public static string renderCompact(string src) => src;
+
+    public static string tokenEstimate(string src) => ((Func<string>)(() => { var toks = tokenize(src); return ((Func<string>)(() => { var n = listLen<Token>(toks); return ((Func<string>)(() => { var p1 = "{\"ok\":true,\"tokens\":"; return ((Func<string>)(() => { var p2 = strConcat(p1)(intToStr(n)); return strConcat(p2)("}"); }))(); }))(); }))(); }))();
+
+    public static string nextBlocker(string src) => ((Func<string>)(() => { var errors = collectErrors(src); return (listIsEmpty<ElabError>(errors) ? (("{\"ok\":true,\"stage\":\"none\",\"message\":\"\"}")?.ToString() ?? "") : ((((Func<string>)(() => { var msg = firstErrorMessage(errors); return ((Func<string>)(() => { var p1 = "{\"ok\":false,\"stage\":\"elaborator\",\"message\":\""; return ((Func<string>)(() => { var p2 = strConcat(p1)(msg); return strConcat(p2)("\"}"); }))(); }))(); }))())?.ToString() ?? "")); }))();
+
+    public static Func<string, string> declKind(Decl d) => name => "";
+
+    public static Func<string, string> findDeclKind(List<Decl> decls) => name => "";
+
+    public static Func<string, string> lookupSymbol(string src) => name => "";
 
     public static Func<string, Func<string, object>> compilerCheckContains(string label) => got => needle => (strContains(needle)(got) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat("\n  missing:  "))(strConcat(needle)((strConcat("\n  in output:\n"))(got)))))));
 

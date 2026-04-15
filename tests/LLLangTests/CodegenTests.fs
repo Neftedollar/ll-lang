@@ -83,7 +83,7 @@ let ``external console_log emits F# Console.WriteLine mapping`` () =
         "external console_log(msg Str) Unit\n" +
         "main() = console_log \"hi\"\n"
     let fs = codegenSrc src
-    Assert.Contains("let console_log msg = System.Console.WriteLine(msg)", fs)
+    Assert.Contains("let console_log (msg: string) = System.Console.WriteLine(msg)", fs)
 
 // ---------- Task 3: expression emission ----------
 
