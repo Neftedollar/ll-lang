@@ -21,6 +21,29 @@ Canonical ownership, pass contracts, and migration notes are the binding authori
 Stage0 F# files are **bootstrap mirrors**. Where a self-hosted ll-lang module owns a subsystem,
 the stage0 file is transitional and must not receive new feature work.
 
+### v2 self-hosted compiler — current state (Milestone 1 complete)
+
+The following ll-lang modules are now the canonical owners of their subsystems:
+
+| Phase | ll-lang file | Tests | Status |
+|-------|-------------|-------|--------|
+| Lexer | `stdlib/src/Lexer.lll` | — | transitional bootstrap |
+| Parser | `stdlib/src/Parser.lll` | — | transitional bootstrap |
+| Elaborator | `stdlib/src/Elaborator.lll` | — | transitional bootstrap |
+| Type representations | `stdlib/src/CompilerTypes.lll` | 20/20 | **canonical** |
+| Typed IR shapes | `stdlib/src/CompilerTyped.lll` | 15/15 | **canonical** |
+| HM inference | `stdlib/src/CompilerInfer.lll` | 12/12 | **canonical** |
+| Lowering | `stdlib/src/CompilerLower.lll` | 16/16 | **canonical** |
+| F# codegen | `stdlib/src/Codegen.lll` | — | transitional bootstrap |
+| TypeScript codegen | `stdlib/src/CodegenTS.lll` | — | transitional bootstrap |
+| Python codegen | `stdlib/src/CodegenPy.lll` | — | transitional bootstrap |
+| Java codegen | `stdlib/src/CodegenJava.lll` | — | transitional bootstrap |
+| C# codegen | `stdlib/src/CodegenCSharp.lll` | — | transitional bootstrap |
+| Full pipeline | `stdlib/src/Compiler.lll` | — | transitional bootstrap |
+
+**Canonical** = ll-lang module is the authority; stage0 is a compatibility mirror only.  
+**Transitional bootstrap** = ll-lang module exists but parity gate not yet enforced.
+
 ---
 
 The compiler is a straight pipeline: source text in, target source out. Each
