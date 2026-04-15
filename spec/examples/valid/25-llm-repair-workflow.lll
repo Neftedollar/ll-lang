@@ -55,7 +55,7 @@ demo7 =
   fixed = "module Demo\nresult = 42\n"
   errs1 = collectAllErrors broken
   errs2 = collectAllErrors fixed
-  (listIsEmpty errs1 == false) == (listIsEmpty errs2 == false)
+  (listIsEmpty errs1 == false) == listIsEmpty errs2
 
 -- ---- Tests ---------------------------------------------------------------
 

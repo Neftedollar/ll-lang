@@ -9,11 +9,11 @@ This document is the binding checklist for `v2` readiness. A gate is either
 
 | # | Gate | Status | How to verify |
 |---|------|--------|---------------|
-| G1.1 | Self-hosted compiler compiles `20-bootstrap-compiler.lll` without errors | BLOCK | `lllc run spec/examples/valid/20-bootstrap-compiler.lll` |
-| G1.2 | `compiler₁.fs == compiler₂.fs` (fixpoint byte-identical) | BLOCK | See `docs/compiler-dev/fixpoint-snapshots/` |
-| G1.3 | All `stdlib/src/*.lll` compile without errors under `lllc run` | BLOCK | `for f in stdlib/src/*.lll; do lllc run "$f"; done` |
-| G1.4 | `spec/examples/valid/24-pipeline-v2.lll` passes all 4 tests | BLOCK | `lllc run spec/examples/valid/24-pipeline-v2.lll` |
-| G1.5 | `spec/examples/valid/25-llm-repair-workflow.lll` passes all 7 tests | BLOCK | `lllc run spec/examples/valid/25-llm-repair-workflow.lll` |
+| G1.1 | Self-hosted compiler compiles `20-bootstrap-compiler.lll` without errors | PASS | `bash tools/check-fixpoint.sh spec/examples/valid/20-bootstrap-compiler.lll` |
+| G1.2 | `compiler₁.fs == compiler₂.fs` (fixpoint byte-identical) | BLOCK | prelude format gap: self-hosted emits `open LLLang.Prelude`; stage0 inlines it. Deferred to M5/M6 alignment. |
+| G1.3 | All `stdlib/src/*.lll` compile without errors under `lllc run` | PASS | `for f in stdlib/src/*.lll; do lllc run "$f"; done` — all 33 modules OK |
+| G1.4 | `spec/examples/valid/24-pipeline-v2.lll` passes all 4 tests | PASS | `lllc run spec/examples/valid/24-pipeline-v2.lll` |
+| G1.5 | `spec/examples/valid/25-llm-repair-workflow.lll` passes all 7 tests | PASS | `lllc run spec/examples/valid/25-llm-repair-workflow.lll` |
 
 ## G2 — Milestone completion
 
