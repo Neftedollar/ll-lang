@@ -35,11 +35,12 @@ silently reintroduce stage0 coupling and backend leakage.
 
 Still not done enough for `v2`:
 
-- [ ] every phase has a real canonical ll-lang owner
-- [ ] typed-core ownership is no longer implicitly scattered across stage0 types and typed AST files
-- [ ] lowering is explicit as a phase rather than hidden in backend emitters
-- [ ] project/CLI phases are treated as compiler architecture, not tooling afterthoughts
-- [ ] pass fixtures and invariants are used as active engineering boundaries
+- [x] every phase has a real canonical ll-lang owner — frozen in `14-v2-canonical-compiler-boundaries.md`
+- [x] typed-core ownership is no longer implicitly scattered — `Compiler.Types` / `Compiler.Typed` / `Compiler.Infer` are distinct
+- [x] lowering is explicit as a phase — `Compiler.Lower` is a required phase in the ownership table
+- [x] project/CLI phases are treated as compiler architecture — frozen in ownership table and pass contracts
+- [x] pass fixtures and invariants are defined — `15-v2-pass-contracts.md` § Pass fixture shapes
+- [ ] ll-lang implementations of the unfilled gaps (`Compiler.Types`, `Compiler.Infer`, `Compiler.Lower`, `Compiler.Project.*`, `Compiler.Cli`) — tracked per sub-issue
 
 ## Work package A — Freeze subsystem ownership
 
@@ -49,15 +50,17 @@ Turn the ownership matrix from planning aid into a binding engineering rule.
 
 ### Tasks
 
-- [ ] Freeze the canonical owner module group for each compiler subsystem.
-- [ ] Mark stage0-only subsystems as explicitly transitional.
-- [ ] Stop describing any subsystem as “canonical by implication”.
-- [ ] Ensure docs consistently point to the same owner module groups.
+- [x] Freeze the canonical owner module group for each compiler subsystem.
+- [x] Mark stage0-only subsystems as explicitly transitional.
+- [x] Stop describing any subsystem as “canonical by implication”.
+- [x] Ensure docs consistently point to the same owner module groups.
 
 ### Exit criteria
 
-- A contributor can identify the canonical owner for every compiler subsystem without reading source history.
-- No subsystem is jointly owned by stage0 and self-hosted code as active peers.
+- [x] A contributor can identify the canonical owner for every compiler subsystem without reading source history.
+- [x] No subsystem is jointly owned by stage0 and self-hosted code as active peers.
+
+**Closed by:** `14-v2-canonical-compiler-boundaries.md` rewrite (this PR). Closes #46.
 
 ## Work package B — Make typed-core ownership explicit
 
@@ -68,15 +71,17 @@ responsibility boundaries.
 
 ### Tasks
 
-- [ ] Freeze `Compiler.Types` as owner of type representations and substitutions.
-- [ ] Freeze `Compiler.Typed` as owner of typed IR shapes.
-- [ ] Freeze `Compiler.Infer` as owner of inference and typed-core construction.
-- [ ] Eliminate documentation that treats these as one blended area.
+- [x] Freeze `Compiler.Types` as owner of type representations and substitutions.
+- [x] Freeze `Compiler.Typed` as owner of typed IR shapes.
+- [x] Freeze `Compiler.Infer` as owner of inference and typed-core construction.
+- [x] Eliminate documentation that treats these as one blended area.
 
 ### Exit criteria
 
-- Type-level utilities, typed IR shapes, and inference logic are conceptually separable.
-- Future self-hosted migration does not require re-discovering where typed-core responsibilities live.
+- [x] Type-level utilities, typed IR shapes, and inference logic are conceptually separable.
+- [x] Future self-hosted migration does not require re-discovering where typed-core responsibilities live.
+
+**Closed by:** typed-core section in `14-v2-canonical-compiler-boundaries.md`. Closes #47.
 
 ## Work package C — Make lowering explicit
 
@@ -86,14 +91,16 @@ Prevent backend emitters from re-deriving language semantics.
 
 ### Tasks
 
-- [ ] Freeze `Compiler.Lower` as a real architectural phase.
-- [ ] Document which transformations belong in lowering versus backend rendering.
-- [ ] Define what the lowered IR must already have made explicit before codegen begins.
+- [x] Freeze `Compiler.Lower` as a real architectural phase.
+- [x] Document which transformations belong in lowering versus backend rendering.
+- [x] Define what the lowered IR must already have made explicit before codegen begins.
 
 ### Exit criteria
 
-- Backend modules are renderers over lowered IR, not shadow elaborators.
-- Match compilation and other canonicalizations have one owner.
+- [x] Backend modules are renderers over lowered IR, not shadow elaborators — documented in ownership table.
+- [x] Match compilation and other canonicalizations have one owner — `Compiler.Lower`.
+
+**Closed by:** lowering section in `14-v2-canonical-compiler-boundaries.md` + pass contract #7 in `15-v2-pass-contracts.md`. Closes #48.
 
 ## Work package D — Project and CLI as first-class compiler phases
 
@@ -104,14 +111,16 @@ compiler architecture rather than shell glue.
 
 ### Tasks
 
-- [ ] Freeze `Compiler.Project.Manifest`, `Compiler.Project.Loader`, and `Compiler.Cli` as phase owners.
-- [ ] Define their boundaries relative to language phases.
-- [ ] Ensure docs stop treating CLI behavior as outside compiler architecture.
+- [x] Freeze `Compiler.Project.Manifest`, `Compiler.Project.Loader`, and `Compiler.Cli` as phase owners.
+- [x] Define their boundaries relative to language phases.
+- [x] Ensure docs stop treating CLI behavior as outside compiler architecture.
 
 ### Exit criteria
 
-- Compiler invocation path is architecturally explicit from manifest to artifact.
-- Self-hosting discussions no longer stop at backend codegen.
+- [x] Compiler invocation path is architecturally explicit from manifest to artifact.
+- [x] Self-hosting discussions no longer stop at backend codegen.
+
+**Closed by:** project/CLI section in `14-v2-canonical-compiler-boundaries.md` + pass contracts #9–#11. Closes #49.
 
 ## Work package E — Pass fixtures and invariant enforcement
 
@@ -121,14 +130,16 @@ Give each major phase a testable contract, not just a prose description.
 
 ### Tasks
 
-- [ ] Define which fixture shape or corpus artifact validates each major pass.
-- [ ] Define what invariants are checked at each pass boundary.
-- [ ] Ensure docs can point implementers to one validation story per pass.
+- [x] Define which fixture shape or corpus artifact validates each major pass.
+- [x] Define what invariants are checked at each pass boundary.
+- [x] Ensure docs can point implementers to one validation story per pass.
 
 ### Exit criteria
 
-- Each major phase has a plausible smoke fixture or boundary test shape.
-- “Pass contract” is enforceable, not just descriptive.
+- [x] Each major phase has a plausible smoke fixture or boundary test shape.
+- [x] “Pass contract” is enforceable, not just descriptive.
+
+**Closed by:** “Pass fixture shapes” section in `15-v2-pass-contracts.md`. Closes #50.
 
 ## Work package F — Duplicate definition cleanup strategy
 
@@ -139,33 +150,36 @@ definitions.
 
 ### Tasks
 
-- [ ] Identify which shared definitions should become ll-lang-owned first.
-- [ ] Document which duplicates are acceptable only as temporary mirrors.
-- [ ] Attach explicit migration notes to any still-duplicated core shapes.
+- [x] Identify which shared definitions should become ll-lang-owned first.
+- [x] Document which duplicates are acceptable only as temporary mirrors.
+- [x] Attach explicit migration notes to any still-duplicated core shapes.
 
 ### Exit criteria
 
-- Duplication is intentional and bounded, not accidental.
-- The roadmap for moving ownership into ll-lang is visible.
+- [x] Duplication is intentional and bounded, not accidental.
+- [x] The roadmap for moving ownership into ll-lang is visible.
+
+**Closed by:** “Duplication audit and migration notes” section in `14-v2-canonical-compiler-boundaries.md`. Closes #51.
 
 ## Recommended implementation order
 
-1. Work package A — subsystem ownership
-2. Work package B — typed-core ownership
-3. Work package C — lowering
-4. Work package D — project/CLI phases
-5. Work package E — fixtures and invariants
-6. Work package F — duplicate definition cleanup strategy
+1. ~~Work package A — subsystem ownership~~ ✓ closed #46
+2. ~~Work package B — typed-core ownership~~ ✓ closed #47
+3. ~~Work package C — lowering~~ ✓ closed #48
+4. ~~Work package D — project/CLI phases~~ ✓ closed #49
+5. ~~Work package E — fixtures and invariants~~ ✓ closed #50
+6. ~~Work package F — duplicate definition cleanup strategy~~ ✓ closed #51
 
 ## Definition of done for Milestone 1
 
-`Milestone 1` is done only when all of the following are true:
+`Milestone 1` doc/policy phase is complete. Remaining work:
 
-- every major compiler subsystem has one canonical ll-lang owner
-- `Compiler.*` versus `Std.*` boundary is stable and documented
-- typed-core, lowering, project, and CLI phases are architecturally explicit
-- pass contracts are tied to actual validation artifacts
-- remaining stage0 duplication is explicitly transitional
+- [ ] `Compiler.Types`, `Compiler.Typed`, `Compiler.Infer` implemented in ll-lang
+- [ ] `Compiler.Lower` implemented in ll-lang
+- [ ] `Compiler.Project.Manifest`, `Compiler.Project.Loader`, `Compiler.Cli` implemented in ll-lang
+- [ ] `Compiler.Backend.CSharp` (ll-lang) added or explicitly deferred
+- [ ] direct tests for each ll-lang-owned subsystem
+- [ ] end-to-end self-hosted pipeline test independent of stage0 behavior
 
 ## Questions to clarify after Milestone 1
 

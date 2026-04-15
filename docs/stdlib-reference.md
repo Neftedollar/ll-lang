@@ -5,19 +5,49 @@ ll-lang ships two layers of stdlib:
 1. **Prelude** — ~50 builtin functions always in scope. No `import` needed.
 2. **Self-hosted modules** — modules written in ll-lang under `stdlib/src`. Import with `import Std.X`.
 
-For `v2` planning, treat the self-hosted modules as two different groups:
+## Module groups (frozen for v2)
 
-1. **Reusable foundation stdlib**
-   Modules such as `Std.List`, `Std.Maybe`, `Std.Result`, `Std.Map`, `Std.Str`,
-   `Std.State`, `Std.Parsec`, `Std.Json`, `Std.Toml`, `Std.Lazy`, `Std.Test`.
-2. **Compiler implementation modules**
-   Modules such as `Std.Lexer`, `Std.Parser`, `Std.Elaborator`, `Std.Codegen`,
-   `Std.CodegenTS`, `Std.CodegenPy`, `Std.CodegenJava`, `Std.CodegenLLVM`,
-   `Std.Compiler`.
+The self-hosted modules fall into two **distinct, non-overlapping groups**:
 
-Today these live side-by-side under `stdlib/src`. The `v2` architecture work
-may later move the canonical compiler implementation under a dedicated
-`Compiler.*` namespace, but this document keeps the current module names.
+### Group 1 — Reusable foundation stdlib (`Std.*`)
+
+These are general-purpose library modules. Import them in any ll-lang program.
+
+| Module | Import | Purpose |
+|--------|--------|---------|
+| `Std.List` | `import Std.List` | list operations |
+| `Std.Maybe` | `import Std.Maybe` | optional values |
+| `Std.Result` | `import Std.Result` | error-or-value |
+| `Std.Map` | `import Std.Map` | Okasaki RB-tree map |
+| `Std.Str` | `import Std.Str` | string utilities |
+| `Std.State` | `import Std.State` | stateful computation |
+| `Std.Parsec` | `import Std.Parsec` | parser combinators |
+| `Std.Lazy` | `import Std.Lazy` | explicit laziness |
+| `Std.Json` | `import Std.Json` | JSON codec |
+| `Std.Toml` | `import Std.Toml` | TOML subset parser |
+| `Std.Test` | `import Std.Test` | unit test harness |
+
+### Group 2 — Compiler implementation (`Compiler.*`)
+
+These modules implement the self-hosted compiler. They live under `stdlib/src/` today but are
+**not general-purpose stdlib**. Their canonical namespace is `Compiler.*` (see
+[14-v2-canonical-compiler-boundaries.md](compiler-dev/14-v2-canonical-compiler-boundaries.md)).
+
+| Current file | Canonical v2 module | Role |
+|-------------|--------------------|----|
+| `stdlib/src/Lexer.lll` | `Compiler.Syntax.Lexer` | tokenizer |
+| `stdlib/src/Parser.lll` | `Compiler.Syntax.Parser` | recursive-descent parser |
+| `stdlib/src/Elaborator.lll` | `Compiler.Frontend.Elaborator` | name resolution + declared-type checks |
+| `stdlib/src/Codegen.lll` | `Compiler.Backend.FSharp` | F# emitter |
+| `stdlib/src/CodegenTS.lll` | `Compiler.Backend.TypeScript` | TypeScript emitter |
+| `stdlib/src/CodegenPy.lll` | `Compiler.Backend.Python` | Python emitter |
+| `stdlib/src/CodegenJava.lll` | `Compiler.Backend.Java` | Java emitter |
+| `stdlib/src/CodegenLLVM.lll` | `Compiler.Backend.LLVM` | LLVM IR emitter (experimental) |
+| `stdlib/src/Compiler.lll` | `Compiler.Main` | pipeline entrypoint |
+| `stdlib/src/Render.lll` | `Compiler.Render` | diagnostic/output rendering |
+
+**Do not `import` compiler implementation modules from user programs.** They are internal to the
+compiler toolchain.
 
 ---
 
