@@ -317,6 +317,32 @@ export parseInput(s Str) = ...
 
 Module path must match file location in `src/`. E.g., `module MyApp.Parser` lives at `src/Parser.lll`.
 
+### External declarations and opaque types
+
+Use `external` to declare a function implemented in the target platform (no ll-lang body). Use `opaque` to declare a platform-native type that ll-lang can hold and pass but not construct or pattern-match.
+
+```lll
+-- Platform-native function (no body)
+external console_log(msg Str) Str
+
+-- Platform-native type (hold/pass, no match)
+opaque HttpClient
+opaque JsonNode
+
+-- Use in normal ll-lang code
+logGreeting(name Str) =
+  console_log (strConcat "Hello, " name)
+```
+
+**Rules:**
+- `external` names must have a Platform SDK mapping for the selected target, otherwise the compiler emits E026 `UnknownExternalMapping`.
+- `opaque` types can appear as param/return types on both `external` and regular functions.
+- Built-in mappings: `console_log` (all targets), `JSON_parse` (fs/ts/py/cs), `fetch` (ts).
+
+**E026 fix recipe:** If you get `E026 UnknownExternalMapping target:fsharp name:foo`, either:
+1. Use a pre-mapped name (`console_log`, `JSON_parse`)
+2. Add a Platform SDK that maps `foo` to the native implementation
+
 ## 7. Anti-patterns
 
 | Do NOT | Do instead |
@@ -343,7 +369,7 @@ Module path must match file location in `src/`. E.g., `module MyApp.Parser` live
 
 ## 8. MCP Tools
 
-ll-lang provides an MCP server (`lllc mcp`) with 10 tools. Use them for instant compiler feedback.
+ll-lang provides an MCP server (`lllc mcp`) with 11 tools. Use them for instant compiler feedback.
 
 ### Setup
 
@@ -369,6 +395,7 @@ ll-lang provides an MCP server (`lllc mcp`) with 10 tools. Use them for instant 
 | `stdlib_search` | Search stdlib by name or type signature | `{ "query": "list" }` |
 | `grammar_lookup` | Get EBNF production for a grammar rule | `{ "rule": "Expr" }` |
 | `project_info` | Get project metadata from lll.toml | `{ "path": "/path/to/src/Main.lll" }` |
+| `list_targets` | List all available compilation targets | `{}` |
 
 ### Recommended workflow
 
