@@ -39,6 +39,13 @@ let private skip (c: Ctx) (t: Token) : Result<unit, string> =
 let private skipNewlines (c: Ctx) =
     while curTok c = Newline do advance c
 
+/// Skip leading Newline tokens and return the current token.
+/// Use in place of `skipNewlines c; curTok c` to make the
+/// "tolerate trailing newlines then peek" intent explicit at call sites.
+let inline private peekSkip (c: Ctx) : Token =
+    skipNewlines c
+    curTok c
+
 // Layout noise inside bracketed literals:
 // `[` followed by a newline often introduces `Indent`/`Dedent` tokens from
 // offside lexing, but inside list literals they should behave like whitespace.
@@ -763,8 +770,7 @@ and private parsePatAtom (c: Ctx) : Result<Pattern, string> =
         // unblocks idiomatic `| [] -> ...` arms in fn-body clause sugar
         // that the old parser silently dropped (see bug 2).
         advance c
-        skipNewlines c
-        if curTok c = RBrack then
+        if peekSkip c = RBrack then
             advance c
             Ok (PCon("[]", []))
         else
@@ -774,8 +780,7 @@ and private parsePatAtom (c: Ctx) : Result<Pattern, string> =
                 | Error e -> Error e
                 | Ok p ->
                     elems.Add(p)
-                    skipNewlines c
-                    if curTok c = Comma then
+                    if peekSkip c = Comma then
                         advance c
                         skipNewlines c
                         readOne ()
@@ -1068,8 +1073,7 @@ let private hasUntypedHole (ty: TypeExpr) : bool =
 
 let private parseFnBody (c: Ctx) : Result<Expr, string> =
     // fn body: either direct expr, or indented block, or match branches starting with |
-    skipNewlines c
-    match curTok c with
+    match peekSkip c with
     | Bar ->
         // Pattern match branches at top level of fn
         parseMatchBranches c
@@ -1416,8 +1420,7 @@ let private parseExportList (c: Ctx) : Result<ExportItem list, string> =
             let mutable parseErr: string option = None
             let mutable doneList = false
             while not doneList && parseErr.IsNone do
-                skipNewlines c
-                match curTok c with
+                match peekSkip c with
                 | RBrace ->
                     doneList <- true
                 | Ident name
@@ -1425,8 +1428,7 @@ let private parseExportList (c: Ctx) : Result<ExportItem list, string> =
                     let tok = cur c
                     names.Add({ Name = name; Line = tok.Line; Col = tok.Col })
                     advance c
-                    skipNewlines c
-                    match curTok c with
+                    match peekSkip c with
                     | Comma ->
                         advance c
                         skipNewlines c
@@ -1506,8 +1508,7 @@ let private parseModuleCtx (c: Ctx) : Result<LLModule, string> =
         // at the offending token's line:col.
             let mutable declErr : string option = None
             while curTok c <> Eof && declErr.IsNone do
-                skipNewlines c
-                if curTok c = Eof then ()
+                if peekSkip c = Eof then ()
                 else
                     let exported = curTok c = KwExport
                     if exported then advance c
