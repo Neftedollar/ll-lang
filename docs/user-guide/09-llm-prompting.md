@@ -17,19 +17,17 @@ attempt.
 The entire keyword set fits on one line:
 
 ```
-fn let in type tag unit trait impl import export module
-match with if then else true false
+let  tag  unit  trait  impl  import  export  module
+external  opaque  if  else  true  false  match
 ```
 
-Operators are the conventional set: `+ - * / ^ < > <= >= == != ->`. There
-are no custom operators, no operator overloading, no macros, no implicit
-coercions, no implicit traits, no `where` clauses. A model does not have to
-guess which of several equivalent syntaxes a user prefers — there is only
-one.
+That is 15 keywords. There is no `fn`, `type`, `in`, `then`, `with`. A model
+does not need to guess which of several equivalent syntaxes a user prefers —
+there is only one canonical form.
 
 ### Explicit, annotatable types
 
-Every top-level `fn` parameter carries its type inline (`fn add(a Int)(b Int)`).
+Every parameter carries its type inline: `add(a Int)(b Int)`.
 LLMs don't have to infer types across multi-file modules; each signature
 declares its contract up front. Return types are optional but always
 welcome. When in doubt, a model can annotate — the extra tokens cost
@@ -37,60 +35,55 @@ nothing and make the error surface smaller.
 
 ### Minimal, predictable stdlib
 
-The implicit prelude exposes ~50 functions grouped by naming convention:
+The implicit prelude exposes ~50 functions grouped by naming prefix:
 
 - `list*` — `listLen`, `listMap`, `listFilter`, `listFold`, `listHead`, ...
-- `maybe*` — `maybeMap`, `maybeBind`, `maybeWithDefault`
-- `result*` — `resultMap`, `resultBind`, `resultMapErr`
+- `maybe*` — `maybeMap`, `maybeBind`, `maybeDefault`
+- `result*` — `resultMap`, `resultBind`, `resultIsOk`
 - `str*` — `strLen`, `strConcat`, `strTrim`, `strSplit`, `strChars`, ...
 - `char*` — `charToInt`, `intToChar`, `charIsDigit`, `charIsAlpha`, ...
-- File / process — `readFile`, `writeFile`, `fileExists`, `exit`
+- IO — `printfn`, `print`, `readFile`, `writeFile`, `exit`
 
-A model that has seen the naming prefix can guess the rest. There is no
-type-class-driven `map` that dispatches on its argument — `listMap`,
-`maybeMap`, and `resultMap` are three separate names, and the one you
-call is the one that runs. This removes a huge class of "which overload
-did the compiler pick?" confusion.
+A model that has seen the naming prefix can guess the rest. `listMap`,
+`maybeMap`, and `resultMap` are three separate names — there is no
+type-class-driven `map` that dispatches on its argument. This removes the
+"which overload did the compiler pick?" confusion class entirely.
 
 ### Unique-dispatch, stable error codes
 
-Every diagnostic the compiler emits uses one of eight fixed codes
-(`E001`–`E008`). The codes never collide; each corresponds to exactly one
-checker stage:
+Every diagnostic uses one of eight fixed codes (`E001`–`E008` plus `E020`,
+`E024`–`E026`). Each code maps to exactly one checker stage:
 
-| Code | Stage        | Typical fix                                  |
-|------|--------------|----------------------------------------------|
-| E001 | Inference    | Change literal or annotation so types match  |
-| E002 | Elaboration  | Declare the missing name or check spelling   |
-| E003 | Exhaustiveness | Add a missing match arm                     |
-| E004 | Unit algebra | Produce the value in the expected unit       |
-| E005 | Tag checker  | Add `[Tag]` to the untagged value             |
+| Code | Stage        | Typical fix                                    |
+|------|--------------|------------------------------------------------|
+| E001 | Inference    | Change literal or annotation so types match    |
+| E002 | Elaboration  | Declare the missing name or check spelling     |
+| E003 | Exhaustiveness | Add a missing match arm                      |
+| E004 | Unit algebra | Produce the value in the expected unit         |
+| E005 | Tag checker  | Add `[Tag]` to the untagged value              |
 | E006 | Trait dispatch | Add the missing `impl` or use a different type |
-| E008 | Occurs check | Rewrite the recursive self-application       |
+| E008 | Occurs check | Rewrite the recursive self-application         |
+| E020 | Module path  | Rename file or fix `module X.Y` declaration    |
+| E024 | Module cycle | Break the import cycle                         |
+| E025 | No project   | Add `lll.toml` or use only `Std.*` imports     |
+| E026 | External map | Map `external` name in Platform SDK            |
 
 Because the number → meaning map is fixed, an LLM system prompt can ship
 with a cheat sheet ("if you see E00N, do X") and the model will apply
-mechanical fixes without re-reasoning about the whole program. See
-[07-error-codes](07-error-codes.md) for worked examples.
+mechanical fixes without re-reasoning about the whole program.
 
 ### Case-based visual disambiguation
 
 `Lowercase` starts values and variables; `Uppercase` starts types,
 constructors, and module segments. There is no ambiguity at the token
 level — a generator scanning its own output can tell `maybe` from
-`Maybe` with zero semantic analysis. Tag names are also `Uppercase`, so
-`Float[m]` is wrong but `Float[Meter]` is right (unless you declared
-`tag m` explicitly).
+`Maybe` with zero semantic analysis.
 
 ### Layout by newlines, not braces
 
 ll-lang has no `{` / `}`. Blocks are introduced by `=` followed by an
-indented body, or by the single-line form. A model doesn't have to track
-brace nesting depth, and it cannot produce a file with an unbalanced
-`{`. Multi-line type declarations accept an optional leading `|`, and
-`match` expressions tolerate newlines between `=`, `in`, and the first
-arm — all of which reduce "was I allowed to break this line here?"
-decisions.
+indented body. A model does not have to track brace nesting depth,
+and it cannot produce a file with an unbalanced `{`.
 
 ### No hidden side effects
 
@@ -103,57 +96,53 @@ network or disk state.
 ## Give the model the shape of the language, not English prose
 
 Most LLMs do not know ll-lang a priori. Include a short, syntactically-dense
-priming prompt — not a paragraph of explanation. Example:
+priming prompt — not a paragraph of explanation:
 
 ```
-ll-lang syntax reference:
+ll-lang v2 syntax reference:
 
-module Path.To.Mod                -- required, first non-comment line
+module Path.To.Mod              -- required, first non-comment line
 -- line comments start with --
 
-let name = expr                   -- top-level constant
-fn name(a Int)(b Int) Int = ...   -- curried, each param (name Type)
-fn name(a Int) = ...              -- return type inferred
-\x. x * 2                         -- lambda
-if c then a else b
-let x = e1 in e2                  -- local scope
-e1 -> f                           -- pipe (e1 passed to f)
+name = expr                     -- top-level value binding
+name(a Int)(b Int) = expr       -- curried function; each param (name Type)
+\x. x * 2                       -- lambda
+if cond                         -- no 'then'; body is indented
+  body
+else alt
+match expr                      -- no 'with'; arms indented below
+  | Pat -> body
+  | _ -> default
 
 -- literals
-42  3.14  "hi"  true  false  'c'  '\n'  "line\nbreak"
+42  3.14  "hi"  true  false  'c'  '\n'
 
-type Point = x Float, y Float
-type Maybe A = Some A | None
-type Color =                      -- multi-line sum with leading |
-  | Red
-  | Green
-  | Blue
+Maybe A = Some A | None         -- type declaration (Uppercase, no 'type' kw)
+Shape = Circle Float | Rect Float Float | Empty
 
-fn area(s Shape) Float =          -- shortcut match on last param
+add(a Int)(b Int) = a + b       -- function (no 'fn' keyword)
+area(s Shape) =                 -- match on last param: arms as body
   | Circle r -> 3.14 * r * r
   | Rect w h -> w * h
   | Empty -> 0.0
 
-fn unwrap(m Maybe[Int]) Int =     -- explicit match ... with
-  match m with
-    | Some n -> n
-    | None -> 0
+tag UserId                      -- zero-cost newtype
+"u1"[UserId]                    -- tag application (postfix brackets)
 
-tag UserId                        -- zero-cost newtype
-"u1"[UserId]                      -- tag application
-Float[m] / Float[s]               -- = Float[m/s]
+-- local bindings chain via layout (no 'let-in')
+example =
+  x = 42
+  y = x + 1
+  y * 2
 
-trait Functor F =
-  fn map(f A->B)(fa F[A]) F[B]
-
-impl Functor Maybe =
-  fn map(f A->B)(fa Maybe[A]) Maybe[B] =
-    | Some a -> Some (f a)
-    | None -> None
+-- sequential effects
+main =
+  _ = printfn "step 1"
+  _ = printfn "step 2"
+  0
 
 Errors: E001 TypeMismatch, E002 UnboundVar, E003 NonExhaustiveMatch,
-        E004 UnitMismatch, E005 TagViolation, E006 MissingImpl,
-        E008 InfiniteType
+        E004 UnitMismatch, E005 TagViolation, E008 InfiniteType
 ```
 
 The examples do double duty as grammar and as reminders of common idioms.
@@ -164,7 +153,7 @@ The compiler is deterministic and fast. The LLM's loop should be:
 
 1. Generate `.lll` code.
 2. `lllc build file.lll` (or `lllc run` if the goal includes execution).
-3. On error: parse the compact error message (one line per error), apply
+3. On error: parse the compact `EXXX line:col Name details` message, apply
    a targeted fix, retry.
 4. On success: ship.
 
@@ -173,30 +162,92 @@ errors — the compiler catches them. Only use tests for logic.
 
 ## What LLMs get wrong most often
 
-### 1. Comma-separated parameters
+### 1. Using removed keywords
 
 Wrong:
 ```lll
-fn add(a Int, b Int) Int = a + b
+fn add(a Int)(b Int) Int = a + b
+type Shape = Circle Float | Rect Float Float
 ```
 
 Right:
 ```lll
-fn add(a Int)(b Int) Int = a + b
+add(a Int)(b Int) = a + b
+Shape = Circle Float | Rect Float Float
 ```
 
-Each parameter has its own parens.
+There is no `fn` or `type` keyword. Functions start with a lowercase name
+and parenthesised parameters. Types start with an uppercase name.
 
-### 2. Mandatory return types for simple bodies
+### 2. Using `then` after `if`
 
-An LLM trained on Haskell often wants to annotate everything. ll-lang
-inferring is fine:
-
+Wrong:
 ```lll
-fn double(x Int) = x * 2      -- inferred Int -> Int, no redundancy
+result = if x > 0 then "positive" else "non-positive"
 ```
 
-### 3. Tags as values
+Right:
+```lll
+result =
+  if x > 0
+    "positive"
+  else "non-positive"
+```
+
+`if` must be followed by an indented body on the next line, then `else`.
+
+### 3. Using `with` after `match`
+
+Wrong:
+```lll
+match m with
+  | Some n -> n
+  | None -> 0
+```
+
+Right:
+```lll
+match m
+  | Some n -> n
+  | None -> 0
+```
+
+`match expr` is followed directly by pattern arms — no `with`.
+
+### 4. Using `let ... in` for local scope
+
+Wrong:
+```lll
+f(x Int) =
+  let y = x * 2 in
+  y + 1
+```
+
+Right:
+```lll
+f(x Int) =
+  y = x * 2
+  y + 1
+```
+
+Local bindings chain via layout. `let` is only needed at the top level for
+value constants (without parameters): `let pi = 3.14159`.
+
+### 5. Comma-separated parameters
+
+Wrong:
+```lll
+add(a Int, b Int) = a + b
+```
+
+Right:
+```lll
+add(a Int)(b Int) = a + b
+```
+
+Each parameter has its own parentheses.
+
+### 6. Tags as constructors
 
 Wrong:
 ```lll
@@ -205,51 +256,33 @@ let uid = UserId "user-42"
 
 Right:
 ```lll
-let uid = "user-42"[UserId]
+uid = "user-42"[UserId]
 ```
 
-Tags are postfix brackets, not constructors.
+Tags are postfix brackets applied to a value, not constructors.
 
-### 4. Pattern match inside `if`
+### 7. Forgetting exhaustive patterns
 
-Wrong:
-```lll
-fn area(s Shape) Float =
-  if s == Circle r then ...
-```
+Every `match` must cover all constructors. The compiler emits E003 for
+missing cases. Add `| _ -> ...` if an explicit catch-all is intended.
 
-Right:
-```lll
-fn area(s Shape) Float =
-  | Circle r -> ...
-  | Rect w h -> ...
-  | Empty -> 0.0
-```
+## Telling the model what error codes mean
 
-### 5. Importing things that don't exist yet
-
-There is no multi-file `Std.List` module. The prelude is implicit — the
-~50 stdlib functions (`listMap`, `strLen`, `charToInt`, `readFile`, ...)
-are already in scope without any `import`. Writing `import Std.List`
-parses without error but is a no-op. Use the flat builtin names
-directly.
-
-Note: `type Maybe A = Some A | None` and `type Result A E = Ok A | Err E`
-are NOT built-in. Any file that calls `listHead`, `strToInt`, or
-`resultMap` must declare the corresponding type locally.
-
-## Telling the model "E003 means"
-
-Because error codes are fixed, you can add a short recovery recipe directly
-to the system prompt:
+Because error codes are fixed, add a short recovery recipe directly to the
+system prompt:
 
 ```
 If compiler returns E003 NonExhaustiveMatch Type missing:Ctor,
 add a branch `| Ctor ... -> default` to the match expression.
+
+If compiler returns E002 UnboundVar name:foo,
+check that foo is declared above the use site or imported.
+
+If compiler returns E001 TypeMismatch expected:T got:U,
+add an annotation to the binding or fix the literal.
 ```
 
-Do this for each code you expect to see. The LLM then applies mechanical
-fixes without re-reasoning from scratch.
+The LLM then applies mechanical fixes without re-reasoning from scratch.
 
 ## A minimal loop script
 
@@ -267,11 +300,27 @@ while true; do
 done
 ```
 
-Because `lllc build` is pure (no side effects beyond writing `prog.fs`),
-you can run it thousands of times safely.
+Because `lllc build` is pure (no side effects beyond writing the target
+output), you can run it thousands of times safely.
+
+## Using MCP for structured feedback
+
+For LLM agents that support Model Context Protocol, `lllc mcp` exposes
+structured tool calls that return machine-readable JSON instead of stderr:
+
+| Task | Tool |
+|------|------|
+| Does this snippet type-check? | `check_source { "source": "..." }` |
+| What does E003 mean with a repro? | `lookup_error { "code": "E003" }` |
+| What list functions exist? | `stdlib_search { "query": "list" }` |
+| What is the syntax for Pattern? | `grammar_lookup { "rule": "Pattern" }` |
+| Compile and show F# output | `compile_source { "source": "...", "target": "fs" }` |
+
+See [09-mcp.md](09-mcp.md) for the full tool reference.
 
 ## Prefer small files, flat structure
 
-Until multi-file modules land, keep each `.lll` file self-contained. A flat
-top-level structure also minimizes the tokens the model needs to regenerate
-on each fix.
+Keep each `.lll` file self-contained unless your project has a `lll.toml`
+manifest. In single-file mode, `Std.*` imports are resolved automatically
+by `lllc run`. A flat top-level structure also minimises the tokens the
+model needs to regenerate on each fix iteration.

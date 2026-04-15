@@ -87,7 +87,7 @@ square(x Int) = x * x
 main() = 0
 ```
 
-The `fn` keyword exists but is optional for declarations. Prefer the bare form.
+There is no `fn` keyword. Functions are declared with the bare form only.
 
 ### Bindings -- lowercase + `=`
 
