@@ -204,6 +204,26 @@ let listErrorsTool (_args: {| dummy: string option |}) : Task<Result<Content lis
         return! ok ("[" + String.concat "," items + "]")
     }
 
+// ─── list_targets ────────────────────────────────────────────────────────────
+
+let private knownTargets = [
+    "fs",   "FSharp",     "stable",       ".fs",   "F# source files; multi-module .fsproj output; default target"
+    "ts",   "TypeScript", "stable",       ".ts",   "TypeScript source files; ADTs as tagged union types"
+    "py",   "Python",     "stable",       ".py",   "Python source files; ADTs as @dataclass + Union types"
+    "java", "Java",       "stable",       ".java", "Java 21 source files; ADTs as sealed interfaces + records"
+    "cs",   "CSharp",     "stable",       ".cs",   "C# source files; ADTs as sealed record hierarchies"
+    "llvm", "LLVM",       "experimental", ".ll",   "LLVM IR; subset backend — pattern-matching and ADT support is partial"
+]
+
+let listTargetsTool (_args: {| dummy: string option |}) : Task<Result<Content list, McpError>> =
+    task {
+        let items =
+            knownTargets |> List.map (fun (id, name, status, ext, desc) ->
+                sprintf "{\"id\":%s,\"name\":%s,\"status\":%s,\"extension\":%s,\"description\":%s}"
+                    (js id) (js name) (js status) (js ext) (js desc))
+        return! ok ("[" + String.concat "," items + "]")
+    }
+
 // ─── lookup_error ────────────────────────────────────────────────────────────
 
 let lookupErrorTool (args: LookupErrorArgs) : Task<Result<Content list, McpError>> =
@@ -468,6 +488,11 @@ let runServer () =
             "list_errors"
             "List all ll-lang error codes with names and short descriptions."
             listErrorsTool |> unwrapResult)
+
+        tool (TypedTool.define<{| dummy: string option |}>
+            "list_targets"
+            "List all ll-lang compilation targets with id, name, status (stable/experimental), file extension, and description."
+            listTargetsTool |> unwrapResult)
 
         tool (TypedTool.define<LookupErrorArgs>
             "lookup_error"
