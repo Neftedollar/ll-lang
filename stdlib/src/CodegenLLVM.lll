@@ -433,6 +433,10 @@ emitDecl(d Decl)(strIdx Int) =
         else strConcat globs "\n"
       strConcat globSection (strConcat "@" (strConcat name (strConcat " = global i64 " reg)))
     | DExport inner -> emitDecl inner strIdx
+    | DExternal name _ _ ->
+      strConcat "; external: " name
+    | DOpaque name ->
+      strConcat "; opaque: " name
 
 emitDecls(ds List[Decl])(strIdx Int) =
   match ds

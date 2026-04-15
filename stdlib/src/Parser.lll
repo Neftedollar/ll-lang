@@ -57,6 +57,8 @@ Decl =
   | DImport (List[Str])
   | DExport Decl
   | DLet Str Expr
+  | DExternal Str (List[Param]) TypeExpr
+  | DOpaque Str
 
 -- Module
 Module = MkModule (List[Str]) (List[Decl])
@@ -524,6 +526,28 @@ parseImportDecl(toks List[Token]) =
       (DImport segs, rest2)
     | _ -> (DImport [], toks)
 
+-- ---- External declaration parsing ------------------------------------
+-- Syntax: external name(p T) RetType
+
+parseExternalDecl(toks List[Token]) =
+  match toks
+    | KwExternal :: Ident name :: rest ->
+      let (prms, rest2) = parseParamGroups rest
+      let (retTy, rest3) = parseReturnType rest2
+      retFinal = match retTy
+        | Some ty -> ty
+        | None -> TyName "?"
+      (DExternal name prms retFinal, rest3)
+    | _ -> (DExternal "?" [] (TyName "?"), toks)
+
+-- ---- Opaque declaration parsing ----------------------------------------
+-- Syntax: opaque TypeName
+
+parseOpaqueDecl(toks List[Token]) =
+  match toks
+    | KwOpaque :: TypeId name :: rest -> (DOpaque name, rest)
+    | _ -> (DOpaque "?", toks)
+
 -- ---- Top-level declaration dispatch ------------------------------------
 
 parseOneDecl(toks List[Token]) =
@@ -532,6 +556,8 @@ parseOneDecl(toks List[Token]) =
     | KwLet :: _ -> parseLetDecl toks
     | Ident _ :: _ -> parseFnDecl toks
     | KwImport :: _ -> parseImportDecl toks
+    | KwExternal :: _ -> parseExternalDecl toks
+    | KwOpaque :: _ -> parseOpaqueDecl toks
     | KwExport :: rest ->
       let (inner, rest2) = parseOneDecl rest
       (DExport inner, rest2)
@@ -553,6 +579,12 @@ parseDecls(toks List[Token]) =
       d :: parseDecls rest
     | KwImport :: _ ->
       let (d, rest) = parseImportDecl toks2
+      d :: parseDecls rest
+    | KwExternal :: _ ->
+      let (d, rest) = parseExternalDecl toks2
+      d :: parseDecls rest
+    | KwOpaque :: _ ->
+      let (d, rest) = parseOpaqueDecl toks2
       d :: parseDecls rest
     | KwExport :: rest ->
       let (inner, rest2) = parseOneDecl rest
@@ -651,6 +683,10 @@ showDecl(d Decl) =
       strConcat "DExport(" (strConcat (showDecl inner) ")")
     | DLet name body ->
       strConcat "DLet " (strConcat name (strConcat "=(" (strConcat (showExpr body) ")")))
+    | DExternal name _prms _retTy ->
+      strConcat "DExternal " name
+    | DOpaque name ->
+      strConcat "DOpaque " name
 
 -- ---- Test helpers ------------------------------------------------------
 
@@ -697,4 +733,17 @@ parserCheckModule(label Str)(toks List[Token])(expectedDeclCount Int) =
 
 -- ---- Tests -------------------------------------------------------------
 -- Token lists are built with :: cons (no comma list syntax in ll-lang).
+
+main =
+  -- external decl: external httpGet(url Str) Str
+  _ = parserCheckDecl "1" (KwExternal :: Ident "httpGet" :: LParen :: Ident "url" :: TypeId "Str" :: RParen :: TypeId "Str" :: Eof :: []) "DExternal httpGet"
+  -- external decl: external ping() Bool
+  _ = parserCheckDecl "2" (KwExternal :: Ident "ping" :: LParen :: RParen :: TypeId "Bool" :: Eof :: []) "DExternal ping"
+  -- opaque decl: opaque HttpClient
+  _ = parserCheckDecl "3" (KwOpaque :: TypeId "HttpClient" :: Eof :: []) "DOpaque HttpClient"
+  -- opaque decl: opaque Promise
+  _ = parserCheckDecl "4" (KwOpaque :: TypeId "Promise" :: Eof :: []) "DOpaque Promise"
+  -- module with external + opaque: 2 decls
+  toks = KwModule :: TypeId "M" :: Newline :: KwExternal :: Ident "connect" :: LParen :: Ident "url" :: TypeId "Str" :: RParen :: TypeId "Bool" :: Newline :: KwOpaque :: TypeId "Conn" :: Eof :: []
+  parserCheckModule "5" toks 2
 

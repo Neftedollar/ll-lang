@@ -360,6 +360,10 @@ emitDecl(d Decl) =
     | DImport parts ->
       strConcat "// import " (joinWith "." parts)
     | DExport inner -> emitDecl inner
+    | DExternal name _ _ ->
+      strConcat "declare function " (strConcat (safeIdent name) "(...args: any[]): any;")
+    | DOpaque name ->
+      strConcat "type " (strConcat name " = unknown;")
 
 emitDecls(ds List[Decl]) =
   joinWith "\n\n" (listMap emitDecl ds)

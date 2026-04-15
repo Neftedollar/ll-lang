@@ -403,6 +403,10 @@ emitDecl(d Decl) =
     | DImport parts ->
       strConcat "// import " (joinWith "." parts)
     | DExport inner -> emitDecl inner
+    | DExternal name _ _ ->
+      strConcat "    // external: " name
+    | DOpaque name ->
+      strConcat "    // opaque: " name
 
 emitDecls(ds List[Decl]) =
   joinWith "\n\n" (listMap emitDecl ds)

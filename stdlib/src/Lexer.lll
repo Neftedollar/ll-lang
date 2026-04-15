@@ -15,6 +15,7 @@ export Token =
   -- Keywords
   | KwLet | KwTag | KwUnit
   | KwTrait | KwImpl | KwImport | KwExport | KwModule
+  | KwExternal | KwOpaque
   | KwIf | KwElse | KwTrue | KwFalse
   | KwMatch
   -- Identifiers
@@ -109,7 +110,9 @@ classifyIdent(s Str) =
     | "impl"   -> KwImpl
     | "import" -> KwImport
     | "export" -> KwExport
-    | "module" -> KwModule
+    | "module"   -> KwModule
+    | "external" -> KwExternal
+    | "opaque"   -> KwOpaque
     | "if"     -> KwIf
     | "else"   -> KwElse
     | "true"   -> KwTrue
