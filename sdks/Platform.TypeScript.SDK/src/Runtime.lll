@@ -1,0 +1,16 @@
+module Platform.TypeScript.Runtime
+
+-- TypeScript/browser runtime helper declarations for ll-lang programs.
+-- These are external functions available in browser and Node.js environments.
+
+-- Standard I/O
+external console_log(msg Str) Unit
+
+-- JSON
+external JSON_parse(src Str) Str
+external JSON_stringify(val Str) Str
+
+-- Fetch API (browser/Node.js)
+opaque Response
+opaque Promise[A]
+external fetch(url Str) Promise[Response]

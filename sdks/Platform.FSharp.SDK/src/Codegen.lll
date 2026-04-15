@@ -342,6 +342,13 @@ emitDecl(d Decl) =
     | DImport parts ->
       strConcat "// import " (joinWith "." parts)
     | DExport inner -> emitDecl inner
+    | DExternal name params _ ->
+      -- external declarations: emit as F# function stubs referencing native impl
+      paramStr = emitParamStr params
+      strConcat "let " (strConcat (safeIdent name) (strConcat paramStr (strConcat " = failwith \"external: " (strConcat name "\""))))
+    | DOpaque name ->
+      -- opaque types: emit as F# object alias
+      strConcat "type " (strConcat name " = obj")
 
 emitDecls(ds List[Decl]) =
   joinWith "\n\n" (listMap emitDecl ds)

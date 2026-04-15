@@ -1,0 +1,24 @@
+module Platform.TypeScript.FFI
+
+-- TypeScript external name mapping table.
+-- Maps ll-lang `external` function names to their TypeScript/browser implementations.
+
+typescriptExternalMap =
+  ("console_log", "console.log") ::
+  ("JSON_parse", "JSON.parse") ::
+  ("fetch", "(globalThis as any).fetch") ::
+  []
+
+lookupExternal(name Str) =
+  lookupExternal_ typescriptExternalMap name
+
+lookupExternal_(entries List[(Str, Str)])(name Str) =
+  match entries
+    | [] -> ""
+    | (k, v) :: rest ->
+      if k == name
+        v
+      else lookupExternal_ rest name
+
+hasExternal(name Str) =
+  strLen (lookupExternal name) > 0

@@ -1,11 +1,11 @@
-module Std.CodegenJava
+module Std.CodegenCSharp
 
 import Std.Parser
 
--- Java code emitter written in ll-lang.
--- Takes the AST produced by Std.Parser and emits Java 21 source code.
+-- C# code emitter written in ll-lang.
+-- Takes the AST produced by Std.Parser and emits C# source code.
 
--- ---- String helpers --------------------------------------------------------
+-- ---- String helpers -------------------------------------------------------
 
 joinWith(sep Str)(items List[Str]) =
   match items
@@ -13,77 +13,113 @@ joinWith(sep Str)(items List[Str]) =
     | x :: [] -> x
     | x :: rest -> strConcat x (strConcat sep (joinWith sep rest))
 
--- ---- Java keyword escaping -------------------------------------------------
+-- ---- C# keyword escaping --------------------------------------------------
 
-isJavaKeyword(s Str) =
+isCSharpKeyword(s Str) =
   match s
-    | "abstract"     -> true
-    | "assert"       -> true
-    | "boolean"      -> true
-    | "break"        -> true
-    | "byte"         -> true
-    | "case"         -> true
-    | "catch"        -> true
-    | "char"         -> true
-    | "class"        -> true
-    | "const"        -> true
-    | "continue"     -> true
-    | "default"      -> true
-    | "do"           -> true
-    | "double"       -> true
-    | "else"         -> true
-    | "enum"         -> true
-    | "extends"      -> true
-    | "false"        -> true
-    | "final"        -> true
-    | "finally"      -> true
-    | "float"        -> true
-    | "for"          -> true
-    | "goto"         -> true
-    | "if"           -> true
-    | "implements"   -> true
-    | "import"       -> true
-    | "instanceof"   -> true
-    | "int"          -> true
-    | "interface"    -> true
-    | "long"         -> true
-    | "native"       -> true
-    | "new"          -> true
-    | "null"         -> true
-    | "package"      -> true
-    | "private"      -> true
-    | "protected"    -> true
-    | "public"       -> true
-    | "return"       -> true
-    | "short"        -> true
-    | "static"       -> true
-    | "super"        -> true
-    | "switch"       -> true
-    | "synchronized" -> true
-    | "this"         -> true
-    | "throw"        -> true
-    | "throws"       -> true
-    | "transient"    -> true
-    | "true"         -> true
-    | "try"          -> true
-    | "void"         -> true
-    | "volatile"     -> true
-    | "while"        -> true
-    | "record"       -> true
-    | "sealed"       -> true
-    | "permits"      -> true
-    | "var"          -> true
-    | "yield"        -> true
-    | _              -> false
+    | "abstract"   -> true
+    | "as"         -> true
+    | "base"       -> true
+    | "bool"       -> true
+    | "break"      -> true
+    | "byte"       -> true
+    | "case"       -> true
+    | "catch"      -> true
+    | "char"       -> true
+    | "checked"    -> true
+    | "class"      -> true
+    | "const"      -> true
+    | "continue"   -> true
+    | "decimal"    -> true
+    | "default"    -> true
+    | "delegate"   -> true
+    | "do"         -> true
+    | "double"     -> true
+    | "else"       -> true
+    | "enum"       -> true
+    | "event"      -> true
+    | "explicit"   -> true
+    | "extern"     -> true
+    | "false"      -> true
+    | "finally"    -> true
+    | "fixed"      -> true
+    | "float"      -> true
+    | "for"        -> true
+    | "foreach"    -> true
+    | "goto"       -> true
+    | "if"         -> true
+    | "implicit"   -> true
+    | "in"         -> true
+    | "int"        -> true
+    | "interface"  -> true
+    | "internal"   -> true
+    | "is"         -> true
+    | "lock"       -> true
+    | "long"       -> true
+    | "namespace"  -> true
+    | "new"        -> true
+    | "null"       -> true
+    | "object"     -> true
+    | "operator"   -> true
+    | "out"        -> true
+    | "override"   -> true
+    | "params"     -> true
+    | "private"    -> true
+    | "protected"  -> true
+    | "public"     -> true
+    | "readonly"   -> true
+    | "ref"        -> true
+    | "return"     -> true
+    | "sbyte"      -> true
+    | "sealed"     -> true
+    | "short"      -> true
+    | "sizeof"     -> true
+    | "stackalloc" -> true
+    | "static"     -> true
+    | "string"     -> true
+    | "struct"     -> true
+    | "switch"     -> true
+    | "this"       -> true
+    | "throw"      -> true
+    | "true"       -> true
+    | "try"        -> true
+    | "typeof"     -> true
+    | "uint"       -> true
+    | "ulong"      -> true
+    | "unchecked"  -> true
+    | "unsafe"     -> true
+    | "ushort"     -> true
+    | "using"      -> true
+    | "virtual"    -> true
+    | "void"       -> true
+    | "volatile"   -> true
+    | "while"      -> true
+    | "record"     -> true
+    | "required"   -> true
+    | "init"       -> true
+    | "with"       -> true
+    | _            -> false
 
 safeIdent(s Str) =
-  if isJavaKeyword s
+  if isCSharpKeyword s
     strConcat s "_"
   else s
 
+safeTypeIdent(s Str) =
+  match strChars s
+    | [] -> "T"
+    | c :: rest ->
+      n = charToInt c
+      upper = if n >= 97
+        if n <= 122
+          intToChar (n - 32)
+        else c
+      else c
+      strConcat (strFromChars [upper]) (strFromChars rest)
+
 -- ---- String escaping -------------------------------------------------------
 
-encodeJavaEscape(c Char) =
+encodeCSharpEscape(c Char) =
   match c
     | '\n' -> "\\n"
     | '\t' -> "\\t"
@@ -93,9 +129,9 @@ encodeJavaEscape(c Char) =
     | _    -> strFromChars [c]
 
 escapeStr(s Str) =
-  listFold (\acc c. strConcat acc (encodeJavaEscape c)) "" (strChars s)
+  listFold (\acc c. strConcat acc (encodeCSharpEscape c)) "" (strChars s)
 
--- ---- Type emission (primitive positions) -----------------------------------
+-- ---- Type emission ---------------------------------------------------------
 
 isTypeParam(s Str) =
   match strChars s
@@ -110,43 +146,43 @@ isTypeParam(s Str) =
 
 emitType(t TypeExpr) =
   match t
-    | TyName "Int" -> "long"
+    | TyName "Int"   -> "long"
     | TyName "Float" -> "double"
-    | TyName "Str" -> "String"
-    | TyName "Bool" -> "boolean"
-    | TyName "Char" -> "char"
-    | TyName "Unit" -> "void"
+    | TyName "Str"   -> "string"
+    | TyName "Bool"  -> "bool"
+    | TyName "Char"  -> "char"
+    | TyName "Unit"  -> "void"
     | TyName n ->
       if isTypeParam n
         n
       else n
-    | TyApp (TyName "List") a -> strConcat "java.util.List<" (strConcat (emitTypeBoxed a) ">")
-    | TyApp (TyName "Maybe") a -> strConcat "java.util.Optional<" (strConcat (emitTypeBoxed a) ">")
+    | TyApp (TyName "List")  a -> strConcat "System.Collections.Generic.List<" (strConcat (emitTypeBoxed a) ">")
+    | TyApp (TyName "Maybe") a -> strConcat "LLLang.Maybe<" (strConcat (emitTypeBoxed a) ">")
     | TyApp f a -> strConcat (emitTypeBoxed f) (strConcat "<" (strConcat (emitTypeBoxed a) ">"))
     | TyFn a b ->
-      strConcat "java.util.function.Function<" (strConcat (emitTypeBoxed a) (strConcat ", " (strConcat (emitTypeBoxed b) ">")))
+      strConcat "System.Func<" (strConcat (emitTypeBoxed a) (strConcat ", " (strConcat (emitTypeBoxed b) ">")))
 
 -- ---- Type emission (boxed / generic positions) ----------------------------
 
 emitTypeBoxed(t TypeExpr) =
   match t
-    | TyName "Int" -> "Long"
-    | TyName "Float" -> "Double"
-    | TyName "Str" -> "String"
-    | TyName "Bool" -> "Boolean"
-    | TyName "Char" -> "Character"
-    | TyName "Unit" -> "Void"
+    | TyName "Int"   -> "long"
+    | TyName "Float" -> "double"
+    | TyName "Str"   -> "string"
+    | TyName "Bool"  -> "bool"
+    | TyName "Char"  -> "char"
+    | TyName "Unit"  -> "object"
     | TyName n ->
       if isTypeParam n
         n
       else n
-    | TyApp (TyName "List") a -> strConcat "java.util.List<" (strConcat (emitTypeBoxed a) ">")
-    | TyApp (TyName "Maybe") a -> strConcat "java.util.Optional<" (strConcat (emitTypeBoxed a) ">")
+    | TyApp (TyName "List")  a -> strConcat "System.Collections.Generic.List<" (strConcat (emitTypeBoxed a) ">")
+    | TyApp (TyName "Maybe") a -> strConcat "LLLang.Maybe<" (strConcat (emitTypeBoxed a) ">")
     | TyApp f a -> strConcat (emitTypeBoxed f) (strConcat "<" (strConcat (emitTypeBoxed a) ">"))
     | TyFn a b ->
-      strConcat "java.util.function.Function<" (strConcat (emitTypeBoxed a) (strConcat ", " (strConcat (emitTypeBoxed b) ">")))
+      strConcat "System.Func<" (strConcat (emitTypeBoxed a) (strConcat ", " (strConcat (emitTypeBoxed b) ">")))
 
--- ---- Pattern emission (for switch arms) ------------------------------------
+-- ---- Pattern emission ------------------------------------------------------
 
 emitPattern(p Pattern) =
   match p
@@ -200,8 +236,8 @@ emitExpr(e Expr) =
         "true"
       else if c == "false"
         "false"
-      else safeIdent c
-    | ENil -> "java.util.List.of()"
+      else strConcat "new LLLang." (strConcat (safeTypeIdent c) "()")
+    | ENil -> "new System.Collections.Generic.List<object>()"
     | EApp f a -> emitApp f a
     | EIf c t el ->
       strConcat "(" (strConcat (emitExpr c) (strConcat " ? " (strConcat (emitExpr t) (strConcat " : " (strConcat (emitExpr el) ")")))))
@@ -210,27 +246,26 @@ emitExpr(e Expr) =
       arms = emitMatchArms scrutStr pats bodies
       strConcat "(\n" (strConcat arms "\n)")
     | ELam x body ->
-      strConcat (safeIdent x) (strConcat " -> " (emitExpr body))
+      strConcat (safeIdent x) (strConcat " => " (emitExpr body))
     | ELet x e body ->
       eStr = emitExpr e
       bodyStr = emitExpr body
-      strConcat "((" (strConcat (safeIdent x) (strConcat ") -> " (strConcat bodyStr (strConcat ").apply(" (strConcat eStr ")")))))
+      retType = "object"
+      strConcat "((System.Func<" (strConcat retType (strConcat ">)(() => { var " (strConcat (safeIdent x) (strConcat " = " (strConcat eStr (strConcat "; return " (strConcat bodyStr "; }))()")))))))
     | EList items ->
-      strConcat "java.util.List.of(" (strConcat (joinWith ", " (listMap emitExpr items)) ")")
+      strConcat "new System.Collections.Generic.List<object> { " (strConcat (joinWith ", " (listMap emitExpr items)) " }")
     | EBinOp op l r ->
       strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat op (strConcat " " (strConcat (emitExpr r) ")")))))
     | ETuple a b ->
-      strConcat "new Object[]{" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) "}")))
+      strConcat "(" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) ")")))
     | ECons h t ->
-      strConcat "java.util.stream.Stream.concat(java.util.stream.Stream.of(" (strConcat (emitExpr h) (strConcat "), " (strConcat (emitExpr t) ".stream()).collect(java.util.stream.Collectors.toList())")))
+      strConcat "new System.Collections.Generic.List<object>{ " (strConcat (emitExpr h) (strConcat " }.Concat(" (strConcat (emitExpr t) ").ToList()")))
 
--- Gather EApp head
 gatherAppHead(e Expr) =
   match e
     | EApp f _ -> gatherAppHead f
     | _ -> e
 
--- Gather EApp args (left to right)
 gatherAppArgs(e Expr) =
   match e
     | EApp f a -> listAppend (gatherAppArgs f) [a]
@@ -261,19 +296,16 @@ emitApp(f Expr)(a Expr) =
       if isUpperStart x
         emitConApp x args
       else
-        -- Regular curried function call: f.apply(a)
-        strConcat (emitExpr f) (strConcat ".apply(" (strConcat (emitExpr a) ")"))
+        strConcat (emitExpr f) (strConcat "(" (strConcat (emitExpr a) ")"))
     | _ ->
-      strConcat (emitExpr f) (strConcat ".apply(" (strConcat (emitExpr a) ")"))
+      strConcat (emitExpr f) (strConcat "(" (strConcat (emitExpr a) ")"))
 
 emitConApp(c Str)(args List[Expr]) =
   match args
-    | [] -> safeIdent c
+    | [] -> strConcat "new LLLang." (strConcat (safeTypeIdent c) "()")
     | _ ->
       inner = joinWith ", " (listMap emitExpr args)
-      strConcat "new " (strConcat (safeIdent c) (strConcat "(" (strConcat inner ")")))
-
--- ---- Match arm emission ----------------------------------------------------
+      strConcat "new LLLang." (strConcat (safeTypeIdent c) (strConcat "(" (strConcat inner ")")))
 
 emitMatchArms(scrut Str)(pats List[Pattern])(bodies List[Expr]) =
   match pats
@@ -286,44 +318,43 @@ emitMatchArms(scrut Str)(pats List[Pattern])(bodies List[Expr]) =
             arm
           else strConcat arm (strConcat "\n" rest)
         | _ -> ""
-    | _ -> "  throw new RuntimeException(\"Non-exhaustive match\");"
+    | _ -> "  throw new System.Exception(\"Non-exhaustive match\");"
 
 emitMatchArm(scrut Str)(p Pattern)(body Expr) =
   match p
     | PWild ->
       strConcat "  " (strConcat (emitExpr body) " /* wildcard */")
     | PVar x ->
-      -- Bind variable then evaluate body
-      strConcat "  ((var " (strConcat (safeIdent x) (strConcat " = " (strConcat scrut ") -> " )))
+      strConcat "  var " (strConcat (safeIdent x) (strConcat " = " (strConcat scrut (strConcat "; " (emitExpr body)))))
     | PLitInt n ->
-      strConcat "  (" (strConcat scrut (strConcat " == " (strConcat (intToStr n) (strConcat "L ? " (strConcat (emitExpr body) " : null /* next */")))))
+      strConcat "  (" (strConcat scrut (strConcat " == " (strConcat (intToStr n) (strConcat "L ? " (strConcat (emitExpr body) " : default /* next */")))))
     | PLitStr s ->
       lit = strConcat "\"" (strConcat (escapeStr s) "\"")
-      strConcat "  (" (strConcat scrut (strConcat ".equals(" (strConcat lit (strConcat ") ? " (strConcat (emitExpr body) " : null /* next */")))))
+      strConcat "  (" (strConcat scrut (strConcat " == " (strConcat lit (strConcat " ? " (strConcat (emitExpr body) " : default /* next */")))))
     | PNil ->
-      strConcat "  (" (strConcat scrut (strConcat ".isEmpty() ? " (strConcat (emitExpr body) " : null /* next */")))
+      strConcat "  (" (strConcat scrut (strConcat ".Count == 0 ? " (strConcat (emitExpr body) " : default /* next */")))
     | PCons h t ->
       hBind = match h
-        | PVar x -> strConcat x (strConcat " = " (strConcat scrut ".get(0); "))
+        | PVar x -> strConcat "var " (strConcat x (strConcat " = " (strConcat scrut "[0]; ")))
         | _ -> ""
       tBind = match t
-        | PVar x -> strConcat x (strConcat " = " (strConcat scrut (strConcat ".subList(1, " (strConcat scrut ".size()); "))))
+        | PVar x -> strConcat "var " (strConcat x (strConcat " = " (strConcat scrut (strConcat ".GetRange(1, " (strConcat scrut ".Count - 1); ")))))
         | _ -> ""
-      cond = strConcat "!" (strConcat scrut ".isEmpty()")
-      strConcat "  (" (strConcat cond (strConcat " ? " (strConcat hBind (strConcat tBind (strConcat (emitExpr body) " : null /* next */")))))
+      cond = strConcat scrut ".Count > 0"
+      strConcat "  (" (strConcat cond (strConcat " ? (" (strConcat hBind (strConcat tBind (strConcat (emitExpr body) ") : default /* next */")))))
     | PCon c args ->
       emitConMatchArm scrut c args body
 
 emitConMatchArm(scrut Str)(c Str)(args List[Pattern])(body Expr) =
-  cond = strConcat scrut (strConcat " instanceof " c)
+  cond = strConcat scrut (strConcat " is LLLang." (safeTypeIdent c))
   match args
     | [] ->
-      strConcat "  (" (strConcat cond (strConcat " ? " (strConcat (emitExpr body) " : null /* next */")))
+      strConcat "  (" (strConcat cond (strConcat " ? " (strConcat (emitExpr body) " : default /* next */")))
     | _ ->
       castVar = strConcat "_c" c
-      castStr = strConcat "var " (strConcat castVar (strConcat " = (" (strConcat c (strConcat ") " scrut))))
+      castStr = strConcat "var " (strConcat castVar (strConcat " = (LLLang." (strConcat (safeTypeIdent c) (strConcat ")" scrut))))
       binds = emitConBinds castVar args 0
-      strConcat "  (" (strConcat cond (strConcat " ? (" (strConcat castStr (strConcat "; " (strConcat binds (strConcat (emitExpr body) ")) : null /* next */"))))))
+      strConcat "  (" (strConcat cond (strConcat " ? (" (strConcat castStr (strConcat "; " (strConcat binds (strConcat (emitExpr body) ")) : default /* next */"))))))
 
 emitConBinds(castVar Str)(args List[Pattern])(idx Int) =
   match args
@@ -332,11 +363,9 @@ emitConBinds(castVar Str)(args List[Pattern])(idx Int) =
       bind = match p
         | PVar x ->
           field = strConcat "_" (intToStr idx)
-          strConcat "var " (strConcat (safeIdent x) (strConcat " = " (strConcat castVar (strConcat "." (strConcat field "(); ")))))
+          strConcat "var " (strConcat (safeIdent x) (strConcat " = " (strConcat castVar (strConcat "." (strConcat field "; ")))))
         | _ -> ""
       strConcat bind (emitConBinds castVar rest (idx + 1))
-
--- ---- Declaration emission --------------------------------------------------
 
 emitTypeParams(tvars List[Str]) =
   match tvars
@@ -359,14 +388,10 @@ emitCtor(typeName Str)(tpStr Str)(c Constructor) =
     | MkCon name args ->
       match args
         | [] ->
-          strConcat "        record " (strConcat name (strConcat tpStr (strConcat "() implements " (strConcat typeName (strConcat tpStr " {}")))))
+          strConcat "    public sealed record " (strConcat (safeTypeIdent name) (strConcat tpStr (strConcat "() : " (strConcat (safeTypeIdent typeName) (strConcat tpStr ";")))))
         | _ ->
           fields = emitCtorFields args 0
-          strConcat "        record " (strConcat name (strConcat tpStr (strConcat "(" (strConcat fields (strConcat ") implements " (strConcat typeName (strConcat tpStr " {}")))))))
-
-emitPermits(typeName Str)(cs List[Constructor]) =
-  names = listMap (\c. match c | MkCon name _ -> strConcat typeName (strConcat "." name)) cs
-  joinWith ", " names
+          strConcat "    public sealed record " (strConcat (safeTypeIdent name) (strConcat tpStr (strConcat "(" (strConcat fields (strConcat ") : " (strConcat (safeTypeIdent typeName) (strConcat tpStr ";")))))))
 
 emitCtors(typeName Str)(tpStr Str)(cs List[Constructor]) =
   joinWith "\n" (listMap (\c. emitCtor typeName tpStr c) cs)
@@ -381,28 +406,31 @@ emitParamsStr(ps List[Param]) =
 emitReturnType(ret Maybe[TypeExpr]) =
   match ret
     | Some t -> emitType t
-    | None -> "Object"
+    | None -> "object"
 
 emitDecl(d Decl) =
   match d
     | DType name tvars ctors ->
       tpStr = emitTypeParams tvars
-      permits = emitPermits name ctors
-      sealedDecl = strConcat "    sealed interface " (strConcat name (strConcat tpStr (strConcat " permits " (strConcat permits " {"))))
+      ifaceDecl = strConcat "    public interface " (strConcat (safeTypeIdent name) (strConcat tpStr " { }"))
       ctorDecls = emitCtors name tpStr ctors
-      strConcat sealedDecl (strConcat "\n" (strConcat ctorDecls "\n    }"))
+      strConcat ifaceDecl (strConcat "\n" ctorDecls)
     | DFn name params ret body ->
       paramStr = emitParamsStr params
       retType = emitReturnType ret
       if name == "main"
-        strConcat "    public static void main(String[] args) {\n        " (strConcat (emitExpr body) ";\n    }")
+        strConcat "    public static int Main(string[] args) {\n        " (strConcat (emitExpr body) ";\n        return 0;\n    }")
       else
-        strConcat "    public static " (strConcat retType (strConcat " " (strConcat (safeIdent name) (strConcat "(" (strConcat paramStr (strConcat ") {\n        return " (strConcat (emitExpr body) ";\n    }")))))))
+        strConcat "    public static " (strConcat retType (strConcat " " (strConcat (safeIdent name) (strConcat "(" (strConcat paramStr (strConcat ") => " (strConcat (emitExpr body) ";")))))))
     | DLet name body ->
-      strConcat "    public static final Object " (strConcat (safeIdent name) (strConcat " = " (strConcat (emitExpr body) ";")))
+      strConcat "    public static readonly object " (strConcat (safeIdent name) (strConcat " = " (strConcat (emitExpr body) ";")))
     | DImport parts ->
       strConcat "// import " (joinWith "." parts)
     | DExport inner -> emitDecl inner
+    | DExternal name _ _ ->
+      strConcat "    // external: " name
+    | DOpaque name ->
+      strConcat "    // opaque: " name
 
 emitDecls(ds List[Decl]) =
   joinWith "\n\n" (listMap emitDecl ds)
@@ -410,11 +438,11 @@ emitDecls(ds List[Decl]) =
 -- ---- Prelude ---------------------------------------------------------------
 
 emitPrelude =
-  "    // --- ll-lang stdlib (Java) ---\n    private static void printfn(String s) { System.out.println(s); }\n    private static void print_(String s) { System.out.print(s); }\n    private static long strLen(String s) { return s.length(); }\n    private static java.util.function.Function<String, String> strConcat(String a) { return b -> a + b; }\n    private static java.util.List<Character> strChars(String s) { java.util.List<Character> cs = new java.util.ArrayList<>(); for (char c : s.toCharArray()) cs.add(c); return cs; }\n    private static String strFromChars(java.util.List<Character> cs) { StringBuilder sb = new StringBuilder(); for (char c : cs) sb.append(c); return sb.toString(); }\n    private static String intToStr(long n) { return Long.toString(n); }\n    private static long charToInt(char c) { return (long) c; }\n    private static <A> long listLen(java.util.List<A> xs) { return xs.size(); }\n    private static <A, B> java.util.function.Function<java.util.List<A>, java.util.List<B>> listMap(java.util.function.Function<A, B> f) { return xs -> xs.stream().map(f::apply).collect(java.util.stream.Collectors.toList()); }\n    private static <A> java.util.function.Function<java.util.List<A>, java.util.List<A>> listFilter(java.util.function.Function<A, Boolean> p) { return xs -> xs.stream().filter(x -> p.apply(x)).collect(java.util.stream.Collectors.toList()); }\n    private static <A, B> java.util.function.Function<B, java.util.function.Function<java.util.List<A>, B>> listFold(java.util.function.Function<B, java.util.function.Function<A, B>> f) { return z -> xs -> { B acc = z; for (A x : xs) acc = f.apply(acc).apply(x); return acc; }; }\n    private static <A> java.util.function.Function<java.util.List<A>, java.util.List<A>> listAppend(java.util.List<A> xs) { return ys -> { java.util.List<A> r = new java.util.ArrayList<>(xs); r.addAll(ys); return r; }; }\n    private static <A> boolean listIsEmpty(java.util.List<A> xs) { return xs.isEmpty(); }\n    private static boolean strContains(String needle, String hay) { return hay.contains(needle); }\n    // --- end prelude ---"
+  "    // --- ll-lang stdlib (C#) ---\n    public static object? printfn(string s) { System.Console.WriteLine(s); return null; }\n    public static object? print(string s) { System.Console.Write(s); return null; }\n    public static long strLen(string s) => s.Length;\n    public static System.Func<object, string> strConcat(string a) => b => a + (b?.ToString() ?? \"\");\n    public static System.Collections.Generic.List<char> strChars(string s) => new(s.ToCharArray());\n    public static string strFromChars(System.Collections.Generic.IEnumerable<char> cs) => new string(new System.Collections.Generic.List<char>(cs).ToArray());\n    public static string intToStr(long n) => n.ToString();\n    public static long charToInt(char c) => c;\n    public static char intToChar(long n) => (char)n;\n    public static bool strContains(string needle) => hay => hay.Contains(needle);\n    public static long listLen<T>(System.Collections.Generic.List<T> xs) => xs.Count;\n    public static System.Func<System.Collections.Generic.List<A>, System.Collections.Generic.List<B>> listMap<A, B>(System.Func<A, B> f) => xs => { var r = new System.Collections.Generic.List<B>(xs.Count); foreach (var x in xs) r.Add(f(x)); return r; };\n    public static System.Func<System.Collections.Generic.List<A>, System.Collections.Generic.List<A>> listFilter<A>(System.Func<A, bool> p) => xs => { var r = new System.Collections.Generic.List<A>(); foreach (var x in xs) if (p(x)) r.Add(x); return r; };\n    public static System.Func<B, System.Func<System.Collections.Generic.List<A>, B>> listFold<A, B>(System.Func<B, System.Func<A, B>> f) => z => xs => { var acc = z; foreach (var x in xs) acc = f(acc)(x); return acc; };\n    public static System.Func<System.Collections.Generic.List<T>, System.Collections.Generic.List<T>> listAppend<T>(System.Collections.Generic.List<T> xs) => ys => { var r = new System.Collections.Generic.List<T>(xs.Count + ys.Count); r.AddRange(xs); r.AddRange(ys); return r; };\n    public static bool listIsEmpty<T>(System.Collections.Generic.List<T> xs) => xs.Count == 0;\n    // --- end prelude ---"
 
 -- ---- Module emission -------------------------------------------------------
 
-javaClassName(parts List[Str]) =
+csharpClassName(parts List[Str]) =
   match parts
     | [] -> "LlLang"
     | _ -> listFold (\acc x. x) "LlLang" parts
@@ -425,15 +453,15 @@ emitModulePath(parts List[Str]) =
 emitModule(m Module) =
   match m
     | MkModule path decls ->
-      className = javaClassName path
-      header = strConcat "// Generated by lllc (ll-lang Java backend)\n// Requires Java 21+\n// Module: " (strConcat (emitModulePath path) "\n\nimport java.util.List;\nimport java.util.Optional;\nimport java.util.function.Function;")
+      className = csharpClassName path
+      header = strConcat "// Generated by lllc (ll-lang C# backend)\n// Requires .NET 8+\n// Module: " (strConcat (emitModulePath path) "\n#nullable enable\nusing System;\nusing System.Collections.Generic;")
       prelude = emitPrelude
       body = emitDecls decls
-      strConcat header (strConcat "\n\npublic class " (strConcat className (strConcat " {\n\n" (strConcat prelude (strConcat "\n\n" (strConcat body "\n}\n"))))))
+      strConcat header (strConcat "\n\npublic static class " (strConcat className (strConcat " {\n\n" (strConcat prelude (strConcat "\n\n" (strConcat body "\n}\n"))))))
 
 -- ---- Tests -----------------------------------------------------------------
 
-codegenJavaCheck(label Str)(got Str)(expected Str) =
+codegenCSharpCheck(label Str)(got Str)(expected Str) =
   if got == expected
     printfn (strConcat "OK " label)
   else
@@ -447,78 +475,78 @@ checkContains(label Str)(got Str)(needle Str) =
 
 main =
   -- 1. EInt → long literal
-  _ = codegenJavaCheck "1 EInt 42" (emitExpr (EInt 42)) "42L"
+  _ = codegenCSharpCheck "1 EInt 42" (emitExpr (EInt 42)) "42L"
 
   -- 2. EStr → double-quoted string
-  _ = codegenJavaCheck "2 EStr hello" (emitExpr (EStr "hello")) "\"hello\""
+  _ = codegenCSharpCheck "2 EStr hello" (emitExpr (EStr "hello")) "\"hello\""
 
   -- 3. EBool true
-  _ = codegenJavaCheck "3 EBool true" (emitExpr (EBool true)) "true"
+  _ = codegenCSharpCheck "3 EBool true" (emitExpr (EBool true)) "true"
 
   -- 4. EBool false
-  _ = codegenJavaCheck "4 EBool false" (emitExpr (EBool false)) "false"
+  _ = codegenCSharpCheck "4 EBool false" (emitExpr (EBool false)) "false"
 
   -- 5. EBinOp +
-  _ = codegenJavaCheck "5 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1L + 2L)"
+  _ = codegenCSharpCheck "5 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1L + 2L)"
 
   -- 6. EIf → ternary
-  _ = codegenJavaCheck "6 EIf ternary" (emitExpr (EIf (EBool true) (EInt 1) (EInt 0))) "(true ? 1L : 0L)"
+  _ = codegenCSharpCheck "6 EIf ternary" (emitExpr (EIf (EBool true) (EInt 1) (EInt 0))) "(true ? 1L : 0L)"
 
-  -- 7. EList → List.of(...)
-  _ = codegenJavaCheck "7 EList" (emitExpr (EList (EInt 1 :: EInt 2 :: []))) "java.util.List.of(1L, 2L)"
+  -- 7. TyName Int → long
+  _ = codegenCSharpCheck "7 TyName Int" (emitType (TyName "Int")) "long"
 
-  -- 8. ENil → empty list
-  _ = codegenJavaCheck "8 ENil" (emitExpr ENil) "java.util.List.of()"
+  -- 8. TyName Float → double
+  _ = codegenCSharpCheck "8 TyName Float" (emitType (TyName "Float")) "double"
 
-  -- 9. TyName Int → long
-  _ = codegenJavaCheck "9 TyName Int" (emitType (TyName "Int")) "long"
+  -- 9. TyName Str → string
+  _ = codegenCSharpCheck "9 TyName Str" (emitType (TyName "Str")) "string"
 
-  -- 10. TyName Float → double
-  _ = codegenJavaCheck "10 TyName Float" (emitType (TyName "Float")) "double"
+  -- 10. TyName Bool → bool
+  _ = codegenCSharpCheck "10 TyName Bool" (emitType (TyName "Bool")) "bool"
 
-  -- 11. TyName Str → String
-  _ = codegenJavaCheck "11 TyName Str" (emitType (TyName "Str")) "String"
+  -- 11. TyApp List Int → List<long>
+  _ = codegenCSharpCheck "11 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "System.Collections.Generic.List<long>"
 
-  -- 12. TyName Bool → boolean
-  _ = codegenJavaCheck "12 TyName Bool" (emitType (TyName "Bool")) "boolean"
+  -- 12. TyFn Int Bool → Func<long, bool>
+  _ = codegenCSharpCheck "12 TyFn" (emitType (TyFn (TyName "Int") (TyName "Bool"))) "System.Func<long, bool>"
 
-  -- 13. TyApp List Int → java.util.List<Long>
-  _ = codegenJavaCheck "13 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "java.util.List<Long>"
+  -- 13. safeIdent: C# keyword 'class' gets suffix
+  _ = codegenCSharpCheck "13 safeIdent class" (safeIdent "class") "class_"
 
-  -- 14. TyFn Int Bool → Function<Long, Boolean>
-  _ = codegenJavaCheck "14 TyFn" (emitType (TyFn (TyName "Int") (TyName "Bool"))) "java.util.function.Function<Long, Boolean>"
+  -- 14. safeIdent: non-keyword unchanged
+  _ = codegenCSharpCheck "14 safeIdent foo" (safeIdent "foo") "foo"
 
-  -- 15. safeIdent: Java keyword 'class' gets suffix
-  _ = codegenJavaCheck "15 safeIdent class" (safeIdent "class") "class_"
+  -- 15. safeTypeIdent: capitalizes first letter
+  _ = codegenCSharpCheck "15 safeTypeIdent color" (safeTypeIdent "color") "Color"
 
-  -- 16. safeIdent: non-keyword unchanged
-  _ = codegenJavaCheck "16 safeIdent foo" (safeIdent "foo") "foo"
-
-  -- 17. DType Color → sealed interface + records
+  -- 16. DType Color → interface + records
   colorCtors = MkCon "Red" [] :: MkCon "Green" (TyName "Int" :: []) :: []
   colorOut = emitDecl (DType "Color" [] colorCtors)
-  _ = checkContains "17 DType sealed interface" colorOut "sealed interface Color"
-  _ = checkContains "17 DType record Red" colorOut "record Red()"
-  _ = checkContains "17 DType record Green" colorOut "record Green("
-  _ = checkContains "17 DType implements Color" colorOut "implements Color"
+  _ = checkContains "16 DType interface Color" colorOut "interface Color"
+  _ = checkContains "16 DType record Red" colorOut "record Red()"
+  _ = checkContains "16 DType record Green" colorOut "record Green("
+  _ = checkContains "16 DType implements Color" colorOut ": Color"
 
-  -- 18. DFn add → static method
+  -- 17. DFn add → static method
   addParams = MkParam "a" (TyName "Int") :: MkParam "b" (TyName "Int") :: []
   addOut = emitDecl (DFn "add" addParams (Some (TyName "Int")) (EBinOp "+" (EVar "a") (EVar "b")))
-  _ = checkContains "18 DFn static" addOut "public static"
-  _ = checkContains "18 DFn name" addOut "add("
-  _ = checkContains "18 DFn return" addOut "return"
+  _ = checkContains "17 DFn static" addOut "public static"
+  _ = checkContains "17 DFn name" addOut "add("
+  _ = checkContains "17 DFn return" addOut "=>"
 
-  -- 19. Full module emit
+  -- 18. Full module emit
   idParams = MkParam "x" (TyName "Int") :: []
   modDecls = DType "Color" [] (MkCon "Red" [] :: MkCon "Blue" [] :: []) :: DFn "id" idParams (Some (TyName "Int")) (EVar "x") :: []
   m = MkModule ("Test" :: "Mod" :: []) modDecls
   out = emitModule m
-  _ = checkContains "19 module class Mod" out "public class Mod"
-  _ = checkContains "19 module sealed Color" out "sealed interface Color"
-  _ = checkContains "19 module fn id" out "id("
+  _ = checkContains "18 module class Mod" out "public static class Mod"
+  _ = checkContains "18 module interface Color" out "interface Color"
+  _ = checkContains "18 module fn id" out "id("
 
-  -- 20. EFloat
-  _ = codegenJavaCheck "20 EFloat" (emitExpr (EFloat "3.14")) "3.14"
+  -- 19. EFloat
+  _ = codegenCSharpCheck "19 EFloat" (emitExpr (EFloat "3.14")) "3.14"
+
+  -- 20. EChar
+  _ = codegenCSharpCheck "20 EChar newline" (emitExpr (EChar '\n')) "'\\n'"
 
   0

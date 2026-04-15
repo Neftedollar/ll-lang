@@ -1,0 +1,11 @@
+module Platform.Java.Runtime
+
+-- Java runtime helper declarations for ll-lang programs.
+-- These are external functions available on the Java 21 platform.
+
+-- Standard I/O
+external console_log(msg Str) Unit
+external System_exit(code Int) Unit
+
+-- JSON
+external JSON_parse(src Str) Str

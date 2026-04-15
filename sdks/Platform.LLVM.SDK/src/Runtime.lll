@@ -1,0 +1,11 @@
+module Platform.LLVM.Runtime
+
+-- LLVM IR runtime helper declarations for ll-lang programs.
+-- These are external functions available via the LLVM runtime.
+
+-- Standard I/O
+external console_log(msg Str) Unit
+
+-- Memory
+external malloc(size Int) Int
+external free(ptr Int) Unit

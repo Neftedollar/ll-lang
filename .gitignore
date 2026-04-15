@@ -12,8 +12,16 @@ my-mcps/
 # local build artifacts (AOT/R2R outputs, dSYM, etc.)
 artifacts/
 
-# generated F# from `lllc build` next to .lll sources
+# generated output from `lllc build` next to .lll sources (all targets)
 spec/examples/**/*.fs
+spec/examples/**/*.cs
+spec/examples/**/*.csproj
+spec/examples/**/*.fsproj
+spec/examples/**/*.ts
+spec/examples/**/*.py
+spec/examples/**/*.java
+spec/examples/**/*.ll
+spec/examples/**/package.json
 
 # macOS / Python local artifacts
 .DS_Store

@@ -1,0 +1,11 @@
+module Platform.Python.Runtime
+
+-- Python runtime helper declarations for ll-lang programs.
+-- These are external functions available on the Python platform.
+
+-- Standard I/O
+external console_log(msg Str) Unit
+external sys_exit(code Int) Unit
+
+-- JSON
+external JSON_parse(src Str) Str

@@ -1,0 +1,23 @@
+module Platform.LLVM.FFI
+
+-- LLVM IR external name mapping table.
+-- Maps ll-lang `external` function names to their LLVM IR symbol declarations.
+-- The LLVM backend uses direct symbol declarations for external functions.
+
+llvmExternalMap =
+  ("console_log", "console_log") ::
+  []
+
+lookupExternal(name Str) =
+  lookupExternal_ llvmExternalMap name
+
+lookupExternal_(entries List[(Str, Str)])(name Str) =
+  match entries
+    | [] -> ""
+    | (k, v) :: rest ->
+      if k == name
+        v
+      else lookupExternal_ rest name
+
+hasExternal(name Str) =
+  strLen (lookupExternal name) > 0

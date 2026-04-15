@@ -1,0 +1,23 @@
+module Platform.Python.FFI
+
+-- Python external name mapping table.
+-- Maps ll-lang `external` function names to their Python implementations.
+
+pythonExternalMap =
+  ("console_log", "print") ::
+  ("JSON_parse", "json.loads") ::
+  []
+
+lookupExternal(name Str) =
+  lookupExternal_ pythonExternalMap name
+
+lookupExternal_(entries List[(Str, Str)])(name Str) =
+  match entries
+    | [] -> ""
+    | (k, v) :: rest ->
+      if k == name
+        v
+      else lookupExternal_ rest name
+
+hasExternal(name Str) =
+  strLen (lookupExternal name) > 0

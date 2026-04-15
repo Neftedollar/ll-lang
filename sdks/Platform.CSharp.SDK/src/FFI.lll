@@ -1,0 +1,23 @@
+module Platform.CSharp.FFI
+
+-- C# external name mapping table.
+-- Maps ll-lang `external` function names to their .NET/C# implementations.
+
+csharpExternalMap =
+  ("console_log", "Console.WriteLine") ::
+  ("JSON_parse", "System.Text.Json.JsonSerializer.Deserialize<object>") ::
+  []
+
+lookupExternal(name Str) =
+  lookupExternal_ csharpExternalMap name
+
+lookupExternal_(entries List[(Str, Str)])(name Str) =
+  match entries
+    | [] -> ""
+    | (k, v) :: rest ->
+      if k == name
+        v
+      else lookupExternal_ rest name
+
+hasExternal(name Str) =
+  strLen (lookupExternal name) > 0

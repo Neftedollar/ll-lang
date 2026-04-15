@@ -1,0 +1,22 @@
+module Platform.Java.FFI
+
+-- Java external name mapping table.
+-- Maps ll-lang `external` function names to their Java 21 implementations.
+
+javaExternalMap =
+  ("console_log", "System.out.println") ::
+  []
+
+lookupExternal(name Str) =
+  lookupExternal_ javaExternalMap name
+
+lookupExternal_(entries List[(Str, Str)])(name Str) =
+  match entries
+    | [] -> ""
+    | (k, v) :: rest ->
+      if k == name
+        v
+      else lookupExternal_ rest name
+
+hasExternal(name Str) =
+  strLen (lookupExternal name) > 0

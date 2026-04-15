@@ -1,0 +1,33 @@
+module Platform.FSharp.FFI
+
+-- F# external name mapping table.
+-- Maps ll-lang `external` function names to their .NET/F# implementations.
+-- This is the ll-lang representation of the mapping used by the bootstrap compiler.
+
+-- Each entry: (ll-lang-name, fsharp-target-expression)
+fsharpExternalMap =
+  ("console_log", "System.Console.WriteLine") ::
+  ("JSON_parse", "System.Text.Json.JsonSerializer.Deserialize<obj>") ::
+  []
+
+-- Look up the F# implementation for an ll-lang external name.
+-- Returns the target expression or empty string if not found.
+lookupExternal(name Str) =
+  match fsharpExternalMap
+    | [] -> ""
+    | (k, v) :: rest ->
+      if k == name
+        v
+      else lookupExternal_ rest name
+
+lookupExternal_(entries List[(Str, Str)])(name Str) =
+  match entries
+    | [] -> ""
+    | (k, v) :: rest ->
+      if k == name
+        v
+      else lookupExternal_ rest name
+
+-- Check if an external name has a known F# mapping.
+hasExternal(name Str) =
+  strLen (lookupExternal name) > 0

@@ -1,0 +1,14 @@
+module Platform.FSharp.Runtime
+
+-- F# runtime helper declarations for ll-lang programs targeting .NET/F#.
+-- These are external functions available via the .NET runtime.
+
+-- Standard I/O
+external console_log(msg Str) Unit
+external Console_Write(msg Str) Unit
+
+-- JSON (via System.Text.Json)
+external JSON_parse(src Str) Str
+
+-- String conversion
+external sprintf(fmt Str)(arg Str) Str
