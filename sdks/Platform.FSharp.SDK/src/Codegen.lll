@@ -126,6 +126,11 @@ isTypeParam(s Str) =
       else false
     | _ -> false
 
+-- Platform.FSharp.SDK native type mapping:
+--   Maybe A  -> 'a option     (FSharp.Core native)
+--   Result A E -> Result<'a,'e> (FSharp.Core native, same constructor names)
+--   List A   -> 'a list       (already native)
+-- All other types use the default mapping.
 emitType(t TypeExpr) =
   match t
     | TyName "Int" -> "int64"
@@ -139,6 +144,7 @@ emitType(t TypeExpr) =
         strConcat "'" n
       else n
     | TyApp (TyName "List") a -> strConcat (emitType a) " list"
+    | TyApp (TyName "Maybe") a -> strConcat (emitType a) " option"
     | TyApp f a ->
       head = collectTyAppHead (TyApp f a)
       args = collectTyAppArgs (TyApp f a)
@@ -328,12 +334,22 @@ emitParamStr(ps List[Param]) =
     | [] -> ""
     | _ -> strConcat " " (joinWith " " (listMap emitParamName ps))
 
+-- Types shadowed by F# native equivalents — suppress custom DU emission.
+isNativeType(name Str) =
+  if name == "Maybe"
+    true
+  else false
+
 emitDecl(d Decl) =
   match d
     | DType name tvars ctors ->
-      header = strConcat "type " (strConcat name (emitTypeParams tvars))
-      body = emitCtors ctors
-      strConcat header (strConcat " =\n" body)
+      if isNativeType name
+        -- Skip: native F# type used instead (Maybe → option, etc.)
+        ""
+      else
+        header = strConcat "type " (strConcat name (emitTypeParams tvars))
+        body = emitCtors ctors
+        strConcat header (strConcat " =\n" body)
     | DFn name params _ body ->
       paramStr = emitParamStr params
       strConcat "let rec " (strConcat (safeIdent name) (strConcat paramStr (strConcat " =\n    " (emitExpr body))))
@@ -454,5 +470,19 @@ main =
 
   -- 20. TyFn
   _ = codegenCheck "20 TyFn" (emitType (TyFn (TyName "Int") (TyName "Bool"))) "int64 -> bool"
+
+  -- 21. Native type mapping: Maybe -> option
+  _ = codegenCheck "21 TyApp Maybe Int -> option" (emitType (TyApp (TyName "Maybe") (TyName "Int"))) "int64 option"
+
+  -- 22. Native type mapping: DType Maybe is suppressed
+  maybeDU = DType "Maybe" ("A" :: []) (MkCon "Some" (TyName "A" :: []) :: MkCon "None" [] :: [])
+  _ = codegenCheck "22 DType Maybe suppressed" (emitDecl maybeDU) ""
+
+  -- 23. DExternal emits failwith stub
+  extDecl = DExternal "httpGet" (MkParam "url" (TyName "Str") :: []) (TyName "Str")
+  _ = checkContains "23 DExternal stub" (emitDecl extDecl) "failwith \"external: httpGet\""
+
+  -- 24. DOpaque emits obj alias
+  _ = codegenCheck "24 DOpaque obj alias" (emitDecl (DOpaque "HttpClient")) "type HttpClient = obj"
 
   0
