@@ -1,0 +1,49 @@
+module Examples.PipelineV2
+
+import Std.Compiler
+
+-- ============================================================
+-- Phase v2: self-hosted compiler pipeline using stdlib modules.
+-- Demonstrates: Lexer → Parser → Elaborator → HM Infer → Codegen
+-- All phases are ll-lang modules from stdlib/src/.
+-- Compare with 17-pipeline-real.lll which wrote everything inline.
+-- ============================================================
+
+-- 1. Compile a simple function — should produce F# output.
+demo1 =
+  src = "module Demo\nadd(a Int)(b Int) = a + b\n"
+  result = compile src
+  strContains "add" result
+
+-- 2. Check a program with an unbound variable — should return an error.
+demo2 =
+  src = "module Demo\nresult = unknownName\n"
+  result = compile src
+  strContains "Unbound" result
+
+-- 3. Full inference-aware check on a well-typed program.
+demo3 =
+  src = "module Demo\nid(x Int) = x\n"
+  errs = collectAllErrors src
+  listIsEmpty errs
+
+-- 4. Look up a symbol in source code.
+demo4 =
+  src = "module Demo\nfoo(x Int) = x + 1\n"
+  result = lookupSymbol src "foo"
+  strContains "\"found\":true" result
+
+-- ---- Tests ---------------------------------------------------------------
+
+checkBool(label Str)(ok Bool) =
+  if ok
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " label)
+
+main =
+  _ = checkBool "1 compile produces output" demo1
+  _ = checkBool "2 compile catches unbound" demo2
+  _ = checkBool "3 inference ok on typed" demo3
+  _ = checkBool "4 lookup finds symbol" demo4
+  printfn "Done"
