@@ -14,10 +14,13 @@ INDENT  ::= synthetic token — emitted when indentation increases
 DEDENT  ::= synthetic token — emitted when indentation decreases
 
 (* --- Keywords ----------------------------------------------- *)
-KW ::= "fn" | "let" | "tag" | "unit"
+(* `fn`, `type`, `let`-as-decl, `in`, `then`, `with` have been removed.
+   Declarations are keyword-free: TYPEID = type-body and IDENT param* = expr.
+   The `let` keyword survives only as the bare-form let expression inside fn bodies. *)
+KW ::= "let" | "tag" | "unit"
      | "trait" | "impl" | "import" | "export" | "module"
+     | "external" | "opaque"
      | "match" | "if" | "else" | "true" | "false"
-     (* "with" removed; "type" removed — type decls start with TYPEID directly *)
 
 (* --- Identifiers -------------------------------------------- *)
 (* value identifiers: lowercase start *)
@@ -30,84 +33,139 @@ TYPEID ::= [A-Z][a-zA-Z0-9_]*
 INT_LIT   ::= [0-9]+
 FLOAT_LIT ::= [0-9]+ '.' [0-9]+
 STR_LIT   ::= '"' ( [^"\\] | '\\' . )* '"'
+CHAR_LIT  ::= "'" ( [^'\\] | '\\' . ) "'"
 BOOL_LIT  ::= "true" | "false"
 
 (* --- Operators & Punctuation -------------------------------- *)
-OP_PIPE    ::= "->"
-OP_LAMBDA  ::= "\"
-OP_DOT     ::= "."
-OP_COMMA   ::= ","
-OP_COLON   ::= ":"
-OP_EQ      ::= "="
-OP_ARROW   ::= "->"       (* same as pipe — context disambiguates *)
-OP_BAR     ::= "|"
-OP_LBRACK  ::= "["
-OP_RBRACK  ::= "]"
-OP_LPAREN  ::= "("
-OP_RPAREN  ::= ")"
-OP_PLUS    ::= "+"
-OP_MINUS   ::= "-"
-OP_STAR    ::= "*"
-OP_SLASH   ::= "/"
-OP_CARET   ::= "^"
-OP_LT      ::= "<"
-OP_GT      ::= ">"
-OP_LE      ::= "<="
-OP_GE      ::= ">="
-OP_EQ2        ::= "=="
-OP_NEQ        ::= "!="
-OP_UNDERSCORE ::= "_"
+(* Fixed operator set — no user-defined operators in v2. *)
+OP_PIPE        ::= "->"       (* left-to-right pipe; also used for type arrow and match branch *)
+OP_PIPE_FWD    ::= "|>"       (* alternative pipe spelling — equivalent to "->" in expr context *)
+OP_BIND        ::= ">>="      (* monadic sequencing / bind *)
+OP_SEQ         ::= ">>"       (* discard-result sequencing *)
+OP_CHOICE      ::= "<|>"      (* applicative/parser choice *)
+OP_CONS        ::= "::"       (* list cons (right-associative) *)
+OP_LAMBDA      ::= "\"
+OP_DOT         ::= "."
+OP_COMMA       ::= ","
+OP_COLON       ::= ":"
+OP_EQ          ::= "="
+OP_BAR         ::= "|"
+OP_LBRACK      ::= "["
+OP_RBRACK      ::= "]"
+OP_LPAREN      ::= "("
+OP_RPAREN      ::= ")"
+OP_PLUS        ::= "+"
+OP_MINUS       ::= "-"
+OP_STAR        ::= "*"
+OP_SLASH       ::= "/"
+OP_CARET       ::= "^"
+OP_LT          ::= "<"
+OP_GT          ::= ">"
+OP_LE          ::= "<="
+OP_GE          ::= ">="
+OP_EQ2         ::= "=="
+OP_NEQ         ::= "!="
+OP_UNDERSCORE  ::= "_"
 
 (* ============================================================
-   Expressions
+   Expressions — operator precedence (loosest → tightest)
+   ============================================================
+
+   Level 1 (loosest): <|>   — parser choice / applicative alternative
+   Level 2:           >>= >> — monadic bind, sequence
+   Level 3:           -> |>  — left-to-right pipe (both spellings are equivalent)
+   Level 4:           < > <= >= == !=  — comparisons (non-associative)
+   Level 5:           ::   — list cons (right-associative)
+   Level 6:           + -  — additive arithmetic
+   Level 7:           * /  — multiplicative arithmetic
+   Level 8 (tightest): juxtaposition — curried function application
+
+   All binary operators except :: are left-associative.
+   The lambda body is the loosest of all; lambda-expr may appear as a
+   trailing argument (see trailing-lambda rule below).
    ============================================================ *)
 
 expr ::= let-expr
        | lambda-expr
        | if-expr
        | match-expr
-       | pipe-expr
-       | arith-expr
+       | choice-expr
 
-(* pipe: left-associative, lowest precedence after if/match *)
-pipe-expr ::= arith-expr (OP_PIPE arith-expr)*
+(* Level 1: choice — left-associative, loosest binary operator *)
+choice-expr ::= bind-expr (OP_CHOICE bind-expr)*
 
-(* arithmetic: standard precedence *)
-arith-expr  ::= cmp-expr ((OP_PLUS | OP_MINUS) cmp-expr)*
-cmp-expr    ::= app-expr ((OP_LT | OP_GT | OP_LE | OP_GE | OP_EQ2 | OP_NEQ) app-expr)*
-app-expr    ::= atom atom*                         (* juxtaposition = curried application *)
-atom        ::= tagged-lit
-              | literal
-              | IDENT
+(* Level 2: bind / sequence — left-associative *)
+bind-expr   ::= pipe-expr ((OP_BIND | OP_SEQ) pipe-expr)*
+
+(* Level 3: pipe — left-associative; both "->" and "|>" are accepted *)
+pipe-expr   ::= cmp-expr ((OP_PIPE | OP_PIPE_FWD) cmp-expr)*
+
+(* Level 4: comparison — non-associative *)
+cmp-expr    ::= cons-expr ((OP_LT | OP_GT | OP_LE | OP_GE | OP_EQ2 | OP_NEQ) cons-expr)?
+
+(* Level 5: list cons — right-associative *)
+cons-expr   ::= arith-expr (OP_CONS cons-expr)?
+
+(* Level 6-7: arithmetic *)
+arith-expr  ::= mul-expr ((OP_PLUS | OP_MINUS) mul-expr)*
+mul-expr    ::= app-expr ((OP_STAR | OP_SLASH) app-expr)*
+
+(* Level 8: juxtaposition — left-associative, tightest binary form.
+   A trailing lambda is a lambda-expr that appears as the last argument
+   of an application without extra parentheses (syntactic sugar; the parser
+   desugars it immediately). The lambda body extends to the next DEDENT or
+   statement boundary. *)
+app-expr    ::= tagged-expr (trailing-arg)*
+trailing-arg ::= tagged-expr             (* normal argument atom *)
+               | lambda-expr             (* trailing lambda — no parens needed *)
+
+(* Atom with optional tag annotation *)
+tagged-expr ::= atom (OP_LBRACK TYPEID OP_RBRACK)?
+
+(* Atoms *)
+atom        ::= literal
+              | IDENT                               (* value reference or zero-arg value *)
+              | TYPEID                              (* constructor reference — passable as value *)
               | list-lit
-              | tuple-lit
-              | OP_LPAREN expr OP_RPAREN            (* grouping — human mode *)
+              | OP_LPAREN expr OP_RPAREN            (* grouping *)
 
-(* literals *)
-literal     ::= INT_LIT | FLOAT_LIT | STR_LIT | BOOL_LIT
+(* Literals *)
+literal     ::= INT_LIT | FLOAT_LIT | STR_LIT | BOOL_LIT | CHAR_LIT
 
-(* tagged literal: value[Tag] *)
-tagged-lit  ::= atom OP_LBRACK TYPEID OP_RBRACK
+(* Collections *)
+list-lit    ::= OP_LBRACK (expr (OP_SEMI? expr)*)? OP_RBRACK
+              (* elements separated by whitespace and/or optional `;` *)
+tuple-lit   ::= expr OP_COMMA expr (OP_COMMA expr)*  (* comma = tuple; 2+ elements *)
 
-(* collections *)
-list-lit    ::= OP_LBRACK [ expr ((OP_SEMI)? expr)* ] OP_RBRACK
-              (* elements may be separated by whitespace, optional ';', or both *)
-tuple-lit   ::= expr OP_COMMA expr (OP_COMMA expr)* (* comma = tuple *)
+(* Let binding inside function bodies — keyword-free form also allowed: `name = expr` *)
+let-expr    ::= "let" pattern "=" expr
+              | IDENT "=" expr    (* keyword-free binding; disambiguated from fn-decl by context *)
 
-(* let binding — bare form only; continuations chain via layout (parseBlockExpr) *)
-let-expr    ::= "let" IDENT "=" expr
-
-(* lambda *)
+(* Lambda — multi-arg shorthand desugars to nested single-arg lambdas *)
 lambda-expr ::= OP_LAMBDA IDENT+ OP_DOT expr
 
-(* conditional — `then` has been removed; condition is separated from body
-   by a newline. Inline form requires the body on the next (indented) line. *)
+(* Conditional — `then` removed; body is indented block or same-line expr after newline *)
 if-expr     ::= "if" expr NEWLINE expr NEWLINE "else" expr
 
-(* pattern match: "with" removed — arms follow scrutinee directly *)
-match-expr  ::= "match" expr NEWLINE INDENT (OP_BAR pattern OP_ARROW expr NEWLINE)+ DEDENT
+(* Pattern match — `with` removed; arms follow scrutinee directly *)
+(* "->" in arm context is the branch arrow — same token as OP_PIPE; context disambiguates *)
+match-expr  ::= "match" expr NEWLINE INDENT (OP_BAR pattern "->" expr NEWLINE)+ DEDENT
 
-pattern     ::= TYPEID pattern*    (* constructor pattern *)
+(* Constructor/function passing rule (v2 canonical):
+   Every TYPEID constructor with arity n is passable as a curried function
+   A1 -> A2 -> ... -> An -> T wherever a function value of that type is expected.
+   No explicit `\x. Ctor x` wrapper is needed unless arity is ambiguous from context. *)
+
+(* Zero-arg call/value rule (v2 canonical):
+   A name with no arguments is a VALUE REFERENCE, not a call.
+   To invoke a nullary effect, pass the required seed or () argument.
+   There are no zero-argument function calls — `()` is the unit literal, not a call trigger. *)
+
+(* --- Patterns ------------------------------------------- *)
+pattern     ::= TYPEID pattern*    (* constructor pattern — matches ctor with args *)
+              | pattern OP_CONS pattern  (* list cons pattern: head :: tail *)
+              | OP_LPAREN pattern (OP_COMMA pattern)+ OP_RPAREN  (* tuple pattern *)
+              | OP_LBRACK (pattern (OP_COMMA pattern)*)? OP_RBRACK  (* list literal pattern *)
               | IDENT               (* variable binding *)
               | literal             (* literal match *)
               | OP_UNDERSCORE       (* wildcard *)
@@ -143,14 +201,19 @@ decl ::= fn-decl
        | external-decl
        | opaque-decl
 
-(* --- let (top-level) --------------------------------------- *)
-let-decl ::= "let" IDENT "=" expr
+(* --- value binding (top-level) ----------------------------- *)
+(* Keyword-free. No `let` or `fn` keyword at the declaration level.
+   `let` keyword is only valid inside fn bodies (as let-expr). *)
+let-decl ::= IDENT "=" expr
 
-(* --- fn ---------------------------------------------------- *)
-fn-decl ::= "fn" IDENT constraint* param* type-expr? "=" expr
-          | "fn" IDENT constraint* param* type-expr? "=" NEWLINE INDENT expr DEDENT
+(* --- function declaration ---------------------------------- *)
+(* Keyword-free: name followed by one or more param groups, optional return type, body.
+   If a name has no params, it is a value binding (same form as let-decl above).
+   Disambiguation: a lone `name = expr` is a value binding; `name(p T) = expr` is a fn. *)
+fn-decl ::= IDENT constraint* param+ type-expr? "=" expr
+          | IDENT constraint* param+ type-expr? "=" NEWLINE INDENT expr DEDENT
 
-param      ::= OP_LPAREN IDENT type-expr OP_RPAREN    (* typed param *)
+param      ::= OP_LPAREN IDENT type-expr? OP_RPAREN   (* typed param; type optional (inferred) *)
 constraint ::= OP_LBRACK IDENT ":" TYPEID OP_RBRACK   (* [F: Functor] *)
 
 (* --- type -------------------------------------------------- *)
@@ -183,8 +246,9 @@ external-decl ::= "external" IDENT param* type-expr
 opaque-decl ::= "opaque" TYPEID
 
 (* --- trait ------------------------------------------------- *)
+(* Trait method signatures use the same keyword-free form as fn-decl but without a body. *)
 trait-decl ::= "trait" TYPEID type-var+ "=" NEWLINE INDENT fn-sig+ DEDENT
-fn-sig     ::= "fn" IDENT param+ type-expr
+fn-sig     ::= IDENT param+ type-expr
 
 (* --- impl -------------------------------------------------- *)
 impl-decl ::= "impl" TYPEID TYPEID "=" NEWLINE INDENT fn-decl+ DEDENT
@@ -202,19 +266,34 @@ import-decl  ::= "import" (module-path | STR_LIT)
 export-decl  ::= "export" decl
 
 (* ============================================================
-   Implementation notes for Phase 2 (Lexer/Parser in F#)
+   Implementation notes
    ============================================================
-   1. INDENT/DEDENT are synthetic — emit from whitespace changes, not literal tokens.
-   2. "->" is used for pipe (expr), type arrow (type-expr), and match branch.
-      Disambiguation: in expr context, "->" is pipe only between app-exprs;
-      type arrow appears only in type-expr; match arrow follows a pattern.
-   3. "[" disambiguation: list literal has space-separated exprs;
-      tag application has exactly one TYPEID followed by "]";
-      parametric type has one type-expr.
-      Lookahead: if next token after "[" is TYPEID and then "]", it's a tag.
-   4. List literals accept both [1 2 3] and [1; 2; 3].
-      "," forms tuples: 1, 2, 3.
-      Record fields use "," in type-decl.
-   5. Keywords are reserved — cannot be used as IDENT or TYPEID.
-   6. "\" begins a lambda expression. Followed by one or more IDENT, then ".", then expr.
+   1. INDENT/DEDENT are synthetic — emitted from indentation changes, not literals.
+   2. "->" is overloaded: pipe (expr), type arrow (type-expr), and match branch arrow.
+      Disambiguation by context:
+      - expr context between app-exprs: pipe
+      - type-expr context: type arrow
+      - after pattern in match arm: branch arrow
+      "|>" is an alias for "->" in expr context only.
+   3. ">>=", ">>", "<|>" are binary operators desugared to curried function application
+      in the AST: `a >>= b` → `EApp(EApp(EVar ">>=", a), b)`.
+      They are NOT special forms — they look up `>>=`, `>>`, `<|>` in scope.
+      Stdlib modules `Std.State`, `Std.Parsec`, etc. supply the implementations.
+   4. "[" disambiguation:
+      - tag suffix on a literal: `42[m]` — exactly one IDENT/TYPEID then "]"
+      - list literal: `[1 2 3]` or `[1; 2; 3]`
+      - parametric type in type-expr: `Maybe[Int]`
+   5. Trailing lambda sugar: `f x \y. body` desugars to `f x (\y. body)`.
+      A bare `\` in argument position is parsed as a full lambda-expr argument.
+      The lambda body extends to the next DEDENT or statement boundary.
+   6. Zero-arg rule: a bare IDENT or TYPEID with no argument tokens is a value
+      reference, not a function call. There are no zero-argument calls. `()` is
+      the unit literal, not a call trigger.
+   7. Constructor passing: TYPEID used in function-value position is treated as
+      a curried function of its constructor's full arity. `\x. Some x` and `Some`
+      are equivalent when the arity is unambiguous from context.
+   8. List literals accept both [1 2 3] (whitespace-separated) and [1; 2; 3].
+      Commas form tuples: `1, 2` is a 2-tuple. Record fields also use comma.
+   9. Keywords are reserved — cannot be used as IDENT or TYPEID.
+  10. "\" begins a lambda. Followed by one or more IDENT params, then ".", then expr body.
    ============================================================ *)

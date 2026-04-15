@@ -1,0 +1,335 @@
+module Compiler.Types
+
+import Std.Parser
+import Std.Map
+import Std.List
+import Std.Maybe
+
+-- ============================================================
+-- HM Type Representations for ll-lang v2 self-hosted compiler.
+-- Canonical owner: Compiler.Types (14-v2-canonical-compiler-boundaries.md)
+--
+-- TypeExpr (from Std.Parser):
+--   TyName Str    -- flex vars ($0,$1,...), rigid vars (a,b), names (Int,Str)
+--   TyApp TypeExpr TypeExpr
+--   TyFn  TypeExpr TypeExpr
+--
+-- Substitution:  RBMap[Str][TypeExpr]  (strCmp from Std.Map)
+-- Type Env:      RBMap[Str][Scheme]
+-- ============================================================
+
+-- Local Result type (avoid depending on Std.Parsec)
+InferResult A = InferOk A | InferErr Str
+
+-- ---- Flex variable convention -----------------------------------------
+-- Flex (unification) vars: TyName "$0", TyName "$1", ... (start with '$')
+-- Rigid type vars: TyName "a", TyName "b", ... (lowercase, no $)
+-- Type names: TyName "Int", TyName "Maybe", ... (uppercase or stdlib)
+
+isFlex(name Str) =
+  if strLen name > 0
+    strSlice name 0 1 == "$"
+  else false
+
+freshVarName(n Int) = strConcat "$" (intToStr n)
+
+-- ---- Type scheme -------------------------------------------------------
+
+Scheme = MkScheme (List[Str]) TypeExpr
+
+schemeMono(t TypeExpr) = MkScheme [] t
+
+schemeVars(s Scheme) =
+  match s
+    | MkScheme vs _ -> vs
+
+schemeBody(s Scheme) =
+  match s
+    | MkScheme _ body -> body
+
+-- ---- Substitution helpers (RBMap[Str][TypeExpr]) ----------------------
+
+substEmpty = Leaf
+
+substInsert(v Str)(t TypeExpr)(s RBMap[Str][TypeExpr]) =
+  mapInsert strCmp v t s
+
+substLookup(v Str)(s RBMap[Str][TypeExpr]) =
+  mapLookup strCmp v s
+
+substRemove(v Str)(s RBMap[Str][TypeExpr]) =
+  mapFold
+    (\acc nk nv.
+      if strCmp v nk == 0
+        acc
+      else mapInsert strCmp nk nv acc
+    )
+    Leaf
+    s
+
+-- Apply substitution to a TypeExpr.
+applyType(s RBMap[Str][TypeExpr])(t TypeExpr) =
+  match t
+    | TyName v ->
+      if isFlex v
+        match substLookup v s
+          | Some t2 -> applyType s t2
+          | None -> t
+      else t
+    | TyApp a b -> TyApp (applyType s a) (applyType s b)
+    | TyFn  a b -> TyFn  (applyType s a) (applyType s b)
+
+-- Apply substitution to a scheme (exclude quantified vars from domain).
+applyScheme(s RBMap[Str][TypeExpr])(sch Scheme) =
+  match sch
+    | MkScheme vs body ->
+      s2 = listFold (\acc v. substRemove v acc) s vs
+      MkScheme vs (applyType s2 body)
+
+-- Apply substitution to a type env.
+applyEnv(s RBMap[Str][TypeExpr])(env RBMap[Str][Scheme]) =
+  mapFold (\acc k sch. mapInsert strCmp k (applyScheme s sch) acc) Leaf env
+
+-- Compose substitutions: s1 after s2 (apply s2 first, then s1).
+substCompose(s1 RBMap[Str][TypeExpr])(s2 RBMap[Str][TypeExpr]) =
+  s2Applied = mapFold (\acc k t. mapInsert strCmp k (applyType s1 t) acc) Leaf s2
+  mapFold
+    (\acc k v.
+      match substLookup k acc
+        | None -> mapInsert strCmp k v acc
+        | Some _ -> acc
+    )
+    s2Applied
+    s1
+
+-- ---- Free type variable helpers ----------------------------------------
+
+ftvTypeList(t TypeExpr) =
+  match t
+    | TyName v ->
+      if isFlex v
+        [v]
+      else []
+    | TyApp a b -> strNub (listAppend (ftvTypeList a) (ftvTypeList b))
+    | TyFn  a b -> strNub (listAppend (ftvTypeList a) (ftvTypeList b))
+
+ftvSchemeList(sch Scheme) =
+  match sch
+    | MkScheme vs body ->
+      listFilter (\v. listAll (\q. v != q) vs) (ftvTypeList body)
+
+ftvEnvList(env RBMap[Str][Scheme]) =
+  strNub (mapFold (\acc k sch. listAppend acc (ftvSchemeList sch)) [] env)
+
+-- Deduplicate a list of strings (preserves first occurrence).
+strNub(xs List[Str]) =
+  listFold
+    (\acc x.
+      if listAny (\y. x == y) acc
+        acc
+      else listAppend acc [x]
+    )
+    []
+    xs
+
+-- ---- Fresh variable state ---------------------------------------------
+
+Fresh = MkFresh Int
+
+freshInit = MkFresh 0
+
+freshNext(f Fresh) =
+  match f
+    | MkFresh n -> (TyName (freshVarName n), MkFresh (n + 1))
+
+-- ---- Generalization and instantiation ---------------------------------
+
+generalize(env RBMap[Str][Scheme])(t TypeExpr) =
+  envFtv = ftvEnvList env
+  toQuant = listFilter (\v. listAll (\e. v != e) envFtv) (ftvTypeList t)
+  MkScheme toQuant t
+
+-- instantiate: replace each quantified var with a fresh flex var.
+-- Returns (TypeExpr, Fresh) to thread the counter.
+instantiateWith(f Fresh)(vs List[Str])(body TypeExpr) =
+  match vs
+    | [] -> (body, f)
+    | v :: rest ->
+      let (tv, f2) = freshNext f
+      s = substInsert v tv substEmpty
+      body2 = applyType s body
+      instantiateWith f2 rest body2
+
+instantiate(f Fresh)(sch Scheme) =
+  match sch
+    | MkScheme vs body -> instantiateWith f vs body
+
+-- ---- Unification -------------------------------------------------------
+
+unify(t1 TypeExpr)(t2 TypeExpr) =
+  match t1
+    | TyName a ->
+      match t2
+        | TyName b ->
+          if a == b
+            InferOk substEmpty
+          else if isFlex a
+            bindVar a t2
+          else if isFlex b
+            bindVar b t1
+          else InferErr (unifyErrMsg t1 t2)
+        | _ ->
+          if isFlex a
+            bindVar a t2
+          else InferErr (unifyErrMsg t1 t2)
+    | TyApp a1 b1 ->
+      match t2
+        | TyApp a2 b2 ->
+          match unify a1 a2
+            | InferErr e -> InferErr e
+            | InferOk s1 ->
+              match unify (applyType s1 b1) (applyType s1 b2)
+                | InferErr e -> InferErr e
+                | InferOk s2 -> InferOk (substCompose s2 s1)
+        | TyName v ->
+          if isFlex v
+            bindVar v t1
+          else InferErr (unifyErrMsg t1 t2)
+        | _ -> InferErr (unifyErrMsg t1 t2)
+    | TyFn a1 b1 ->
+      match t2
+        | TyFn a2 b2 ->
+          match unify a1 a2
+            | InferErr e -> InferErr e
+            | InferOk s1 ->
+              match unify (applyType s1 b1) (applyType s1 b2)
+                | InferErr e -> InferErr e
+                | InferOk s2 -> InferOk (substCompose s2 s1)
+        | TyName v ->
+          if isFlex v
+            bindVar v t1
+          else InferErr (unifyErrMsg t1 t2)
+        | _ -> InferErr (unifyErrMsg t1 t2)
+
+unifyErrMsg(t1 TypeExpr)(t2 TypeExpr) =
+  strConcat "Cannot unify " (strConcat (renderType t1) (strConcat " with " (renderType t2)))
+
+bindVar(v Str)(t TypeExpr) =
+  match t
+    | TyName w ->
+      if v == w
+        InferOk substEmpty
+      else InferOk (substInsert v t substEmpty)
+    | _ ->
+      if occursIn v t
+        InferErr (strConcat "Infinite type: " (strConcat v (strConcat " in " (renderType t))))
+      else InferOk (substInsert v t substEmpty)
+
+occursIn(v Str)(t TypeExpr) =
+  listAny (\w. v == w) (ftvTypeList t)
+
+-- ---- Type rendering (for error messages) --------------------------------
+
+renderType(t TypeExpr) =
+  match t
+    | TyName n -> n
+    | TyApp f a ->
+      aStr = match a
+        | TyApp _ _ -> strConcat "(" (strConcat (renderType a) ")")
+        | TyFn  _ _ -> strConcat "(" (strConcat (renderType a) ")")
+        | _ -> renderType a
+      strConcat (renderType f) (strConcat " " aStr)
+    | TyFn a b ->
+      aStr = match a
+        | TyFn _ _ -> strConcat "(" (strConcat (renderType a) ")")
+        | _ -> renderType a
+      strConcat aStr (strConcat " -> " (renderType b))
+
+-- ---- Type environment helpers -----------------------------------------
+
+typeEnvEmpty = Leaf
+
+typeEnvInsert(name Str)(sch Scheme)(env RBMap[Str][Scheme]) =
+  mapInsert strCmp name sch env
+
+typeEnvLookup(name Str)(env RBMap[Str][Scheme]) =
+  mapLookup strCmp name env
+
+typeEnvApply(s RBMap[Str][TypeExpr])(env RBMap[Str][Scheme]) =
+  applyEnv s env
+
+-- ---- Self-test helpers ------------------------------------------------
+
+-- Extract the rendering of a bound flex var from a unification result.
+extractBound(v Str)(r InferResult[RBMap[Str][TypeExpr]]) =
+  match r
+    | InferOk s ->
+      match substLookup v s
+        | Some t -> renderType t
+        | None -> "none"
+    | InferErr e -> e
+
+-- ---- Self-tests --------------------------------------------------------
+
+typesCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+boolStr(b Bool) =
+  if b
+    "true"
+  else "false"
+
+strJoin(xs List[Str]) =
+  match xs
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat " " (strJoin rest))
+
+main =
+  -- 1-3. isFlex
+  _ = typesCheck "1 isFlex $0=true" (boolStr (isFlex "$0")) "true"
+  _ = typesCheck "2 isFlex Int=false" (boolStr (isFlex "Int")) "false"
+  _ = typesCheck "3 isFlex a=false" (boolStr (isFlex "a")) "false"
+
+  -- 4-5. freshVarName
+  _ = typesCheck "4 freshVarName 0" (freshVarName 0) "$0"
+  _ = typesCheck "5 freshVarName 42" (freshVarName 42) "$42"
+
+  -- 6-8. renderType
+  _ = typesCheck "6 renderType Name" (renderType (TyName "Int")) "Int"
+  _ = typesCheck "7 renderType Fn" (renderType (TyFn (TyName "Int") (TyName "Str"))) "Int -> Str"
+  _ = typesCheck "8 renderType App" (renderType (TyApp (TyName "Maybe") (TyName "Int"))) "Maybe Int"
+
+  -- 9-12. applyType
+  s0 = substEmpty
+  _ = typesCheck "9 applyType no-op" (renderType (applyType s0 (TyName "Int"))) "Int"
+  s1 = substInsert "$0" (TyName "Str") substEmpty
+  _ = typesCheck "10 applyType flex->Str" (renderType (applyType s1 (TyName "$0"))) "Str"
+  _ = typesCheck "11 applyType rigid" (renderType (applyType s1 (TyName "a"))) "a"
+  _ = typesCheck "12 applyType TyFn" (renderType (applyType s1 (TyFn (TyName "$0") (TyName "Int")))) "Str -> Int"
+
+  -- 13-16. unify
+  _ = typesCheck "13 unify same" (match unify (TyName "Int") (TyName "Int") | InferOk _ -> "ok" | InferErr _ -> "err") "ok"
+  _ = typesCheck "14 unify mismatch" (match unify (TyName "Int") (TyName "Str") | InferOk _ -> "ok" | InferErr _ -> "err") "err"
+  u3 = unify (TyName "$0") (TyName "Int")
+  _ = typesCheck "15 unify flex=Int" (extractBound "$0" u3) "Int"
+  u4 = unify (TyFn (TyName "$0") (TyName "$1")) (TyFn (TyName "Int") (TyName "Str"))
+  _ = typesCheck "16 unify TyFn" (extractBound "$0" u4) "Int"
+
+  -- 17. generalize
+  sch1 = generalize Leaf (TyFn (TyName "$0") (TyName "$0"))
+  _ = typesCheck "17 generalize" (strJoin (schemeVars sch1)) "$0"
+
+  -- 18. instantiate: scheme (∀ $0. $0 -> $0), fresh=1 → $1 -> $1
+  sch2 = MkScheme ["$0"] (TyFn (TyName "$0") (TyName "$0"))
+  let (t5, _) = instantiate (MkFresh 1) sch2
+  _ = typesCheck "18 instantiate" (renderType t5) "$1 -> $1"
+
+  -- 19-20. occursIn
+  _ = typesCheck "19 occursIn true" (boolStr (occursIn "$0" (TyApp (TyName "List") (TyName "$0")))) "true"
+  _ = typesCheck "20 occursIn false" (boolStr (occursIn "$0" (TyApp (TyName "List") (TyName "$1")))) "false"
+
+  printfn "Done"

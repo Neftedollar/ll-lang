@@ -111,11 +111,11 @@ Detailed execution breakdown lives in
 Detailed execution breakdown lives in
 [v2 syntax ergonomics execution](19-v2-syntax-ergonomics-execution.md).
 
-- [ ] Stabilize the fixed operator layer: `|>`, `>>=`, `>>`, `<|>`.
-- [ ] Define precedence and associativity once and enforce it in both parsers and all codegens.
-- [ ] Stabilize constructor/function passing where canonical.
-- [ ] Stabilize trailing lambda and zero-arg call/value rules.
-- [ ] Remove or de-emphasize noisy syntactic forms that do not buy semantic power.
+- [x] Stabilize the fixed operator layer: `|>`, `>>=`, `>>`, `<|>`.
+- [x] Define precedence and associativity once and enforce it in both parsers and all codegens.
+- [x] Stabilize constructor/function passing where canonical.
+- [x] Stabilize trailing lambda and zero-arg call/value rules.
+- [x] Remove or de-emphasize noisy syntactic forms that do not buy semantic power.
 
 **Exit criteria**
 
