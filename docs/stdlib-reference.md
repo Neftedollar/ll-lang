@@ -808,6 +808,90 @@ transpileToFSharp(src Str) =
 
 ---
 
+### `Std.CompilerTypes` — HM type representations
+
+**Import:** `import Std.CompilerTypes`  
+**LOC:** 336  
+**Description:** Hindley-Milner type representations for the v2 self-hosted compiler. Provides `Scheme`, substitution helpers (`RBMap[Str][TypeExpr]`), free-type-variable utilities, fresh variable generation, unification (`unify`), and `generalize`/`instantiate`. Canonical home for all type-level machinery shared across compiler passes.
+
+**Key types:**
+
+```lll
+-- Flex (unification) vars: TyName "$0", TyName "$1", ...
+-- Rigid type vars: TyName "a", TyName "b", ...
+-- Type names: TyName "Int", TyName "Maybe", ...
+
+Scheme = MkScheme (List[Str]) TypeExpr
+
+InferResult A = InferOk A | InferErr Str
+
+Fresh = MkFresh Int
+```
+
+**Key functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `isFlex` | `Str -> Bool` | True if name starts with `$` |
+| `freshVarName` | `Int -> Str` | `"$N"` |
+| `freshNext` | `Fresh -> (TypeExpr, Fresh)` | Allocate next flex var |
+| `generalize` | `RBMap[Str][Scheme] -> TypeExpr -> Scheme` | Generalize over free flex vars |
+| `instantiate` | `Fresh -> Scheme -> (TypeExpr, Fresh)` | Replace quantified vars with fresh flex vars |
+| `unify` | `TypeExpr -> TypeExpr -> InferResult[RBMap[Str][TypeExpr]]` | Algorithm W unification with occurs check |
+| `applyType` | `RBMap[Str][TypeExpr] -> TypeExpr -> TypeExpr` | Apply substitution to a type |
+| `substCompose` | `Subst -> Subst -> Subst` | Compose substitutions (s1 after s2) |
+| `renderType` | `TypeExpr -> Str` | Pretty-print a type for error messages |
+| `ftvTypeList` | `TypeExpr -> List[Str]` | Free flex vars in a type |
+
+---
+
+### `Std.CompilerInfer` — HM Algorithm W inference
+
+**Import:** `import Std.CompilerInfer`  
+**LOC:** 471  
+**Description:** Hindley-Milner Algorithm W type inference for the v2 self-hosted compiler. Builds on `Std.CompilerTypes`. Provides `InferState` threading, a prelude base environment, and `inferExpr` / `inferDecl` / `inferModule` for inferring types over the `Expr`/`Decl` AST from `Std.Parser`.
+
+**Key types:**
+
+```lll
+-- (env, fresh counter, error list, accumulated substitution)
+InferState = MkInferState
+  (RBMap[Str][Scheme])      -- type environment
+  Fresh                      -- fresh variable counter
+  (List[Str])                -- accumulated errors
+  (RBMap[Str][TypeExpr])     -- accumulated substitution
+```
+
+**Key functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `inferExpr` | `InferState -> Expr -> (TypeExpr, InferState)` | Infer type of an expression |
+| `inferDecl` | `InferState -> Decl -> InferState` | Elaborate one declaration into the env |
+| `inferModule` | `List[Decl] -> List[Str]` | Infer a whole module; return errors |
+| `baseEnv` | `() -> RBMap[Str][Scheme]` | Prelude: arithmetic, comparison, `printfn`, etc. |
+| `inferUnify` | `InferState -> TypeExpr -> TypeExpr -> Str -> InferState` | Unify two types, compose substitution |
+| `inferFreshVar` | `InferState -> (TypeExpr, InferState)` | Allocate a fresh flex var |
+| `inferInstantiate` | `InferState -> Scheme -> (TypeExpr, InferState)` | Instantiate a scheme |
+
+**Usage:**
+
+```lll
+module MyApp.Check
+
+import Std.Parser
+import Std.CompilerInfer
+
+checkSource(src Str) =
+  tokens = tokenize src
+  match parseModule tokens
+    | None -> ["parse error"]
+    | Some m ->
+      inferModule m.decls
+```
+
+---
+
 ### `Std.Compiler` — full pipeline (source → F#)
 
 **Import:** `import Std.Compiler`  
@@ -859,6 +943,8 @@ buildFile(path Str) =
 | Code generation | `Std.CodegenCSharp` | C# emitter |
 | Rendering | `Std.Render` | Shared rendering helpers |
 | Testing | `Std.Test` | Test assertions/utilities |
+| Type inference | `Std.CompilerTypes` | HM substitutions, unification, schemes |
+| Type inference | `Std.CompilerInfer` | Algorithm W for Expr/Decl |
 | Full pipeline | `Std.Compiler` | Source pipeline helpers |
 
 ---
@@ -872,6 +958,8 @@ application-library APIs:
 - `Std.Lexer`
 - `Std.Parser`
 - `Std.Elaborator`
+- `Std.CompilerTypes`
+- `Std.CompilerInfer`
 - `Std.Codegen`
 - `Std.CodegenTS`
 - `Std.CodegenPy`
