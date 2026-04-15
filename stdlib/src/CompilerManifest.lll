@@ -1,0 +1,189 @@
+module Std.CompilerManifest
+
+import Std.Maybe
+import Std.List
+import Std.Map
+import Std.Toml
+
+-- ============================================================
+-- Project manifest model for ll-lang v2 self-hosted compiler.
+-- Canonical owner: Compiler.Project.Manifest
+-- (14-v2-canonical-compiler-boundaries.md)
+--
+-- Builds on Std.Toml's parseManifest to provide a structured,
+-- validated manifest type for the project system.
+--
+-- Input:  lll.toml text (Str)
+-- Output: LLManifest with structured deps and validation errors
+-- ============================================================
+
+-- ---- Dependency source type ------------------------------------------
+
+DepSource =
+  | GitDep Str Str    -- url, ref (branch/tag/commit)
+  | PathDep Str       -- local path
+
+-- Parse a dep value string into a DepSource.
+-- Git deps: "https://github.com/user/repo#ref"
+-- Path deps: "path:../local/dir"
+parseDepSource(val Str) =
+  if strLen val >= 5
+    if strSlice val 0 5 == "path:"
+      PathDep (strSlice val 5 (strLen val - 5))
+    else
+      -- Parse as git URL: split on '#'
+      hashIdx = strIndexOf "#" val
+      if hashIdx < 0
+        GitDep val "main"
+      else
+        url = strSlice val 0 hashIdx
+        ref = strSlice val (hashIdx + 1) (strLen val - hashIdx - 1)
+        GitDep url ref
+  else
+    PathDep val
+
+-- ---- Structured manifest type ----------------------------------------
+
+LLManifest = MkLLManifest Str Str Str (RBMap[Str][DepSource]) (List[Str])
+-- name, version, entry, deps (name → source), platform list
+
+llManifestName(m LLManifest) =
+  match m | MkLLManifest n _ _ _ _ -> n
+
+llManifestVersion(m LLManifest) =
+  match m | MkLLManifest _ v _ _ _ -> v
+
+llManifestEntry(m LLManifest) =
+  match m | MkLLManifest _ _ e _ _ -> e
+
+llManifestDeps(m LLManifest) =
+  match m | MkLLManifest _ _ _ d _ -> d
+
+llManifestPlatform(m LLManifest) =
+  match m | MkLLManifest _ _ _ _ p -> p
+
+-- ---- Manifest validation errors --------------------------------------
+
+ManifestError =
+  | MissingName
+  | EmptyVersion
+  | InvalidDepSource Str Str   -- dep name, raw value
+
+renderManifestError(e ManifestError) =
+  match e
+    | MissingName -> "E020 manifest: [project] name is required"
+    | EmptyVersion -> "E020 manifest: [project] version must not be empty"
+    | InvalidDepSource n v -> strConcat "E020 manifest: dep '" (strConcat n (strConcat "' has invalid source: " v))
+
+-- ---- Conversion from Std.Toml Manifest --------------------------------
+-- Std.Toml stores deps as flat [key1, val1, key2, val2, ...] list.
+-- We convert this to a proper RBMap[Str][DepSource].
+
+parseDepsMap(flat List[Str]) =
+  parseDepsMapAcc flat Leaf
+
+parseDepsMapAcc(flat List[Str])(acc RBMap[Str][DepSource]) =
+  match flat
+    | [] -> acc
+    | key :: val :: rest ->
+      src = parseDepSource val
+      parseDepsMapAcc rest (mapInsert strCmp key src acc)
+    | _ :: [] -> acc   -- odd-length list: skip lone key
+
+-- Validate a converted manifest and return any errors.
+validateManifest(m LLManifest) =
+  errs0 = []
+  errs1 = if llManifestName m == ""
+    listAppend errs0 [MissingName]
+  else errs0
+  errs2 = if llManifestVersion m == ""
+    listAppend errs1 [EmptyVersion]
+  else errs1
+  errs2
+
+-- ---- Entry point: parse lll.toml text → LLManifest or errors ---------
+
+parseTomlManifest(src Str) =
+  match parseManifest src
+    | None -> Err [MissingName]   -- Toml parse failed
+    | Some raw ->
+      name = mName raw
+      version = mVersion raw
+      entry = mEntry raw
+      platform = mPlatform raw
+      deps = parseDepsMap (mDeps raw)
+      m = MkLLManifest name version entry deps platform
+      errs = validateManifest m
+      if listIsEmpty errs
+        Ok m
+      else
+        Err errs
+
+-- Result type (local, since Std.Result not in prelude)
+Result A B =
+  | Ok A
+  | Err B
+
+resultIsOk(r Result[A][B]) =
+  match r | Ok _ -> true | Err _ -> false
+
+-- ---- Self-tests -------------------------------------------------------
+
+manifestCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+boolStr(b Bool) =
+  if b
+    "true"
+  else "false"
+
+main =
+  -- A minimal valid lll.toml
+  toml1 = strConcat "[project]\n" (strConcat "name = \"myapp\"\n" (strConcat "version = \"0.1.0\"\n" "entry = \"src/Main.lll\"\n"))
+
+  -- 1. Parse success
+  r1 = parseTomlManifest toml1
+  _ = manifestCheck "1 parse ok" (boolStr (resultIsOk r1)) "true"
+
+  -- 2. Name extracted
+  m1 = match r1 | Ok m -> m | Err _ -> MkLLManifest "" "" "" Leaf []
+  _ = manifestCheck "2 name" (llManifestName m1) "myapp"
+
+  -- 3. Version extracted
+  _ = manifestCheck "3 version" (llManifestVersion m1) "0.1.0"
+
+  -- 4. Entry extracted (reads src/Main.lll)
+  _ = manifestCheck "4 entry" (llManifestEntry m1) "src/Main.lll"
+
+  -- 5. Empty name → Err
+  toml2 = "[project]\nversion = \"1.0.0\"\n"
+  r2 = parseTomlManifest toml2
+  _ = manifestCheck "5 missing name = Err" (boolStr (resultIsOk r2)) "false"
+
+  -- 6. parseDepSource path
+  ds1 = parseDepSource "path:../stdlib"
+  _ = manifestCheck "6 path dep" (match ds1 | PathDep p -> p | _ -> "?") "../stdlib"
+
+  -- 7. parseDepSource git with ref
+  ds2 = parseDepSource "https://github.com/user/repo#v1.0"
+  _ = manifestCheck "7 git dep url" (match ds2 | GitDep u _ -> u | _ -> "?") "https://github.com/user/repo"
+  _ = manifestCheck "8 git dep ref" (match ds2 | GitDep _ r -> r | _ -> "?") "v1.0"
+
+  -- 9. parseDepSource git without ref → default "main"
+  ds3 = parseDepSource "https://github.com/user/repo"
+  _ = manifestCheck "9 git dep default ref" (match ds3 | GitDep _ r -> r | _ -> "?") "main"
+
+  -- 10. renderManifestError
+  _ = manifestCheck "10 render err" (renderManifestError MissingName) "E020 manifest: [project] name is required"
+
+  -- 11. Manifest with deps
+  tomlDeps = strConcat toml1 "\n[deps]\nstdlib = \"path:../stdlib\"\n"
+  r3 = parseTomlManifest tomlDeps
+  _ = manifestCheck "11 deps parse ok" (boolStr (resultIsOk r3)) "true"
+  m3 = match r3 | Ok m -> m | Err _ -> MkLLManifest "" "" "" Leaf []
+  _ = manifestCheck "12 dep stdlib" (match mapLookup strCmp "stdlib" (llManifestDeps m3) | Some (PathDep p) -> p | _ -> "?") "../stdlib"
+
+  printfn "Done"

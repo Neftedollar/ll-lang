@@ -216,6 +216,10 @@ mVersion(m Manifest) =
   match m
     | MkManifest _ v _ _ _ -> v
 
+mEntry(m Manifest) =
+  match m
+    | MkManifest _ _ e _ _ -> e
+
 mDeps(m Manifest) =
   match m
     | MkManifest _ _ _ d _ -> d
