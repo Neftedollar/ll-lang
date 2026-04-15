@@ -115,12 +115,12 @@ parseTypeExprTop        -- type arrow A -> B (right-associative)
 ambiguity with the start of a tagged expression in `parseAtom` is
 avoided by context: `parseTypeExpr` is only called inside type positions.
 
-## The `parseFnSig` empty-paren quirk
+## The zero-param function / empty-paren quirk (historical)
 
-`fn main()` — zero parameters expressed as empty parens — used to crash
-the parser because the old code treated every `LParen` as the start of
-a `parseParam`, which expected `(ident type)`. The fix (now in the
-codebase):
+In earlier ll-lang the `fn main()` form — zero parameters expressed as
+empty parens — used to crash the parser because the old code treated
+every `LParen` as the start of a `parseParam`, which expected
+`(ident type)`. The fix (still in the stage0 codebase):
 
 ```fsharp
 while paramCont && curTok c = LParen do
@@ -136,11 +136,10 @@ while paramCont && curTok c = LParen do
         | Error _ -> c.Pos <- saved; paramCont <- false
 ```
 
-Semantically `fn main()` is "a function named `main` with an empty
-parameter list, inferred return type". The resulting `FnSig` has
-`Params = []`. Downstream, Codegen special-cases this combination
-(`sig_.Name = "main" && List.isEmpty sig_.Params`) into an
-`[<EntryPoint>]` F# function.
+In **v2**, `fn` was removed. A zero-parameter entry point is written as
+a bare value binding: `main = ...`. The resulting `FnSig` still has
+`Params = []`. Codegen special-cases `sig_.Name = "main" && List.isEmpty sig_.Params`
+into `[<EntryPoint>] let main (argv: string[]) = ...`.
 
 ## Module parsing
 
@@ -162,19 +161,22 @@ that the elaborator and HMInfer read when emitting errors).
 
 ## Declaration dispatch
 
-`parseDecl` branches on the leading keyword:
+`parseDecl` dispatches on the leading token. In the stage0 bootstrap the
+AST still uses `DFn`/`DType` nodes internally; in v2 surface syntax the
+`fn` and `type` keywords are gone and functions/types are recognized by
+leading `IDENT (params…) =` and `TYPEID =` patterns:
 
-| Keyword    | AST node                                    |
-|------------|---------------------------------------------|
-| `fn`       | `DFn(FnSig, Expr)`                          |
-| `let`      | `DLet(Ident, Expr)` for simple `let x = e`, `DLetPat(Pattern, Expr)` otherwise |
-| `type`     | `DType(TypeIdent, TypeParam list, TypeBody)` |
-| `tag`      | `DTag(TypeIdent)`                           |
-| `unit`     | `DUnit(TypeIdent)`                          |
-| `trait`    | `DTrait(TypeIdent, Ident list, FnSig list)` |
-| `impl`     | `DImpl(TypeIdent, TypeIdent, (FnSig * Expr) list)` |
+| Surface (v2) / Stage0 trigger   | AST node                                         |
+|----------------------------------|--------------------------------------------------|
+| `IDENT ( param )+ = body`        | `DFn(FnSig, Expr)` — function declaration        |
+| `IDENT = expr` (no params)       | `DLet(Ident, Expr)` — value binding / entry point |
+| `TYPEID type-params? = type-body`| `DType(TypeIdent, TypeParam list, TypeBody)`     |
+| `tag TYPEID`                     | `DTag(TypeIdent)`                                |
+| `unit TYPEID`                    | `DUnit(TypeIdent)`                               |
+| `trait TYPEID …`                 | `DTrait(TypeIdent, Ident list, FnSig list)`      |
+| `impl TYPEID TYPEID …`           | `DImpl(TypeIdent, TypeIdent, (FnSig * Expr) list)` |
 
-`let` is parsed pattern-first: a bare `PVar` falls back to `DLet` so
+`DLet` is parsed pattern-first: a bare `PVar` falls back to `DLet` so
 all existing code paths keep working, while non-trivial patterns
 (tuples, cons, constructors) produce `DLetPat`.
 
@@ -225,7 +227,7 @@ the compiler can surface multiple errors per pass.
 - Every decl form.
 - Expression precedence (ordering of `+`, `*`, `->`, etc.).
 - Record vs sum vs wrapped type bodies.
-- Empty-paren `fn main()`.
+- Zero-param entry point (`main = ...` as a bare value binding).
 - Pattern match branches with and without indentation.
 
 Run:

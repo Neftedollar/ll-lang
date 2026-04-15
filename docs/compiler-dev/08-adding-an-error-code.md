@@ -73,9 +73,9 @@ Create `spec/examples/invalid/E009-shadow.lll`:
 -- expect: E009
 module Invalid.E009
 
-fn f =
-  let x = 1 in
-  let x = 2 in
+f =
+  x = 1
+  x = 2
   x
 ```
 

@@ -254,8 +254,8 @@ The emitted helper shape follows each backend's existing calling convention.
 
 Three decisions:
 
-1. `fn main()` (zero params) becomes F#'s `[<EntryPoint>] let main
-   (argv: string[]) = ...` — the program's entry point.
+1. A bare `main = ...` declaration (zero params, value binding) becomes F#'s
+   `[<EntryPoint>] let main (argv: string[]) = ...` — the program's entry point.
 2. `containsVar` scans the body for a reference to the function's own
    name. If found, emit `let rec`.
 3. Otherwise: normal `let` with space-joined parameter names.

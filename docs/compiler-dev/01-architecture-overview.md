@@ -214,8 +214,8 @@ See [05-hm-inference](05-hm-inference.md).
 
 Walks the `TypedModule` producing a big string of F# source. Each
 `TypedExprKind` case has a corresponding emit rule. Binary operators are
-detected as `TEApp(TEApp(TEVar op, a), b)` and rendered infix. `fn main`
-with no params becomes `[<EntryPoint>] let main (argv: string[]) = ... 0`.
+detected as `TEApp(TEApp(TEVar op, a), b)` and rendered infix. A bare `main`
+declaration with no params becomes `[<EntryPoint>] let main (argv: string[]) = ... 0`.
 
 See [06-codegen](06-codegen.md).
 
