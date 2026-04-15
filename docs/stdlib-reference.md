@@ -194,7 +194,7 @@ missing = maybeWithDefault 0 (strToInt "x") -- 0
 ### `Std.Maybe` — Optional values
 
 **Import:** `import Std.Maybe`  
-**Self-tests:** 10/10  
+**Self-tests:** 6/6 (isSome/isNone/pattern-match tests; maybeMap/maybeBind tested via F# backend target only — C# prelude type-inference limitation)  
 **Description:** Canonical optional type with predicate helpers. Core `maybeMap`/`maybeBind`/`maybeWithDefault` are also available as prelude builtins without an import.
 
 **Type:**
@@ -461,6 +461,7 @@ validateAndRoundtrip(src Str) =
 ### `Std.State` — stateful computation primitives
 
 **Import:** `import Std.State`  
+**Self-tests:** 7/7  
 **Description:** Concrete state monad foundation for self-hosted compiler passes and imperative-style pipelines via `stateBind`.
 
 **Key types:**
@@ -486,6 +487,47 @@ State S A = MkState (S -> StatePair[A][S])
 | `stateModify` | `(S -> S) -> State[S][StateUnit]` | Transform state |
 
 `stateGet` is temporarily argument-based due current top-level polymorphic value inference limits; once zero-arg polymorphic values are stabilized it can be reduced to a plain `State[S][S]` value.
+
+---
+
+### `Std.Test` — unit test harness
+
+**Import:** `import Std.Test`  
+**Self-tests:** 8 (4 pass + 4 intentional fails exercising the harness itself)  
+**Description:** Lightweight test harness for ll-lang modules. Collects `TestResult` values, prints OK/FAIL lines, and returns a failure count. Intended for module self-tests reachable via `lllc run`.
+
+**Type:**
+
+```lll
+TestResult = Pass Str | Fail Str
+```
+
+**Functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `assertTrue` | `Str -> Bool -> TestResult` | Pass iff condition is true |
+| `assertEqInt` | `Str -> Int -> Int -> TestResult` | Pass iff ints match |
+| `assertEqStr` | `Str -> Str -> Str -> TestResult` | Pass iff strings match |
+| `assertEqBool` | `Str -> Bool -> Bool -> TestResult` | Pass iff bools match |
+| `renderResult` | `TestResult -> Str` | Format OK/FAIL line |
+| `run` | `List[TestResult] -> Int` | Print all results; return fail count |
+
+**Usage:**
+
+```lll
+module MyModule
+
+import Std.Test
+
+main =
+  failCount = run
+    [ assertEqInt "add" 5 (2 + 3)
+    ; assertEqStr "hello" "hello" "hello"
+    ; assertTrue "positive" (3 > 0)
+    ]
+  printfn (strConcat "Done failCount=" (intToStr failCount))
+```
 
 ---
 
