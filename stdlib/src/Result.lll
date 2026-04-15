@@ -2,37 +2,174 @@ module Std.Result
 
 import Std.Maybe
 
+-- Canonical Result type: Ok A | Err E
+-- Use for recoverable errors. Never throw; propagate with resultBind.
+
 Result A E = Ok A | Err E
 
+-- ---- Core operations --------------------------------------------------------
+
+-- Extract success value, or use a default on Err.
 resultWithDefault(defValue A)(r Result[A][E]) =
   match r
-    | Ok v -> v
-    | Err e -> defValue
+    | Ok v  -> v
+    | Err _ -> defValue
 
+-- Transform the success value (functor map).
+resultMap(f A -> B)(r Result[A][E]) =
+  match r
+    | Ok v  -> Ok (f v)
+    | Err e -> Err e
+
+-- Transform the error value.
+resultMapErr(f E -> F)(r Result[A][E]) =
+  match r
+    | Ok v  -> Ok v
+    | Err e -> Err (f e)
+
+-- Chain a fallible computation on success (monadic bind).
+resultBind(r Result[A][E])(k A -> Result[B][E]) =
+  match r
+    | Ok v  -> k v
+    | Err e -> Err e
+
+-- Fold over a Result: apply fOk on Ok, fErr on Err.
+resultFold(fOk A -> C)(fErr E -> C)(r Result[A][E]) =
+  match r
+    | Ok v  -> fOk v
+    | Err e -> fErr e
+
+-- Try the second result if the first is Err.
 resultOrElse(f E -> Result[A][E])(r Result[A][E]) =
   match r
-    | Ok _ -> r
+    | Ok _  -> r
     | Err e -> f e
 
+-- Predicate checks.
+resultIsOk(r Result[A][E]) =
+  match r
+    | Ok _  -> true
+    | Err _ -> false
+
+resultIsErr(r Result[A][E]) =
+  match r
+    | Ok _  -> false
+    | Err _ -> true
+
+-- ---- Conversions ------------------------------------------------------------
+
+-- Lift a Maybe into Result, using errValue if None.
 resultFromMaybe(errValue E)(m Maybe[A]) =
   match m
     | Some v -> Ok v
-    | None -> Err errValue
+    | None   -> Err errValue
 
-resultToList(r Result[A][E]) =
+-- Convert to Maybe (discard the error).
+resultToMaybe(r Result[A][E]) =
   match r
-    | Ok v -> [v]
-    | Err e -> []
+    | Ok v  -> Some v
+    | Err _ -> None
 
--- ---- Self-checks -------------------------------------------------------------
+-- Collect Ok values from a list; first Err short-circuits.
+resultSequence(rs List[Result[A][E]]) =
+  resultSequenceAcc rs []
 
-check(label Str)(ok Bool) =
-  if ok
-    _ = printfn (strConcat "OK " label)
-    0
+resultSequenceAcc(rs List[Result[A][E]])(acc List[A]) =
+  match rs
+    | [] -> Ok (listReverse acc)
+    | r :: rest ->
+      match r
+        | Err e -> Err e
+        | Ok v  -> resultSequenceAcc rest (v :: acc)
+
+-- Apply f to each element, collect Ok or short-circuit on first Err.
+resultTraverse(f A -> Result[B][E])(xs List[A]) =
+  resultSequence (listMap f xs)
+
+-- ---- Self-tests --------------------------------------------------------------
+
+showBool(b Bool) =
+  if b
+    "true"
+  else "false"
+
+resultCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
   else
-    _ = printfn (strConcat "FAIL " label)
-    1
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
 
-fallbackNotFound(e Str) = Ok (strConcat "fallback:" e)
+addOne(n Int) = n + 1
+failIfZero(n Int) =
+  if n == 0
+    Err "zero"
+  else Ok n
+double(n Int) = n * 2
 
+main =
+  -- 1. Ok withDefault
+  _ = resultCheck "1 Ok withDefault" (intToStr (resultWithDefault 0 (Ok 42))) "42"
+
+  -- 2. Err withDefault
+  _ = resultCheck "2 Err withDefault" (intToStr (resultWithDefault 0 (Err "oops"))) "0"
+
+  -- 3. resultMap Ok
+  _ = resultCheck "3 resultMap Ok" (intToStr (resultWithDefault 0 (resultMap addOne (Ok 5)))) "6"
+
+  -- 4. resultMap Err passthrough (success type is Int, so int default)
+  _ = resultCheck "4 resultMap Err" (intToStr (resultWithDefault 0 (resultMap addOne (Err "bad")))) "0"
+
+  -- 5. resultMapErr transforms error value
+  r5 = resultMapErr (\e. strConcat "E:" e) (Err "bad")
+  _ = resultCheck "5 resultMapErr" (resultFold (\v. v) (\e. e) r5) "E:bad"
+
+  -- 6. resultBind Ok→Ok
+  _ = resultCheck "6 resultBind Ok→Ok" (intToStr (resultWithDefault 0 (resultBind (Ok 5) failIfZero))) "5"
+
+  -- 7. resultBind Ok→Err (use resultFold to extract the error string)
+  _ = resultCheck "7 resultBind Ok→Err" (resultFold intToStr (\e. e) (resultBind (Ok 0) failIfZero)) "zero"
+
+  -- 8. resultBind Err propagates (use resultFold to extract the error string)
+  _ = resultCheck "8 resultBind Err" (resultFold intToStr (\e. e) (resultBind (Err "early") failIfZero)) "early"
+
+  -- 9. resultFold Ok
+  _ = resultCheck "9 resultFold Ok" (resultFold intToStr (\e. e) (Ok 7)) "7"
+
+  -- 10. resultFold Err
+  _ = resultCheck "10 resultFold Err" (resultFold intToStr (\e. e) (Err "fail")) "fail"
+
+  -- 11. resultIsOk
+  _ = resultCheck "11 isOk" (showBool (resultIsOk (Ok 1))) "true"
+
+  -- 12. resultIsErr
+  _ = resultCheck "12 isErr" (showBool (resultIsErr (Err "x"))) "true"
+
+  -- 13. fromMaybe Some
+  _ = resultCheck "13 fromMaybe Some" (intToStr (resultWithDefault 0 (resultFromMaybe "none" (Some 3)))) "3"
+
+  -- 14. fromMaybe None (use resultFold to extract the error string)
+  _ = resultCheck "14 fromMaybe None" (resultFold (\v. "ok") (\e. e) (resultFromMaybe "missing" None)) "missing"
+
+  -- 15. toMaybe Ok
+  _ = resultCheck "15 toMaybe Ok" (intToStr (maybeWithDefault 0 (resultToMaybe (Ok 9)))) "9"
+
+  -- 16. toMaybe Err
+  _ = resultCheck "16 toMaybe Err" (intToStr (maybeWithDefault 0 (resultToMaybe (Err "x")))) "0"
+
+  -- 17. resultSequence all Ok
+  seq17 = resultSequence [Ok 1; Ok 2; Ok 3]
+  _ = resultCheck "17 sequence ok" (intToStr (listLen (resultWithDefault [] seq17))) "3"
+
+  -- 18. resultSequence first Err (use resultFold to extract error string)
+  seq18 = resultSequence [Ok 1; Err "bad"; Ok 3]
+  _ = resultCheck "18 sequence err" (resultFold (\v. "ok") (\e. e) seq18) "bad"
+
+  -- 19. resultOrElse on Err
+  r19 = resultOrElse (\e. Ok 99) (Err "oops")
+  _ = resultCheck "19 orElse" (intToStr (resultWithDefault 0 r19)) "99"
+
+  -- 20. resultTraverse
+  trav = resultTraverse failIfZero [1; 2; 3]
+  _ = resultCheck "20 traverse ok" (intToStr (listLen (resultWithDefault [] trav))) "3"
+
+  printfn "Done"

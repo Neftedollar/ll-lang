@@ -86,3 +86,75 @@ check(label Str)(ok Bool) =
     _ = printfn (strConcat "FAIL " label)
     1
 
+listCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+boolStr(b Bool) =
+  if b
+    "true"
+  else "false"
+
+showIntList(xs List[Int]) =
+  strs = listMap intToStr xs
+  listFold (\acc s. strConcat acc (strConcat "," s)) "" strs
+
+main =
+  -- 1. listTake empty
+  _ = listCheck "1 listTake 0" (showIntList (listTake 0 [1; 2; 3])) ""
+
+  -- 2. listTake some
+  _ = listCheck "2 listTake 2" (showIntList (listTake 2 [1; 2; 3])) ",1,2"
+
+  -- 3. listTake all
+  _ = listCheck "3 listTake all" (showIntList (listTake 10 [1; 2; 3])) ",1,2,3"
+
+  -- 4. listDrop zero
+  _ = listCheck "4 listDrop 0" (showIntList (listDrop 0 [1; 2; 3])) ",1,2,3"
+
+  -- 5. listDrop some
+  _ = listCheck "5 listDrop 2" (showIntList (listDrop 2 [1; 2; 3])) ",3"
+
+  -- 6. listDrop all
+  _ = listCheck "6 listDrop all" (showIntList (listDrop 10 [1; 2; 3])) ""
+
+  -- 7. listFlatMap (duplicate each element)
+  _ = listCheck "7 listFlatMap" (showIntList (listFlatMap (\x. [x; x]) [1; 2; 3])) ",1,1,2,2,3,3"
+
+  -- 8. listAny true
+  _ = listCheck "8 listAny true" (boolStr (listAny (\x. x > 2) [1; 2; 3])) "true"
+
+  -- 9. listAny false
+  _ = listCheck "9 listAny false" (boolStr (listAny (\x. x > 5) [1; 2; 3])) "false"
+
+  -- 10. listAll true
+  _ = listCheck "10 listAll true" (boolStr (listAll (\x. x > 0) [1; 2; 3])) "true"
+
+  -- 11. listAll false
+  _ = listCheck "11 listAll false" (boolStr (listAll (\x. x > 1) [1; 2; 3])) "false"
+
+  -- 12. listFind found
+  r12 = listFind (\x. x > 2) [1; 2; 3]
+  _ = listCheck "12 listFind found" (intToStr (maybeWithDefault 0 r12)) "3"
+
+  -- 13. listFind not found
+  r13 = listFind (\x. x > 10) [1; 2; 3]
+  _ = listCheck "13 listFind none" (intToStr (maybeWithDefault 0 r13)) "0"
+
+  -- 14. listFindIndex found
+  r14 = listFindIndex (\x. x == 2) [1; 2; 3]
+  _ = listCheck "14 listFindIndex" (intToStr (maybeWithDefault (-1) r14)) "1"
+
+  -- 15. listFindIndex not found
+  r15 = listFindIndex (\x. x == 9) [1; 2; 3]
+  _ = listCheck "15 listFindIndex none" (intToStr (maybeWithDefault (-1) r15)) "-1"
+
+  -- 16. listPartition
+  let (yes, no) = listPartition (\x. x > 2) [1; 2; 3; 4]
+  _ = listCheck "16 partition yes" (showIntList yes) ",3,4"
+  _ = listCheck "16 partition no" (showIntList no) ",1,2"
+
+  printfn "Done"
+

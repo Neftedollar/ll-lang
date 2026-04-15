@@ -77,3 +77,59 @@ check(label Str)(ok Bool) =
     _ = printfn (strConcat "FAIL " label)
     1
 
+strCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+boolStr(b Bool) =
+  if b
+    "true"
+  else "false"
+
+main =
+  -- 1. strIsEmpty empty
+  _ = strCheck "1 isEmptyTrue" (boolStr (strIsEmpty "")) "true"
+
+  -- 2. strIsEmpty non-empty
+  _ = strCheck "2 isEmptyFalse" (boolStr (strIsEmpty "hi")) "false"
+
+  -- 3. strStartsWith true
+  _ = strCheck "3 startsWith true" (boolStr (strStartsWith "he" "hello")) "true"
+
+  -- 4. strStartsWith false
+  _ = strCheck "4 startsWith false" (boolStr (strStartsWith "wo" "hello")) "false"
+
+  -- 5. strEndsWith true
+  _ = strCheck "5 endsWith true" (boolStr (strEndsWith "lo" "hello")) "true"
+
+  -- 6. strEndsWith false
+  _ = strCheck "6 endsWith false" (boolStr (strEndsWith "he" "hello")) "false"
+
+  -- 7. strTake
+  _ = strCheck "7 strTake" (strTake 3 "hello") "hel"
+
+  -- 8. strTake over length
+  _ = strCheck "8 strTake all" (strTake 100 "hi") "hi"
+
+  -- 9. strDrop
+  _ = strCheck "9 strDrop" (strDrop 3 "hello") "lo"
+
+  -- 10. strDrop all
+  _ = strCheck "10 strDrop all" (strDrop 100 "hi") ""
+
+  -- 11. strRepeat
+  _ = strCheck "11 strRepeat" (strRepeat 3 "ab") "ababab"
+
+  -- 12. strPadLeft
+  _ = strCheck "12 strPadLeft" (strPadLeft 5 "0" "42") "00042"
+
+  -- 13. strPadLeft no-op
+  _ = strCheck "13 strPadLeft noop" (strPadLeft 2 "0" "hello") "hello"
+
+  -- 14. strPadRight
+  _ = strCheck "14 strPadRight" (strPadRight 5 "." "hi") "hi..."
+
+  printfn "Done"
+

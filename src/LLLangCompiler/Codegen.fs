@@ -837,6 +837,10 @@ let private emitModule (tm: TypedModule) : string =
 let emit (tm: TypedModule) : string = emitModule tm
 
 /// Assemble a combined prelude across multiple modules (union of type names).
+/// NOTE: fsharpPreludeResult is intentionally excluded here because Ok/Err
+/// constructors are defined in a later Result.fs module — Prelude.fs is
+/// compiled first and cannot reference them. Result helpers are defined in
+/// stdlib/src/Result.lll itself, so they're available via `open Std.Result`.
 let private assembleCombinedPrelude (tms: TypedModule list) : string =
     let typeNames = projectTypeNames tms
     let usedNames =
@@ -844,13 +848,10 @@ let private assembleCombinedPrelude (tms: TypedModule list) : string =
         |> List.fold (fun acc tm -> Set.union acc (moduleStdlibUsage tm)) Set.empty
     let includeCore = intersects usedNames fsharpPreludeCoreNames
     let hasMaybe  = Set.contains "Maybe"  typeNames
-    let hasResult = Set.contains "Result" typeNames
     let includeMaybe = hasMaybe && intersects usedNames fsharpPreludeMaybeNames
-    let includeResult = hasResult && intersects usedNames fsharpPreludeResultNames
     let sections =
         [ if includeCore then yield fsharpPreludeCore
-          if includeMaybe then yield fsharpPreludeMaybe
-          if includeResult then yield fsharpPreludeResult ]
+          if includeMaybe then yield fsharpPreludeMaybe ]
     if List.isEmpty sections then ""
     else String.concat "\n" (sections @ [preludeEnd])
 

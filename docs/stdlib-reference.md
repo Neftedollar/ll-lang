@@ -189,6 +189,141 @@ missing = maybeWithDefault 0 (strToInt "x") -- 0
 
 ---
 
+## Category: Core Types
+
+### `Std.Maybe` — Optional values
+
+**Import:** `import Std.Maybe`  
+**Self-tests:** 10/10  
+**Description:** Canonical optional type with predicate helpers. Core `maybeMap`/`maybeBind`/`maybeWithDefault` are also available as prelude builtins without an import.
+
+**Type:**
+
+```lll
+Maybe A = Some A | None
+```
+
+**Functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `isSome` | `Maybe[A] -> Bool` | True if Some |
+| `isNone` | `Maybe[A] -> Bool` | True if None |
+
+---
+
+### `Std.Result` — Error-or-value
+
+**Import:** `import Std.Result`  
+**Self-tests:** 20/20  
+**Description:** Canonical Result type for recoverable errors. Never throw; propagate with `resultBind`. Integrates with `Std.Maybe` via `resultFromMaybe`/`resultToMaybe`.
+
+**Type:**
+
+```lll
+Result A E = Ok A | Err E
+```
+
+**Functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `resultWithDefault` | `A -> Result[A][E] -> A` | Unwrap Ok or return default |
+| `resultMap` | `(A -> B) -> Result[A][E] -> Result[B][E]` | Transform Ok value |
+| `resultMapErr` | `(E -> F) -> Result[A][E] -> Result[A][F]` | Transform Err value |
+| `resultBind` | `Result[A][E] -> (A -> Result[B][E]) -> Result[B][E]` | Chain fallible computations |
+| `resultFold` | `(A -> C) -> (E -> C) -> Result[A][E] -> C` | Fold over both branches |
+| `resultOrElse` | `(E -> Result[A][E]) -> Result[A][E] -> Result[A][E]` | Recover from Err |
+| `resultIsOk` | `Result[A][E] -> Bool` | Test for Ok |
+| `resultIsErr` | `Result[A][E] -> Bool` | Test for Err |
+| `resultFromMaybe` | `E -> Maybe[A] -> Result[A][E]` | Lift Maybe; use errValue on None |
+| `resultToMaybe` | `Result[A][E] -> Maybe[A]` | Discard error |
+| `resultSequence` | `List[Result[A][E]] -> Result[List[A]][E]` | Collect Ok or short-circuit |
+| `resultTraverse` | `(A -> Result[B][E]) -> List[A] -> Result[List[B]][E]` | Map+sequence |
+
+**Usage:**
+
+```lll
+import Std.Result
+
+failIfZero(n Int) =
+  if n == 0
+    Err "zero"
+  else Ok n
+
+pipeline(s Str) =
+  resultBind (resultFromMaybe "not a number" (strToInt s)) failIfZero
+```
+
+---
+
+### `Std.List` — Extended list operations
+
+**Import:** `import Std.List`  
+**Self-tests:** 16/16  
+**Description:** Extended list operations beyond the prelude. Import adds `listTake`, `listDrop`, `listFlatMap`, `listAny`, `listAll`, `listFind`, `listFindIndex`, and `listPartition`.
+
+**Functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `listTake` | `Int -> List[A] -> List[A]` | First N elements |
+| `listDrop` | `Int -> List[A] -> List[A]` | Skip first N elements |
+| `listFlatMap` | `(A -> List[B]) -> List[A] -> List[B]` | Map then flatten |
+| `listAny` | `(A -> Bool) -> List[A] -> Bool` | Any element satisfies predicate |
+| `listAll` | `(A -> Bool) -> List[A] -> Bool` | All elements satisfy predicate |
+| `listFind` | `(A -> Bool) -> List[A] -> Maybe[A]` | First matching element |
+| `listFindIndex` | `(A -> Bool) -> List[A] -> Maybe[Int]` | Index of first match |
+| `listPartition` | `(A -> Bool) -> List[A] -> (List[A], List[A])` | Split into passing/failing |
+
+---
+
+### `Std.Str` — Extended string operations
+
+**Import:** `import Std.Str`  
+**Self-tests:** 14/14  
+**Description:** String utility functions beyond the prelude. Adds `isEmpty`, `startsWith`/`endsWith`, `take`/`drop`, `repeat`, `padLeft`/`padRight`.
+
+**Functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `strIsEmpty` | `Str -> Bool` | True if length is 0 |
+| `strStartsWith` | `Str -> Str -> Bool` | Prefix test |
+| `strEndsWith` | `Str -> Str -> Bool` | Suffix test |
+| `strTake` | `Int -> Str -> Str` | First N characters |
+| `strDrop` | `Int -> Str -> Str` | Skip first N characters |
+| `strRepeat` | `Int -> Str -> Str` | Repeat string N times |
+| `strPadLeft` | `Int -> Str -> Str -> Str` | Left-pad to width with fill |
+| `strPadRight` | `Int -> Str -> Str -> Str` | Right-pad to width with fill |
+
+---
+
+### `Std.Lazy` — Explicit laziness
+
+**Import:** `import Std.Lazy`  
+**Self-tests:** 6/6  
+**Description:** Controlled deferred evaluation for strict language semantics. Models thunks as `Int -> A` to avoid a dedicated Unit type.
+
+**Type:**
+
+```lll
+Lazy A = Delayed (Int -> A) | Ready A
+```
+
+**Functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `lazyDelay` | `(Int -> A) -> Lazy[A]` | Create deferred value |
+| `lazyReady` | `A -> Lazy[A]` | Already-evaluated value |
+| `lazyForce` | `Lazy[A] -> (A, Lazy[A])` | Force + memoize |
+| `lazyValue` | `Lazy[A] -> A` | Force and extract value |
+| `lazyMap` | `(A -> B) -> Lazy[A] -> Lazy[B]` | Map through deferred value |
+| `lazyBind` | `Lazy[A] -> (A -> Lazy[B]) -> Lazy[B]` | Compose deferred computations |
+
+---
+
 ## Category: Data Structures
 
 ### `Std.Map` — Ordered map (red-black tree)

@@ -147,3 +147,59 @@ export mapCheck(label Str)(ok Bool) =
     1
 
 -- Main: exercise all API functions
+
+main =
+  -- 1. empty map
+  m0 = Leaf
+  _ = mapCheck "1 mapEmpty size=0" (mapSize m0 == 0)
+
+  -- 2. insert several entries
+  m1 = mapInsert intCmp 3 30 m0
+  m2 = mapInsert intCmp 1 10 m1
+  m3 = mapInsert intCmp 4 40 m2
+  m4 = mapInsert intCmp 2 20 m3
+  m5 = mapInsert intCmp 5 50 m4
+  _ = mapCheck "2 mapInsert size=5" (mapSize m5 == 5)
+
+  -- 3. lookup found
+  r3 = mapLookup intCmp 3 m5
+  _ = mapCheck "3 mapLookup found" (maybeWithDefault 0 r3 == 30)
+
+  -- 4. lookup missing
+  r4 = mapLookup intCmp 9 m5
+  _ = mapCheck "4 mapLookup missing" (r4 == None)
+
+  -- 5. contains present
+  _ = mapCheck "5 mapContains present" (mapContains intCmp 2 m5)
+
+  -- 6. contains absent
+  _ = mapCheck "6 mapContains absent" (mapContains intCmp 9 m5 == false)
+
+  -- 7. fold sum values
+  sumV = mapFold (\acc k v. acc + v) 0 m5
+  _ = mapCheck "7 mapFold sum vals" (sumV == 150)
+
+  -- 8. mapKeys length
+  ks = mapKeys m5
+  _ = mapCheck "8 mapKeys length" (listLen ks == 5)
+
+  -- 9. string map lookup
+  sm = mapInsert strCmp "b" 2 (mapInsert strCmp "a" 1 Leaf)
+  r9 = mapLookup strCmp "a" sm
+  _ = mapCheck "9 strCmp lookup" (maybeWithDefault 0 r9 == 1)
+
+  -- 10. insert into empty, fresh Leaf
+  m10 = mapInsert intCmp 42 1 Leaf
+  _ = mapCheck "10 mapEmpty size=0" (mapSize Leaf == 0)
+
+  -- 11. duplicate key replaces value
+  m11 = mapInsert intCmp 1 99 m5
+  r11 = mapLookup intCmp 1 m11
+  _ = mapCheck "11 duplicate key insert" (maybeWithDefault 0 r11 == 99)
+
+  -- 12. keys are sorted
+  ksSorted = mapKeys m5
+  h = listHead ksSorted
+  _ = mapCheck "12 sorted order" (maybeWithDefault 0 h == 1)
+
+  printfn "Done"

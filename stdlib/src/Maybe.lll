@@ -30,3 +30,47 @@ export check(label Str)(ok Bool) =
     1
 
 export doubleInMaybe(x Int) = Some (x * 2)
+
+maybeCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+boolStr(b Bool) =
+  if b
+    "true"
+  else "false"
+
+main =
+  -- 1. isSome on Some
+  _ = maybeCheck "1 isSome" (boolStr (isSome (Some 1))) "true"
+
+  -- 2. isSome on None
+  _ = maybeCheck "2 isSome None" (boolStr (isSome None)) "false"
+
+  -- 3. isNone on None
+  _ = maybeCheck "3 isNone" (boolStr (isNone None)) "true"
+
+  -- 4. isNone on Some
+  _ = maybeCheck "4 isNone Some" (boolStr (isNone (Some 5))) "false"
+
+  -- 5. maybeWithDefault Some
+  _ = maybeCheck "5 withDefault Some" (intToStr (maybeWithDefault 0 (Some 42))) "42"
+
+  -- 6. maybeWithDefault None
+  _ = maybeCheck "6 withDefault None" (intToStr (maybeWithDefault 0 None)) "0"
+
+  -- 7. maybeMap Some
+  _ = maybeCheck "7 maybeMap Some" (intToStr (maybeWithDefault 0 (maybeMap (\x. x * 2) (Some 5)))) "10"
+
+  -- 8. maybeMap None
+  _ = maybeCheck "8 maybeMap None" (intToStr (maybeWithDefault 0 (maybeMap (\x. x * 2) None))) "0"
+
+  -- 9. maybeBind Some→Some
+  _ = maybeCheck "9 maybeBind Some" (intToStr (maybeWithDefault 0 (maybeBind (Some 3) doubleInMaybe))) "6"
+
+  -- 10. maybeBind None
+  _ = maybeCheck "10 maybeBind None" (intToStr (maybeWithDefault 0 (maybeBind None doubleInMaybe))) "0"
+
+  printfn "Done"

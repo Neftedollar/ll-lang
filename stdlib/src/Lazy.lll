@@ -31,3 +31,38 @@ export lazyBind(node Lazy[A])(k A -> Lazy[B]) =
     v = lazyValue node
     lazyValue (k v)
   )
+
+-- ---- Self-tests ---------------------------------------------------------------
+
+lazyCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+main =
+  -- 1. lazyDelay + lazyValue
+  n1 = lazyDelay (\ignored. 42)
+  _ = lazyCheck "1 delay+force" (intToStr (lazyValue n1)) "42"
+
+  -- 2. lazyReady
+  n2 = lazyReady 99
+  _ = lazyCheck "2 ready" (intToStr (lazyValue n2)) "99"
+
+  -- 3. lazyForce returns cached Ready
+  let (v3, n3) = lazyForce (lazyDelay (\ignored. 7))
+  _ = lazyCheck "3 force value" (intToStr v3) "7"
+
+  -- 4. lazyForce on Ready
+  let (v4, _) = lazyForce (lazyReady 5)
+  _ = lazyCheck "4 force ready" (intToStr v4) "5"
+
+  -- 5. lazyMap
+  n5 = lazyMap (\x. x * 2) (lazyReady 3)
+  _ = lazyCheck "5 lazyMap" (intToStr (lazyValue n5)) "6"
+
+  -- 6. lazyBind
+  n6 = lazyBind (lazyReady 4) (\x. lazyReady (x + 1))
+  _ = lazyCheck "6 lazyBind" (intToStr (lazyValue n6)) "5"
+
+  printfn "Done"
