@@ -208,6 +208,25 @@ In single-file mode (no `lll.toml`), `root`/`manifest_path`/`manifest_kind` are 
 
 ---
 
+### `list_targets`
+
+List all available compilation targets with their status and description. No input required.
+
+**Input:** `{}` (no fields required)  
+**Output:**
+```json
+[
+  {"id":"fs",   "name":"FSharp",     "status":"stable",       "extension":".fs",   "description":"F# source files; multi-module .fsproj output; default target"},
+  {"id":"ts",   "name":"TypeScript", "status":"stable",       "extension":".ts",   "description":"TypeScript source files; ADTs as tagged union types"},
+  {"id":"py",   "name":"Python",     "status":"stable",       "extension":".py",   "description":"Python source files; ADTs as @dataclass + Union types"},
+  {"id":"java", "name":"Java",       "status":"stable",       "extension":".java", "description":"Java 21 source files; ADTs as sealed interfaces + records"},
+  {"id":"cs",   "name":"CSharp",     "status":"stable",       "extension":".cs",   "description":"C# source files; ADTs as sealed record hierarchies"},
+  {"id":"llvm", "name":"LLVM",       "status":"experimental", "extension":".ll",   "description":"LLVM IR; subset backend — pattern-matching and ADT support is partial"}
+]
+```
+
+---
+
 ## How LLM agents should use these tools
 
 | Task | Recommended tool |
@@ -221,6 +240,7 @@ In single-file mode (no `lll.toml`), `root`/`manifest_path`/`manifest_kind` are 
 | "What list functions are available?" | `stdlib_search` with `"query": "list"` |
 | "What's the syntax for pattern matching?" | `grammar_lookup` with `"rule": "Pattern"` |
 | "What modules are in this project?" | `project_info` |
+| "What compile targets are available?" | `list_targets` |
 
 ---
 
