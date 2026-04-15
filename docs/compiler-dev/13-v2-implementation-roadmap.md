@@ -184,7 +184,7 @@ Detailed execution breakdown lives in
 
 - [x] Add a token-efficiency benchmark suite versus F#, TypeScript, Python, Java, and C#.
 - [x] Add compile-latency and self-hosted-vs-stage0 benchmark baselines.
-- [ ] Add semantic equivalence corpus checks across stable backends.
+- [x] Add semantic equivalence corpus checks across stable backends.
 - [x] Add explicit `v2` release gates to CI and docs.
 
 **Exit criteria**
