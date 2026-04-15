@@ -1,6 +1,6 @@
 # ll-lang v2 Project System
 
-**Status:** planned  
+**Status:** frozen — doc/policy phase complete (epic #52, closes #53–#60)  
 **Scope:** canonical project/dependency model for the `v2` line.
 
 ## Summary
@@ -173,6 +173,14 @@ Where `<source>` is rendered as either:
 - the source portion participates in winner pinning
 - the hash portion participates in drift detection and reproducibility checks
 
+### Recovery and drift policy
+
+- if `ll.sum` is absent, `install` and `tidy` create it from scratch
+- if `ll.sum` is partially malformed, `install` and `tidy` overwrite it
+- checksum drift (hash in `ll.sum` does not match `vendor/` content) is reported
+  as a warning during `check/build`; it does not cause a hard build failure
+- correcting drift always goes through `install` or `tidy`, never silently
+
 ### Lock responsibilities
 
 `ll.sum` is responsible for:
@@ -330,6 +338,9 @@ Responsibilities:
 
 This command is part of the LLM- and MCP-facing observability story and must
 retain stable machine-readable semantics once the CLI surfaces are versioned.
+
+`TODO(v2:mcp-output)` — machine-readable structured output mode for `mod why`
+and `install` is reserved for Milestone 6. Human-readable output only in `v2`.
 
 ## Library vs executable contract
 
