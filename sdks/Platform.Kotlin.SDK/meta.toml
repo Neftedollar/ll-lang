@@ -1,0 +1,3 @@
+[build]
+compile = "kotlinc {main_file_q} -include-runtime -d {main_jar_q}"
+run = "kotlinc {main_file_q} -include-runtime -d {main_jar_q} && java -jar {main_jar_q}"

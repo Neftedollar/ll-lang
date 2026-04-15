@@ -1,0 +1,556 @@
+module Std.CodegenKotlin
+
+import Std.Parser
+
+-- Kotlin code emitter written in ll-lang.
+-- Takes the AST produced by Std.Parser and emits Kotlin source code.
+-- Targets Kotlin 1.9+ / JVM with Java 21 interop.
+
+-- ---- String helpers --------------------------------------------------------
+
+joinWith(sep Str)(items List[Str]) =
+  match items
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat sep (joinWith sep rest))
+
+-- ---- Kotlin keyword escaping -----------------------------------------------
+
+isKotlinKeyword(s Str) =
+  match s
+    | "abstract"    -> true
+    | "actual"      -> true
+    | "annotation"  -> true
+    | "as"          -> true
+    | "break"       -> true
+    | "by"          -> true
+    | "catch"       -> true
+    | "class"       -> true
+    | "companion"   -> true
+    | "const"       -> true
+    | "constructor" -> true
+    | "continue"    -> true
+    | "crossinline" -> true
+    | "data"        -> true
+    | "delegate"    -> true
+    | "do"          -> true
+    | "dynamic"     -> true
+    | "else"        -> true
+    | "enum"        -> true
+    | "expect"      -> true
+    | "external"    -> true
+    | "false"       -> true
+    | "field"       -> true
+    | "file"        -> true
+    | "final"       -> true
+    | "finally"     -> true
+    | "for"         -> true
+    | "fun"         -> true
+    | "get"         -> true
+    | "if"          -> true
+    | "import"      -> true
+    | "in"          -> true
+    | "infix"       -> true
+    | "init"        -> true
+    | "inline"      -> true
+    | "inner"       -> true
+    | "interface"   -> true
+    | "internal"    -> true
+    | "is"          -> true
+    | "it"          -> true
+    | "lateinit"    -> true
+    | "noinline"    -> true
+    | "null"        -> true
+    | "object"      -> true
+    | "open"        -> true
+    | "operator"    -> true
+    | "out"         -> true
+    | "override"    -> true
+    | "package"     -> true
+    | "param"       -> true
+    | "private"     -> true
+    | "property"    -> true
+    | "protected"   -> true
+    | "public"      -> true
+    | "receiver"    -> true
+    | "reified"     -> true
+    | "return"      -> true
+    | "sealed"      -> true
+    | "set"         -> true
+    | "setparam"    -> true
+    | "super"       -> true
+    | "suspend"     -> true
+    | "tailrec"     -> true
+    | "this"        -> true
+    | "throw"       -> true
+    | "to"          -> true
+    | "true"        -> true
+    | "try"         -> true
+    | "typealias"   -> true
+    | "typeof"      -> true
+    | "val"         -> true
+    | "value"       -> true
+    | "var"         -> true
+    | "vararg"      -> true
+    | "when"        -> true
+    | "where"       -> true
+    | "while"       -> true
+    | _             -> false
+
+safeIdent(s Str) =
+  if isKotlinKeyword s
+    strConcat "`" (strConcat s "`")
+  else s
+
+-- ---- String escaping -------------------------------------------------------
+
+encodeKotlinEscape(c Char) =
+  match c
+    | '\n' -> "\\n"
+    | '\t' -> "\\t"
+    | '\r' -> "\\r"
+    | '\\' -> "\\\\"
+    | '"'  -> "\\\""
+    | '$'  -> "\\$"
+    | _    -> strFromChars [c]
+
+escapeStr(s Str) =
+  listFold (\acc c. strConcat acc (encodeKotlinEscape c)) "" (strChars s)
+
+-- ---- Type emission ---------------------------------------------------------
+
+isTypeParam(s Str) =
+  match strChars s
+    | c :: [] ->
+      n = charToInt c
+      if n >= 65
+        if n <= 90
+          true
+        else false
+      else false
+    | _ -> false
+
+emitType(t TypeExpr) =
+  match t
+    | TyName "Int"   -> "Long"
+    | TyName "Float" -> "Double"
+    | TyName "Str"   -> "String"
+    | TyName "Bool"  -> "Boolean"
+    | TyName "Char"  -> "Char"
+    | TyName "Unit"  -> "Unit"
+    | TyName n ->
+      if isTypeParam n
+        n
+      else n
+    | TyApp (TyName "List")  a -> strConcat "List<" (strConcat (emitType a) ">")
+    | TyApp (TyName "Maybe") a -> strConcat (emitType a) "?"
+    | TyApp f a -> strConcat (emitType f) (strConcat "<" (strConcat (emitType a) ">"))
+    | TyFn a b ->
+      strConcat "(" (strConcat (emitType a) (strConcat ") -> " (emitType b)))
+
+-- ---- Type emission (nullable / generic positions) -------------------------
+
+emitTypeBoxed(t TypeExpr) =
+  match t
+    | TyName "Int"   -> "Long"
+    | TyName "Float" -> "Double"
+    | TyName "Str"   -> "String"
+    | TyName "Bool"  -> "Boolean"
+    | TyName "Char"  -> "Char"
+    | TyName "Unit"  -> "Unit"
+    | TyName n ->
+      if isTypeParam n
+        n
+      else n
+    | TyApp (TyName "List")  a -> strConcat "List<" (strConcat (emitType a) ">")
+    | TyApp (TyName "Maybe") a -> strConcat (emitType a) "?"
+    | TyApp f a -> strConcat (emitType f) (strConcat "<" (strConcat (emitType a) ">"))
+    | TyFn a b ->
+      strConcat "(" (strConcat (emitType a) (strConcat ") -> " (emitType b)))
+
+-- ---- Type parameters -------------------------------------------------------
+
+emitTypeParams(tvars List[Str]) =
+  match tvars
+    | [] -> ""
+    | _ ->
+      strConcat "<" (strConcat (joinWith ", " tvars) ">")
+
+-- ---- Pattern emission ------------------------------------------------------
+
+emitPattern(p Pattern) =
+  match p
+    | PVar x -> safeIdent x
+    | PWild -> "_"
+    | PNil -> "emptyList()"
+    | PLitInt n -> strConcat (intToStr n) "L"
+    | PLitStr s -> strConcat "\"" (strConcat (escapeStr s) "\"")
+    | PCons h t ->
+      strConcat (emitPattern h) (strConcat " :: " (emitPattern t))
+    | PCon c args -> emitConPattern c args
+
+emitConPattern(c Str)(args List[Pattern]) =
+  match args
+    | [] -> c
+    | _ ->
+      inner = joinWith ", " (listMap emitPattern args)
+      strConcat c (strConcat "(" (strConcat inner ")"))
+
+patListHead(xs List[Pattern]) =
+  match xs
+    | x :: _ -> x
+    | _ -> PWild
+
+-- ---- Expression emission ---------------------------------------------------
+
+emitCharLit(c Char) =
+  if c == '\n'
+    "'\\n'"
+  else if c == '\t'
+    "'\\t'"
+  else if c == '\\'
+    "'\\\\'"
+  else if c == '\''
+    "'\\''"
+  else strConcat (strConcat "'" (strFromChars [c])) "'"
+
+emitExpr(e Expr) =
+  match e
+    | EInt n -> strConcat (intToStr n) "L"
+    | EStr s -> strConcat "\"" (strConcat (escapeStr s) "\"")
+    | EBool b ->
+      if b
+        "true"
+      else "false"
+    | EChar c -> emitCharLit c
+    | EFloat s -> s
+    | EVar x -> safeIdent x
+    | ECon c ->
+      if c == "true"
+        "true"
+      else if c == "false"
+        "false"
+      else safeIdent c
+    | ENil -> "emptyList()"
+    | EApp f a -> emitApp f a
+    | EIf c t el ->
+      strConcat "if (" (strConcat (emitExpr c) (strConcat ") " (strConcat (emitExpr t) (strConcat " else " (emitExpr el)))))
+    | EMatch scrut pats bodies ->
+      scrutStr = emitExpr scrut
+      arms = emitMatchArms scrutStr pats bodies
+      strConcat "when (" (strConcat scrutStr (strConcat ") {\n" (strConcat arms "\n}")))
+    | ELam x body ->
+      strConcat "{ " (strConcat (safeIdent x) (strConcat " -> " (strConcat (emitExpr body) " }")))
+    | ELet x e body ->
+      eStr = emitExpr e
+      bodyStr = emitExpr body
+      strConcat "run { val " (strConcat (safeIdent x) (strConcat " = " (strConcat eStr (strConcat "; " (strConcat bodyStr " }")))))
+    | EList items ->
+      strConcat "listOf(" (strConcat (joinWith ", " (listMap emitExpr items)) ")")
+    | EBinOp op l r ->
+      strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat op (strConcat " " (strConcat (emitExpr r) ")")))))
+    | ETuple a b ->
+      strConcat "Pair(" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) ")")))
+    | ECons h t ->
+      strConcat "buildList { add(" (strConcat (emitExpr h) (strConcat "); addAll(" (strConcat (emitExpr t) ") }")))
+
+-- Gather EApp head
+gatherAppHead(e Expr) =
+  match e
+    | EApp f _ -> gatherAppHead f
+    | _ -> e
+
+-- Gather EApp args (left to right)
+gatherAppArgs(e Expr) =
+  match e
+    | EApp f a -> listAppend (gatherAppArgs f) [a]
+    | _ -> []
+
+isUpperStart(s Str) =
+  match strChars s
+    | c :: _ ->
+      n = charToInt c
+      if n >= 65
+        if n <= 90
+          true
+        else false
+      else false
+    | _ -> false
+
+exprListHead(xs List[Expr]) =
+  match xs
+    | x :: _ -> x
+    | _ -> ENil
+
+emitApp(f Expr)(a Expr) =
+  head = gatherAppHead (EApp f a)
+  args = gatherAppArgs (EApp f a)
+  match head
+    | ECon c -> emitConApp c args
+    | EVar x ->
+      if isUpperStart x
+        emitConApp x args
+      else
+        -- Curried call: wrap each arg as lambda invocation
+        strConcat (emitExpr f) (strConcat "(" (strConcat (emitExpr a) ")"))
+    | _ ->
+      strConcat (emitExpr f) (strConcat "(" (strConcat (emitExpr a) ")"))
+
+emitConApp(c Str)(args List[Expr]) =
+  match args
+    | [] -> safeIdent c
+    | _ ->
+      inner = joinWith ", " (listMap emitExpr args)
+      strConcat (safeIdent c) (strConcat "(" (strConcat inner ")"))
+
+-- ---- Match arm emission ----------------------------------------------------
+
+emitMatchArms(scrut Str)(pats List[Pattern])(bodies List[Expr]) =
+  match pats
+    | p :: prest ->
+      match bodies
+        | b :: brest ->
+          arm = emitMatchArm scrut p b
+          rest = emitMatchArms scrut prest brest
+          if strLen rest == 0
+            arm
+          else strConcat arm (strConcat "\n" rest)
+        | _ -> ""
+    | _ -> "  else -> throw Exception(\"Non-exhaustive match\")"
+
+emitMatchArm(scrut Str)(p Pattern)(body Expr) =
+  match p
+    | PWild ->
+      strConcat "  else -> " (emitExpr body)
+    | PVar x ->
+      strConcat "  else -> { val " (strConcat (safeIdent x) (strConcat " = " (strConcat scrut (strConcat "; " (strConcat (emitExpr body) " }")))))
+    | PLitInt n ->
+      strConcat "  " (strConcat (intToStr n) (strConcat "L -> " (emitExpr body)))
+    | PLitStr s ->
+      lit = strConcat "\"" (strConcat (escapeStr s) "\"")
+      strConcat "  " (strConcat lit (strConcat " -> " (emitExpr body)))
+    | PNil ->
+      strConcat "  emptyList<Any>() -> " (emitExpr body)
+    | PCons h t ->
+      hBind = match h
+        | PVar x -> strConcat "val " (strConcat (safeIdent x) (strConcat " = " (strConcat scrut ".first(); ")))
+        | _ -> ""
+      tBind = match t
+        | PVar x -> strConcat "val " (strConcat (safeIdent x) (strConcat " = " (strConcat scrut ".drop(1); ")))
+        | _ -> ""
+      cond = strConcat scrut ".isNotEmpty()"
+      strConcat "  else -> if (" (strConcat cond (strConcat ") { " (strConcat hBind (strConcat tBind (strConcat (emitExpr body) " } else throw Exception(\"pattern mismatch\")")))))
+    | PCon c args ->
+      emitConMatchArm scrut c args body
+
+emitConMatchArm(scrut Str)(c Str)(args List[Pattern])(body Expr) =
+  cond = strConcat "is " (safeIdent c)
+  match args
+    | [] ->
+      strConcat "  " (strConcat cond (strConcat " -> " (emitExpr body)))
+    | _ ->
+      castVar = strConcat "_c" c
+      castStr = strConcat "val " (strConcat castVar (strConcat " = " (strConcat scrut (strConcat " as " (safeIdent c)))))
+      binds = emitConBinds castVar args 0
+      strConcat "  " (strConcat cond (strConcat " -> { " (strConcat castStr (strConcat "; " (strConcat binds (strConcat (emitExpr body) " }"))))))
+
+emitConBinds(castVar Str)(args List[Pattern])(idx Int) =
+  match args
+    | [] -> ""
+    | p :: rest ->
+      bind = match p
+        | PVar x ->
+          field = strConcat "_" (intToStr idx)
+          strConcat "val " (strConcat (safeIdent x) (strConcat " = " (strConcat castVar (strConcat "." (strConcat field "; ")))))
+        | _ -> ""
+      strConcat bind (emitConBinds castVar rest (idx + 1))
+
+-- ---- Declaration emission --------------------------------------------------
+
+emitCtorField(args List[TypeExpr])(idx Int) =
+  match args
+    | [] -> ""
+    | t :: rest ->
+      field = strConcat "val _" (strConcat (intToStr idx) (strConcat ": " (emitTypeBoxed t)))
+      remaining = emitCtorField rest (idx + 1)
+      if strLen remaining == 0
+        field
+      else strConcat field (strConcat ", " remaining)
+
+emitCtor(typeName Str)(tpStr Str)(c Constructor) =
+  match c
+    | MkCon name args ->
+      match args
+        | [] ->
+          strConcat "    data class " (strConcat (safeIdent name) (strConcat tpStr (strConcat "() : " (strConcat (safeIdent typeName) (strConcat tpStr "()")))))
+        | _ ->
+          fields = emitCtorField args 0
+          strConcat "    data class " (strConcat (safeIdent name) (strConcat tpStr (strConcat "(" (strConcat fields (strConcat ") : " (strConcat (safeIdent typeName) (strConcat tpStr "()")))))))
+
+emitCtors(typeName Str)(tpStr Str)(cs List[Constructor]) =
+  joinWith "\n" (listMap (\c. emitCtor typeName tpStr c) cs)
+
+emitParamWithType(p Param) =
+  match p
+    | MkParam n t -> strConcat (safeIdent n) (strConcat ": " (emitType t))
+
+emitParamsStr(ps List[Param]) =
+  joinWith ", " (listMap emitParamWithType ps)
+
+emitReturnType(ret Maybe[TypeExpr]) =
+  match ret
+    | Some t -> emitType t
+    | None -> "Any"
+
+-- Native type suppression: Maybe is T? in Kotlin
+isNativeType(name Str) =
+  if name == "Maybe"
+    true
+  else false
+
+emitDecl(d Decl) =
+  match d
+    | DType name tvars ctors ->
+      if isNativeType name
+        ""
+      else
+        tpStr = emitTypeParams tvars
+        sealedDecl = strConcat "    sealed class " (strConcat (safeIdent name) (strConcat tpStr "()"))
+        ctorDecls = emitCtors name tpStr ctors
+        strConcat sealedDecl (strConcat " {\n" (strConcat ctorDecls "\n    }"))
+    | DFn name params ret body ->
+      paramStr = emitParamsStr params
+      retType = emitReturnType ret
+      if name == "main"
+        strConcat "    fun main() {\n        " (strConcat (emitExpr body) "\n    }")
+      else
+        strConcat "    fun " (strConcat (safeIdent name) (strConcat "(" (strConcat paramStr (strConcat "): " (strConcat retType (strConcat " = " (emitExpr body)))))))
+    | DLet name body ->
+      strConcat "    val " (strConcat (safeIdent name) (strConcat " = " (emitExpr body)))
+    | DImport parts ->
+      strConcat "// import " (joinWith "." parts)
+    | DExport inner -> emitDecl inner
+    | DExternal name _ _ ->
+      strConcat "    // external: " name
+    | DOpaque name ->
+      strConcat "    typealias " (strConcat (safeIdent name) " = Any")
+
+emitDecls(ds List[Decl]) =
+  joinWith "\n\n" (listMap emitDecl ds)
+
+-- ---- Prelude ---------------------------------------------------------------
+
+emitPrelude =
+  "    // --- ll-lang stdlib (Kotlin) ---\n    fun printfn(s: String) = println(s)\n    fun strLen(s: String): Long = s.length.toLong()\n    fun strConcat(a: String): (String) -> String = { b -> a + b }\n    fun strChars(s: String): List<Char> = s.toList()\n    fun strFromChars(cs: List<Char>): String = String(cs.toCharArray())\n    fun strContains(needle: String): (String) -> Boolean = { hay -> hay.contains(needle) }\n    fun intToStr(n: Long): String = n.toString()\n    fun charToInt(c: Char): Long = c.code.toLong()\n    fun intToChar(n: Long): Char = n.toInt().toChar()\n    fun <A> listLen(xs: List<A>): Long = xs.size.toLong()\n    fun <A, B> listMap(f: (A) -> B): (List<A>) -> List<B> = { xs -> xs.map(f) }\n    fun <A> listFilter(p: (A) -> Boolean): (List<A>) -> List<A> = { xs -> xs.filter(p) }\n    fun <A, B> listFold(f: (B) -> (A) -> B): (B) -> (List<A>) -> B = { z -> { xs -> xs.fold(z) { acc, x -> f(acc)(x) } } }\n    fun <A> listReverse(xs: List<A>): List<A> = xs.reversed()\n    fun <A> listAppend(xs: List<A>): (List<A>) -> List<A> = { ys -> xs + ys }\n    fun <A> listIsEmpty(xs: List<A>): Boolean = xs.isEmpty()\n    // --- end prelude ---"
+
+-- ---- Module emission -------------------------------------------------------
+
+kotlinClassName(parts List[Str]) =
+  match parts
+    | [] -> "LlLang"
+    | _ -> listFold (\acc x. x) "LlLang" parts
+
+emitModulePath(parts List[Str]) =
+  joinWith "." parts
+
+emitModule(m Module) =
+  match m
+    | MkModule path decls ->
+      className = kotlinClassName path
+      header = strConcat "// Generated by lllc (ll-lang Kotlin backend)\n// Requires Kotlin 1.9+\n// Module: " (emitModulePath path)
+      prelude = emitPrelude
+      body = emitDecls decls
+      strConcat header (strConcat "\n\nobject " (strConcat (safeIdent className) (strConcat " {\n\n" (strConcat prelude (strConcat "\n\n" (strConcat body "\n}\n"))))))
+
+-- ---- Tests -----------------------------------------------------------------
+
+codegenKotlinCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  got:      " (strConcat got (strConcat "\n  expected: " expected)))))
+
+checkContains(label Str)(got Str)(needle Str) =
+  if strContains needle got
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  missing: " (strConcat needle (strConcat "\n  in: " got)))))
+
+main =
+  -- 1. EInt → Long literal
+  _ = codegenKotlinCheck "1 EInt 42" (emitExpr (EInt 42)) "42L"
+
+  -- 2. EStr → double-quoted string
+  _ = codegenKotlinCheck "2 EStr hello" (emitExpr (EStr "hello")) "\"hello\""
+
+  -- 3. EBool true
+  _ = codegenKotlinCheck "3 EBool true" (emitExpr (EBool true)) "true"
+
+  -- 4. EBool false
+  _ = codegenKotlinCheck "4 EBool false" (emitExpr (EBool false)) "false"
+
+  -- 5. EBinOp +
+  _ = codegenKotlinCheck "5 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1L + 2L)"
+
+  -- 6. TyName Int → Long
+  _ = codegenKotlinCheck "6 TyName Int" (emitType (TyName "Int")) "Long"
+
+  -- 7. TyName Str → String
+  _ = codegenKotlinCheck "7 TyName Str" (emitType (TyName "Str")) "String"
+
+  -- 8. TyApp List Int → List<Long>
+  _ = codegenKotlinCheck "8 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "List<Long>"
+
+  -- 9. TyApp Maybe Int → Long? (nullable)
+  _ = codegenKotlinCheck "9 TyApp Maybe Int" (emitType (TyApp (TyName "Maybe") (TyName "Int"))) "Long?"
+
+  -- 10. TyFn Int Bool → (Long) -> Boolean
+  _ = codegenKotlinCheck "10 TyFn" (emitType (TyFn (TyName "Int") (TyName "Bool"))) "(Long) -> Boolean"
+
+  -- 11. safeIdent: Kotlin keyword 'object' gets backtick-escaped
+  _ = codegenKotlinCheck "11 safeIdent object" (safeIdent "object") "`object`"
+
+  -- 12. safeIdent: non-keyword unchanged
+  _ = codegenKotlinCheck "12 safeIdent foo" (safeIdent "foo") "foo"
+
+  -- 13. DType Color → sealed class + data classes
+  colorCtors = MkCon "Red" [] :: MkCon "Green" (TyName "Int" :: []) :: []
+  colorOut = emitDecl (DType "Color" [] colorCtors)
+  _ = checkContains "13 DType sealed class Color" colorOut "sealed class Color"
+  _ = checkContains "13 DType data class Red" colorOut "data class Red()"
+  _ = checkContains "13 DType data class Green" colorOut "data class Green("
+
+  -- 14. DFn add → fun method
+  addParams = MkParam "a" (TyName "Int") :: MkParam "b" (TyName "Int") :: []
+  addOut = emitDecl (DFn "add" addParams (Some (TyName "Int")) (EBinOp "+" (EVar "a") (EVar "b")))
+  _ = checkContains "14 DFn fun" addOut "fun add("
+  _ = checkContains "14 DFn return type" addOut "): Long"
+  _ = checkContains "14 DFn body" addOut "= (a + b)"
+
+  -- 15. DType Maybe suppressed (native T?)
+  maybeDU = DType "Maybe" ("A" :: []) (MkCon "Some" (TyName "A" :: []) :: MkCon "None" [] :: [])
+  _ = codegenKotlinCheck "15 DType Maybe suppressed" (emitDecl maybeDU) ""
+
+  -- 16. DExternal comment
+  extDecl = DExternal "httpGet" (MkParam "url" (TyName "Str") :: []) (TyName "Str")
+  _ = checkContains "16 DExternal comment" (emitDecl extDecl) "// external: httpGet"
+
+  -- 17. DOpaque typealias
+  _ = codegenKotlinCheck "17 DOpaque typealias" (emitDecl (DOpaque "HttpClient")) "    typealias HttpClient = Any"
+
+  -- 18. Full module emit
+  idParams = MkParam "x" (TyName "Int") :: []
+  modDecls = DType "Color" [] (MkCon "Red" [] :: MkCon "Blue" [] :: []) :: DFn "id" idParams (Some (TyName "Int")) (EVar "x") :: []
+  m = MkModule ("Test" :: "Mod" :: []) modDecls
+  out = emitModule m
+  _ = checkContains "18 module object Mod" out "object Mod"
+  _ = checkContains "18 module sealed Color" out "sealed class Color"
+  _ = checkContains "18 module fun id" out "fun id("
+
+  -- 19. EFloat
+  _ = codegenKotlinCheck "19 EFloat" (emitExpr (EFloat "3.14")) "3.14"
+
+  -- 20. EChar
+  _ = codegenKotlinCheck "20 EChar newline" (emitExpr (EChar '\n')) "'\\n'"
+
+  0

@@ -1,0 +1,15 @@
+module Platform.Kotlin.Runtime
+
+-- Kotlin/JVM runtime helper declarations for ll-lang programs.
+-- These are external functions available via the Kotlin standard library.
+
+-- Standard I/O
+external console_log(msg Str) Unit
+
+-- JSON (via kotlinx.serialization)
+external JSON_parse(src Str) Str
+
+-- HTTP (requires ktor or okhttp on classpath)
+opaque Response
+opaque Request
+external httpGet(url Str) Str

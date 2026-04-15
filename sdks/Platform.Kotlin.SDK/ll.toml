@@ -1,0 +1,8 @@
+[project]
+name = "Platform.Kotlin.SDK"
+version = "1.0.0"
+
+[sdk]
+target = "kotlin"
+aliases = ["kt", "kotlin"]
+ext = ".kt"

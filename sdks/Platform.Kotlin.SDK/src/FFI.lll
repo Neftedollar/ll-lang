@@ -1,0 +1,27 @@
+module Platform.Kotlin.FFI
+
+-- Kotlin external name mapping table.
+-- Maps ll-lang `external` function names to their Kotlin/JVM implementations.
+
+-- Each entry: (ll-lang-name, kotlin-target-expression)
+kotlinExternalMap =
+  ("console_log", "println") ::
+  ("JSON_parse", "kotlinx.serialization.json.Json.decodeFromString") ::
+  []
+
+-- Look up the Kotlin implementation for an ll-lang external name.
+-- Returns the target expression or empty string if not found.
+lookupExternal(name Str) =
+  lookupExternal_ kotlinExternalMap name
+
+lookupExternal_(entries List[(Str, Str)])(name Str) =
+  match entries
+    | [] -> ""
+    | (k, v) :: rest ->
+      if k == name
+        v
+      else lookupExternal_ rest name
+
+-- Check if an external name has a known Kotlin mapping.
+hasExternal(name Str) =
+  strLen (lookupExternal name) > 0
