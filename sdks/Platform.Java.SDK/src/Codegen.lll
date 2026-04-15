@@ -383,14 +383,25 @@ emitReturnType(ret Maybe[TypeExpr]) =
     | Some t -> emitType t
     | None -> "Object"
 
+-- Platform.Java.SDK native type mapping:
+--   Maybe A  -> java.util.Optional<A>  (already in emitType)
+-- Suppress custom sealed interface for types covered by Java native equivalents.
+isNativeType(name Str) =
+  if name == "Maybe"
+    true
+  else false
+
 emitDecl(d Decl) =
   match d
     | DType name tvars ctors ->
-      tpStr = emitTypeParams tvars
-      permits = emitPermits name ctors
-      sealedDecl = strConcat "    sealed interface " (strConcat name (strConcat tpStr (strConcat " permits " (strConcat permits " {"))))
-      ctorDecls = emitCtors name tpStr ctors
-      strConcat sealedDecl (strConcat "\n" (strConcat ctorDecls "\n    }"))
+      if isNativeType name
+        ""
+      else
+        tpStr = emitTypeParams tvars
+        permits = emitPermits name ctors
+        sealedDecl = strConcat "    sealed interface " (strConcat name (strConcat tpStr (strConcat " permits " (strConcat permits " {"))))
+        ctorDecls = emitCtors name tpStr ctors
+        strConcat sealedDecl (strConcat "\n" (strConcat ctorDecls "\n    }"))
     | DFn name params ret body ->
       paramStr = emitParamsStr params
       retType = emitReturnType ret

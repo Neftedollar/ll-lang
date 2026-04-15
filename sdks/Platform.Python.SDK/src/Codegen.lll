@@ -287,12 +287,23 @@ emitParamStr(p Param) =
 emitParams(ps List[Param]) =
   joinWith ", " (listMap emitParamStr ps)
 
+-- Platform.Python.SDK native type mapping:
+--   Maybe A  -> Optional[A]  (already in emitType)
+-- Suppress custom dataclass/Union for types covered by Python native equivalents.
+isNativeType(name Str) =
+  if name == "Maybe"
+    true
+  else false
+
 emitDecl(d Decl) =
   match d
     | DType name _ ctors ->
-      ctorDecls = emitCtors ctors
-      alias = emitUnionAlias name ctors
-      strConcat ctorDecls (strConcat "\n\n" alias)
+      if isNativeType name
+        ""
+      else
+        ctorDecls = emitCtors ctors
+        alias = emitUnionAlias name ctors
+        strConcat ctorDecls (strConcat "\n\n" alias)
     | DFn name params _ body ->
       match params
         | [] ->
