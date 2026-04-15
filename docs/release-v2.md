@@ -24,7 +24,7 @@ This document is the binding checklist for `v2` readiness. A gate is either
 | G2.2 | M2 (project & deps) all items `[x]` | PASS | roadmap §M2 |
 | G2.3 | M3 (stdlib foundation) all items `[x]` | PASS | roadmap §M3 |
 | G2.4 | M4 (syntax ergonomics) all items `[x]` | PASS | roadmap §M4 |
-| G2.5 | M5 (self-host transition) — policy items `[x]`; "compile itself" `[ ]` | PARTIAL | M5 gap: file I/O FFI |
+| G2.5 | M5 (self-host transition) — policy items `[x]`; "compile itself" `[ ]` | PARTIAL | file I/O FFI added (PR #127); remaining: byte-identical fixpoint (let rec + prelude alignment) |
 | G2.6 | M6 (LLM operating system) all items `[x]` | PASS | roadmap §M6 |
 | G2.7 | M7 (benchmarks & release gates) all items `[x]` | PARTIAL | this doc |
 
