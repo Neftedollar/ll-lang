@@ -7,19 +7,15 @@ open LLLang.Elaborator
 
 // ---- Error helpers -------------------------------------------------------
 
-let private mkErr code line col msg : LLError =
-    { Code = code; Line = line; Col = col
-      Message = sprintf "%s %d:%d %s" (code.ToString()) line col msg }
-
 /// Position-less error emitters. Unification returns errors without a
 /// source position (it doesn't see the source AST); callers that DO know
 /// the source expression later reposition the error via `repos`.
-let private e001 t1 t2 = mkErr E001 0 0 $"TypeMismatch {typeExprToStr t1} vs {typeExprToStr t2}"
-let private e002 name  = mkErr E002 0 0 $"UnboundVar {name}"
-let private e004 t1 t2 = mkErr E004 0 0 $"UnitMismatch {typeExprToStr t1} vs {typeExprToStr t2}"
-let private e005 t1 t2 = mkErr E005 0 0 $"TaggedUntaggedMismatch {typeExprToStr t1} vs {typeExprToStr t2}"
-let private e006 msg    = mkErr E006 0 0 $"MissingImpl {msg}"
-let private e008 v  t  = mkErr E008 0 0 $"OccursCheck {v} in {typeExprToStr t}"
+let private e001 t1 t2 = mkLLError E001 0 0 $"TypeMismatch {typeExprToStr t1} vs {typeExprToStr t2}"
+let private e002 name  = mkLLError E002 0 0 $"UnboundVar {name}"
+let private e004 t1 t2 = mkLLError E004 0 0 $"UnitMismatch {typeExprToStr t1} vs {typeExprToStr t2}"
+let private e005 t1 t2 = mkLLError E005 0 0 $"TaggedUntaggedMismatch {typeExprToStr t1} vs {typeExprToStr t2}"
+let private e006 msg    = mkLLError E006 0 0 $"MissingImpl {msg}"
+let private e008 v  t  = mkLLError E008 0 0 $"OccursCheck {v} in {typeExprToStr t}"
 
 /// Look up a node's source position in the PosMap side-table.
 /// Accepts `obj | null` so callers can pass the result of `box` directly
@@ -27,23 +23,12 @@ let private e008 v  t  = mkErr E008 0 0 $"OccursCheck {v} in {typeExprToStr t}"
 let private posOf (pm: PosMap) (node: obj | null) : int * int =
     PosMap.tryFind pm node |> fun p -> (p.Line, p.Col)
 
-/// Rewrite an error's line/col (and its rendered Message) to match `(ln, col)`.
-/// Used to attach a caller-supplied source position to errors produced by
-/// position-agnostic helpers like `unify`. If the error already has a
-/// non-zero line, keep it (nested errors can supply their own position).
+/// Attach a source position to an error produced by a position-agnostic helper.
+/// Rebuilds Message from Body + new position without string-parsing.
+/// If the error already has a non-zero line, keep it unchanged.
 let private repos (ln: int) (col: int) (err: LLError) : LLError =
     if err.Line <> 0 || err.Col <> 0 then err
-    else
-        // Reconstruct the Message with the new line/col. The format is
-        // "EXXX L:C Rest..." — split off the first two whitespace-separated
-        // tokens and replace the second ("L:C") with the new one.
-        let parts = err.Message.Split([| ' ' |], 3)
-        let newMsg =
-            if parts.Length >= 2 then
-                let rest = if parts.Length = 3 then " " + parts[2] else ""
-                sprintf "%s %d:%d%s" parts[0] ln col rest
-            else err.Message
-        { err with Line = ln; Col = col; Message = newMsg }
+    else mkLLError err.Code ln col err.Body
 
 // ---- Helpers -------------------------------------------------------------
 
@@ -500,7 +485,7 @@ and private patternType (st: InferState) (env: Env) (pat: Pattern) : TypeExpr * 
             let nExpected = List.length expectedArgTys
             let nActual   = List.length argPats
             if nActual > nExpected then
-                st.Errors <- st.Errors @ [mkErr E001 0 0 (sprintf "TypeMismatch constructor %s (arity %d) applied to %d argument(s)" name nExpected nActual)]
+                st.Errors <- st.Errors @ [mkLLError E001 0 0 (sprintf "TypeMismatch constructor %s (arity %d) applied to %d argument(s)" name nExpected nActual)]
             // Only zip the patterns that have a corresponding expected type;
             // extra patterns (over-application) are skipped — the error above
             // already records the problem.
