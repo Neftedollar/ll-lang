@@ -123,6 +123,35 @@ lookupSymbol(src Str)(name Str) =
         p4 = strConcat p3 kind
         strConcat p4 "\"}"
 
+-- ---- Multi-file type-checking ----------------------------------------
+-- Compile a list of source texts in dependency order (caller must topo-sort).
+-- Threads the type environment across files so later files see earlier types.
+-- Returns: (all-type-errors, final-env).
+-- Elaboration errors are immediately fatal per file (returns that file's errors).
+
+compileFiles(srcs List[Str])(env RBMap[Str][Scheme]) =
+  match srcs
+    | [] -> ([], env)
+    | src :: rest ->
+      tokens = tokenize src
+      ast = parseModule tokens
+      elabErrs = elaborate ast
+      if listIsEmpty elabErrs
+        match ast
+          | MkModule _ decls ->
+            let (typeErrs, env2) = inferModuleStep env decls
+            if listIsEmpty typeErrs
+              compileFiles rest env2
+            else
+              (typeErrs, env2)
+      else
+        (listMap errMsg elabErrs, env)
+
+-- Entry: compile ordered source texts starting from the base env.
+compileProject(srcs List[Str]) =
+  let (errs, _) = compileFiles srcs (baseEnv ())
+  errs
+
 -- ---- Inference-aware pipeline ----------------------------------------
 
 showTypeErrors(errs List[Str]) =
@@ -236,5 +265,17 @@ main =
   -- 9. tokenEstimate > 0 tokens
   te9 = tokenEstimate src1
   _ = compilerCheckContains "9 tokenEstimate ok" te9 "\"ok\":true"
+
+  -- 10. compileProject with two valid modules, no errors
+  srcA = "module A\nfoo(x Int) = x\n"
+  srcB = "module B\nbar(x Int) = x\n"
+  proj10 = compileProject [srcA; srcB]
+  _ = compilerCheck "10 compileProject no errs" (intToStr (listLen proj10)) "0"
+
+  -- 11. compileProject with an unbound name, returns type errors
+  srcBad = "module Bad\nresult = badFn 1\n"
+  proj11 = compileProject [srcBad]
+  proj11status = match proj11 | [] -> "none" | _ :: _ -> "err"
+  _ = compilerCheck "11 compileProject unbound err" proj11status "err"
 
   printfn "Done"

@@ -404,6 +404,14 @@ inferModule(decls List[Decl]) =
   stFinal = listFold inferDecl st0 decls
   inferErrors stFinal
 
+-- inferModuleStep: like inferModule but accepts a pre-built env and
+-- returns (errors, updated-env) for multi-file / incremental compilation.
+-- The caller threads the env across files in topological order.
+inferModuleStep(env RBMap[Str][Scheme])(decls List[Decl]) =
+  st0 = MkInferState env freshInit [] substEmpty
+  stFinal = listFold inferDecl st0 decls
+  (inferErrors stFinal, inferEnv stFinal)
+
 -- ---- Self-tests --------------------------------------------------------
 
 strStartsWith(prefix Str)(s Str) =
