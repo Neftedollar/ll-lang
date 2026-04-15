@@ -6,6 +6,7 @@ OK 5 unbound constructor
 OK 6 let binding scoping
 OK 7 external decl registers name
 OK 8 opaque type and external
+OK 9 non-exhaustive match
 OK 1 isFlex $0=true
 OK 2 isFlex Int=false
 OK 3 isFlex a=false
