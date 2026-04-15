@@ -88,6 +88,11 @@ declKind(d Decl)(name Str) =
       if n == name
         "let"
       else ""
+    | DExternal n _ _ ->
+      if n == name
+        "external"
+      else ""
+    | DOpaque _ -> ""
     | DImport _ -> ""
     | DExport inner -> declKind inner name
 
