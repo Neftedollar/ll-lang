@@ -20,14 +20,14 @@ Create `hello.lll`:
 ```lll
 module Hello
 
-Hello = printfn "Hello, ll-lang!"
+main() = printfn "Hello, ll-lang!"
 ```
 
-Three lines. That is the entire program. No imports, no main annotation, no braces.
+Three lines. That is the entire program. No imports, no entry-point annotation, no braces.
 
-**Line 1 — module declaration.** Every `.lll` file must start with `module Name`. The name is an identifier matching the file.
+**Line 1 — module declaration.** Every `.lll` file must start with `module Name`. The name must match the file name.
 
-**Line 3 — the entry point.** An uppercase name on the left of `=` declares a value (or type — but `printfn` returns `Unit`, so the compiler knows this is a value binding, not a type). `Hello` is the conventional entry point when there are no parameters. `printfn` is in the prelude; it takes a `Str` and prints it with a newline.
+**Line 3 — the entry point.** `main()` is the canonical zero-parameter entry point. The empty parens signal a zero-param function — the compiler emits `[<EntryPoint>]` for it. `printfn` is in the prelude; it takes a `Str` and prints it with a newline.
 
 No `fn`, no `return`, no `{}`.
 
@@ -56,7 +56,7 @@ This writes `hello.fs` next to your source file. Inspect it:
 module Hello
 
 [<EntryPoint>]
-let main _ =
+let main (argv: string[]) =
     printfn "Hello, ll-lang!"
     0
 ```
@@ -70,7 +70,7 @@ module Hello
 
 greet(name Str) = printfn (strConcat "Hello, " name)
 
-Hello =
+main() =
   _ = greet "Alice"
   _ = greet "Bob"
   printfn "Done."
@@ -81,7 +81,7 @@ New things here:
 - `greet(name Str)` — a function. Each parameter is written `(name Type)` in its own parens. Return type is inferred (`Unit`).
 - `strConcat` — stdlib string concatenation.
 - `_ = expr` — evaluate `expr` for its side effect and discard the result. This is how you sequence `Unit`-returning calls in a pure language.
-- The last expression in a block is the block's value. `printfn "Done."` returns `Unit`, which becomes the value of `Hello`.
+- The last expression in a block is the block's value. `printfn "Done."` returns `Unit`, which becomes the value of `main()`.
 
 ```bash
 lllc run hello.lll
