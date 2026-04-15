@@ -178,23 +178,29 @@ echo "--- binding name comparison ---"
 echo "stage0 bindings ($STAGE0_COUNT): $(tr '\n' ' ' < "$STAGE0_NAMES")"
 echo "self-hosted bindings ($SELFHOSTED_COUNT): $(tr '\n' ' ' < "$SELFHOSTED_NAMES")"
 
-# Names in stage0 but not self-hosted (self-hosted must include all corpus names)
-MISSING=$(comm -23 "$STAGE0_NAMES" "$SELFHOSTED_NAMES" | grep -v '^$' || true)
+# Prelude names: stage0 inlines these as `let` bindings; self-hosted uses
+# `open LLLang.Prelude` so they don't appear as `let` lines.  Both are valid
+# and structurally equivalent — exclude prelude names from the comparison.
+PRELUDE_NAMES_RE='^(abs|absf|charIsAlpha|charIsDigit|charIsSpace|charToInt|exit|fileExists|floatToStr|getArgs|intToChar|intToStr|listAppend|listAt|listConcat|listFilter|listFold|listHead|listIsEmpty|listLen|listMap|listReverse|listTail|ll_dirList|ll_processRun|max|maybeBind|maybeMap|maybeWithDefault|min|print|printfn|readFile|sqrt|strChars|strConcat|strContains|strFromChars|strIndexOf|strLen|strReverse|strSlice|strSplit|strToFloat|strToInt|strTrim|writeFile)$'
+
+# Names in stage0 but not self-hosted (after excluding known prelude names)
+MISSING=$(comm -23 "$STAGE0_NAMES" "$SELFHOSTED_NAMES" | grep -v '^$' \
+        | grep -vE "$PRELUDE_NAMES_RE" || true)
+# Extra names in self-hosted beyond stage0 (after excluding known prelude names)
 EXTRA=$(comm -13 "$STAGE0_NAMES" "$SELFHOSTED_NAMES" | grep -v '^$' \
-        | grep -vE '^(listLen|listMap|listFilter|listFold|listReverse|listAppend|listConcat|listIsEmpty|strLen|strConcat|strChars|strFromChars|intToStr|charToInt|printfn|print|listHead|listTail)$' \
-        || true)
+        | grep -vE "$PRELUDE_NAMES_RE" || true)
 
 if [[ -z "$MISSING" ]]; then
-  pass "all stage0 corpus bindings are present in self-hosted output"
+  pass "all stage0 user bindings are present in self-hosted output"
 else
-  fail "bindings in stage0 but missing from self-hosted: $MISSING"
+  fail "user bindings in stage0 but missing from self-hosted: $MISSING"
 fi
 
 if [[ -z "$EXTRA" ]]; then
   pass "no unexpected extra user bindings in self-hosted output"
 else
-  # Extra non-prelude bindings are informational (might be fine)
-  echo "INFO  extra bindings in self-hosted (beyond stage0): $EXTRA"
+  # Extra user bindings in self-hosted are informational (might be fine)
+  echo "INFO  extra user bindings in self-hosted (beyond stage0): $EXTRA"
 fi
 
 # ── 5. Byte-identical check (expected to fail until deeper M5 alignment) ─────

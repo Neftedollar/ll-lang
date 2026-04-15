@@ -160,6 +160,11 @@ checkExpr(env Env)(e Expr) =
       env2 = envAdd name env
       bodyErrs = checkExpr env2 body
       listAppend rhsErrs bodyErrs
+    | ELetTuple a b rhs body ->
+      rhsErrs = checkExpr env rhs
+      env2 = envAdd b (envAdd a env)
+      bodyErrs = checkExpr env2 body
+      listAppend rhsErrs bodyErrs
     | EMatch scrut pats bodies ->
       scrutErrs = checkExpr env scrut
       armErrs = checkArms env pats bodies
