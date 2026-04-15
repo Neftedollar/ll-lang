@@ -696,3 +696,115 @@ boundary is tracked in
 The stdlib modules are written in ll-lang and compiled via the bootstrap compiler. Library modules are no longer expected to be independently runnable via `main()`; smoke/demo entrypoints should live in dedicated executable modules.
 
 When using multiple modules together in a project, import them in dependency order: `Std.Lexer` before `Std.Parser` before `Std.Elaborator` before `Std.Codegen`.
+
+---
+
+## Naming convention (frozen for v2)
+
+All public stdlib names use a **`verbOnType` prefix style** — no namespacing inside modules, no operator overloading. The type prefix is lowercase and comes first.
+
+| Type | Prefix | Example |
+|------|--------|---------|
+| `List` | `list` | `listMap`, `listFilter`, `listFold` |
+| `Maybe` | `maybe` | `maybeMap`, `maybeBind`, `maybeWithDefault` |
+| `Result` | `result` | `resultMap`, `resultBind`, `resultIsOk` |
+| `Map` | `map` | `mapInsert`, `mapLookup`, `mapDelete` |
+| `Str` | `str` | `strConcat`, `strSplit`, `strTrim` |
+| `State` | `state` | `stateRun`, `stateBind`, `stateGet` |
+| `Parsec` | `parse` | `parsePure`, `parseBind`, `parseMany` |
+| `Lazy` | `lazy` | `lazyDelay`, `lazyForce`, `lazyValue` |
+| `Json` | `json` | `jsonParse`, `jsonStringify` |
+| `Toml` | `toml` | `tomlParse` |
+
+**Rules:**
+1. The type-name prefix is always lowercase and always first in the name.
+2. No two functions in different modules may share an unambiguous short name (e.g., `map` is not a valid export — use `mapInsert`).
+3. Prelude function names are owned by the prelude; imported modules must not re-export conflicting names.
+4. Legacy names or aliases are removed aggressively; backwards-compatibility shims are not kept.
+
+---
+
+## Prelude boundary rule (frozen for v2)
+
+**A function belongs in the Prelude if and only if:**
+- It is needed by almost every ll-lang program (≥ 90% of programs would import it otherwise)
+- It operates on a type that is built into the language (`List`, `Maybe`, `Str`, `Int`, `Bool`, `Char`)
+- Its definition is 1–3 lines and has no non-trivial dependencies
+
+**A function does NOT belong in the Prelude if:**
+- It is useful only in specific domains (parsing, state threading, config loading)
+- It requires importing another stdlib module to typecheck
+- It could be replaced by a 2–3 line inline in the call site
+
+**Current Prelude surface is frozen.** Adding to it requires removing something of equal or
+greater cognitive weight. The prelude must stay small enough that a developer can memorize
+it in one sitting.
+
+---
+
+## Compiler-facing proof-of-use (M3.H)
+
+The following sketch shows the foundation modules supporting a real compiler-shaped task:
+a single-pass diagnostic accumulator that resolves imports, collects errors, and formats them.
+
+This uses `Std.State` for pass state, `Std.Maybe` for optional lookups, `Std.Map` for the
+module registry, and `Std.Result` for error propagation.
+
+```lll
+module Compiler.ImportResolver
+
+import Std.State
+import Std.Maybe
+import Std.Map
+import Std.Result
+
+-- Pass state: seen module names + accumulated diagnostics
+ResolverState = MkResolverState
+  (RBMap[Str][Bool])   -- seen modules
+  (List[Str])          -- diagnostics
+
+emptyResolverState() =
+  MkResolverState (mapEmpty()) []
+
+addDiag(diag Str)(s ResolverState) =
+  match s
+    | MkResolverState seen diags ->
+      MkResolverState seen (diag :: diags)
+
+markSeen(modName Str)(s ResolverState) =
+  match s
+    | MkResolverState seen diags ->
+      MkResolverState (mapInsert strCmp modName true seen) diags
+
+isSeen(modName Str)(s ResolverState) =
+  match s
+    | MkResolverState seen _ -> isSome (mapLookup strCmp modName seen)
+
+-- Resolve one import: emit diagnostic if unknown, mark as seen
+resolveImport(known RBMap[Str][Bool])(modName Str) =
+  stateBind (stateGet (emptyResolverState())) \s.
+  if isSeen modName s
+    statePure ()
+  else
+    match mapLookup strCmp modName known
+      | None ->
+        stateModify (addDiag (strConcat "E002 unknown module: " modName))
+      | Some _ ->
+        stateModify (markSeen modName)
+
+-- Run resolver over a list of imports
+resolveAll(known RBMap[Str][Bool])(imports List[Str]) =
+  listFold
+    (\acc imp. stateBind acc (\_ . resolveImport known imp))
+    (statePure ())
+    imports
+
+-- Entry: returns accumulated diagnostics
+checkImports(known RBMap[Str][Bool])(imports List[Str]) =
+  s = stateExec (resolveAll known imports) (emptyResolverState())
+  match s
+    | MkResolverState _ diags -> diags
+```
+
+This sketch validates that `Std.State` + `Std.Map` + `Std.Maybe` compose correctly for
+compiler-style pass work without fighting the language or requiring ad hoc helpers.
