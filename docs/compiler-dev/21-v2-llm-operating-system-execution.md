@@ -62,7 +62,7 @@ Make the core compiler/toolchain surfaces discoverable without scraping prose.
 
 ### MCP tool contract surface (frozen for v2)
 
-The following 10 tools form the stable MCP contract surface. Each tool is
+The following 11 tools form the stable MCP contract surface. Each tool is
 reachable via `lllc mcp` (stdio). All inputs and outputs are JSON.
 
 | Tool | Purpose | Key input fields | Output shape |
@@ -77,8 +77,9 @@ reachable via `lllc mcp` (stdio). All inputs and outputs are JSON.
 | `stdlib_search` | Search stdlib by name or type sig | `query: Str` | `[{ name, signature, module, scope }]` |
 | `grammar_lookup` | EBNF production for a grammar rule | `rule: Str` | `{ found, rule, production }` |
 | `project_info` | Project metadata from `lll.toml` | `path: Str` | `{ root, manifest_path, manifest_kind, manifest, modules[], deps[], errors[] }` |
+| `list_targets` | All compile targets with status/description | _(none)_ | `[{ id, name, status, extension, description }]` |
 
-Compile targets: `fs` (F#, default), `ts` (TypeScript), `py` (Python), `java` (Java).
+Compile targets: `fs` (F#, default), `ts` (TypeScript), `py` (Python), `java` (Java), `cs` (C#), `llvm` (experimental).
 Error shape: `{ code: Str, line: Int, col: Int, message: Str }`.
 
 ---
