@@ -12,17 +12,22 @@ type LLError = {
     Code: ErrorCode
     Line: int
     Col: int
-    /// Compact format: "E001 12:5 TypeMismatch Str Str[UserId]"
+    /// Position-free detail: "TypeMismatch Str Str[UserId]" (no code or pos prefix).
+    /// Used to rebuild Message when position is patched in after construction.
+    Body: string
+    /// Full compact format: "E001 12:5 TypeMismatch Str Str[UserId]"
     Message: string
 }
 
-let private e003 line col typeName missing = {
-    Code = E003; Line = line; Col = col
-    Message = sprintf "E003 %d:%d NonExhaustiveMatch %s missing:%s" line col typeName missing }
+let internal mkLLError code line col body = {
+    Code = code; Line = line; Col = col; Body = body
+    Message = sprintf "%s %d:%d %s" (code.ToString()) line col body }
 
-let private e026 line col target name = {
-    Code = E026; Line = line; Col = col
-    Message = sprintf "E026 %d:%d UnknownExternalMapping target:%s name:%s" line col target name }
+let private e003 line col typeName missing =
+    mkLLError E003 line col (sprintf "NonExhaustiveMatch %s missing:%s" typeName missing)
+
+let private e026 line col target name =
+    mkLLError E026 line col (sprintf "UnknownExternalMapping target:%s name:%s" target name)
 
 /// Arithmetic and comparison operators pre-populated as TyVar wildcards.
 /// These are parsed as EApp(EApp(EVar "+", ...), ...) and must not trigger E002

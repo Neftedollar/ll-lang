@@ -20,7 +20,7 @@ let CSharp = Target.CSharp
 let LLVM = Target.LLVM
 
 let private wrapErr (msg: string) : LLError list =
-    [{ Code = E001; Line = 0; Col = 0; Message = msg }]
+    [mkLLError E001 0 0 msg]
 
 let private parseModuleWithPosFromSrc (src: string) : Result<LLModule * PosMap, LLError list> =
     match tokenize src with
@@ -66,18 +66,8 @@ let private importedSchemesToElaboratorEnv (importedEnv: Env) : Elaborator.TypeE
 
 let private externalMappingError (target: Target) (pm: PosMap) (sigRecord: FnSig) : LLError =
     let pos = PosMap.tryFind pm (box sigRecord)
-    {
-        Code = E026
-        Line = pos.Line
-        Col = pos.Col
-        Message =
-            sprintf
-                "E026 %d:%d UnknownExternalMapping target:%s name:%s"
-                pos.Line
-                pos.Col
-                (targetPlatformName target)
-                sigRecord.Name
-    }
+    mkLLError E026 pos.Line pos.Col
+        (sprintf "UnknownExternalMapping target:%s name:%s" (targetPlatformName target) sigRecord.Name)
 
 let private validateExternalMappingsForTarget (target: Target) (pm: PosMap) (m: LLModule) : LLError list =
     m.Decls

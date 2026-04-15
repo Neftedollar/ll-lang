@@ -27,13 +27,11 @@ type LLProject = {
 let private e020 (filePath: string) (expected: string list) (actual: string list) : LLError =
     let exp = String.concat "." expected
     let act = String.concat "." actual
-    { Code = E020; Line = 0; Col = 0
-      Message = sprintf "E020 0:0 ModulePathMismatch file:%s expected:%s got:%s" filePath exp act }
+    mkLLError E020 0 0 (sprintf "ModulePathMismatch file:%s expected:%s got:%s" filePath exp act)
 
 let private e024 (cycle: string list) : LLError =
     let path = String.concat " -> " cycle
-    { Code = E024; Line = 0; Col = 0
-      Message = sprintf "E024 0:0 ModuleCycle %s" path }
+    mkLLError E024 0 0 (sprintf "ModuleCycle %s" path)
 
 // ---- Helpers ---------------------------------------------------------------
 
@@ -153,12 +151,12 @@ let loadProject (rootDir: string) : Result<LLProject, LLError list> =
         | None   -> Path.Combine(rootDir, "lll.toml")  // will fail with a clear message below
     let manifestSrc =
         try Ok (File.ReadAllText manifestPath)
-        with ex -> Error [{ Code = E001; Line = 0; Col = 0; Message = sprintf "E001 0:0 CannotReadManifest %s: %s" manifestPath ex.Message }]
+        with ex -> Error [mkLLError E001 0 0 (sprintf "CannotReadManifest %s: %s" manifestPath ex.Message)]
     match manifestSrc with
     | Error es -> Error es
     | Ok manifestText ->
     match parseManifest manifestText with
-    | Error msg -> Error [{ Code = E001; Line = 0; Col = 0; Message = sprintf "E001 0:0 ManifestError %s" msg }]
+    | Error msg -> Error [mkLLError E001 0 0 (sprintf "ManifestError %s" msg)]
     | Ok manifest ->
     // 2. Glob all .lll files under rootDir/src/
     let srcDir = Path.Combine(rootDir, "src")
@@ -173,18 +171,18 @@ let loadProject (rootDir: string) : Result<LLProject, LLError list> =
         let src =
             try Some (File.ReadAllText filePath)
             with ex ->
-                errors <- errors @ [{ Code = E001; Line = 0; Col = 0; Message = sprintf "E001 0:0 CannotReadFile %s: %s" filePath ex.Message }]
+                errors <- errors @ [mkLLError E001 0 0 (sprintf "CannotReadFile %s: %s" filePath ex.Message)]
                 None
         match src with
         | None -> ()
         | Some srcText ->
             match tokenize srcText with
             | Error e ->
-                errors <- errors @ [{ Code = E001; Line = 0; Col = 0; Message = sprintf "E001 0:0 LexError %s: %s" filePath e }]
+                errors <- errors @ [mkLLError E001 0 0 (sprintf "LexError %s: %s" filePath e)]
             | Ok toks ->
                 match parseModuleWithPos toks with
                 | Error e ->
-                    errors <- errors @ [{ Code = E001; Line = 0; Col = 0; Message = sprintf "E001 0:0 ParseError %s: %s" filePath e }]
+                    errors <- errors @ [mkLLError E001 0 0 (sprintf "ParseError %s: %s" filePath e)]
                 | Ok (m, _) ->
                     // 4. Validate module path matches file path
                     let expected = fileToExpectedModulePath rootDir manifest.Name filePath
