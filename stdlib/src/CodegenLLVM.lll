@@ -472,3 +472,73 @@ checkContains(label Str)(got Str)(needle Str) =
 
 -- ---- Tests -----------------------------------------------------------------
 
+codegenLLVMCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  got:      " (strConcat got (strConcat "\n  expected: " expected)))))
+
+main =
+  -- 1. emitLLVMType Int
+  _ = codegenLLVMCheck "1 TyName Int" (emitLLVMType (TyName "Int")) "i64"
+
+  -- 2. emitLLVMType Float
+  _ = codegenLLVMCheck "2 TyName Float" (emitLLVMType (TyName "Float")) "double"
+
+  -- 3. emitLLVMType Bool
+  _ = codegenLLVMCheck "3 TyName Bool" (emitLLVMType (TyName "Bool")) "i1"
+
+  -- 4. emitLLVMType Str
+  _ = codegenLLVMCheck "4 TyName Str" (emitLLVMType (TyName "Str")) "i8*"
+
+  -- 5. emitLLVMType TyFn
+  _ = codegenLLVMCheck "5 TyFn" (emitLLVMType (TyFn (TyName "Int") (TyName "Bool"))) "i8*"
+
+  -- 6. emitExprReg EInt
+  _ = codegenLLVMCheck "6 EInt reg" (emitExprReg (EInt 42) 0 0) "42"
+
+  -- 7. emitExprReg EBool true
+  _ = codegenLLVMCheck "7 EBool true reg" (emitExprReg (EBool true) 0 0) "1"
+
+  -- 8. emitExprReg EBool false
+  _ = codegenLLVMCheck "8 EBool false reg" (emitExprReg (EBool false) 0 0) "0"
+
+  -- 9. emitExprReg EVar
+  _ = codegenLLVMCheck "9 EVar reg" (emitExprReg (EVar "x") 0 0) "%x"
+
+  -- 10. emitExprInstrs EBinOp +
+  binopInstrs = emitExprInstrs (EBinOp "+" (EInt 1) (EInt 2)) 0 0
+  _ = checkContains "10 EBinOp + instrs" binopInstrs "add i64"
+  _ = checkContains "10 EBinOp + result reg" binopInstrs "%t0"
+
+  -- 11. emitExprInstrs EBinOp cmp
+  cmpInstrs = emitExprInstrs (EBinOp "==" (EInt 3) (EInt 3)) 0 0
+  _ = checkContains "11 EBinOp == instrs" cmpInstrs "icmp eq i64"
+
+  -- 12. DFn emitDecl basic
+  idParams = MkParam "x" (TyName "Int") :: []
+  idOut = emitDecl (DFn "id" idParams None (EVar "x")) 0
+  _ = checkContains "12 DFn define" idOut "define i64 @id("
+  _ = checkContains "12 DFn param" idOut "i64 %x"
+  _ = checkContains "12 DFn ret" idOut "ret i64 %x"
+
+  -- 13. DType emitDecl
+  dtypeOut = emitDecl (DType "Color" [] (MkCon "Red" [] :: [])) 0
+  _ = codegenLLVMCheck "13 DType comment" dtypeOut "; type Color"
+
+  -- 14. DFn with BinOp body
+  addParams = MkParam "a" (TyName "Int") :: MkParam "b" (TyName "Int") :: []
+  addOut = emitDecl (DFn "add" addParams None (EBinOp "+" (EVar "a") (EVar "b"))) 0
+  _ = checkContains "14 DFn add define" addOut "define i64 @add("
+  _ = checkContains "14 DFn add body" addOut "add i64"
+  _ = checkContains "14 DFn add ret" addOut "ret i64"
+
+  -- 15. emitModule header
+  modDecls = DFn "id" idParams None (EVar "x") :: []
+  modOut = emitModule (MkModule ("Test" :: "LLVM" :: []) modDecls)
+  _ = checkContains "15 module prelude" modOut "ll-lang LLVM IR output"
+  _ = checkContains "15 module target" modOut "x86_64-unknown-linux-gnu"
+  _ = checkContains "15 module name" modOut "module Test.LLVM"
+  _ = checkContains "15 module fn" modOut "define i64 @id("
+
+  0
