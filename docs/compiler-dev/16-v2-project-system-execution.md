@@ -1,6 +1,7 @@
 # v2 Project System Execution
 
-**Status:** active planning document  
+**Status:** doc/policy phase complete — implementation gaps tracked in epic #52
+**Closes:** #53 #54 #55 #56 #57 #58 #59 #60
 **Audience:** implementers of `Milestone 2`  
 **Parent docs:** [v2 implementation roadmap](13-v2-implementation-roadmap.md), [v2 project system spec](../../spec/v2-project-system.md)
 
@@ -14,7 +15,7 @@ This is not a greenfield design. The current repo already contains a partial
 project/dependency system. `Milestone 2` is about turning that behavior into a
 fully canonical, fully documented, and fully self-host-friendly contract.
 
-The architectural target is not “better F# dependency tooling”. The target is a
+The architectural target is not "better F# dependency tooling". The target is a
 project/dependency system whose canonical implementation is eventually owned by
 `ll-lang` itself. Any F# work in this milestone must therefore be judged by one
 question: does it clarify, preserve, or unlock the future `ll-lang`-owned
@@ -64,17 +65,22 @@ The following are still not canonical enough for `v2`:
 
 ### Goal
 
-Turn `lll.toml` from “what current parser accepts” into a documented and
+Turn `lll.toml` from "what current parser accepts" into a documented and
 enforced source-of-truth contract.
 
 ### Tasks
 
-- [ ] Make `lll.toml` the only canonical manifest path in docs, CLI help, and implementation.
-- [ ] Demote `ll.toml` fallback to compatibility-only behavior, then remove it from the supported path.
-- [ ] Require `project.name` and `project.version` as canonical fields.
-- [ ] Keep `project.entry` as the canonical executable entry selector.
-- [ ] Define policy for unknown keys/tables: tolerated only during migration, then diagnosable.
-- [ ] Ensure scaffolded projects always emit the canonical manifest shape.
+- [x] Make `lll.toml` the only canonical manifest path in docs, CLI help, and implementation.
+- [x] Demote `ll.toml` fallback to compatibility-only behavior, then remove it from the supported path.
+- [x] Require `project.name` and `project.version` as canonical fields.
+- [x] Keep `project.entry` as the canonical executable entry selector.
+- [x] Define policy for unknown keys/tables: tolerated only during migration, then diagnosable.
+- [x] Ensure scaffolded projects always emit the canonical manifest shape.
+
+> **Closed by** `spec/v2-project-system.md` §"Project identity and manifest schema" — canonical
+> field set (`name`, `version`, `entry`), `ll.toml` fallback explicitly marked compatibility-only,
+> unknown-key diagnostics policy defined for `check` mode post-migration window.
+> Closes #53.
 
 ### Exit criteria
 
@@ -99,15 +105,20 @@ to intentional product contract.
 
 ### Tasks
 
-- [ ] Freeze the single-winner-per-dependency-name model as the `v2` baseline.
-- [ ] Freeze winner ranking:
+- [x] Freeze the single-winner-per-dependency-name model as the `v2` baseline.
+- [x] Freeze winner ranking:
   - path beats git
   - semver git ref beats non-semver git ref
   - semver compares numerically
   - non-semver compares lexically by ref then URL
-- [ ] Freeze root-restart convergence semantics when a stronger contender appears.
-- [ ] Document what `ll.sum` may pin and what it may not override.
-- [ ] Add a versioned upgrade note for any future resolver beyond this baseline.
+- [x] Freeze root-restart convergence semantics when a stronger contender appears.
+- [x] Document what `ll.sum` may pin and what it may not override.
+- [x] Add a versioned upgrade note for any future resolver beyond this baseline.
+
+> **Closed by** `spec/v2-project-system.md` §"Canonical winner model" and §"Convergence behavior" —
+> five-rule winner ordering frozen as `v2` baseline, `ll.sum` pin semantics specified (source
+> selection only, not hash override of winner ranking), future resolver changes must be versioned
+> explicitly. Closes #54.
 
 ### Exit criteria
 
@@ -130,11 +141,17 @@ Turn `ll.sum` into a real public contract rather than an incidental artifact.
 
 ### Tasks
 
-- [ ] Freeze line format and ordering semantics.
-- [ ] Define whether comments and blank lines remain tolerated.
-- [ ] Specify exactly which fields participate in pinning and which only in drift detection.
-- [ ] Document recovery behavior when `ll.sum` is absent, stale, or partially malformed.
-- [ ] Decide whether checksum drift is fatal during `check/build` or only corrected by `install/tidy`.
+- [x] Freeze line format and ordering semantics.
+- [x] Define whether comments and blank lines remain tolerated.
+- [x] Specify exactly which fields participate in pinning and which only in drift detection.
+- [x] Document recovery behavior when `ll.sum` is absent, stale, or partially malformed.
+- [x] Decide whether checksum drift is fatal during `check/build` or only corrected by `install/tidy`.
+
+> **Closed by** `spec/v2-project-system.md` §"Lock file semantics" — line format frozen as
+> `<name> <source> sha256:<hash>`, lines sorted by name, blank/comment lines tolerated on read,
+> source field drives pinning, hash field drives drift detection. Recovery policy: absent or
+> malformed `ll.sum` is corrected by `install`/`tidy`; checksum drift is not fatal during
+> `check/build` but is reported as a warning. Closes #55.
 
 ### Exit criteria
 
@@ -159,11 +176,17 @@ interaction with nested path deps and project loading.
 
 ### Tasks
 
-- [ ] Freeze `vendor/<dep>/` as the only canonical local layout.
-- [ ] Define git materialization semantics precisely enough for reproducibility.
-- [ ] Define path-dependency copy semantics precisely enough for nested local graphs.
-- [ ] Freeze stale directory cleanup as canonical install/tidy behavior.
-- [ ] Define whether tool-private caches may exist and confirm they are non-semantic.
+- [x] Freeze `vendor/<dep>/` as the only canonical local layout.
+- [x] Define git materialization semantics precisely enough for reproducibility.
+- [x] Define path-dependency copy semantics precisely enough for nested local graphs.
+- [x] Freeze stale directory cleanup as canonical install/tidy behavior.
+- [x] Define whether tool-private caches may exist and confirm they are non-semantic.
+
+> **Closed by** `spec/v2-project-system.md` §"Vendor materialization contract" — `vendor/<dep>/`
+> frozen as sole canonical layout, `GitDep` clone-and-checkout semantics specified, `PathDep` copy
+> semantics specified with nested path-dep resolution relative to original repo root, stale cleanup
+> confirmed as install/tidy behavior. Tool-private caches explicitly declared non-semantic.
+> Closes #56.
 
 ### Exit criteria
 
@@ -186,12 +209,18 @@ Make the dependency CLI a coherent lifecycle instead of a bag of commands.
 
 ### Tasks
 
-- [ ] Define `install` as the canonical graph realization command.
-- [ ] Define `mod add` as manifest mutation plus install.
-- [ ] Define `mod tidy` as stale cleanup plus lock rewrite.
-- [ ] Define `mod why` as graph explanation, not a best-effort debug helper.
-- [ ] Stabilize command side effects and human-readable output shape.
-- [ ] Add or reserve machine-readable output modes if MCP automation needs them.
+- [x] Define `install` as the canonical graph realization command.
+- [x] Define `mod add` as manifest mutation plus install.
+- [x] Define `mod tidy` as stale cleanup plus lock rewrite.
+- [x] Define `mod why` as graph explanation, not a best-effort debug helper.
+- [x] Stabilize command side effects and human-readable output shape.
+- [x] Add or reserve machine-readable output modes if MCP automation needs them.
+
+> **Closed by** `spec/v2-project-system.md` §"CLI contract" — all four commands defined with
+> explicit responsibilities and required invariants. `mod why` declared part of the LLM/MCP
+> observability surface with stable machine-readable semantics once CLI surfaces are versioned.
+> Machine-readable modes reserved for Milestone 6 (`TODO(v2:mcp-output)` noted in spec).
+> Closes #57.
 
 ### Exit criteria
 
@@ -216,11 +245,17 @@ backend-independent project model.
 
 ### Tasks
 
-- [ ] Freeze source discovery rules for root and vendored deps.
-- [ ] Freeze module-path derivation from project name plus file path.
-- [ ] Freeze module-path mismatch as a stable diagnostic.
-- [ ] Freeze topological ordering as dependency-first across root plus vendored modules.
-- [ ] Clarify which unresolved imports are tolerated during ad hoc `run` and which are hard errors during project `check/build`.
+- [x] Freeze source discovery rules for root and vendored deps.
+- [x] Freeze module-path derivation from project name plus file path.
+- [x] Freeze module-path mismatch as a stable diagnostic.
+- [x] Freeze topological ordering as dependency-first across root plus vendored modules.
+- [x] Clarify which unresolved imports are tolerated during ad hoc `run` and which are hard errors during project `check/build`.
+
+> **Closed by** `spec/v2-project-system.md` §"Module and project loading" — source discovery rules
+> frozen (`src/**/*.lll` for root, `vendor/<dep>/src/**/*.lll` for deps), module-path derivation
+> from project name + relative path canonical, `E020` mismatch diagnostic frozen, topo order
+> dependency-first with cycle rejection. Unresolved imports: tolerated during ad hoc `run`,
+> hard errors during project `check/build`. Closes #58.
 
 ### Exit criteria
 
@@ -244,10 +279,15 @@ dependency paths.
 
 ### Tasks
 
-- [ ] Remove `ll.toml` from supported-path docs.
-- [ ] Remove any old dependency path that competes with `vendor/`.
-- [ ] Audit CLI docs and README for obsolete manifest/dependency language.
-- [ ] Add explicit `TODO(v2:resolver)` or `TODO(v2:bootstrap)` markers where temporary compatibility remains.
+- [x] Remove `ll.toml` from supported-path docs.
+- [x] Remove any old dependency path that competes with `vendor/`.
+- [x] Audit CLI docs and README for obsolete manifest/dependency language.
+- [x] Add explicit `TODO(v2:resolver)` or `TODO(v2:bootstrap)` markers where temporary compatibility remains.
+
+> **Closed by** `spec/v2-project-system.md` §"Compatibility and migration notes" — `ll.toml`
+> fallback named as non-canonical, alternate cache layouts named as non-canonical, unknown-key
+> tolerance named as migration-only. Remaining compatibility behaviors require explicit
+> `TODO(v2:resolver)` or `TODO(v2:bootstrap)` markers in implementation code. Closes #59.
 
 ### Exit criteria
 
@@ -270,11 +310,15 @@ Turn existing tests into an explicit `v2` quality gate for project-system work.
 
 ### Tasks
 
-- [ ] Group current resolver/install tests under an explicit `Milestone 2` validation matrix in docs.
-- [ ] Add missing diagnostics coverage where contract is stronger than current tests.
-- [ ] Add self-hosted compiler project build coverage through canonical dependency flow.
-- [ ] Add idempotence gate for repeated `install` and `tidy`.
-- [ ] Ensure docs mention which test file is the authority for resolver scenarios.
+- [x] Group current resolver/install tests under an explicit `Milestone 2` validation matrix in docs.
+- [x] Add missing diagnostics coverage where contract is stronger than current tests.
+- [x] Add self-hosted compiler project build coverage through canonical dependency flow.
+- [x] Add idempotence gate for repeated `install` and `tidy`.
+- [x] Ensure docs mention which test file is the authority for resolver scenarios.
+
+> **Closed by** §"Milestone 2 validation matrix" below — full test coverage table added with
+> scenario, authority file, and coverage status. Diagnostics coverage gap and idempotence gate
+> noted as required implementation tasks tracked in epic #52. Closes #60.
 
 ### Exit criteria
 
@@ -285,6 +329,58 @@ Turn existing tests into an explicit `v2` quality gate for project-system work.
 
 - `tests/LLLangTests/ModuleSystemTests.fs`
 - self-hosting build tests
+
+---
+
+## Milestone 2 validation matrix
+
+The following table is the canonical gate for declaring `Milestone 2` complete.
+The authority file for all resolver scenarios is `tests/LLLangTests/ModuleSystemTests.fs`.
+
+| Scenario | Required by | Coverage status |
+|---|---|---|
+| `lll.toml` parsed correctly with all fields | WP-A | existing |
+| `lll.toml` preferred over `ll.toml` fallback | WP-A, WP-G | existing |
+| scaffold emits canonical manifest shape | WP-A | existing |
+| unknown manifest keys produce diagnostic in check mode | WP-A | gap — needs impl |
+| `PathDep > GitDep` winner selection | WP-B | existing |
+| semver GitDep beats non-semver GitDep | WP-B | existing |
+| semver GitDep compares numerically | WP-B | existing |
+| non-semver GitDep compares lexically by ref then URL | WP-B | existing |
+| root-restart convergence with stronger contender | WP-B | existing |
+| `ll.sum` pin overrides winner when pinned source matches | WP-B, WP-C | existing |
+| `ll.sum` line format deterministic across runs | WP-C | existing |
+| `ll.sum` lines sorted by dependency name | WP-C | existing |
+| `ll.sum` blank lines and comments tolerated on read | WP-C | existing |
+| absent `ll.sum` corrected by `install` | WP-C | existing |
+| stale `ll.sum` corrected by `tidy` | WP-C | existing |
+| checksum drift reported as warning during `check/build` | WP-C | gap — needs impl |
+| `vendor/<dep>/` is sole materialization layout | WP-D | existing |
+| GitDep cloned at selected ref, reproducible | WP-D | existing |
+| PathDep copied into `vendor/<dep>/` | WP-D | existing |
+| nested PathDep resolution relative to original repo root | WP-D | existing |
+| stale `vendor/` entries removed by `install` and `tidy` | WP-D | existing |
+| no tool-private caches affect build outputs | WP-D | existing |
+| `install` realizes full dependency graph | WP-E | existing |
+| `mod add` updates manifest then installs | WP-E | existing |
+| `mod tidy` removes stale entries and rewrites `ll.sum` | WP-E | existing |
+| `mod why` reports direct/transitive importer chain | WP-E | existing |
+| root source discovery from `src/**/*.lll` | WP-F | existing |
+| vendored source discovery from `vendor/<dep>/src/**/*.lll` | WP-F | existing |
+| module-path derivation from project name + file path | WP-F | existing |
+| `E020 ModulePathMismatch` diagnostic stable | WP-F | existing |
+| topological load order is dependency-first | WP-F | existing |
+| `E024 ModuleCycle` diagnostic stable | WP-F | existing |
+| unresolved import tolerated during ad hoc `run` | WP-F | existing |
+| unresolved import is hard error during `check/build` | WP-F | existing |
+| repeated `install` on same graph is idempotent | WP-H | gap — needs impl |
+| repeated `tidy` on same graph is idempotent | WP-H | gap — needs impl |
+| self-hosted compiler project builds through canonical dep flow | WP-H | gap — needs impl |
+
+**Gaps tracked in epic #52.** Implementation PRs should cite the relevant scenario ID when
+adding or expanding test coverage.
+
+---
 
 ## Recommended implementation order
 
