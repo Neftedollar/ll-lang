@@ -75,6 +75,12 @@
           "tokens_code": 35,
           "bytes": 188,
           "ratio_vs_lll": 3.5
+        },
+        "cs": {
+          "tokens_raw": 28,
+          "tokens_code": 28,
+          "bytes": 122,
+          "ratio_vs_lll": 2.8
         }
       }
     },
@@ -108,6 +114,12 @@
           "tokens_raw": 58,
           "tokens_code": 58,
           "bytes": 177,
+          "ratio_vs_lll": 1.41
+        },
+        "cs": {
+          "tokens_raw": 58,
+          "tokens_code": 58,
+          "bytes": 174,
           "ratio_vs_lll": 1.41
         }
       }
@@ -143,6 +155,12 @@
           "tokens_code": 16,
           "bytes": 49,
           "ratio_vs_lll": 1.45
+        },
+        "cs": {
+          "tokens_raw": 17,
+          "tokens_code": 17,
+          "bytes": 50,
+          "ratio_vs_lll": 1.55
         }
       }
     },
@@ -177,6 +195,12 @@
           "tokens_code": 31,
           "bytes": 140,
           "ratio_vs_lll": 4.43
+        },
+        "cs": {
+          "tokens_raw": 24,
+          "tokens_code": 24,
+          "bytes": 88,
+          "ratio_vs_lll": 3.43
         }
       }
     }

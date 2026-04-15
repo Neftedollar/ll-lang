@@ -182,7 +182,7 @@ Detailed execution breakdown lives in
 Detailed execution breakdown lives in
 [v2 benchmarks and release gates execution](22-v2-benchmarks-release-gates-execution.md).
 
-- [ ] Add a token-efficiency benchmark suite versus F#, TypeScript, Python, Java, and C#.
+- [x] Add a token-efficiency benchmark suite versus F#, TypeScript, Python, Java, and C#.
 - [ ] Add compile-latency and self-hosted-vs-stage0 benchmark baselines.
 - [ ] Add semantic equivalence corpus checks across stable backends.
 - [ ] Add explicit `v2` release gates to CI and docs.

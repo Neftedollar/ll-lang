@@ -33,6 +33,7 @@ MICRO = {
         "ts": 'type Shape = { tag: "Circle"; value: number } | { tag: "Rect"; w: number; h: number } | { tag: "Empty" }',
         "py": 'from dataclasses import dataclass\n\n@dataclass\nclass Circle:\n    value: float\n\n@dataclass\nclass Rect:\n    w: float\n    h: float\n\nclass Empty:\n    pass\n\nShape = Circle | Rect | Empty',
         "java": 'sealed interface Shape permits Circle, Rect, Empty {}\nrecord Circle(double value) implements Shape {}\nrecord Rect(double w, double h) implements Shape {}\nrecord Empty() implements Shape {}',
+        "cs": 'abstract record Shape;\nrecord Circle(double Value) : Shape;\nrecord Rect(double W, double H) : Shape;\nrecord Empty : Shape;',
     },
     "pattern_match": {
         # v2 canonical syntax: no 'fn' keyword, match without 'with', no 'then'
@@ -41,6 +42,7 @@ MICRO = {
         "ts": 'function area(s: Shape): number {\n  switch (s.tag) {\n    case "Circle": return 3.14 * s.value * s.value;\n    case "Rect": return s.w * s.h;\n    case "Empty": return 0.0;\n  }\n}',
         "py": 'def area(s: Shape) -> float:\n    match s:\n        case Circle(r):\n            return 3.14 * r * r\n        case Rect(w, h):\n            return w * h\n        case Empty():\n            return 0.0',
         "java": 'static double area(Shape s) {\n    return switch (s) {\n        case Circle(var r) -> 3.14 * r * r;\n        case Rect(var w, var h) -> w * h;\n        case Empty() -> 0.0;\n    };\n}',
+        "cs": 'static double Area(Shape s) => s switch {\n    Circle(var r) => 3.14 * r * r,\n    Rect(var w, var h) => w * h,\n    Empty => 0.0,\n    _ => throw new Exception("unreachable")\n};',
     },
     "curried_fn": {
         # v2 canonical syntax: no 'fn' keyword, no return type annotation needed
@@ -49,6 +51,7 @@ MICRO = {
         "ts": 'const add = (a: number) => (b: number): number => a + b;',
         "py": 'def add(a: int, b: int) -> int:\n    return a + b',
         "java": 'static long add(long a, long b) { return a + b; }',
+        "cs": 'static Func<long, long> Add(long a) => b => a + b;',
     },
     "parametric_adt": {
         # v2 canonical syntax: no 'type' keyword
@@ -57,6 +60,7 @@ MICRO = {
         "ts": 'type Maybe<A> = { tag: "Some"; value: A } | { tag: "None" };',
         "py": 'from typing import Generic, TypeVar\nT = TypeVar("T")\nclass Some(Generic[T]):\n    def __init__(self, value: T): self.value = value\nclass Nothing: pass\nMaybe = Some | Nothing',
         "java": 'sealed interface Maybe<A> permits Some, Nothing {}\nrecord Some<A>(A value) implements Maybe<A> {}\nrecord Nothing<A>() implements Maybe<A> {}',
+        "cs": 'abstract record Maybe<A>;\nrecord Some<A>(A Value) : Maybe<A>;\nrecord None<A> : Maybe<A>;',
     },
 }
 
@@ -403,7 +407,7 @@ def run_benchmark():
             }
         # Compute ratios vs lll
         lll_tok = row["variants"].get("lll", {}).get("tokens_code", 0)
-        for lang in ["fs", "ts", "py", "java"]:
+        for lang in ["fs", "ts", "py", "java", "cs"]:
             if lang in row["variants"] and lll_tok > 0:
                 row["variants"][lang]["ratio_vs_lll"] = round(
                     row["variants"][lang]["tokens_code"] / lll_tok, 2
@@ -413,7 +417,8 @@ def run_benchmark():
         lll_t = row["variants"].get("lll", {}).get("tokens_code", "?")
         fs_t = row["variants"].get("fs", {}).get("tokens_code", "?")
         ts_t = row["variants"].get("ts", {}).get("tokens_code", "?")
-        print(f"  {name}: lll={lll_t}, fs={fs_t}, ts={ts_t}")
+        cs_t = row["variants"].get("cs", {}).get("tokens_code", "?")
+        print(f"  {name}: lll={lll_t}, fs={fs_t}, ts={ts_t}, cs={cs_t}")
 
     # ------------------------------------------------------------------
     # Write JSON results
@@ -461,8 +466,8 @@ def run_benchmark():
 
         # --- Tier 3 table ---
         f.write("## Tier 3: Micro-benchmarks\n\n")
-        f.write("| Pattern | lll | F# | TS | Py | Java | F#/lll | TS/lll | Py/lll | Java/lll |\n")
-        f.write("|---------|-----|----|----|-----|------|--------|--------|--------|----------|\n")
+        f.write("| Pattern | lll | F# | TS | Py | Java | C# | F#/lll | TS/lll | Py/lll | Java/lll | C#/lll |\n")
+        f.write("|---------|-----|----|----|-----|------|-----|--------|--------|--------|----------|--------|\n")
         for row in results["tier3"]:
             v = row["variants"]
             def tok(lang):
@@ -470,8 +475,8 @@ def run_benchmark():
             def ratio(lang):
                 return v.get(lang, {}).get("ratio_vs_lll", "-")
             f.write(
-                f"| {row['label']} | {tok('lll')} | {tok('fs')} | {tok('ts')} | {tok('py')} | {tok('java')}"
-                f" | {ratio('fs')} | {ratio('ts')} | {ratio('py')} | {ratio('java')} |\n"
+                f"| {row['label']} | {tok('lll')} | {tok('fs')} | {tok('ts')} | {tok('py')} | {tok('java')} | {tok('cs')}"
+                f" | {ratio('fs')} | {ratio('ts')} | {ratio('py')} | {ratio('java')} | {ratio('cs')} |\n"
             )
         f.write("\n")
 
