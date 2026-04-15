@@ -270,6 +270,15 @@ backend-independent project model.
 - `ProjectLoader.fs`
 - `resolveRunImports` behavior in `Program.fs`
 
+### ll-lang implementation progress
+
+Two ll-lang modules now provide the pure graph/ordering logic that `ProjectLoader.fs` owns in stage0:
+
+- `stdlib/src/CompilerManifest.lll` (`Std.CompilerManifest`) — `DepSource`, `LLManifest`, `ManifestError`, `parseTomlManifest`; wraps `Std.Toml`; 12/12 self-tests pass.
+- `stdlib/src/CompilerLoader.lll` (`Std.CompilerLoader`) — `LoadedFile`, `LoaderResult`, `LoaderError`; `buildDepMap`, DFS cycle detection, Kahn's topo sort, `loadProject` entry; 12/12 self-tests pass.
+
+These are the ll-lang-owned implementations targeted by §"Self-hosting questions" below.
+
 ## Work package G — Compatibility cleanup
 
 ### Goal

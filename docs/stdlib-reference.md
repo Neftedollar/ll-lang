@@ -1034,6 +1034,8 @@ buildFile(path Str) =
 | Type inference | `Std.CompilerTyped` | Typed IR shapes (TypedExpr, TypedDecl, TypedModule) |
 | Type inference | `Std.CompilerInfer` | Algorithm W for Expr/Decl |
 | Lowering | `Std.CompilerLower` | BinOp desugaring; TypedModule → LowModule |
+| Project system | `Std.CompilerManifest` | lll.toml parsing, DepSource, LLManifest, validation |
+| Project system | `Std.CompilerLoader` | Dependency graph, cycle detection, Kahn's topo sort |
 | Full pipeline | `Std.Compiler` | Source pipeline helpers |
 
 ---
@@ -1051,6 +1053,8 @@ application-library APIs:
 - `Std.CompilerTyped`
 - `Std.CompilerInfer`
 - `Std.CompilerLower`
+- `Std.CompilerManifest`
+- `Std.CompilerLoader`
 - `Std.Codegen`
 - `Std.CodegenTS`
 - `Std.CodegenPy`
