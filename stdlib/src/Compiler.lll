@@ -4,9 +4,10 @@ import Std.Lexer
 import Std.Parser
 import Std.Elaborator
 import Std.Codegen
+import Std.CompilerInfer
 
 -- End-to-end ll-lang compiler pipeline.
--- Lexer -> Parser -> Elaborator -> Codegen, all in ll-lang.
+-- Lexer -> Parser -> Elaborator -> HM Infer -> Codegen, all in ll-lang.
 -- Usage: `lllc run stdlib/src/Compiler.lll`
 
 -- ============================================================
@@ -122,6 +123,62 @@ lookupSymbol(src Str)(name Str) =
         p4 = strConcat p3 kind
         strConcat p4 "\"}"
 
+-- ---- Inference-aware pipeline ----------------------------------------
+
+showTypeErrors(errs List[Str]) =
+  listFold (\acc e.
+    if strLen acc == 0
+      e
+    else strConcat acc (strConcat "\n" e)
+  ) "" errs
+
+-- Compile with full pipeline: Lexer → Parser → Elaborator → HM Infer → Codegen.
+compileWithInfer(src Str) =
+  tokens = tokenize src
+  ast = parseModule tokens
+  elabErrs = elaborate ast
+  if listIsEmpty elabErrs
+    match ast
+      | MkModule _ decls ->
+        typeErrs = inferModule decls
+        if listIsEmpty typeErrs
+          emitModule ast
+        else
+          showTypeErrors typeErrs
+  else
+    showErrors elabErrs
+
+-- Collect all diagnostics (elaboration + type inference).
+collectAllErrors(src Str) =
+  tokens = tokenize src
+  ast = parseModule tokens
+  elabErrs = elaborate ast
+  if listIsEmpty elabErrs
+    match ast
+      | MkModule _ decls -> inferModule decls
+  else
+    listMap errMsg elabErrs
+
+-- Check with full pipeline; JSON compact output including inference stage.
+nextBlockerFull(src Str) =
+  tokens = tokenize src
+  ast = parseModule tokens
+  elabErrs = elaborate ast
+  if listIsEmpty elabErrs
+    match ast
+      | MkModule _ decls ->
+        typeErrs = inferModule decls
+        if listIsEmpty typeErrs
+          "{\"ok\":true,\"stage\":\"none\",\"message\":\"\"}"
+        else
+          msg = match typeErrs | e :: _ -> e | [] -> ""
+          p1 = "{\"ok\":false,\"stage\":\"inference\",\"message\":\""
+          strConcat p1 (strConcat msg "\"}")
+  else
+    msg = firstErrorMessage elabErrs
+    p1 = "{\"ok\":false,\"stage\":\"elaborator\",\"message\":\""
+    strConcat p1 (strConcat msg "\"}")
+
 -- ============================================================
 -- TESTS
 -- ============================================================
@@ -137,3 +194,47 @@ checkHasError(label Str)(got Str)(needle Str) =
     printfn (strConcat "OK " label)
   else
     printfn (strConcat "FAIL " (strConcat label (strConcat "\n  expected error containing: " (strConcat needle (strConcat "\n  got: " got)))))
+
+compilerCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+main =
+  -- 1. compile a trivial function, check F# output has let keyword
+  src1 = "module Test\nadd(a Int)(b Int) = a + b\n"
+  _ = compilerCheckContains "1 compile basic fn" (compile src1) "add"
+
+  -- 2. compile with type error triggers elab error on undeclared name
+  src2 = "module Test\nfoo = undeclaredName\n"
+  _ = checkHasError "2 elab error undeclared" (compile src2) "undeclared"
+
+  -- 3. collectAllErrors on valid source returns empty
+  errs3 = collectAllErrors src1
+  _ = compilerCheck "3 no errors on valid" (intToStr (listLen errs3)) "0"
+
+  -- 4. compileWithInfer on valid source produces F# output
+  _ = compilerCheckContains "4 compileWithInfer basic" (compileWithInfer src1) "add"
+
+  -- 5. nextBlockerFull on valid source → ok
+  nb5 = nextBlockerFull src1
+  _ = compilerCheckContains "5 nextBlockerFull ok" nb5 "\"ok\":true"
+
+  -- 6. nextBlockerFull on undeclared name → elaborator stage
+  nb6 = nextBlockerFull src2
+  _ = compilerCheckContains "6 nextBlockerFull elab" nb6 "\"stage\":\"elaborator\""
+
+  -- 7. lookupSymbol finds function
+  sym7 = lookupSymbol src1 "add"
+  _ = compilerCheckContains "7 lookupSymbol found" sym7 "\"found\":true"
+
+  -- 8. lookupSymbol unknown → not found
+  sym8 = lookupSymbol src1 "unknown"
+  _ = compilerCheckContains "8 lookupSymbol not found" sym8 "\"found\":false"
+
+  -- 9. tokenEstimate > 0 tokens
+  te9 = tokenEstimate src1
+  _ = compilerCheckContains "9 tokenEstimate ok" te9 "\"ok\":true"
+
+  printfn "Done"
