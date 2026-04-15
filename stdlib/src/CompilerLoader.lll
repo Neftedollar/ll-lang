@@ -1,0 +1,279 @@
+module Std.CompilerLoader
+
+import Std.Maybe
+import Std.List
+import Std.Map
+import Std.CompilerManifest
+
+-- (isSome from Std.Maybe, listFind from Std.List)
+
+-- ============================================================
+-- Project loader for ll-lang v2 self-hosted compiler.
+-- Canonical owner: Compiler.Project.Loader
+-- (14-v2-canonical-compiler-boundaries.md, 15-v2-pass-contracts.md)
+--
+-- Input:  project root path + LLManifest (from Std.CompilerManifest)
+-- Output: LoaderResult with topo-sorted module file list
+--
+-- Responsibilities:
+--   - import-to-file path resolution
+--   - dependency graph construction from import declarations
+--   - cycle detection (returns LoaderError on cycle)
+--   - Kahn's topological sort (deps-first order)
+--
+-- Note: Actual filesystem I/O (file existence check, read) is
+-- done by the caller or via FFI. This module provides the pure
+-- graph/ordering logic over a pre-collected file→import map.
+-- ============================================================
+
+-- ---- Input types -------------------------------------------------------
+
+-- A loaded source file: path + module path segments + import list
+LoadedFile = MkLoadedFile Str (List[Str]) (List[Str])
+-- filePath, modulePath, imports (as dot-joined strings: "Std.Map")
+
+lfPath(f LoadedFile) =
+  match f | MkLoadedFile p _ _ -> p
+
+lfModule(f LoadedFile) =
+  match f | MkLoadedFile _ m _ -> m
+
+lfImports(f LoadedFile) =
+  match f | MkLoadedFile _ _ i -> i
+
+-- ---- Loader result types -----------------------------------------------
+
+LoaderError =
+  | CycleDetected (List[Str])   -- cycle path (file paths)
+  | DuplicateModule Str         -- module path already defined
+  | UnresolvedImport Str Str    -- file path, import name
+
+LoaderResult =
+  | LoaderOk (List[LoadedFile])   -- topo-sorted, deps first
+  | LoaderErr (List[LoaderError])
+
+renderLoaderError(e LoaderError) =
+  match e
+    | CycleDetected path ->
+      strConcat "E024 cycle detected: " (strJoinWith " -> " path)
+    | DuplicateModule m ->
+      strConcat "E020 duplicate module: " m
+    | UnresolvedImport f imp ->
+      strConcat "E002 unresolved import '" (strConcat imp (strConcat "' in " f))
+
+strJoinWith(sep Str)(xs List[Str]) =
+  match xs
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat sep (strJoinWith sep rest))
+
+-- ---- Import-to-file resolution -----------------------------------------
+-- Given a list of all loaded files and an import name (e.g., "Std.Map"),
+-- find the file that declares that module.
+
+resolveImportToFile(files List[LoadedFile])(importName Str) =
+  listFind (\f. strJoinWith "." (lfModule f) == importName) files
+
+-- listFilterMap: filter and map simultaneously (not in Std.List)
+listFilterMap(f A -> Maybe[B])(xs List[A]) =
+  match xs
+    | [] -> []
+    | x :: rest ->
+      match f x
+        | None -> listFilterMap f rest
+        | Some v -> v :: listFilterMap f rest
+
+-- ---- Build dependency graph: file path → list of dep file paths --------
+
+buildDepMap(files List[LoadedFile]) =
+  listFold (\acc f.
+    deps = listFilterMap (\imp.
+      match resolveImportToFile files imp
+        | None -> None
+        | Some dep -> Some (lfPath dep)
+    ) (lfImports f)
+    mapInsert strCmp (lfPath f) deps acc
+  ) Leaf files
+
+-- ---- Cycle detection using DFS -----------------------------------------
+-- Returns Some (cycle path) if a cycle is found, else None.
+
+CycleState = MkCycleState (RBMap[Str][Bool]) (RBMap[Str][Bool]) (List[Str])
+-- visited (fully done), inStack (currently being explored), path
+
+cycleVisited(s CycleState) =
+  match s | MkCycleState v _ _ -> v
+
+cycleInStack(s CycleState) =
+  match s | MkCycleState _ i _ -> i
+
+cyclePath(s CycleState) =
+  match s | MkCycleState _ _ p -> p
+
+detectCycle(depMap RBMap[Str][List[Str]])(files List[LoadedFile]) =
+  initState = MkCycleState Leaf Leaf []
+  detectCycleFiles depMap (listMap lfPath files) initState
+
+detectCycleFiles(depMap RBMap[Str][List[Str]])(paths List[Str])(st CycleState) =
+  match paths
+    | [] -> None
+    | p :: rest ->
+      visited = cycleVisited st
+      if isSome (mapLookup strCmp p visited)
+        detectCycleFiles depMap rest st
+      else
+        match dfs depMap p st
+          | Some cycle -> Some cycle
+          | None -> detectCycleFiles depMap rest st
+
+dfs(depMap RBMap[Str][List[Str]])(node Str)(st CycleState) =
+  -- If node is in stack → cycle detected
+  inStack = cycleInStack st
+  if isSome (mapLookup strCmp node inStack)
+    Some (listAppend (cyclePath st) [node])
+  else
+    visited = cycleVisited st
+    if isSome (mapLookup strCmp node visited)
+      None
+    else
+      -- Add node to stack
+      st2 = MkCycleState visited (mapInsert strCmp node true inStack) (listAppend (cyclePath st) [node])
+      deps = match mapLookup strCmp node depMap | Some d -> d | None -> []
+      match dfsChildren depMap deps st2
+        | Some cycle -> Some cycle
+        | None ->
+          -- Mark as fully visited, remove from stack
+          visited3 = mapInsert strCmp node true (cycleVisited st2)
+          None
+
+dfsChildren(depMap RBMap[Str][List[Str]])(deps List[Str])(st CycleState) =
+  match deps
+    | [] -> None
+    | d :: rest ->
+      match dfs depMap d st
+        | Some cycle -> Some cycle
+        | None -> dfsChildren depMap rest st
+
+-- ---- Kahn's topological sort -------------------------------------------
+-- Returns files in deps-first order.
+
+topoSort(files List[LoadedFile])(depMap RBMap[Str][List[Str]]) =
+  allPaths = listMap lfPath files
+  -- Build reverse edge map: dep → list of paths that depend on it
+  revEdges = buildRevEdges allPaths depMap Leaf
+  -- In-degree of p = number of deps of p (how many must be processed before p)
+  inDeg = buildInDeg allPaths depMap Leaf
+  -- Start queue: paths with in-degree 0 (no unprocessed deps)
+  queue0 = listFilter (\p.
+    match mapLookup strCmp p inDeg
+      | Some 0 -> true
+      | Some _ -> false
+      | None -> true
+  ) allPaths
+  kahnLoop queue0 inDeg revEdges [] files
+
+buildRevEdges(paths List[Str])(depMap RBMap[Str][List[Str]])(acc RBMap[Str][List[Str]]) =
+  match paths
+    | [] -> acc
+    | p :: rest ->
+      deps = match mapLookup strCmp p depMap | Some d -> d | None -> []
+      -- For each dep d, add p to revEdges[d] (p depends on d)
+      acc2 = listFold (\a dep.
+        existing = match mapLookup strCmp dep a | Some es -> es | None -> []
+        mapInsert strCmp dep (listAppend existing [p]) a
+      ) acc deps
+      buildRevEdges rest depMap acc2
+
+-- In-degree of each node = number of its dependencies
+buildInDeg(paths List[Str])(depMap RBMap[Str][List[Str]])(acc RBMap[Str][Int]) =
+  match paths
+    | [] -> acc
+    | p :: rest ->
+      deps = match mapLookup strCmp p depMap | Some d -> d | None -> []
+      acc2 = mapInsert strCmp p (listLen deps) acc
+      buildInDeg rest depMap acc2
+
+kahnLoop(queue List[Str])(inDeg RBMap[Str][Int])(revEdges RBMap[Str][List[Str]])(sorted List[Str])(files List[LoadedFile]) =
+  match queue
+    | [] -> sorted
+    | p :: rest ->
+      sorted2 = listAppend sorted [p]
+      -- Decrement in-degree for all nodes that depend on p
+      neighbors = match mapLookup strCmp p revEdges | Some ns -> ns | None -> []
+      let (inDeg2, newQueue) = listFold (\pair n.
+        let (deg, q) = pair
+        cur = match mapLookup strCmp n deg | Some x -> x | None -> 0
+        newDeg = cur - 1
+        deg2 = mapInsert strCmp n newDeg deg
+        q2 =
+          if newDeg <= 0
+            listAppend q [n]
+          else q
+        (deg2, q2)
+      ) (inDeg, rest) neighbors
+      kahnLoop newQueue inDeg2 revEdges sorted2 files
+
+-- ---- Main entry point --------------------------------------------------
+
+loadProject(files List[LoadedFile]) =
+  depMap = buildDepMap files
+  -- Check for cycles
+  match detectCycle depMap files
+    | Some cycle -> LoaderErr [CycleDetected cycle]
+    | None ->
+      sorted = topoSort files depMap
+      -- Reorder files by sorted path order
+      orderedFiles = listFilterMap (\p. listFind (\f. lfPath f == p) files) sorted
+      LoaderOk orderedFiles
+
+-- ---- Self-tests --------------------------------------------------------
+
+loaderCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" got)))))
+
+main =
+  -- Build test files
+  fileA = MkLoadedFile "a.lll" ["A"] []            -- no deps
+  fileB = MkLoadedFile "b.lll" ["B"] ["A"]          -- depends on A
+  fileC = MkLoadedFile "c.lll" ["C"] ["A"; "B"]     -- depends on A, B
+
+  -- 1. Single file, no deps
+  r1 = loadProject [fileA]
+  _ = loaderCheck "1 single ok" (match r1 | LoaderOk _ -> "ok" | LoaderErr _ -> "err") "ok"
+  _ = loaderCheck "2 single count" (match r1 | LoaderOk fs -> intToStr (listLen fs) | LoaderErr _ -> "?") "1"
+
+  -- 3. Two files, B depends on A → A first in result
+  r2 = loadProject [fileB; fileA]
+  _ = loaderCheck "3 two ok" (match r2 | LoaderOk _ -> "ok" | LoaderErr _ -> "err") "ok"
+  _ = loaderCheck "4 topo A first" (match r2 | LoaderOk (f :: _) -> lfPath f | _ -> "?") "a.lll"
+
+  -- 5. Three files: C depends on A,B; B depends on A → order: A,B,C
+  r3 = loadProject [fileC; fileA; fileB]
+  _ = loaderCheck "5 three ok" (match r3 | LoaderOk _ -> "ok" | LoaderErr _ -> "err") "ok"
+  sorted3 = match r3 | LoaderOk fs -> listMap lfPath fs | LoaderErr _ -> []
+  _ = loaderCheck "6 topo order[0]" (match sorted3 | f :: _ -> f | [] -> "?") "a.lll"
+  _ = loaderCheck "7 topo order[1]" (match sorted3 | _ :: f :: _ -> f | _ -> "?") "b.lll"
+  _ = loaderCheck "8 topo order[2]" (match sorted3 | _ :: _ :: f :: _ -> f | _ -> "?") "c.lll"
+
+  -- 9. Cycle detection: X→Y, Y→X
+  fileX = MkLoadedFile "x.lll" ["X"] ["Y"]
+  fileY = MkLoadedFile "y.lll" ["Y"] ["X"]
+  r4 = loadProject [fileX; fileY]
+  _ = loaderCheck "9 cycle detected" (match r4 | LoaderErr (CycleDetected _ :: _) -> "cycle" | _ -> "ok") "cycle"
+
+  -- 10. resolveImportToFile
+  files10 = [fileA; fileB; fileC]
+  found = resolveImportToFile files10 "B"
+  _ = loaderCheck "10 resolve import" (match found | Some f -> lfPath f | None -> "none") "b.lll"
+
+  -- 11. Not found → None
+  notFound = resolveImportToFile files10 "Unknown"
+  _ = loaderCheck "11 not found" (match notFound | None -> "none" | Some _ -> "found") "none"
+
+  -- 12. renderLoaderError
+  _ = loaderCheck "12 render cycle" (match renderLoaderError (CycleDetected ["a.lll"; "b.lll"]) | s -> s) "E024 cycle detected: a.lll -> b.lll"
+
+  printfn "Done"
