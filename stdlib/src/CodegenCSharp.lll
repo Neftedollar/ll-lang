@@ -1,0 +1,548 @@
+module Std.CodegenCSharp
+
+import Std.Parser
+
+-- C# code emitter written in ll-lang.
+-- Takes the AST produced by Std.Parser and emits C# source code.
+
+-- ---- String helpers -------------------------------------------------------
+
+joinWith(sep Str)(items List[Str]) =
+  match items
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat sep (joinWith sep rest))
+
+-- ---- C# keyword escaping --------------------------------------------------
+
+isCSharpKeyword(s Str) =
+  match s
+    | "abstract"   -> true
+    | "as"         -> true
+    | "base"       -> true
+    | "bool"       -> true
+    | "break"      -> true
+    | "byte"       -> true
+    | "case"       -> true
+    | "catch"      -> true
+    | "char"       -> true
+    | "checked"    -> true
+    | "class"      -> true
+    | "const"      -> true
+    | "continue"   -> true
+    | "decimal"    -> true
+    | "default"    -> true
+    | "delegate"   -> true
+    | "do"         -> true
+    | "double"     -> true
+    | "else"       -> true
+    | "enum"       -> true
+    | "event"      -> true
+    | "explicit"   -> true
+    | "extern"     -> true
+    | "false"      -> true
+    | "finally"    -> true
+    | "fixed"      -> true
+    | "float"      -> true
+    | "for"        -> true
+    | "foreach"    -> true
+    | "goto"       -> true
+    | "if"         -> true
+    | "implicit"   -> true
+    | "in"         -> true
+    | "int"        -> true
+    | "interface"  -> true
+    | "internal"   -> true
+    | "is"         -> true
+    | "lock"       -> true
+    | "long"       -> true
+    | "namespace"  -> true
+    | "new"        -> true
+    | "null"       -> true
+    | "object"     -> true
+    | "operator"   -> true
+    | "out"        -> true
+    | "override"   -> true
+    | "params"     -> true
+    | "private"    -> true
+    | "protected"  -> true
+    | "public"     -> true
+    | "readonly"   -> true
+    | "ref"        -> true
+    | "return"     -> true
+    | "sbyte"      -> true
+    | "sealed"     -> true
+    | "short"      -> true
+    | "sizeof"     -> true
+    | "stackalloc" -> true
+    | "static"     -> true
+    | "string"     -> true
+    | "struct"     -> true
+    | "switch"     -> true
+    | "this"       -> true
+    | "throw"      -> true
+    | "true"       -> true
+    | "try"        -> true
+    | "typeof"     -> true
+    | "uint"       -> true
+    | "ulong"      -> true
+    | "unchecked"  -> true
+    | "unsafe"     -> true
+    | "ushort"     -> true
+    | "using"      -> true
+    | "virtual"    -> true
+    | "void"       -> true
+    | "volatile"   -> true
+    | "while"      -> true
+    | "record"     -> true
+    | "required"   -> true
+    | "init"       -> true
+    | "with"       -> true
+    | _            -> false
+
+safeIdent(s Str) =
+  if isCSharpKeyword s
+    strConcat s "_"
+  else s
+
+safeTypeIdent(s Str) =
+  match strChars s
+    | [] -> "T"
+    | c :: rest ->
+      n = charToInt c
+      upper = if n >= 97
+        if n <= 122
+          intToChar (n - 32)
+        else c
+      else c
+      strConcat (strFromChars [upper]) (strFromChars rest)
+
+-- ---- String escaping -------------------------------------------------------
+
+encodeCSharpEscape(c Char) =
+  match c
+    | '\n' -> "\\n"
+    | '\t' -> "\\t"
+    | '\r' -> "\\r"
+    | '\\' -> "\\\\"
+    | '"'  -> "\\\""
+    | _    -> strFromChars [c]
+
+escapeStr(s Str) =
+  listFold (\acc c. strConcat acc (encodeCSharpEscape c)) "" (strChars s)
+
+-- ---- Type emission ---------------------------------------------------------
+
+isTypeParam(s Str) =
+  match strChars s
+    | c :: [] ->
+      n = charToInt c
+      if n >= 65
+        if n <= 90
+          true
+        else false
+      else false
+    | _ -> false
+
+emitType(t TypeExpr) =
+  match t
+    | TyName "Int"   -> "long"
+    | TyName "Float" -> "double"
+    | TyName "Str"   -> "string"
+    | TyName "Bool"  -> "bool"
+    | TyName "Char"  -> "char"
+    | TyName "Unit"  -> "void"
+    | TyName n ->
+      if isTypeParam n
+        n
+      else n
+    | TyApp (TyName "List")  a -> strConcat "System.Collections.Generic.List<" (strConcat (emitTypeBoxed a) ">")
+    | TyApp (TyName "Maybe") a -> strConcat "LLLang.Maybe<" (strConcat (emitTypeBoxed a) ">")
+    | TyApp f a -> strConcat (emitTypeBoxed f) (strConcat "<" (strConcat (emitTypeBoxed a) ">"))
+    | TyFn a b ->
+      strConcat "System.Func<" (strConcat (emitTypeBoxed a) (strConcat ", " (strConcat (emitTypeBoxed b) ">")))
+
+-- ---- Type emission (boxed / generic positions) ----------------------------
+
+emitTypeBoxed(t TypeExpr) =
+  match t
+    | TyName "Int"   -> "long"
+    | TyName "Float" -> "double"
+    | TyName "Str"   -> "string"
+    | TyName "Bool"  -> "bool"
+    | TyName "Char"  -> "char"
+    | TyName "Unit"  -> "object"
+    | TyName n ->
+      if isTypeParam n
+        n
+      else n
+    | TyApp (TyName "List")  a -> strConcat "System.Collections.Generic.List<" (strConcat (emitTypeBoxed a) ">")
+    | TyApp (TyName "Maybe") a -> strConcat "LLLang.Maybe<" (strConcat (emitTypeBoxed a) ">")
+    | TyApp f a -> strConcat (emitTypeBoxed f) (strConcat "<" (strConcat (emitTypeBoxed a) ">"))
+    | TyFn a b ->
+      strConcat "System.Func<" (strConcat (emitTypeBoxed a) (strConcat ", " (strConcat (emitTypeBoxed b) ">")))
+
+-- ---- Pattern emission ------------------------------------------------------
+
+emitPattern(p Pattern) =
+  match p
+    | PVar x -> safeIdent x
+    | PWild -> "_"
+    | PNil -> "nil_"
+    | PLitInt n -> intToStr n
+    | PLitStr s -> strConcat "\"" (strConcat (escapeStr s) "\"")
+    | PCons h t ->
+      strConcat (emitPattern h) (strConcat " :: " (emitPattern t))
+    | PCon c args -> emitConPattern c args
+
+emitConPattern(c Str)(args List[Pattern]) =
+  match args
+    | [] -> c
+    | _ ->
+      inner = joinWith ", " (listMap emitPattern args)
+      strConcat c (strConcat "(" (strConcat inner ")"))
+
+patListHead(xs List[Pattern]) =
+  match xs
+    | x :: _ -> x
+    | _ -> PWild
+
+-- ---- Expression emission ---------------------------------------------------
+
+emitCharLit(c Char) =
+  if c == '\n'
+    "'\\n'"
+  else if c == '\t'
+    "'\\t'"
+  else if c == '\\'
+    "'\\\\'"
+  else if c == '\''
+    "'\\''"
+  else strConcat (strConcat "'" (strFromChars [c])) "'"
+
+emitExpr(e Expr) =
+  match e
+    | EInt n -> strConcat (intToStr n) "L"
+    | EStr s -> strConcat "\"" (strConcat (escapeStr s) "\"")
+    | EBool b ->
+      if b
+        "true"
+      else "false"
+    | EChar c -> emitCharLit c
+    | EFloat s -> s
+    | EVar x -> safeIdent x
+    | ECon c ->
+      if c == "true"
+        "true"
+      else if c == "false"
+        "false"
+      else strConcat "new LLLang." (strConcat (safeTypeIdent c) "()")
+    | ENil -> "new System.Collections.Generic.List<object>()"
+    | EApp f a -> emitApp f a
+    | EIf c t el ->
+      strConcat "(" (strConcat (emitExpr c) (strConcat " ? " (strConcat (emitExpr t) (strConcat " : " (strConcat (emitExpr el) ")")))))
+    | EMatch scrut pats bodies ->
+      scrutStr = emitExpr scrut
+      arms = emitMatchArms scrutStr pats bodies
+      strConcat "(\n" (strConcat arms "\n)")
+    | ELam x body ->
+      strConcat (safeIdent x) (strConcat " => " (emitExpr body))
+    | ELet x e body ->
+      eStr = emitExpr e
+      bodyStr = emitExpr body
+      retType = "object"
+      strConcat "((System.Func<" (strConcat retType (strConcat ">)(() => { var " (strConcat (safeIdent x) (strConcat " = " (strConcat eStr (strConcat "; return " (strConcat bodyStr "; }))()")))))))
+    | EList items ->
+      strConcat "new System.Collections.Generic.List<object> { " (strConcat (joinWith ", " (listMap emitExpr items)) " }")
+    | EBinOp op l r ->
+      strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat op (strConcat " " (strConcat (emitExpr r) ")")))))
+    | ETuple a b ->
+      strConcat "(" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) ")")))
+    | ECons h t ->
+      strConcat "new System.Collections.Generic.List<object>{ " (strConcat (emitExpr h) (strConcat " }.Concat(" (strConcat (emitExpr t) ").ToList()")))
+
+gatherAppHead(e Expr) =
+  match e
+    | EApp f _ -> gatherAppHead f
+    | _ -> e
+
+gatherAppArgs(e Expr) =
+  match e
+    | EApp f a -> listAppend (gatherAppArgs f) [a]
+    | _ -> []
+
+isUpperStart(s Str) =
+  match strChars s
+    | c :: _ ->
+      n = charToInt c
+      if n >= 65
+        if n <= 90
+          true
+        else false
+      else false
+    | _ -> false
+
+exprListHead(xs List[Expr]) =
+  match xs
+    | x :: _ -> x
+    | _ -> ENil
+
+emitApp(f Expr)(a Expr) =
+  head = gatherAppHead (EApp f a)
+  args = gatherAppArgs (EApp f a)
+  match head
+    | ECon c -> emitConApp c args
+    | EVar x ->
+      if isUpperStart x
+        emitConApp x args
+      else
+        strConcat (emitExpr f) (strConcat "(" (strConcat (emitExpr a) ")"))
+    | _ ->
+      strConcat (emitExpr f) (strConcat "(" (strConcat (emitExpr a) ")"))
+
+emitConApp(c Str)(args List[Expr]) =
+  match args
+    | [] -> strConcat "new LLLang." (strConcat (safeTypeIdent c) "()")
+    | _ ->
+      inner = joinWith ", " (listMap emitExpr args)
+      strConcat "new LLLang." (strConcat (safeTypeIdent c) (strConcat "(" (strConcat inner ")")))
+
+emitMatchArms(scrut Str)(pats List[Pattern])(bodies List[Expr]) =
+  match pats
+    | p :: prest ->
+      match bodies
+        | b :: brest ->
+          arm = emitMatchArm scrut p b
+          rest = emitMatchArms scrut prest brest
+          if strLen rest == 0
+            arm
+          else strConcat arm (strConcat "\n" rest)
+        | _ -> ""
+    | _ -> "  throw new System.Exception(\"Non-exhaustive match\");"
+
+emitMatchArm(scrut Str)(p Pattern)(body Expr) =
+  match p
+    | PWild ->
+      strConcat "  " (strConcat (emitExpr body) " /* wildcard */")
+    | PVar x ->
+      strConcat "  var " (strConcat (safeIdent x) (strConcat " = " (strConcat scrut (strConcat "; " (emitExpr body)))))
+    | PLitInt n ->
+      strConcat "  (" (strConcat scrut (strConcat " == " (strConcat (intToStr n) (strConcat "L ? " (strConcat (emitExpr body) " : default /* next */")))))
+    | PLitStr s ->
+      lit = strConcat "\"" (strConcat (escapeStr s) "\"")
+      strConcat "  (" (strConcat scrut (strConcat " == " (strConcat lit (strConcat " ? " (strConcat (emitExpr body) " : default /* next */")))))
+    | PNil ->
+      strConcat "  (" (strConcat scrut (strConcat ".Count == 0 ? " (strConcat (emitExpr body) " : default /* next */")))
+    | PCons h t ->
+      hBind = match h
+        | PVar x -> strConcat "var " (strConcat x (strConcat " = " (strConcat scrut "[0]; ")))
+        | _ -> ""
+      tBind = match t
+        | PVar x -> strConcat "var " (strConcat x (strConcat " = " (strConcat scrut (strConcat ".GetRange(1, " (strConcat scrut ".Count - 1); ")))))
+        | _ -> ""
+      cond = strConcat scrut ".Count > 0"
+      strConcat "  (" (strConcat cond (strConcat " ? (" (strConcat hBind (strConcat tBind (strConcat (emitExpr body) ") : default /* next */")))))
+    | PCon c args ->
+      emitConMatchArm scrut c args body
+
+emitConMatchArm(scrut Str)(c Str)(args List[Pattern])(body Expr) =
+  cond = strConcat scrut (strConcat " is LLLang." (safeTypeIdent c))
+  match args
+    | [] ->
+      strConcat "  (" (strConcat cond (strConcat " ? " (strConcat (emitExpr body) " : default /* next */")))
+    | _ ->
+      castVar = strConcat "_c" c
+      castStr = strConcat "var " (strConcat castVar (strConcat " = (LLLang." (strConcat (safeTypeIdent c) (strConcat ")" scrut))))
+      binds = emitConBinds castVar args 0
+      strConcat "  (" (strConcat cond (strConcat " ? (" (strConcat castStr (strConcat "; " (strConcat binds (strConcat (emitExpr body) ")) : default /* next */"))))))
+
+emitConBinds(castVar Str)(args List[Pattern])(idx Int) =
+  match args
+    | [] -> ""
+    | p :: rest ->
+      bind = match p
+        | PVar x ->
+          field = strConcat "_" (intToStr idx)
+          strConcat "var " (strConcat (safeIdent x) (strConcat " = " (strConcat castVar (strConcat "." (strConcat field "; ")))))
+        | _ -> ""
+      strConcat bind (emitConBinds castVar rest (idx + 1))
+
+emitTypeParams(tvars List[Str]) =
+  match tvars
+    | [] -> ""
+    | _ ->
+      strConcat "<" (strConcat (joinWith ", " tvars) ">")
+
+emitCtorFields(args List[TypeExpr])(idx Int) =
+  match args
+    | [] -> ""
+    | t :: rest ->
+      field = strConcat (emitTypeBoxed t) (strConcat " _" (intToStr idx))
+      remaining = emitCtorFields rest (idx + 1)
+      if strLen remaining == 0
+        field
+      else strConcat field (strConcat ", " remaining)
+
+emitCtor(typeName Str)(tpStr Str)(c Constructor) =
+  match c
+    | MkCon name args ->
+      match args
+        | [] ->
+          strConcat "    public sealed record " (strConcat (safeTypeIdent name) (strConcat tpStr (strConcat "() : " (strConcat (safeTypeIdent typeName) (strConcat tpStr ";")))))
+        | _ ->
+          fields = emitCtorFields args 0
+          strConcat "    public sealed record " (strConcat (safeTypeIdent name) (strConcat tpStr (strConcat "(" (strConcat fields (strConcat ") : " (strConcat (safeTypeIdent typeName) (strConcat tpStr ";")))))))
+
+emitCtors(typeName Str)(tpStr Str)(cs List[Constructor]) =
+  joinWith "\n" (listMap (\c. emitCtor typeName tpStr c) cs)
+
+emitParamWithType(p Param) =
+  match p
+    | MkParam n t -> strConcat (emitType t) (strConcat " " (safeIdent n))
+
+emitParamsStr(ps List[Param]) =
+  joinWith ", " (listMap emitParamWithType ps)
+
+emitReturnType(ret Maybe[TypeExpr]) =
+  match ret
+    | Some t -> emitType t
+    | None -> "object"
+
+emitDecl(d Decl) =
+  match d
+    | DType name tvars ctors ->
+      tpStr = emitTypeParams tvars
+      ifaceDecl = strConcat "    public interface " (strConcat (safeTypeIdent name) (strConcat tpStr " { }"))
+      ctorDecls = emitCtors name tpStr ctors
+      strConcat ifaceDecl (strConcat "\n" ctorDecls)
+    | DFn name params ret body ->
+      paramStr = emitParamsStr params
+      retType = emitReturnType ret
+      if name == "main"
+        strConcat "    public static int Main(string[] args) {\n        " (strConcat (emitExpr body) ";\n        return 0;\n    }")
+      else
+        strConcat "    public static " (strConcat retType (strConcat " " (strConcat (safeIdent name) (strConcat "(" (strConcat paramStr (strConcat ") => " (strConcat (emitExpr body) ";")))))))
+    | DLet name body ->
+      strConcat "    public static readonly object " (strConcat (safeIdent name) (strConcat " = " (strConcat (emitExpr body) ";")))
+    | DImport parts ->
+      strConcat "// import " (joinWith "." parts)
+    | DExport inner -> emitDecl inner
+
+emitDecls(ds List[Decl]) =
+  joinWith "\n\n" (listMap emitDecl ds)
+
+-- ---- Prelude ---------------------------------------------------------------
+
+emitPrelude =
+  "    // --- ll-lang stdlib (C#) ---\n    public static object? printfn(string s) { System.Console.WriteLine(s); return null; }\n    public static object? print(string s) { System.Console.Write(s); return null; }\n    public static long strLen(string s) => s.Length;\n    public static System.Func<object, string> strConcat(string a) => b => a + (b?.ToString() ?? \"\");\n    public static System.Collections.Generic.List<char> strChars(string s) => new(s.ToCharArray());\n    public static string strFromChars(System.Collections.Generic.IEnumerable<char> cs) => new string(new System.Collections.Generic.List<char>(cs).ToArray());\n    public static string intToStr(long n) => n.ToString();\n    public static long charToInt(char c) => c;\n    public static char intToChar(long n) => (char)n;\n    public static bool strContains(string needle) => hay => hay.Contains(needle);\n    public static long listLen<T>(System.Collections.Generic.List<T> xs) => xs.Count;\n    public static System.Func<System.Collections.Generic.List<A>, System.Collections.Generic.List<B>> listMap<A, B>(System.Func<A, B> f) => xs => { var r = new System.Collections.Generic.List<B>(xs.Count); foreach (var x in xs) r.Add(f(x)); return r; };\n    public static System.Func<System.Collections.Generic.List<A>, System.Collections.Generic.List<A>> listFilter<A>(System.Func<A, bool> p) => xs => { var r = new System.Collections.Generic.List<A>(); foreach (var x in xs) if (p(x)) r.Add(x); return r; };\n    public static System.Func<B, System.Func<System.Collections.Generic.List<A>, B>> listFold<A, B>(System.Func<B, System.Func<A, B>> f) => z => xs => { var acc = z; foreach (var x in xs) acc = f(acc)(x); return acc; };\n    public static System.Func<System.Collections.Generic.List<T>, System.Collections.Generic.List<T>> listAppend<T>(System.Collections.Generic.List<T> xs) => ys => { var r = new System.Collections.Generic.List<T>(xs.Count + ys.Count); r.AddRange(xs); r.AddRange(ys); return r; };\n    public static bool listIsEmpty<T>(System.Collections.Generic.List<T> xs) => xs.Count == 0;\n    // --- end prelude ---"
+
+-- ---- Module emission -------------------------------------------------------
+
+csharpClassName(parts List[Str]) =
+  match parts
+    | [] -> "LlLang"
+    | _ -> listFold (\acc x. x) "LlLang" parts
+
+emitModulePath(parts List[Str]) =
+  joinWith "." parts
+
+emitModule(m Module) =
+  match m
+    | MkModule path decls ->
+      className = csharpClassName path
+      header = strConcat "// Generated by lllc (ll-lang C# backend)\n// Requires .NET 8+\n// Module: " (strConcat (emitModulePath path) "\n#nullable enable\nusing System;\nusing System.Collections.Generic;")
+      prelude = emitPrelude
+      body = emitDecls decls
+      strConcat header (strConcat "\n\npublic static class " (strConcat className (strConcat " {\n\n" (strConcat prelude (strConcat "\n\n" (strConcat body "\n}\n"))))))
+
+-- ---- Tests -----------------------------------------------------------------
+
+codegenCSharpCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  got:      " (strConcat got (strConcat "\n  expected: " expected)))))
+
+checkContains(label Str)(got Str)(needle Str) =
+  if strContains needle got
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  missing: " (strConcat needle (strConcat "\n  in: " got)))))
+
+main =
+  -- 1. EInt → long literal
+  _ = codegenCSharpCheck "1 EInt 42" (emitExpr (EInt 42)) "42L"
+
+  -- 2. EStr → double-quoted string
+  _ = codegenCSharpCheck "2 EStr hello" (emitExpr (EStr "hello")) "\"hello\""
+
+  -- 3. EBool true
+  _ = codegenCSharpCheck "3 EBool true" (emitExpr (EBool true)) "true"
+
+  -- 4. EBool false
+  _ = codegenCSharpCheck "4 EBool false" (emitExpr (EBool false)) "false"
+
+  -- 5. EBinOp +
+  _ = codegenCSharpCheck "5 EBinOp +" (emitExpr (EBinOp "+" (EInt 1) (EInt 2))) "(1L + 2L)"
+
+  -- 6. EIf → ternary
+  _ = codegenCSharpCheck "6 EIf ternary" (emitExpr (EIf (EBool true) (EInt 1) (EInt 0))) "(true ? 1L : 0L)"
+
+  -- 7. TyName Int → long
+  _ = codegenCSharpCheck "7 TyName Int" (emitType (TyName "Int")) "long"
+
+  -- 8. TyName Float → double
+  _ = codegenCSharpCheck "8 TyName Float" (emitType (TyName "Float")) "double"
+
+  -- 9. TyName Str → string
+  _ = codegenCSharpCheck "9 TyName Str" (emitType (TyName "Str")) "string"
+
+  -- 10. TyName Bool → bool
+  _ = codegenCSharpCheck "10 TyName Bool" (emitType (TyName "Bool")) "bool"
+
+  -- 11. TyApp List Int → List<long>
+  _ = codegenCSharpCheck "11 TyApp List Int" (emitType (TyApp (TyName "List") (TyName "Int"))) "System.Collections.Generic.List<long>"
+
+  -- 12. TyFn Int Bool → Func<long, bool>
+  _ = codegenCSharpCheck "12 TyFn" (emitType (TyFn (TyName "Int") (TyName "Bool"))) "System.Func<long, bool>"
+
+  -- 13. safeIdent: C# keyword 'class' gets suffix
+  _ = codegenCSharpCheck "13 safeIdent class" (safeIdent "class") "class_"
+
+  -- 14. safeIdent: non-keyword unchanged
+  _ = codegenCSharpCheck "14 safeIdent foo" (safeIdent "foo") "foo"
+
+  -- 15. safeTypeIdent: capitalizes first letter
+  _ = codegenCSharpCheck "15 safeTypeIdent color" (safeTypeIdent "color") "Color"
+
+  -- 16. DType Color → interface + records
+  colorCtors = MkCon "Red" [] :: MkCon "Green" (TyName "Int" :: []) :: []
+  colorOut = emitDecl (DType "Color" [] colorCtors)
+  _ = checkContains "16 DType interface Color" colorOut "interface Color"
+  _ = checkContains "16 DType record Red" colorOut "record Red()"
+  _ = checkContains "16 DType record Green" colorOut "record Green("
+  _ = checkContains "16 DType implements Color" colorOut ": Color"
+
+  -- 17. DFn add → static method
+  addParams = MkParam "a" (TyName "Int") :: MkParam "b" (TyName "Int") :: []
+  addOut = emitDecl (DFn "add" addParams (Some (TyName "Int")) (EBinOp "+" (EVar "a") (EVar "b")))
+  _ = checkContains "17 DFn static" addOut "public static"
+  _ = checkContains "17 DFn name" addOut "add("
+  _ = checkContains "17 DFn return" addOut "=>"
+
+  -- 18. Full module emit
+  idParams = MkParam "x" (TyName "Int") :: []
+  modDecls = DType "Color" [] (MkCon "Red" [] :: MkCon "Blue" [] :: []) :: DFn "id" idParams (Some (TyName "Int")) (EVar "x") :: []
+  m = MkModule ("Test" :: "Mod" :: []) modDecls
+  out = emitModule m
+  _ = checkContains "18 module class Mod" out "public static class Mod"
+  _ = checkContains "18 module interface Color" out "interface Color"
+  _ = checkContains "18 module fn id" out "id("
+
+  -- 19. EFloat
+  _ = codegenCSharpCheck "19 EFloat" (emitExpr (EFloat "3.14")) "3.14"
+
+  -- 20. EChar
+  _ = codegenCSharpCheck "20 EChar newline" (emitExpr (EChar '\n')) "'\\n'"
+
+  0
