@@ -107,13 +107,15 @@ fileToModulePath(rootDir Str)(projectName Str)(filePath Str) =
   rel = strStripPrefix srcPrefix filePath
   noExt = strDropLast 4 rel
   segments = strSplitBy "/" noExt
+  cappedProj = strCapFirst projectName
   match segments
-    | [] ->
-      capped = strCapFirst projectName
-      [capped]
+    | [] -> [cappedProj]
     | first :: segsRest ->
       cappedFirst = strCapFirst first
-      cappedFirst :: segsRest
+      if first == projectName
+        cappedFirst :: segsRest
+      else
+        cappedProj :: cappedFirst :: segsRest
 
 -- Join a list of strings with "." separator.
 joinDots(segs List[Str]) =
@@ -247,14 +249,16 @@ main =
   _ = check "7 strCapFirst already upper" (capAlready == "Foo")
 
   -- Test 6: fileToModulePath
-  -- File directly in src/: path strips srcDir prefix, then splits on /
+  -- File directly in src/: prepends capped project name
   mp = fileToModulePath "/root/myapp" "myapp" "/root/myapp/src/Foo/Bar.lll"
-  _ = check "8 fileToModulePath length" (listLen mp == 2)
-  _ = check "9 fileToModulePath[0]" (match mp | h :: _ -> h == "Foo" | [] -> false)
-  _ = check "10 fileToModulePath[1]" (match mp | _ :: h :: _ -> h == "Bar" | _ -> false)
-  -- File with project subdir: src/myapp/Foo.lll -> ["Myapp", "Foo"]
+  _ = check "8 fileToModulePath length" (listLen mp == 3)
+  _ = check "9 fileToModulePath[0]" (match mp | h :: _ -> h == "Myapp" | [] -> false)
+  _ = check "10 fileToModulePath[1]" (match mp | _ :: h :: _ -> h == "Foo" | _ -> false)
+  _ = check "10b fileToModulePath[2]" (match mp | _ :: _ :: h :: _ -> h == "Bar" | _ -> false)
+  -- File with project subdir: src/myapp/Foo.lll -> ["Myapp", "Foo"] (no doubling)
   mp2 = fileToModulePath "/root/myapp" "myapp" "/root/myapp/src/myapp/Foo.lll"
   _ = check "11 fileToModulePath with project subdir" (match mp2 | h :: _ -> h == "Myapp" | [] -> false)
+  _ = check "11b fileToModulePath no double prefix" (listLen mp2 == 2)
 
   -- Test 7: read and parse a single file (Str.lll)
   src = readFile "stdlib/src/Str.lll"

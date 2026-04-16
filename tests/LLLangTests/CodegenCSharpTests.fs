@@ -192,3 +192,33 @@ let ``CSharp: main sequencing preserves side effects at runtime`` () =
             Assert.Contains("smoke", runOut)
         finally
             try Directory.Delete(tempRoot, true) with _ -> ()
+
+[<Fact>]
+let ``CSharp: zero-arg method is called with () at use site (#135)`` () =
+    // rbEmpty() is a zero-arg function; when referenced as a value it must emit rbEmpty()
+    let src =
+        "module M\n"
+        + "RBMap K V = Leaf | Node K V (RBMap K V) (RBMap K V)\n"
+        + "rbEmpty() = Leaf\n"
+        + "main() Int =\n"
+        + "  m = rbEmpty\n"
+        + "  0\n"
+    let cs = csSrc src
+    // The use of rbEmpty as a value must emit rbEmpty() — not a bare method-group reference
+    Assert.Contains("rbEmpty()", cs)
+    Assert.DoesNotContain("var m = rbEmpty;", cs)
+
+[<Fact>]
+let ``CSharp: two identical-RHS tuple destructures get distinct temp names (#136)`` () =
+    // Previously hash-based naming would produce identical temp names for same-text RHS
+    let src =
+        "module M\n"
+        + "pair(n Int) = (n, n)\n"
+        + "main() Int =\n"
+        + "  let (a, b) = pair 1\n"
+        + "  let (c, d) = pair 1\n"
+        + "  a + c\n"
+    let cs = csSrc src
+    // Both destructures emit a temp var; they must have different names
+    Assert.Contains("__ll_tup_0", cs)
+    Assert.Contains("__ll_tup_1", cs)

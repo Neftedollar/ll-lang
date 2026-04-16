@@ -41,8 +41,9 @@ let listConcat (xss: 'a list list) = List.concat xss
 let listIsEmpty (xs: 'a list) = List.isEmpty xs
 let getArgs : string list = System.Environment.GetCommandLineArgs() |> Array.toList |> List.tail
 let processSpawn (cmd: string) (args: string list) : int64 =
-    let psi = System.Diagnostics.ProcessStartInfo(cmd, System.String.Join(" ", List.toArray args))
+    let psi = System.Diagnostics.ProcessStartInfo(cmd)
     psi.UseShellExecute <- false
+    args |> List.iter (fun a -> psi.ArgumentList.Add(a))
     let p = System.Diagnostics.Process.Start(psi) in p.WaitForExit(); int64 p.ExitCode
 // --- end prelude ---
 
