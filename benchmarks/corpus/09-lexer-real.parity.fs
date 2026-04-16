@@ -103,8 +103,8 @@ and tokenize src =
 
 and tokenName t =
     (match t with
-    | TIdent(s) -> ((strConcat "id:") s)
-    | TInt(s) -> ((strConcat "int:") s)
+    | TIdent(s) -> ("id:" + s)
+    | TInt(s) -> ("int:" + s)
     | TLet -> "kw:let"
     | TFn -> "kw:fn"
     | TIf -> "kw:if"
@@ -118,10 +118,10 @@ and tokenName t =
     | TGt -> ">"
     | TLParen -> "("
     | TRParen -> ")"
-    | TUnknown(s) -> ((strConcat "?:") s))
+    | TUnknown(s) -> ("?:" + s))
 
 and joinNames ts =
-    (((listFold (fun acc t -> (if ((strLen acc) = 0L) then (tokenName t) else ((strConcat ((strConcat acc) " ")) (tokenName t))))) "") ts)
+    (((listFold (fun acc t -> (if ((strLen acc) = 0L) then (tokenName t) else ((acc + " ") + (tokenName t))))) "") ts)
 
 [<EntryPoint>]
 let main (argv: string[]) =

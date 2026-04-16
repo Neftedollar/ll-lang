@@ -9,8 +9,8 @@ Token =
   | TRParen
 
 show(t Token) =
-  | TIdent s -> strConcat "id:" s
-  | TNum s -> strConcat "num:" s
+  | TIdent s -> "id:" + s
+  | TNum s -> "num:" + s
   | TLParen -> "("
   | TRParen -> ")"
 

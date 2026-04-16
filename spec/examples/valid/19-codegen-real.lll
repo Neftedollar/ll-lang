@@ -318,27 +318,27 @@ showTExpr(e TExpr) =
 -- `intToStr` builtin and suffixes `L` because ll-lang's `Int` maps to
 -- F# `int64` in the host codegen.
 showInt(n Int) =
-  strConcat (intToStr n) "L"
+  intToStr n + "L"
 
 -- `TEStr s` -> `"\"<s>\""` (raw, no escape handling). The hardcoded
 -- test strings below (`"hello"`) contain no embedded quotes or
 -- backslashes, so the simplest possible emission works. Slice B adds
 -- real escape handling when user-authored strings start appearing.
 showStr(s Str) =
-  strConcat "\"" (strConcat s "\"")
+  "\"" + s + "\""
 
 -- `TEAdd a b` -> `"(<a> + <b>)"`. Parens are unconditional — mirrors
 -- the host's `emitExpr` `binaryOp` arm which also always parenthesises
 -- to dodge F# operator-precedence ambiguity.
 showAdd(a TExpr)(b TExpr) =
-  strConcat "(" (strConcat (showTExpr a) (strConcat " + " (strConcat (showTExpr b) ")")))
+  "(" + showTExpr a + " + " + showTExpr b + ")"
 
 -- `TEApp f a` -> `"(<f> <a>)"`. Host's `emitExpr` wraps every
 -- application in parens too, for the same reason — curried apps are
 -- left-associative in F# but left-leaning chains like `f a b c` would
 -- need extra context tracking to drop them safely. Parens are free.
 showApp(f TExpr)(a TExpr) =
-  strConcat "(" (strConcat (showTExpr f) (strConcat " " (strConcat (showTExpr a) ")")))
+  "(" + showTExpr f + " " + showTExpr a + ")"
 
 -- `TELet n e1 e2` -> `"(let <n> = <e1> in <e2>)"` — the host's
 -- offside-safe inline form from `Codegen.fs` line 162 area. A
@@ -346,7 +346,7 @@ showApp(f TExpr)(a TExpr) =
 -- doesn't bother with; inline form costs long lines but works in any
 -- expression position.
 showLet(n Str)(e1 TExpr)(e2 TExpr) =
-  strConcat "(let " (strConcat n (strConcat " = " (strConcat (showTExpr e1) (strConcat " in " (strConcat (showTExpr e2) ")")))))
+  "(let " + n + " = " + showTExpr e1 + " in " + showTExpr e2 + ")"
 
 -- `TELam x body` -> `"(fun <x> -> <body>)"`. Single-param lambda
 -- only — `18-hminfer-real.lll`'s `ELam Str Expr` also takes a single
@@ -354,14 +354,14 @@ showLet(n Str)(e1 TExpr)(e2 TExpr) =
 -- `TELam` arm in `Codegen.fs` line 158 area joins a param list with
 -- spaces; this slice's single-param form is a strict subset.
 showLam(x Str)(body TExpr) =
-  strConcat "(fun " (strConcat x (strConcat " -> " (strConcat (showTExpr body) ")")))
+  "(fun " + x + " -> " + showTExpr body + ")"
 
 -- `TEIf c t e` -> `"(if <c> then <t> else <e>)"`. Unconditionally
 -- parenthesised, same as the host's `emitExpr` `TEIf` arm in
 -- `Codegen.fs` line 180 area, so the if-expression embeds cleanly in
 -- any parent expression position without offside-rule surprises.
 showIf(c TExpr)(t TExpr)(e TExpr) =
-  strConcat "(if " (strConcat (showTExpr c) (strConcat " then " (strConcat (showTExpr t) (strConcat " else " (strConcat (showTExpr e) ")")))))
+  "(if " + showTExpr c + " then " + showTExpr t + " else " + showTExpr e + ")"
 
 -- `TEMatch scr ps bs` -> `"(match <scr> with <arms>)"`. Arms are
 -- emitted on a **single line** joined by spaces — mirrors the host's
@@ -372,7 +372,7 @@ showIf(c TExpr)(t TExpr)(e TExpr) =
 -- lockstep by `showArms`, same trick as `18-hminfer-real.lll`'s
 -- `inferMatchBranches`.
 showMatch(scr TExpr)(ps List[Pat])(bs List[TExpr]) =
-  strConcat "(match " (strConcat (showTExpr scr) (strConcat " with " (strConcat (showArms ps bs) ")")))
+  "(match " + showTExpr scr + " with " + showArms ps bs + ")"
 
 -- ---------- Pattern + arm emission --------------------------------------
 
@@ -404,11 +404,11 @@ showArms(ps List[Pat])(bs List[TExpr]) =
 showArmsCons(p Pat)(prest List[Pat])(bs List[TExpr]) =
   match bs
     | b :: brest ->
-      head = strConcat "| " (strConcat (showPat p) (strConcat " -> " (showTExpr b)))
+      head = "| " + showPat p + " -> " + showTExpr b
       rest = showArms prest brest
       if strLen rest == 0
         head
-      else strConcat head (strConcat " " rest)
+      else head + " " + rest
     | _ -> ""
 
 -- ---------- Parameter-list emission -------------------------------------
@@ -428,7 +428,7 @@ showParams(ps List[Str]) =
 -- the file).
 showParamsTail(first Str)(rest List[Str]) =
   match rest
-    | p :: more -> strConcat first (strConcat " " (showParamsTail p more))
+    | p :: more -> first + " " + showParamsTail p more
     | _ -> first
 
 -- ---------- Type-argument + constructor emission ------------------------
@@ -438,7 +438,7 @@ showParamsTail(first Str)(rest List[Str]) =
 -- produces `'A` for every `TPBare` param). Only single-letter params
 -- are emitted in this slice.
 showTypeParam(p Str) =
-  strConcat "'" p
+  "'" + p
 
 -- Render a single `TypeArg` as its F# type string. `TAName` covers the
 -- primitive name mapping (`Int` -> `int64`, `Str` -> `string`, `Bool`
@@ -479,7 +479,7 @@ showCtorArgs(args List[TypeArg]) =
 -- with ` * ` separators. Same shape as `showParamsTail`.
 showCtorArgsTail(acc Str)(rest List[TypeArg]) =
   match rest
-    | a :: more -> showCtorArgsTail (strConcat acc (strConcat " * " (showTypeArg a))) more
+    | a :: more -> showCtorArgsTail (acc + " * " + showTypeArg a) more
     | _ -> acc
 
 -- Render a single `Ctor` as one indented arm line — `"    | Name"` for
@@ -495,9 +495,9 @@ showCtorBody(name Str)(args List[TypeArg]) =
   match args
     | _ :: _ ->
       argStr = showCtorArgs args
-      strConcat "    | " (strConcat name (strConcat " of " argStr))
+      "    | " + name + " of " + argStr
     | _ ->
-      strConcat "    | " name
+      "    | " + name
 
 -- Fold a `List[Ctor]` into a single newline-joined string. Each arm
 -- occupies its own indented line — `showCtor` supplies the `    | `
@@ -511,7 +511,7 @@ showCtors(cs List[Ctor]) =
 -- separators. Mirrors `showCtorArgsTail` / `showParamsTail`.
 showCtorsTail(acc Str)(rest List[Ctor]) =
   match rest
-    | c :: more -> showCtorsTail (strConcat acc (strConcat "\n" (showCtor c))) more
+    | c :: more -> showCtorsTail (acc + "\n" + showCtor c) more
     | _ -> acc
 
 -- Render the `<'A, 'B>` segment of a type header. Empty list returns
@@ -520,7 +520,7 @@ showCtorsTail(acc Str)(rest List[Ctor]) =
 -- `emitTypeParams` in `Codegen.fs` line 67 area.
 showTypeParams(ps List[Str]) =
   match ps
-    | p :: rest -> strConcat "<" (strConcat (showTypeParamsBody p rest) ">")
+    | p :: rest -> "<" + showTypeParamsBody p rest + ">"
     | _ -> ""
 
 -- Tail-helper: consumed one head, glue the rest on with `", "`
@@ -528,7 +528,7 @@ showTypeParams(ps List[Str]) =
 -- level deep.
 showTypeParamsBody(first Str)(rest List[Str]) =
   match rest
-    | p :: more -> strConcat (showTypeParam first) (strConcat ", " (showTypeParamsBody p more))
+    | p :: more -> showTypeParam first + ", " + showTypeParamsBody p more
     | _ -> showTypeParam first
 
 -- ---------- Declaration emission ----------------------------------------
@@ -579,9 +579,9 @@ showFnDeclPlain(name Str)(ps List[Str])(body TExpr) =
   match ps
     | _ :: _ ->
       paramStr = showParams ps
-      strConcat "let " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
+      "let " + name + " " + paramStr + " = " + showTExpr body
     | _ ->
-      strConcat "let " (strConcat name (strConcat " = " (showTExpr body)))
+      "let " + name + " = " + showTExpr body
 
 -- First-in-group form — `let rec <name> <params> = <body>`. Used for
 -- the head of a `let rec f1 ... and f2 ... and f3 ...` block. Phase
@@ -593,9 +593,9 @@ showFnDeclFirst(name Str)(ps List[Str])(body TExpr) =
   match ps
     | _ :: _ ->
       paramStr = showParams ps
-      strConcat "let rec " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
+      "let rec " + name + " " + paramStr + " = " + showTExpr body
     | _ ->
-      strConcat "let rec " (strConcat name (strConcat " = " (showTExpr body)))
+      "let rec " + name + " = " + showTExpr body
 
 -- Continuation-in-group form — `and <name> <params> = <body>`. Every
 -- non-first fn in a 2+ `let rec` block gets this prefix. Same shape
@@ -605,9 +605,9 @@ showFnDeclCont(name Str)(ps List[Str])(body TExpr) =
   match ps
     | _ :: _ ->
       paramStr = showParams ps
-      strConcat "and " (strConcat name (strConcat " " (strConcat paramStr (strConcat " = " (showTExpr body)))))
+      "and " + name + " " + paramStr + " = " + showTExpr body
     | _ ->
-      strConcat "and " (strConcat name (strConcat " = " (showTExpr body)))
+      "and " + name + " = " + showTExpr body
 
 -- Dispatch a single TDFn to `showFnDeclFirst`. Extracted so
 -- `showFnGroup`'s outer `match` stays one level deep.
@@ -631,7 +631,7 @@ showFnDeclContD(d TDecl) =
 showMainDecl(body TExpr) =
   header = "[<EntryPoint>]\nlet main (argv: string[]) =\n    "
   trailer = "\n    0"
-  strConcat header (strConcat (showTExpr body) trailer)
+  header + showTExpr body + trailer
 
 -- Emit a run of 2+ consecutive non-main TDFns as a single `let rec
 -- ... and ... and ...` block. Single-element runs fall through to
@@ -654,7 +654,7 @@ showFnGroupCons(first TDecl)(rest List[TDecl]) =
   tailStr = joinLines tails
   if strLen tailStr == 0
     head
-  else strConcat head (strConcat "\n" tailStr)
+  else head + "\n" + tailStr
 
 -- Emit a sum-type decl as multi-line F# source. Shape:
 --   `type <name><typeParams> =\n    | <ctor1>\n    | <ctor2> ...`
@@ -666,7 +666,7 @@ showFnGroupCons(first TDecl)(rest List[TDecl]) =
 showTypeDecl(name Str)(tps List[Str])(ctors List[Ctor]) =
   paramStr = showTypeParams tps
   arms = showCtors ctors
-  strConcat "type " (strConcat name (strConcat paramStr (strConcat " =\n" arms)))
+  "type " + name + paramStr + " =\n" + arms
 
 -- ---------- Line joiner -------------------------------------------------
 
@@ -678,7 +678,7 @@ showTypeDecl(name Str)(tps List[Str])(ctors List[Ctor]) =
 joinLines(xs List[Str]) =
   listFold (\acc s. if strLen acc == 0
     s
-  else strConcat (strConcat acc "\n") s) "" xs
+  else acc + "\n" + s) "" xs
 
 -- Blank-line-joined variant: walks a `List[Str]` of already-emitted
 -- source blocks and glues them with `"\n\n"` separators. Used by
@@ -688,7 +688,7 @@ joinLines(xs List[Str]) =
 joinBlocks(xs List[Str]) =
   listFold (\acc s. if strLen acc == 0
     s
-  else strConcat (strConcat acc "\n\n") s) "" xs
+  else acc + "\n\n" + s) "" xs
 
 -- ---------- F# stdlib prelude (Phase 7.8d) ------------------------------
 
@@ -749,7 +749,7 @@ showModule(m Module) =
 -- `let rec` grouping + `[<EntryPoint>]` main slicing), all glued with
 -- blank-line separators.
 showModuleBody(path Str)(decls List[TDecl]) =
-  header = strConcat "module " path
+  header = "module " + path
   prelude = fsharpPrelude 0
   declBlock = splitAndShowDecls decls
   parts = [header prelude declBlock]
@@ -855,7 +855,7 @@ flushPendingFnsNonEmpty(fns List[TDecl])(acc Str) =
 appendBlockStr(block Str)(acc Str) =
   if strLen acc == 0
     block
-  else strConcat acc (strConcat "\n\n" block)
+  else acc + "\n\n" + block
 
 -- ---------- main --------------------------------------------------------
 

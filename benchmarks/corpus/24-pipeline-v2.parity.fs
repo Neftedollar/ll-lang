@@ -1266,7 +1266,7 @@ let demo4 =
     (let src = "module Demo\nfoo(x Int) = x + 1\n" in (let result = ((lookupSymbol src) "foo") in ((strContains "\"found\":true") result)))
 
 let checkBool label ok =
-    (if ok then (printfn ((strConcat "OK ") label)) else (printfn ((strConcat "FAIL ") label)))
+    (if ok then (printfn ("OK " + label)) else (printfn ("FAIL " + label)))
 
 [<EntryPoint>]
 let main (argv: string[]) =

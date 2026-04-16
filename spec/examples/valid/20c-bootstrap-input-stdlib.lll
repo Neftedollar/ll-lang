@@ -1,3 +1,3 @@
 module Examples.Clean
-greet(n Str) = strConcat "hi " n
+greet(n Str) = "hi " + n
 main() = 1

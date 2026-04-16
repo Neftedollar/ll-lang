@@ -24,8 +24,8 @@ classify(c Char) =
   else TUnknown
 
 tokenName(t Token) =
-  | TIdent s -> strConcat "id:" s
-  | TNum n -> strConcat "n:" n
+  | TIdent s -> "id:" + s
+  | TNum n -> "n:" + n
   | TLParen -> "("
   | TRParen -> ")"
   | TPlus -> "+"
@@ -35,7 +35,7 @@ tokenName(t Token) =
 joinTokens(toks List[Token]) =
   listFold (\acc. \t. if strLen acc == 0
     tokenName t
-  else strConcat (strConcat acc ",") (tokenName t)) "" toks
+  else acc + "," + tokenName t) "" toks
 
 main() =
   toks = listMap classify (strChars "ab 12 (x+y)")

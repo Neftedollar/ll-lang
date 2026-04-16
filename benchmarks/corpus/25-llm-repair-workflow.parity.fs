@@ -1275,7 +1275,7 @@ let demo7 =
     (let broken = "module Demo\nresult = missingFn\n" in (let __ll_fixed = "module Demo\nresult = 42\n" in (let errs1 = (collectAllErrors broken) in (let errs2 = (collectAllErrors __ll_fixed) in (((listIsEmpty errs1) = false) = ((listIsEmpty errs2) = false))))))
 
 let checkBool label ok =
-    (if ok then (printfn ((strConcat "OK ") label)) else (printfn ((strConcat "FAIL ") label)))
+    (if ok then (printfn ("OK " + label)) else (printfn ("FAIL " + label)))
 
 [<EntryPoint>]
 let main (argv: string[]) =

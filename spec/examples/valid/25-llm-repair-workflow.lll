@@ -61,9 +61,9 @@ demo7 =
 
 checkBool(label Str)(ok Bool) =
   if ok
-    printfn (strConcat "OK " label)
+    printfn ("OK " + label)
   else
-    printfn (strConcat "FAIL " label)
+    printfn ("FAIL " + label)
 
 main =
   _ = checkBool "1 valid program no errors" demo1

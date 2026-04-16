@@ -137,10 +137,10 @@ parseFactor(toks List[Token]) =
 -- the runtime test string-match the result.
 show(e Expr) =
   | ENum n -> intToStr n
-  | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (show l)) " + ") (show r)) ")"
-  | ESub l r -> strConcat (strConcat (strConcat (strConcat "(" (show l)) " - ") (show r)) ")"
-  | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (show l)) " * ") (show r)) ")"
-  | EDiv l r -> strConcat (strConcat (strConcat (strConcat "(" (show l)) " / ") (show r)) ")"
+  | EAdd l r -> "(" + show l + " + " + show r + ")"
+  | ESub l r -> "(" + show l + " - " + show r + ")"
+  | EMul l r -> "(" + show l + " * " + show r + ")"
+  | EDiv l r -> "(" + show l + " / " + show r + ")"
 
 -- ---------- Driver -------------------------------------------------------
 

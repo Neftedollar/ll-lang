@@ -374,13 +374,13 @@ parseAtom(toks List[Token]) =
 
 showPat(p Pat) =
   | PLitInt n -> intToStr n
-  | PLitStr s -> strConcat (strConcat "\"" s) "\""
+  | PLitStr s -> "\"" + s + "\""
   | PVar s -> s
   | PWild -> "_"
 
 -- Render a single arm given its pattern and body. Helper for showArmsAt.
 showArm(p Pat)(body Expr) =
-  strConcat (strConcat (strConcat "| " (showPat p)) " -> ") (showExpr body)
+  "| " + showPat p + " -> " + showExpr body
 
 -- Recursively walk the two parallel lists to produce ` | pat -> body`
 -- joined with single spaces. The two lists are always the same length
@@ -394,7 +394,7 @@ showArms(pats List[Pat])(bodies List[Expr]) =
           tail = showArms ps bs
           if strLen tail == 0
             head
-          else strConcat (strConcat head " ") tail
+          else head + " " + tail
         | _ -> ""
     | _ -> ""
 
@@ -402,25 +402,25 @@ showArms(pats List[Pat])(bodies List[Expr]) =
 -- associativity are visually unambiguous. Leaves print bare.
 showExpr(e Expr) =
   | EInt n -> intToStr n
-  | EStr s -> strConcat (strConcat "\"" s) "\""
+  | EStr s -> "\"" + s + "\""
   | EVar s -> s
-  | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " + ") (showExpr r)) ")"
-  | ESub l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " - ") (showExpr r)) ")"
-  | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " * ") (showExpr r)) ")"
-  | EDiv l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " / ") (showExpr r)) ")"
-  | EApp f x -> strConcat (strConcat (strConcat (strConcat "(" (showExpr f)) " ") (showExpr x)) ")"
-  | ELam n body -> strConcat (strConcat (strConcat (strConcat "(fun " n) " -> ") (showExpr body)) ")"
+  | EAdd l r -> "(" + showExpr l + " + " + showExpr r + ")"
+  | ESub l r -> "(" + showExpr l + " - " + showExpr r + ")"
+  | EMul l r -> "(" + showExpr l + " * " + showExpr r + ")"
+  | EDiv l r -> "(" + showExpr l + " / " + showExpr r + ")"
+  | EApp f x -> "(" + showExpr f + " " + showExpr x + ")"
+  | ELam n body -> "(fun " + n + " -> " + showExpr body + ")"
   | ELet n e1 e2 ->
-    p1 = strConcat (strConcat "(let " n) " = "
-    p2 = strConcat (strConcat p1 (showExpr e1)) " in "
-    strConcat (strConcat p2 (showExpr e2)) ")"
+    p1 = "(let " + n + " = "
+    p2 = p1 + showExpr e1 + " in "
+    p2 + showExpr e2 + ")"
   | EIf c a b ->
-    p1 = strConcat "(if " (showExpr c)
-    p2 = strConcat (strConcat p1 " ") (showExpr a)
-    strConcat (strConcat (strConcat p2 " else ") (showExpr b)) ")"
+    p1 = "(if " + showExpr c
+    p2 = p1 + " " + showExpr a
+    p2 + " else " + showExpr b + ")"
   | EMatch scrut pats bodies ->
-    head = strConcat "(match " (showExpr scrut)
-    strConcat (strConcat (strConcat head " ") (showArms pats bodies)) ")"
+    head = "(match " + showExpr scrut
+    head + " " + showArms pats bodies + ")"
 
 -- ---------- Driver -------------------------------------------------------
 
@@ -434,7 +434,7 @@ runOne(src Str) =
 joinLines(xs List[Str]) =
   listFold (\acc s. if strLen acc == 0
     s
-  else strConcat (strConcat acc "\n") s) "" xs
+  else acc + "\n" + s) "" xs
 
 runAll(inputs List[Str]) =
   joinLines (listMap runOne inputs)

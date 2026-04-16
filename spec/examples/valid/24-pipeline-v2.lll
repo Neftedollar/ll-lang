@@ -37,9 +37,9 @@ demo4 =
 
 checkBool(label Str)(ok Bool) =
   if ok
-    printfn (strConcat "OK " label)
+    printfn ("OK " + label)
   else
-    printfn (strConcat "FAIL " label)
+    printfn ("FAIL " + label)
 
 main =
   _ = checkBool "1 compile produces output" demo1

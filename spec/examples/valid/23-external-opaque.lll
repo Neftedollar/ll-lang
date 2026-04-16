@@ -19,4 +19,4 @@ opaque Buffer
 
 -- Use the external function — no different from a regular call.
 greet(name Str) Unit =
-  console_log (strConcat "Hello, " (strConcat name "!"))
+  console_log ("Hello, " + name + "!")
