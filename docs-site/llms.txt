@@ -63,7 +63,7 @@ lllc mcp                         # start MCP server
 
 ## MCP server
 ll-lang ships with a built-in MCP (Model Context Protocol) server: `lllc mcp`
-Tools: compile_file, check_file, run_file, list_errors, lookup_error, stdlib_search, grammar_lookup
+Tools: compile_file, check_file, run_file, compile_source, check_source, list_errors, lookup_error, stdlib_search, grammar_lookup, project_info
 
 ## Links
 - GitHub: https://github.com/Neftedollar/ll-lang

@@ -1,140 +1,205 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ll-lang &mdash; The language built for LLMs to write, compile, and fix</title>
-  <meta name="description" content="Token-efficient functional syntax. Machine-readable errors. Compiles to F#, TypeScript, Python, Java, C#." />
-  <meta property="og:title" content="ll-lang" />
-  <meta property="og:description" content="The language built for LLMs to write, compile, and fix." />
-  <meta property="og:type" content="website" />
-  <link rel="stylesheet" href="css/style.css" />
-  <link
-    rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
-    integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH"
-    crossorigin="anonymous"
-  />
-  <script
-    src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
-    integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp"
-    crossorigin="anonymous"
-  ></script>
-</head>
-<body>
-
-<!-- Nav -->
-<nav>
-  <div class="nav-inner">
-    <a href="index.html" class="nav-logo"><span>//</span>ll-lang</a>
-    <ul class="nav-links" id="nav-links">
-      <li><a href="index.html">Home</a></li>
-      <li><a href="docs.html">Docs</a></li>
-      <li><a href="playground.html">Playground</a></li>
-      <li><a href="https://github.com/Neftedollar/ll-lang" target="_blank" rel="noopener">GitHub</a></li>
-      <li><a href="https://github.com/Neftedollar/ll-lang/releases" class="nav-cta" target="_blank" rel="noopener">v1.0.0</a></li>
-    </ul>
-    <button class="nav-hamburger" id="nav-hamburger" aria-label="Toggle navigation" aria-expanded="false">
-      <span></span><span></span><span></span>
-    </button>
-  </div>
-</nav>
-
-<!-- Hero -->
-<section class="hero">
-  <div class="container">
-    <div class="hero-badge">
-      <span class="dot"></span>v1.0.0 &mdash; Bootstrap fixpoint achieved
-    </div>
-    <h1>The language built for LLMs to write, compile, and fix</h1>
-    <p class="hero-sub">
-      Token-efficient functional syntax. Machine-readable errors.
-      Compiles to F#, TypeScript, Python, Java, C#.
-    </p>
-    <div class="hero-actions">
-      <a href="playground.html" class="btn btn-primary">&#x25B6; Try with lllc</a>
-      <a href="https://github.com/Neftedollar/ll-lang" class="btn btn-secondary" target="_blank" rel="noopener">&#x2605; View on GitHub</a>
-      <a href="docs.html" class="btn btn-ghost">Read the docs &rarr;</a>
-    </div>
-
-    <!-- Terminal mockup -->
-    <div class="hero-terminal">
-      <div class="terminal-bar">
-        <span class="dot red"></span>
-        <span class="dot yellow"></span>
-        <span class="dot green"></span>
-        <span class="terminal-title">hello.lll</span>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>
+      ll-lang &mdash; The language built for LLMs to write, compile, and fix
+    </title>
+    <meta
+      name="description"
+      content="Token-efficient functional syntax. Machine-readable errors. Compiles to F#, TypeScript, Python, Java, C#."
+    />
+    <meta
+      name="keywords"
+      content="ll-lang, functional programming language, LLM code generation, AI coding language, token efficient, static typing, F# codegen"
+    />
+    <meta name="author" content="ll-lang contributors" />
+    <link rel="canonical" href="https://neftedollar.github.io/ll-lang/" />
+    <meta property="og:title" content="ll-lang — The Language Built for LLMs" />
+    <meta
+      property="og:description"
+      content="Token-efficient functional syntax. Machine-readable errors. Multi-target codegen."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://neftedollar.github.io/ll-lang/" />
+    <meta
+      property="og:image"
+      content="https://neftedollar.github.io/ll-lang/og-image.png"
+    />
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta
+      property="twitter:title"
+      content="ll-lang — The Language Built for LLMs"
+    />
+    <meta
+      property="twitter:description"
+      content="Token-efficient functional syntax. Machine-readable errors. Multi-target codegen."
+    />
+    <link rel="stylesheet" href="css/style.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
+      integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH"
+      crossorigin="anonymous"
+    />
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
+      integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp"
+      crossorigin="anonymous"
+    ></script>
+  </head>
+  <body>
+    <!-- Nav -->
+    <nav>
+      <div class="nav-inner">
+        <a href="index.html" class="nav-logo"><span>//</span>ll-lang</a>
+        <ul class="nav-links" id="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="docs.html">Docs</a></li>
+          <li><a href="playground.html">Playground</a></li>
+          <li>
+            <a
+              href="https://github.com/Neftedollar/ll-lang"
+              target="_blank"
+              rel="noopener"
+              >GitHub</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://github.com/Neftedollar/ll-lang/releases"
+              class="nav-cta"
+              target="_blank"
+              rel="noopener"
+              >v1.0.0</a
+            >
+          </li>
+        </ul>
+        <button
+          class="nav-hamburger"
+          id="nav-hamburger"
+          aria-label="Toggle navigation"
+          aria-expanded="false"
+        >
+          <span></span><span></span><span></span>
+        </button>
       </div>
-      <div class="terminal-body">
-        <div><span class="t-keyword">module</span> Hello</div>
-        <div>&nbsp;</div>
-        <div><span class="t-comment">-- no fn keyword, no braces, no ceremony</span></div>
-        <div>greet(name <span class="t-type">Str</span>) = <span class="t-keyword">printfn</span> <span class="t-string">"Hello, %s!"</span> name</div>
-        <div>&nbsp;</div>
-        <div>Hello = greet <span class="t-string">"ll-lang"</span></div>
-        <div>&nbsp;</div>
-        <div><span class="t-prompt">$</span> lllc run hello.lll</div>
-        <div><span class="t-success">Hello, ll-lang!</span></div>
-      </div>
-    </div>
-  </div>
-</section>
+    </nav>
 
-<!-- Stats -->
-<section style="padding-block: 0 4rem">
-  <div class="container">
-    <div class="stats-bar">
-      <div class="stat-item">
-        <div class="stat-value">5,857</div>
-        <div class="stat-label">LOC self-hosted stdlib</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">10</div>
-        <div class="stat-label">stdlib modules</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">5</div>
-        <div class="stat-label">compile targets</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">15</div>
-        <div class="stat-label">keywords total</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">8&ndash;17%</div>
-        <div class="stat-label">fewer tokens vs F#</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<div class="divider"></div>
-
-<!-- Features -->
-<section id="features">
-  <div class="container">
-    <div class="section-label">Features</div>
-    <h2 class="section-title">Built differently, on purpose</h2>
-    <p class="section-sub">
-      Every design decision is evaluated against one goal: LLM agents
-      writing correct code on the first attempt.
-    </p>
-
-    <div class="features-grid">
-
-      <!-- Feature 1: Zero ceremony -->
-      <div class="feature-card">
-        <div class="feature-icon">&#x26A1;</div>
-        <h3>Zero ceremony</h3>
-        <p>
-          No <code>fn</code>, <code>type</code>, <code>in</code>, <code>then</code>,
-          or <code>with</code> keywords. Uppercase declares types; lowercase declares
-          values. The body follows <code>=</code>.
+    <!-- Hero -->
+    <section class="hero">
+      <div class="container">
+        <div class="hero-badge">
+          <span class="dot"></span>v1.0.0 &mdash; Bootstrap fixpoint achieved
+        </div>
+        <h1>The language built for LLMs to write, compile, and fix</h1>
+        <p class="hero-sub">
+          Token-efficient functional syntax. Machine-readable errors. Compiles
+          to F#, TypeScript, Python, Java, C#.
         </p>
-        <div class="code-compare">
-          <div class="code-block">
-            <div class="compare-label"><span class="badge badge-before">verbose</span>TypeScript</div>
-            <pre><code class="language-typescript">type Shape =
+        <div class="hero-actions">
+          <a href="playground.html" class="btn btn-primary"
+            >&#x25B6; Try with lllc</a
+          >
+          <a
+            href="https://github.com/Neftedollar/ll-lang"
+            class="btn btn-secondary"
+            target="_blank"
+            rel="noopener"
+            >&#x2605; View on GitHub</a
+          >
+          <a href="docs.html" class="btn btn-ghost">Read the docs &rarr;</a>
+        </div>
+
+        <!-- Terminal mockup -->
+        <div class="hero-terminal">
+          <div class="terminal-bar">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+            <span class="terminal-title">hello.lll</span>
+          </div>
+          <div class="terminal-body">
+            <div><span class="t-keyword">module</span> Hello</div>
+            <div>&nbsp;</div>
+            <div>
+              <span class="t-comment"
+                >-- no fn keyword, no braces, no ceremony</span
+              >
+            </div>
+            <div>
+              greet(name <span class="t-type">Str</span>) =
+              <span class="t-keyword">printfn</span>
+              <span class="t-string">"Hello, %s!"</span> name
+            </div>
+            <div>&nbsp;</div>
+            <div>Hello = greet <span class="t-string">"ll-lang"</span></div>
+            <div>&nbsp;</div>
+            <div><span class="t-prompt">$</span> lllc run hello.lll</div>
+            <div><span class="t-success">Hello, ll-lang!</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stats -->
+    <section style="padding-block: 0 4rem">
+      <div class="container">
+        <div class="stats-bar">
+          <div class="stat-item">
+            <div class="stat-value">5,857</div>
+            <div class="stat-label">LOC self-hosted stdlib</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">10</div>
+            <div class="stat-label">stdlib modules</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">5</div>
+            <div class="stat-label">compile targets</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">15</div>
+            <div class="stat-label">keywords total</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">8&ndash;17%</div>
+            <div class="stat-label">fewer tokens vs F#</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- Features -->
+    <section id="features">
+      <div class="container">
+        <div class="section-label">Features</div>
+        <h2 class="section-title">Built differently, on purpose</h2>
+        <p class="section-sub">
+          Every design decision is evaluated against one goal: LLM agents
+          writing correct code on the first attempt.
+        </p>
+
+        <div class="features-grid">
+          <!-- Feature 1: Zero ceremony -->
+          <div class="feature-card">
+            <div class="feature-icon">&#x26A1;</div>
+            <h3>Zero ceremony</h3>
+            <p>
+              No <code>fn</code>, <code>type</code>, <code>in</code>,
+              <code>then</code>, or <code>with</code> keywords. Uppercase
+              declares types; lowercase declares values. The body follows
+              <code>=</code>.
+            </p>
+            <div class="code-compare">
+              <div class="code-block">
+                <div class="compare-label">
+                  <span class="badge badge-before">verbose</span>TypeScript
+                </div>
+                <pre><code class="language-typescript">type Shape =
   | { kind: "Circle"; r: number }
   | { kind: "Rect"; w: number; h: number }
 
@@ -144,180 +209,213 @@ function area(s: Shape): number {
     case "Rect":   return s.w * s.h;
   }
 }</code></pre>
-          </div>
-          <div class="code-block">
-            <div class="compare-label"><span class="badge badge-after">compact</span>ll-lang</div>
-            <pre><code class="language-haskell">Shape = Circle Float | Rect Float Float
+              </div>
+              <div class="code-block">
+                <div class="compare-label">
+                  <span class="badge badge-after">compact</span>ll-lang
+                </div>
+                <pre><code class="language-haskell">Shape = Circle Float | Rect Float Float
 
 area(s Shape) Float =
   match s with
   | Circle r   -> 3.14159 * r * r
   | Rect w h   -> w * h</code></pre>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
 
-      <!-- Feature 2: LLM errors -->
-      <div class="feature-card">
-        <div class="feature-icon">&#x1F916;</div>
-        <h3>Errors LLMs understand</h3>
-        <p>
-          All errors are short, structured, and machine-readable. One line
-          per error, parseable by regex &mdash; no stack traces, no prose.
-        </p>
-        <div class="code-block">
-          <div class="code-block-header">
-            <span class="code-lang">compiler output</span>
-          </div>
-          <pre><code class="language-plaintext">E001 12:5  TypeMismatch     expected Str[UserId] got Str
+          <!-- Feature 2: LLM errors -->
+          <div class="feature-card">
+            <div class="feature-icon">&#x1F916;</div>
+            <h3>Errors LLMs understand</h3>
+            <p>
+              All errors are short, structured, and machine-readable. One line
+              per error, parseable by regex &mdash; no stack traces, no prose.
+            </p>
+            <div class="code-block">
+              <div class="code-block-header">
+                <span class="code-lang">compiler output</span>
+              </div>
+              <pre><code class="language-plaintext">E001 12:5  TypeMismatch     expected Str[UserId] got Str
 E003 15:1  NonExhaustiveMatch Shape missing:Empty
 E004 20:9  UnitMismatch     Float[m] vs Float[s]
 E005  7:14 TagViolation     Str[Email] != Str[UserId]
 E002  8:3  UnboundVar       username</code></pre>
-        </div>
-        <p style="margin-top:.75rem;margin-bottom:0;font-size:.85rem">
-          Format: <code>EXXX line:col ErrorKind details</code> &mdash; the agent
-          reads the error, patches the source, recompiles. No scraping.
-        </p>
-      </div>
-
-      <!-- Feature 3: Multi-target -->
-      <div class="feature-card">
-        <div class="feature-icon">&#x1F3AF;</div>
-        <h3>Multi-target codegen</h3>
-        <p>
-          Write once in ll-lang. Compile to F#, TypeScript, Python, Java 21,
-          or C# from the same source &mdash; same semantics, idiomatic output
-          per target.
-        </p>
-        <div class="code-block">
-          <div class="code-block-header">
-            <span class="code-lang">shell</span>
-            <button class="copy-btn">copy</button>
+            </div>
+            <p
+              style="margin-top: 0.75rem; margin-bottom: 0; font-size: 0.85rem"
+            >
+              Format: <code>EXXX line:col ErrorKind details</code> &mdash; the
+              agent reads the error, patches the source, recompiles. No
+              scraping.
+            </p>
           </div>
-          <pre><code class="language-bash">lllc build --target fs   adts.lll  # F# discriminated unions
+
+          <!-- Feature 3: Multi-target -->
+          <div class="feature-card">
+            <div class="feature-icon">&#x1F3AF;</div>
+            <h3>Multi-target codegen</h3>
+            <p>
+              Write once in ll-lang. Compile to F#, TypeScript, Python, Java 21,
+              or C# from the same source &mdash; same semantics, idiomatic
+              output per target.
+            </p>
+            <div class="code-block">
+              <div class="code-block-header">
+                <span class="code-lang">shell</span>
+                <button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-bash">lllc build --target fs   adts.lll  # F# discriminated unions
 lllc build --target ts   adts.lll  # TypeScript sealed interfaces
 lllc build --target py   adts.lll  # Python @dataclass + Union
 lllc build --target java adts.lll  # Java 21 sealed interfaces
 lllc build --target cs   adts.lll  # C# records + interfaces</code></pre>
-        </div>
-        <div class="targets-grid" style="margin-top:1rem">
-          <div class="target-card"><div class="t-icon">&#x1F4B3;</div><div class="t-name">F#</div><div class="t-flag">--target fs</div><span class="t-stable stable">stable</span></div>
-          <div class="target-card"><div class="t-icon">&#x1F4D8;</div><div class="t-name">TypeScript</div><div class="t-flag">--target ts</div><span class="t-stable stable">stable</span></div>
-          <div class="target-card"><div class="t-icon">&#x1F40D;</div><div class="t-name">Python</div><div class="t-flag">--target py</div><span class="t-stable stable">stable</span></div>
-          <div class="target-card"><div class="t-icon">&#x2615;</div><div class="t-name">Java 21</div><div class="t-flag">--target java</div><span class="t-stable stable">stable</span></div>
-          <div class="target-card"><div class="t-icon">&#x1F4E6;</div><div class="t-name">C#</div><div class="t-flag">--target cs</div><span class="t-stable stable">stable</span></div>
-        </div>
-      </div>
-
-    </div>
-  </div>
-</section>
-
-<div class="divider"></div>
-
-<!-- Quickstart -->
-<section id="quickstart">
-  <div class="container">
-    <div class="section-label">Quickstart</div>
-    <h2 class="section-title">Up in 60 seconds</h2>
-    <p class="section-sub">
-      Requires <a href="https://dotnet.microsoft.com/download" target="_blank" rel="noopener">.NET 10</a>.
-    </p>
-
-    <div class="quickstart-steps">
-
-      <div class="qs-step">
-        <div class="qs-num">1</div>
-        <div class="qs-content">
-          <h3>Get the compiler</h3>
-          <div class="code-block">
-            <div class="code-block-header">
-              <span class="code-lang">shell</span>
-              <button class="copy-btn">copy</button>
             </div>
-            <pre><code class="language-bash">git clone https://github.com/Neftedollar/ll-lang.git
-cd ll-lang
-dotnet build
-dotnet test   # optional: run full test suite</code></pre>
+            <div class="targets-grid" style="margin-top: 1rem">
+              <div class="target-card">
+                <div class="t-icon">&#x1F4B3;</div>
+                <div class="t-name">F#</div>
+                <div class="t-flag">--target fs</div>
+                <span class="t-stable stable">stable</span>
+              </div>
+              <div class="target-card">
+                <div class="t-icon">&#x1F4D8;</div>
+                <div class="t-name">TypeScript</div>
+                <div class="t-flag">--target ts</div>
+                <span class="t-stable stable">stable</span>
+              </div>
+              <div class="target-card">
+                <div class="t-icon">&#x1F40D;</div>
+                <div class="t-name">Python</div>
+                <div class="t-flag">--target py</div>
+                <span class="t-stable stable">stable</span>
+              </div>
+              <div class="target-card">
+                <div class="t-icon">&#x2615;</div>
+                <div class="t-name">Java 21</div>
+                <div class="t-flag">--target java</div>
+                <span class="t-stable stable">stable</span>
+              </div>
+              <div class="target-card">
+                <div class="t-icon">&#x1F4E6;</div>
+                <div class="t-name">C#</div>
+                <div class="t-flag">--target cs</div>
+                <span class="t-stable stable">stable</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
+    </section>
 
-      <div class="qs-step">
-        <div class="qs-num">2</div>
-        <div class="qs-content">
-          <h3>Write your first program</h3>
-          <div class="code-block">
-            <div class="code-block-header">
-              <span class="code-lang">hello.lll</span>
-              <button class="copy-btn">copy</button>
+    <div class="divider"></div>
+
+    <!-- Quickstart -->
+    <section id="quickstart">
+      <div class="container">
+        <div class="section-label">Quickstart</div>
+        <h2 class="section-title">Up in 60 seconds</h2>
+        <p class="section-sub">
+          Requires
+          <a
+            href="https://dotnet.microsoft.com/download"
+            target="_blank"
+            rel="noopener"
+            >.NET 10</a
+          >.
+        </p>
+
+        <div class="quickstart-steps">
+          <div class="qs-step">
+            <div class="qs-num">1</div>
+            <div class="qs-content">
+              <h3>Get the compiler</h3>
+              <div class="code-block">
+                <div class="code-block-header">
+                  <span class="code-lang">shell</span>
+                  <button class="copy-btn">copy</button>
+                </div>
+                <pre><code class="language-bash">git clone https://github.com/Neftedollar/ll-lang.git
+cd ll-lang
+dotnet build
+dotnet test   # optional: run full test suite</code></pre>
+              </div>
             </div>
-            <pre><code class="language-haskell">module Hello
+          </div>
+
+          <div class="qs-step">
+            <div class="qs-num">2</div>
+            <div class="qs-content">
+              <h3>Write your first program</h3>
+              <div class="code-block">
+                <div class="code-block-header">
+                  <span class="code-lang">hello.lll</span>
+                  <button class="copy-btn">copy</button>
+                </div>
+                <pre><code class="language-haskell">module Hello
 
 -- greet takes a Str, returns nothing (unit)
 greet(name Str) = printfn "Hello, %s!" name
 
 -- entry point: uppercase name, no args
 Hello = greet "ll-lang"</code></pre>
-          </div>
-        </div>
-      </div>
-
-      <div class="qs-step">
-        <div class="qs-num">3</div>
-        <div class="qs-content">
-          <h3>Compile and run</h3>
-          <div class="code-block">
-            <div class="code-block-header">
-              <span class="code-lang">shell</span>
-              <button class="copy-btn">copy</button>
+              </div>
             </div>
-            <pre><code class="language-bash">lllc run hello.lll
+          </div>
+
+          <div class="qs-step">
+            <div class="qs-num">3</div>
+            <div class="qs-content">
+              <h3>Compile and run</h3>
+              <div class="code-block">
+                <div class="code-block-header">
+                  <span class="code-lang">shell</span>
+                  <button class="copy-btn">copy</button>
+                </div>
+                <pre><code class="language-bash">lllc run hello.lll
 # Hello, ll-lang!</code></pre>
-          </div>
-        </div>
-      </div>
-
-      <div class="qs-step">
-        <div class="qs-num">4</div>
-        <div class="qs-content">
-          <h3>Scaffold a multi-file project</h3>
-          <div class="code-block">
-            <div class="code-block-header">
-              <span class="code-lang">shell</span>
-              <button class="copy-btn">copy</button>
+              </div>
             </div>
-            <pre><code class="language-bash">lllc new myapp          # creates myapp/lll.toml + src/Main.lll
+          </div>
+
+          <div class="qs-step">
+            <div class="qs-num">4</div>
+            <div class="qs-content">
+              <h3>Scaffold a multi-file project</h3>
+              <div class="code-block">
+                <div class="code-block-header">
+                  <span class="code-lang">shell</span>
+                  <button class="copy-btn">copy</button>
+                </div>
+                <pre><code class="language-bash">lllc new myapp          # creates myapp/lll.toml + src/Main.lll
 cd myapp
 lllc build              # emits bin/fsharp/myapp.fsproj
 dotnet run --project bin/fsharp/myapp.fsproj</code></pre>
+              </div>
+            </div>
           </div>
         </div>
       </div>
+    </section>
 
-    </div>
-  </div>
-</section>
+    <div class="divider"></div>
 
-<div class="divider"></div>
-
-<!-- MCP -->
-<section id="mcp">
-  <div class="container">
-    <div class="section-label">MCP Integration</div>
-    <h2 class="section-title">Wire it to your LLM client</h2>
-    <p class="section-sub">
-      ll-lang ships a built-in MCP server. Connect it to Claude Code, Cursor,
-      or Zed &mdash; your agent gets structured tools to compile, check, and
-      run ll-lang without parsing shell output.
-    </p>
-    <div class="code-block">
-      <div class="code-block-header">
-        <span class="code-lang">claude_desktop_config.json</span>
-        <button class="copy-btn">copy</button>
-      </div>
-      <pre><code class="language-json">{
+    <!-- MCP -->
+    <section id="mcp">
+      <div class="container">
+        <div class="section-label">MCP Integration</div>
+        <h2 class="section-title">Wire it to your LLM client</h2>
+        <p class="section-sub">
+          ll-lang ships a built-in MCP server. Connect it to Claude Code,
+          Cursor, or Zed &mdash; your agent gets structured tools to compile,
+          check, and run ll-lang without parsing shell output.
+        </p>
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-lang">claude_desktop_config.json</span>
+            <button class="copy-btn">copy</button>
+          </div>
+          <pre><code class="language-json">{
   "mcpServers": {
     "lllc": {
       "command": "dotnet",
@@ -325,60 +423,106 @@ dotnet run --project bin/fsharp/myapp.fsproj</code></pre>
     }
   }
 }</code></pre>
-    </div>
-    <p style="margin-top:1rem;font-size:.9rem">
-      10 MCP tools:
-      <code>compile_file</code>, <code>compile_source</code>, <code>check_file</code>,
-      <code>check_source</code>, <code>run_file</code>, <code>list_errors</code>,
-      <code>lookup_error</code>, <code>stdlib_search</code>, <code>grammar_lookup</code>,
-      <code>project_info</code>.
-    </p>
-  </div>
-</section>
+        </div>
+        <p style="margin-top: 1rem; font-size: 0.9rem">
+          10 MCP tools:
+          <code>compile_file</code>, <code>compile_source</code>,
+          <code>check_file</code>, <code>check_source</code>,
+          <code>run_file</code>, <code>list_errors</code>,
+          <code>lookup_error</code>, <code>stdlib_search</code>,
+          <code>grammar_lookup</code>, <code>project_info</code>.
+        </p>
+      </div>
+    </section>
 
-<div class="divider"></div>
+    <div class="divider"></div>
 
-<!-- Community -->
-<section id="community">
-  <div class="container">
-    <div class="section-label">Community</div>
-    <h2 class="section-title">Get involved</h2>
-    <div class="links-grid">
-      <a href="https://github.com/Neftedollar/ll-lang" class="link-card" target="_blank" rel="noopener">
-        <span class="l-icon">&#x2605;</span>
-        <div><div class="l-title">GitHub</div><div class="l-desc">Source, releases, CI badges</div></div>
-      </a>
-      <a href="https://github.com/Neftedollar/ll-lang/issues" class="link-card" target="_blank" rel="noopener">
-        <span class="l-icon">&#x1F41B;</span>
-        <div><div class="l-title">Issues</div><div class="l-desc">Bug reports and feature requests</div></div>
-      </a>
-      <a href="https://github.com/Neftedollar/ll-lang/discussions" class="link-card" target="_blank" rel="noopener">
-        <span class="l-icon">&#x1F4AC;</span>
-        <div><div class="l-title">Discussions</div><div class="l-desc">Questions, ideas, showcase</div></div>
-      </a>
-      <a href="docs.html" class="link-card">
-        <span class="l-icon">&#x1F4DA;</span>
-        <div><div class="l-title">Documentation</div><div class="l-desc">Spec, stdlib reference, guides</div></div>
-      </a>
-    </div>
-  </div>
-</section>
+    <!-- Community -->
+    <section id="community">
+      <div class="container">
+        <div class="section-label">Community</div>
+        <h2 class="section-title">Get involved</h2>
+        <div class="links-grid">
+          <a
+            href="https://github.com/Neftedollar/ll-lang"
+            class="link-card"
+            target="_blank"
+            rel="noopener"
+          >
+            <span class="l-icon">&#x2605;</span>
+            <div>
+              <div class="l-title">GitHub</div>
+              <div class="l-desc">Source, releases, CI badges</div>
+            </div>
+          </a>
+          <a
+            href="https://github.com/Neftedollar/ll-lang/issues"
+            class="link-card"
+            target="_blank"
+            rel="noopener"
+          >
+            <span class="l-icon">&#x1F41B;</span>
+            <div>
+              <div class="l-title">Issues</div>
+              <div class="l-desc">Bug reports and feature requests</div>
+            </div>
+          </a>
+          <a
+            href="https://github.com/Neftedollar/ll-lang/discussions"
+            class="link-card"
+            target="_blank"
+            rel="noopener"
+          >
+            <span class="l-icon">&#x1F4AC;</span>
+            <div>
+              <div class="l-title">Discussions</div>
+              <div class="l-desc">Questions, ideas, showcase</div>
+            </div>
+          </a>
+          <a href="docs.html" class="link-card">
+            <span class="l-icon">&#x1F4DA;</span>
+            <div>
+              <div class="l-title">Documentation</div>
+              <div class="l-desc">Spec, stdlib reference, guides</div>
+            </div>
+          </a>
+        </div>
+      </div>
+    </section>
 
-<!-- Footer -->
-<footer>
-  <div class="footer-inner">
-    <span class="footer-logo"><span>//</span>ll-lang</span>
-    <ul class="footer-links">
-      <li><a href="https://github.com/Neftedollar/ll-lang" target="_blank" rel="noopener">GitHub</a></li>
-      <li><a href="docs.html">Docs</a></li>
-      <li><a href="playground.html">Playground</a></li>
-      <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a></li>
-    </ul>
-    <p class="footer-copy">&copy; 2025 Neftedollar &mdash; ll-lang v1.0.0</p>
-  </div>
-</footer>
+    <!-- Footer -->
+    <footer>
+      <div class="footer-inner">
+        <span class="footer-logo"><span>//</span>ll-lang</span>
+        <ul class="footer-links">
+          <li>
+            <a
+              href="https://github.com/Neftedollar/ll-lang"
+              target="_blank"
+              rel="noopener"
+              >GitHub</a
+            >
+          </li>
+          <li><a href="docs.html">Docs</a></li>
+          <li><a href="playground.html">Playground</a></li>
+          <li>
+            <a
+              href="https://github.com/Neftedollar/ll-lang/blob/main/LICENSE"
+              target="_blank"
+              rel="noopener"
+              >MIT License</a
+            >
+          </li>
+        </ul>
+        <p class="footer-copy">
+          &copy; 2025 Neftedollar &mdash; ll-lang v1.0.0
+        </p>
+      </div>
+    </footer>
 
-<script>hljs.highlightAll();</script>
-<script src="js/main.js"></script>
-</body>
+    <script>
+      hljs.highlightAll();
+    </script>
+    <script src="js/main.js"></script>
+  </body>
 </html>
