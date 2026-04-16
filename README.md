@@ -8,7 +8,7 @@
 ```
 module Hello
 
-main() = printfn "Hello, ll-lang!"
+Hello = printfn "Hello, ll-lang!"
 ```
 
 ```bash
@@ -73,7 +73,7 @@ dotnet build
 cat > hello.lll <<'EOF'
 module Hello
 
-main() = printfn "Hello, ll-lang!"
+Hello = printfn "Hello, ll-lang!"
 EOF
 
 dotnet run --project src/LLLangTool -- run hello.lll
@@ -81,6 +81,10 @@ dotnet run --project src/LLLangTool -- run hello.lll
 ```
 
 ### Scaffold a project
+
+> **Note:** After `dotnet build`, the `lllc` binary is not on PATH. Use
+> `dotnet run --project src/LLLangTool --` as a prefix, or add the build output
+> directory to PATH: `export PATH="$PATH:$(pwd)/src/LLLangTool/bin/Debug/net10.0"`.
 
 ```bash
 lllc new myapp          # creates myapp/lll.toml + myapp/src/Main.lll

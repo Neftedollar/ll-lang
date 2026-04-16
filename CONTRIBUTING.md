@@ -69,7 +69,7 @@ Source (.lll)
     │     CodegenTS.fs    → TypeScript
     │     CodegenPy.fs    → Python
     │     CodegenJava.fs  → Java 21
-    │     CodegenCS.fs    → C#
+    │     CodegenCSharp.fs → C#
     │     CodegenLLVM.fs  → LLVM IR (experimental)
     │
     ▼ Compiler.fs
