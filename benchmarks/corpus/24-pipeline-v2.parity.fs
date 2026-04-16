@@ -419,8 +419,17 @@ and skipBrackTypeArgs toks =
 and skipBrackTypeBody toks =
     (match toks with | (RBrack :: rest) -> rest | (LBrack :: rest) -> (let rest2 = (skipBrackTypeBody rest) in (skipBrackTypeBody rest2)) | (_ :: rest) -> (skipBrackTypeBody rest) | [] -> [])
 
+and parseTypeExprAtom toks =
+    (match toks with | (TypeId(name) :: rest) -> (let rest2 = (skipBrackTypeArgs rest) in ((TyName name), rest2)) | (Ident(name) :: rest) -> ((TyName name), rest) | (LParen :: rest) -> (parseTypeExprParens rest) | _ -> ((TyName "?"), toks))
+
+and parseTypeExprParens toks =
+    (let (head, rest) = (parseTypeExprAtom toks) in ((parseTypeExprParensTail head) rest))
+
+and parseTypeExprParensTail acc toks =
+    (match toks with | (TypeId(_) :: _) -> (let (next, rest) = (parseTypeExprAtom toks) in ((parseTypeExprParensTail (TyApp (acc, next))) rest)) | (Ident(_) :: _) -> (let (next, rest) = (parseTypeExprAtom toks) in ((parseTypeExprParensTail (TyApp (acc, next))) rest)) | (LParen :: _) -> (let (next, rest) = (parseTypeExprAtom toks) in ((parseTypeExprParensTail (TyApp (acc, next))) rest)) | (RParen :: rest) -> (acc, rest) | _ -> (acc, toks))
+
 and parseTypeExpr toks =
-    (match toks with | (TypeId(name) :: rest) -> (let rest2 = (skipBrackTypeArgs rest) in ((TyName name), rest2)) | (Ident(name) :: rest) -> ((TyName name), rest) | _ -> ((TyName "?"), toks))
+    (parseTypeExprAtom toks)
 
 and parseReturnType toks =
     (match toks with | (TypeId(name) :: rest) -> (let rest2 = (skipBrackTypeArgs rest) in ((Some (TyName name)), rest2)) | _ -> (None, toks))
@@ -432,7 +441,7 @@ and parseTypeParams toks =
     (match toks with | (TypeId(s) :: rest) -> (if ((strLen s) = 1L) then (let (ps, rest2) = (parseTypeParams rest) in ((s :: ps), rest2)) else ([], toks)) | _ -> ([], toks))
 
 and parseConArgs toks =
-    (match toks with | (TypeId(_) :: _) -> (let (arg, rest) = (parseTypeExpr toks) in (let (args, rest2) = (parseConArgs rest) in ((arg :: args), rest2))) | _ -> ([], toks))
+    (match toks with | (TypeId(_) :: _) -> (let (arg, rest) = (parseTypeExprAtom toks) in (let (args, rest2) = (parseConArgs rest) in ((arg :: args), rest2))) | (LParen :: _) -> (let (arg, rest) = (parseTypeExprAtom toks) in (let (args, rest2) = (parseConArgs rest) in ((arg :: args), rest2))) | _ -> ([], toks))
 
 and parseCon toks =
     (match toks with | (TypeId(name) :: rest) -> (let (args, rest2) = (parseConArgs rest) in ((MkCon (name, args)), rest2)) | _ -> ((MkCon ("?", [])), toks))
@@ -946,20 +955,77 @@ and emitParamName p =
 and emitParamStr ps =
     (match ps with | [] -> "" | _ -> ((strConcat " ") ((joinWith " ") ((listMap emitParamName) ps))))
 
+and containsVarExprs name exprs =
+    (match exprs with | [] -> false | (e :: rest) -> (if ((containsVarExpr name) e) then true else ((containsVarExprs name) rest)))
+
+and containsVarExpr name expr =
+    (match expr with | EVar(n) -> (n = name) | EApp(f, arg) -> (if ((containsVarExpr name) f) then true else ((containsVarExpr name) arg)) | EBinOp(_, l, r) -> (if ((containsVarExpr name) l) then true else ((containsVarExpr name) r)) | ETuple(l, r) -> (if ((containsVarExpr name) l) then true else ((containsVarExpr name) r)) | ECons(h, t) -> (if ((containsVarExpr name) h) then true else ((containsVarExpr name) t)) | ELam(_, body) -> ((containsVarExpr name) body) | ELet(_, v, body) -> (if ((containsVarExpr name) v) then true else ((containsVarExpr name) body)) | EIf(c, t, f) -> (if ((containsVarExpr name) c) then true else (if ((containsVarExpr name) t) then true else ((containsVarExpr name) f))) | EList(es) -> ((containsVarExprs name) es) | EMatch(e, _, bods) -> (if ((containsVarExpr name) e) then true else ((containsVarExprs name) bods)) | _ -> false)
+
+and isMaybeAlias name tvars ctors =
+    (if (name = "Maybe") then (match tvars with | (_ :: []) -> (match ctors with | (MkCon(n1, a1) :: (MkCon(n2, a2) :: [])) -> (if (n1 = "Some") then (if (n2 = "None") then (if (listIsEmpty a2) then (match a1 with | (_ :: []) -> true | _ -> false) else false) else false) else (if (n1 = "None") then (if (n2 = "Some") then (if (listIsEmpty a1) then (match a2 with | (_ :: []) -> true | _ -> false) else false) else false) else false)) | _ -> false) | _ -> false) else false)
+
+and getMaybeArgTypeFromCtors ctors =
+    (match ctors with | (MkCon(n1, a1) :: (MkCon(_, a2) :: [])) -> (if (n1 = "Some") then (match a1 with | (t :: _) -> t | _ -> (TyName "A")) else (match a2 with | (t :: _) -> t | _ -> (TyName "A"))) | _ -> (TyName "A"))
+
 and emitDecl d =
-    (match d with | DType(name, tvars, ctors) -> (let header = ((strConcat "type ") ((strConcat name) (emitTypeParams tvars))) in (let body = (emitCtors ctors) in ((strConcat header) ((strConcat " =\n") body)))) | DFn(name, __ll_params, _, body) -> (let paramStr = (emitParamStr __ll_params) in ((strConcat "let rec ") ((strConcat (safeIdent name)) ((strConcat paramStr) ((strConcat " =\n    ") (emitExpr body)))))) | DLet(name, body) -> ((strConcat "let ") ((strConcat (safeIdent name)) ((strConcat " = ") (emitExpr body)))) | DImport(parts) -> ((strConcat "// import ") ((joinWith ".") parts)) | DExport(inner) -> (emitDecl inner) | DExternal(name, __ll_params, retTy) -> (let paramStr = (emitParamStr __ll_params) in ((strConcat "let ") ((strConcat (safeIdent name)) ((strConcat paramStr) ((strConcat " = failwith \"external: ") ((strConcat name) "\"")))))) | DOpaque(name) -> ((strConcat "type ") ((strConcat name) " = obj")))
+    (match d with | DType(name, tvars, ctors) -> (if (((isMaybeAlias name) tvars) ctors) then (let p = (match tvars with | (s :: _) -> s | _ -> "A") in (let argTy = (getMaybeArgTypeFromCtors ctors) in ((strConcat "type Maybe<'") ((strConcat p) ((strConcat "> = ") ((strConcat (emitType argTy)) " option")))))) else (let header = ((strConcat "type ") ((strConcat name) (emitTypeParams tvars))) in (let body = (emitCtors ctors) in ((strConcat header) ((strConcat " =\n") body))))) | DFn(name, __ll_params, _, body) -> (let paramStr = (emitParamStr __ll_params) in (let isMain = (if (name = "main") then (listIsEmpty __ll_params) else false) in (if isMain then ((strConcat "[<EntryPoint>]\nlet main (argv: string[]) =\n    ") ((strConcat (emitExpr body)) "\n    0")) else (let kw = (if ((containsVarExpr name) body) then "let rec " else "let ") in ((strConcat kw) ((strConcat (safeIdent name)) ((strConcat paramStr) ((strConcat " =\n    ") (emitExpr body))))))))) | DLet(name, body) -> ((strConcat "let ") ((strConcat (safeIdent name)) ((strConcat " = ") (emitExpr body)))) | DImport(parts) -> ((strConcat "// import ") ((joinWith ".") parts)) | DExport(inner) -> (emitDecl inner) | DExternal(name, __ll_params, retTy) -> (let paramStr = (emitParamStr __ll_params) in ((strConcat "let ") ((strConcat (safeIdent name)) ((strConcat paramStr) ((strConcat " = failwith \"external: ") ((strConcat name) "\"")))))) | DOpaque(name) -> ((strConcat "type ") ((strConcat name) " = obj")))
 
 and emitDecls ds =
     ((joinWith "\n\n") ((listMap emitDecl) ds))
 
-and emitPrelude =
-    "// --- ll-lang stdlib prelude (auto-generated) ---\nlet listLen (xs: 'a list) : int64 = int64 (List.length xs)\nlet listMap f xs = List.map f xs\nlet listFilter p xs = List.filter p xs\nlet listFold f z xs = List.fold f z xs\nlet listReverse xs = List.rev xs\nlet listAppend xs ys = List.append xs ys\nlet listConcat xss = List.concat xss\nlet listIsEmpty xs = List.isEmpty xs\nlet strLen (s: string) : int64 = int64 s.Length\nlet strConcat (a: string) (b: string) = a + b\nlet strChars (s: string) = s |> Seq.toList\nlet strFromChars (cs: char list) = System.String(cs |> List.toArray)\nlet intToStr (n: int64) = string n\nlet charToInt (c: char) = int64 (int c)\nlet printfn (s: string) = System.Console.WriteLine(s)\nlet print (s: string) = System.Console.Write(s)\nlet listHead xs = match xs with [] -> None | x :: _ -> Some x\nlet listTail xs = match xs with [] -> None | _ :: t -> Some t\n// --- end prelude ---"
+and isDTypeDecl d =
+    (match d with | DType(_, _, _) -> true | DOpaque(_) -> true | _ -> false)
+
+and isEmittable d =
+    (match d with | DImport(_) -> false | _ -> true)
+
+and isOtherDecl d =
+    (if (isEmittable d) then (if (isDTypeDecl d) then false else true) else false)
+
+and hasDeclWithName name decls =
+    (match decls with | [] -> false | (DType(n, _, _) :: rest) -> (if (n = name) then true else ((hasDeclWithName name) rest)) | (_ :: rest) -> ((hasDeclWithName name) rest))
+
+and preludeCore =
+    "// --- ll-lang stdlib prelude (auto-generated) ---\nlet abs (x: int64) = System.Math.Abs(x)\nlet absf (x: float) = System.Math.Abs(x)\nlet sqrt (x: float) = System.Math.Sqrt(x)\nlet min (a: int64) (b: int64) = if a < b then a else b\nlet max (a: int64) (b: int64) = if a > b then a else b\nlet listLen (xs: 'a list) : int64 = int64 (List.length xs)\nlet listMap f xs = List.map f xs\nlet listFilter p xs = List.filter p xs\nlet listFold f z xs = List.fold f z xs\nlet listReverse xs = List.rev xs\nlet listAppend xs ys = List.append xs ys\nlet strLen (s: string) : int64 = int64 s.Length\nlet strConcat (a: string) (b: string) = a + b\nlet strTrim (s: string) = s.Trim()\nlet strContains (needle: string) (haystack: string) = haystack.Contains(needle: string)\nlet print (s: string) = System.Console.Write(s)\nlet printfn (s: string) = System.Console.WriteLine(s)\nlet strChars (s: string) = s |> Seq.toList\nlet charToInt (c: char) = int64 (int c)\nlet intToChar (n: int64) = char (int n)\nlet intToStr (n: int64) = string n\nlet floatToStr (f: float) = f.ToString(System.Globalization.CultureInfo.InvariantCulture)\nlet strSlice (s: string) (start: int64) (len: int64) = s.Substring(int start, int len)\nlet strIndexOf (needle: string) (haystack: string) : int64 = int64 (haystack.IndexOf(needle: string))\nlet strSplit (sep: string) (s: string) = s.Split([| sep |], System.StringSplitOptions.None) |> Array.toList\nlet strFromChars (cs: char list) = System.String(cs |> List.toArray)\nlet strReverse (s: string) = System.String(s.ToCharArray() |> Array.rev)\nlet charIsDigit (c: char) = System.Char.IsDigit(c)\nlet charIsAlpha (c: char) = System.Char.IsLetter(c)\nlet charIsSpace (c: char) = System.Char.IsWhiteSpace(c)\nlet readFile (path: string) = System.IO.File.ReadAllText(path: string)\nlet writeFile (path: string) (contents: string) = System.IO.File.WriteAllText(path, contents)\nlet fileExists (path: string) = System.IO.File.Exists(path: string)\nlet dirList (path: string) : string list = if System.IO.Directory.Exists(path) then System.IO.Directory.GetFiles(path, \"*\", System.IO.SearchOption.AllDirectories) |> Array.toList else []\nlet exit (code: int64) : unit = System.Environment.Exit(int code)\nlet listConcat (xss: 'a list list) = List.concat xss\nlet listIsEmpty (xs: 'a list) = List.isEmpty xs\nlet getArgs : string list = System.Environment.GetCommandLineArgs() |> Array.toList |> List.tail\nlet processSpawn (cmd: string) (args: string list) : int64 =\n    let psi = System.Diagnostics.ProcessStartInfo(cmd, System.String.Join(\" \", List.toArray args))\n    psi.UseShellExecute <- false\n    let p = System.Diagnostics.Process.Start(psi) in p.WaitForExit(); int64 p.ExitCode"
+
+and preludeMaybe =
+    "let listHead xs = match xs with [] -> None | x :: _ -> Some x\nlet listTail xs = match xs with [] -> None | _ :: t -> Some t\nlet maybeMap f m = match m with Some x -> Some (f x) | None -> None\nlet maybeBind m f = match m with Some x -> f x | None -> None\nlet maybeWithDefault d m = match m with Some x -> x | None -> d\nlet strToInt (s: string) =\n    match System.Int64.TryParse(s: string) with\n    | true, n -> Some n\n    | false, _ -> None\nlet strToFloat (s: string) =\n    match System.Double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture) with\n    | true, n -> Some n\n    | false, _ -> None\nlet listAt (xs: 'a list) (i: int64) =\n    if int i < 0 || int i >= List.length xs then None else Some (List.item (int i) xs)"
+
+and preludeResult =
+    "let resultMap f r = match r with Ok x -> Ok (f x) | Err e -> Err e\nlet resultBind r f = match r with Ok x -> f x | Err e -> Err e\nlet resultMapErr f r = match r with Ok x -> Ok x | Err e -> Err (f e)"
+
+and preludeEndMark =
+    "// --- end prelude ---"
+
+and isPreludeCoreName n =
+    (match n with | "abs" -> true | "absf" -> true | "sqrt" -> true | "min" -> true | "max" -> true | "listLen" -> true | "listMap" -> true | "listFilter" -> true | "listFold" -> true | "listReverse" -> true | "listAppend" -> true | "strLen" -> true | "strConcat" -> true | "strTrim" -> true | "strContains" -> true | "print" -> true | "printfn" -> true | "strChars" -> true | "charToInt" -> true | "intToChar" -> true | "intToStr" -> true | "floatToStr" -> true | "strSlice" -> true | "strIndexOf" -> true | "strSplit" -> true | "strFromChars" -> true | "strReverse" -> true | "charIsDigit" -> true | "charIsAlpha" -> true | "charIsSpace" -> true | "readFile" -> true | "writeFile" -> true | "fileExists" -> true | "dirList" -> true | "exit" -> true | "listConcat" -> true | "listIsEmpty" -> true | "getArgs" -> true | "processSpawn" -> true | _ -> false)
+
+and isPreludeMaybeName n =
+    (match n with | "listHead" -> true | "listTail" -> true | "maybeMap" -> true | "maybeBind" -> true | "maybeWithDefault" -> true | "strToInt" -> true | "strToFloat" -> true | "listAt" -> true | _ -> false)
+
+and isPreludeResultName n =
+    (match n with | "resultMap" -> true | "resultBind" -> true | "resultMapErr" -> true | _ -> false)
+
+and exprListAny pred es =
+    (match es with | [] -> false | (e :: rest) -> (if (pred e) then true else ((exprListAny pred) rest)))
+
+and exprUsesName isName e =
+    (match e with | EVar(n) -> (isName n) | EApp(f, a) -> (if ((exprUsesName isName) f) then true else ((exprUsesName isName) a)) | EBinOp(_, l, r) -> (if ((exprUsesName isName) l) then true else ((exprUsesName isName) r)) | ELam(_, body) -> ((exprUsesName isName) body) | ELet(_, v, body) -> (if ((exprUsesName isName) v) then true else ((exprUsesName isName) body)) | EIf(c, t, f) -> (if ((exprUsesName isName) c) then true else (if ((exprUsesName isName) t) then true else ((exprUsesName isName) f))) | EList(es) -> ((exprListAny (exprUsesName isName)) es) | EMatch(s, _, bods) -> (if ((exprUsesName isName) s) then true else ((exprListAny (exprUsesName isName)) bods)) | ETuple(a, b) -> (if ((exprUsesName isName) a) then true else ((exprUsesName isName) b)) | ECons(h, t) -> (if ((exprUsesName isName) h) then true else ((exprUsesName isName) t)) | _ -> false)
+
+and declUsesName isName d =
+    (match d with | DFn(_, _, _, body) -> ((exprUsesName isName) body) | DLet(_, body) -> ((exprUsesName isName) body) | DExport(inner) -> ((declUsesName isName) inner) | _ -> false)
+
+and declsUseName isName decls =
+    (match decls with | [] -> false | (d :: rest) -> (if ((declUsesName isName) d) then true else ((declsUseName isName) rest)))
+
+and assemblePrelude decls =
+    (let hasMaybe = ((hasDeclWithName "Maybe") decls) in (let hasResult = ((hasDeclWithName "Result") decls) in (let includeCore = ((declsUseName isPreludeCoreName) decls) in (let includeMaybe = (if hasMaybe then ((declsUseName isPreludeMaybeName) decls) else false) in (let includeResult = (if hasResult then ((declsUseName isPreludeResultName) decls) else false) in (if includeCore then (let maybePart = (if includeMaybe then ((strConcat "\n") preludeMaybe) else "") in (let resultPart = (if includeResult then ((strConcat "\n") preludeResult) else "") in ((strConcat preludeCore) ((strConcat maybePart) ((strConcat resultPart) ((strConcat "\n") preludeEndMark)))))) else ""))))))
 
 and emitModulePath parts =
     ((joinWith ".") parts)
 
 and emitModule m =
-    (match m with | MkModule(path, decls) -> (let header = ((strConcat "module ") (emitModulePath path)) in (let prelude = emitPrelude in (let body = (emitDecls decls) in ((strConcat header) ((strConcat "\n\n") ((strConcat prelude) ((strConcat "\n\n") body))))))))
+    (match m with | MkModule(path, decls) -> (let header = ((strConcat "module ") (emitModulePath path)) in (let typeDecls = ((listFilter isDTypeDecl) decls) in (let otherDecls = ((listFilter isOtherDecl) decls) in (let typeStr = (emitDecls typeDecls) in (let prelude = (assemblePrelude decls) in (let otherStr = (emitDecls otherDecls) in (let parts = ((listFilter (fun s -> ((strLen s) > 0L))) [header; typeStr; prelude; otherStr]) in ((joinWith "\n\n") parts)))))))))
 
 and codegenCheck label got expected =
     (if (got = expected) then (printfn ((strConcat "OK ") label)) else (printfn ((strConcat "FAIL ") ((strConcat label) ((strConcat "\n  got:      ") ((strConcat got) ((strConcat "\n  expected: ") expected)))))))
@@ -968,7 +1034,7 @@ and checkContains label got needle =
     (if ((strContains needle) got) then (printfn ((strConcat "OK ") label)) else (printfn ((strConcat "FAIL ") ((strConcat label) ((strConcat "\n  missing: ") ((strConcat needle) ((strConcat "\n  in: ") got)))))))
 
 and __test_main_Codegen =
-    (let _ = (((codegenCheck "1 EInt 42") (emitExpr (EInt 42L))) "42L") in (let _ = (((codegenCheck "2 EStr hello") (emitExpr (EStr "hello"))) "\"hello\"") in (let _ = (((codegenCheck "3 EBinOp +") (emitExpr (EBinOp ("+", (EInt 1L), (EInt 2L))))) "(1L + 2L)") in (let _ = (((codegenCheck "4 EApp f x") (emitExpr (EApp ((EVar "f"), (EVar "x"))))) "(f x)") in (let _ = (((codegenCheck "5 EIf") (emitExpr (EIf ((EBool true), (EInt 1L), (EInt 0L))))) "(if true then 1L else 0L)") in (let _ = (((codegenCheck "6 ELet") (emitExpr (ELet ("x", (EInt 1L), (EVar "x"))))) "(let x = 1L in x)") in (let _ = (((codegenCheck "7 PCon Some v") (emitPattern (PCon ("Some", ((PVar "v") :: []))))) "Some(v)") in (let _ = (((codegenCheck "8 TyName Int") (emitType (TyName "Int"))) "int64") in (let _ = (((codegenCheck "9 TyApp List Int") (emitType (TyApp ((TyName "List"), (TyName "Int"))))) "int64 list") in (let colorCtors = ((MkCon ("Red", [])) :: ((MkCon ("Blue", [])) :: [])) in (let colorDecl = (DType ("Color", [], colorCtors)) in (let _ = (((checkContains "10 DType Color") (emitDecl colorDecl)) "type Color") in (let addParams = ((MkParam ("x", (TyName "Int"))) :: ((MkParam ("y", (TyName "Int"))) :: [])) in (let addDecl = (DFn ("add", addParams, None, (EBinOp ("+", (EVar "x"), (EVar "y"))))) in (let _ = (((checkContains "11 DFn add") (emitDecl addDecl)) "let rec add") in (let idParams = ((MkParam ("x", (TyName "Int"))) :: []) in (let modDecls = ((DType ("Color", [], colorCtors)) :: ((DFn ("id", idParams, None, (EVar "x"))) :: [])) in (let m = (MkModule (("Test" :: ("Mod" :: [])), modDecls)) in (let out = (emitModule m) in (let _ = (((checkContains "12 module header") out) "module Test.Mod") in (let _ = (((checkContains "12 module type") out) "type Color") in (let _ = (((checkContains "12 module fn") out) "let rec id") in (let _ = (((codegenCheck "13 PWild") (emitPattern PWild)) "_") in (let _ = (((codegenCheck "14 PNil") (emitPattern PNil)) "[]") in (let _ = (((codegenCheck "15 ELam") (emitExpr (ELam ("x", (EVar "x"))))) "(fun x -> x)") in (let twoItems = ((EInt 1L) :: ((EInt 2L) :: [])) in (let _ = (((codegenCheck "16 EList") (emitExpr (EList twoItems))) "[1L; 2L]") in (let _ = (((codegenCheck "17 ETuple") (emitExpr (ETuple ((EVar "a"), (EVar "b"))))) "(a, b)") in (let _ = (((codegenCheck "18 safeIdent let") (safeIdent "let")) "__ll_let") in (let _ = (((codegenCheck "19 safeIdent foo") (safeIdent "foo")) "foo") in (let _ = (((codegenCheck "20 TyFn") (emitType (TyFn ((TyName "Int"), (TyName "Bool"))))) "int64 -> bool") in (let extDecl = (DExternal ("httpGet", ((MkParam ("url", (TyName "Str"))) :: []), (TyName "Str"))) in (let _ = (((checkContains "21 DExternal stub") (emitDecl extDecl)) "failwith \"external: httpGet\"") in (let _ = (((codegenCheck "22 DOpaque obj alias") (emitDecl (DOpaque "HttpClient"))) "type HttpClient = obj") in 0L))))))))))))))))))))))))))))))))))// FILE: CompilerInfer.fs
+    (let _ = (((codegenCheck "1 EInt 42") (emitExpr (EInt 42L))) "42L") in (let _ = (((codegenCheck "2 EStr hello") (emitExpr (EStr "hello"))) "\"hello\"") in (let _ = (((codegenCheck "3 EBinOp +") (emitExpr (EBinOp ("+", (EInt 1L), (EInt 2L))))) "(1L + 2L)") in (let _ = (((codegenCheck "4 EApp f x") (emitExpr (EApp ((EVar "f"), (EVar "x"))))) "(f x)") in (let _ = (((codegenCheck "5 EIf") (emitExpr (EIf ((EBool true), (EInt 1L), (EInt 0L))))) "(if true then 1L else 0L)") in (let _ = (((codegenCheck "6 ELet") (emitExpr (ELet ("x", (EInt 1L), (EVar "x"))))) "(let x = 1L in x)") in (let _ = (((codegenCheck "7 PCon Some v") (emitPattern (PCon ("Some", ((PVar "v") :: []))))) "Some(v)") in (let _ = (((codegenCheck "8 TyName Int") (emitType (TyName "Int"))) "int64") in (let _ = (((codegenCheck "9 TyApp List Int") (emitType (TyApp ((TyName "List"), (TyName "Int"))))) "int64 list") in (let colorCtors = ((MkCon ("Red", [])) :: ((MkCon ("Blue", [])) :: [])) in (let colorDecl = (DType ("Color", [], colorCtors)) in (let _ = (((checkContains "10 DType Color") (emitDecl colorDecl)) "type Color") in (let addParams = ((MkParam ("x", (TyName "Int"))) :: ((MkParam ("y", (TyName "Int"))) :: [])) in (let addDecl = (DFn ("add", addParams, None, (EBinOp ("+", (EVar "x"), (EVar "y"))))) in (let _ = (((checkContains "11 DFn add") (emitDecl addDecl)) "let add") in (let idParams = ((MkParam ("x", (TyName "Int"))) :: []) in (let modDecls = ((DType ("Color", [], colorCtors)) :: ((DFn ("id", idParams, None, (EVar "x"))) :: [])) in (let m = (MkModule (("Test" :: ("Mod" :: [])), modDecls)) in (let out = (emitModule m) in (let _ = (((checkContains "12 module header") out) "module Test.Mod") in (let _ = (((checkContains "12 module type") out) "type Color") in (let _ = (((checkContains "12 module fn") out) "let id") in (let _ = (((codegenCheck "13 PWild") (emitPattern PWild)) "_") in (let _ = (((codegenCheck "14 PNil") (emitPattern PNil)) "[]") in (let _ = (((codegenCheck "15 ELam") (emitExpr (ELam ("x", (EVar "x"))))) "(fun x -> x)") in (let twoItems = ((EInt 1L) :: ((EInt 2L) :: [])) in (let _ = (((codegenCheck "16 EList") (emitExpr (EList twoItems))) "[1L; 2L]") in (let _ = (((codegenCheck "17 ETuple") (emitExpr (ETuple ((EVar "a"), (EVar "b"))))) "(a, b)") in (let _ = (((codegenCheck "18 safeIdent let") (safeIdent "let")) "__ll_let") in (let _ = (((codegenCheck "19 safeIdent foo") (safeIdent "foo")) "foo") in (let _ = (((codegenCheck "20 TyFn") (emitType (TyFn ((TyName "Int"), (TyName "Bool"))))) "int64 -> bool") in (let extDecl = (DExternal ("httpGet", ((MkParam ("url", (TyName "Str"))) :: []), (TyName "Str"))) in (let _ = (((checkContains "21 DExternal stub") (emitDecl extDecl)) "failwith \"external: httpGet\"") in (let _ = (((codegenCheck "22 DOpaque obj alias") (emitDecl (DOpaque "HttpClient"))) "type HttpClient = obj") in (let mainDecl = (DFn ("main", [], None, (EApp ((EVar "printfn"), (EStr "hello"))))) in (let _ = (((checkContains "23 main EntryPoint") (emitDecl mainDecl)) "[<EntryPoint>]") in (let _ = (((checkContains "23 main argv") (emitDecl mainDecl)) "(argv: string[])") in (let factBody = (EIf ((EBinOp ("==", (EVar "n"), (EInt 0L))), (EInt 1L), (EBinOp ("*", (EVar "n"), (EApp ((EVar "factorial"), (EBinOp ("-", (EVar "n"), (EInt 1L))))))))) in (let factDecl = (DFn ("factorial", ((MkParam ("n", (TyName "Int"))) :: []), None, factBody)) in (let _ = (((checkContains "24 DFn factorial is rec") (emitDecl factDecl)) "let rec factorial") in (printfn "Done")))))))))))))))))))))))))))))))))))))))))// FILE: CompilerInfer.fs
 module Std.CompilerInfer
 
 open LLLang.Prelude

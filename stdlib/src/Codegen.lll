@@ -328,15 +328,118 @@ emitParamStr(ps List[Param]) =
     | [] -> ""
     | _ -> strConcat " " (joinWith " " (listMap emitParamName ps))
 
+-- ---- Recursion detection ---------------------------------------------------
+
+containsVarExprs(name Str)(exprs List[Expr]) =
+  match exprs
+    | [] -> false
+    | e :: rest ->
+      if containsVarExpr name e
+        true
+      else containsVarExprs name rest
+
+containsVarExpr(name Str)(expr Expr) =
+  match expr
+    | EVar n -> n == name
+    | EApp f arg ->
+      if containsVarExpr name f
+        true
+      else containsVarExpr name arg
+    | EBinOp _ l r ->
+      if containsVarExpr name l
+        true
+      else containsVarExpr name r
+    | ETuple l r ->
+      if containsVarExpr name l
+        true
+      else containsVarExpr name r
+    | ECons h t ->
+      if containsVarExpr name h
+        true
+      else containsVarExpr name t
+    | ELam _ body -> containsVarExpr name body
+    | ELet _ v body ->
+      if containsVarExpr name v
+        true
+      else containsVarExpr name body
+    | EIf c t f ->
+      if containsVarExpr name c
+        true
+      else if containsVarExpr name t
+        true
+      else containsVarExpr name f
+    | EList es -> containsVarExprs name es
+    | EMatch e _ bods ->
+      if containsVarExpr name e
+        true
+      else containsVarExprs name bods
+    | _ -> false
+
+-- Check for canonical ll-lang Maybe: Maybe A = Some A | None (or None | Some A).
+-- When matched, emit as F# option alias to avoid Some/None divergence.
+isMaybeAlias(name Str)(tvars List[Str])(ctors List[Constructor]) =
+  if name == "Maybe"
+    match tvars
+      | _ :: [] ->
+        match ctors
+          | MkCon n1 a1 :: MkCon n2 a2 :: [] ->
+            if n1 == "Some"
+              if n2 == "None"
+                if listIsEmpty a2
+                  match a1
+                    | _ :: [] -> true
+                    | _ -> false
+                else false
+              else false
+            else if n1 == "None"
+              if n2 == "Some"
+                if listIsEmpty a1
+                  match a2
+                    | _ :: [] -> true
+                    | _ -> false
+                else false
+              else false
+            else false
+          | _ -> false
+      | _ -> false
+  else false
+
+getMaybeArgTypeFromCtors(ctors List[Constructor]) =
+  match ctors
+    | MkCon n1 a1 :: MkCon _ a2 :: [] ->
+      if n1 == "Some"
+        match a1
+          | t :: _ -> t
+          | _ -> TyName "A"
+      else
+        match a2
+          | t :: _ -> t
+          | _ -> TyName "A"
+    | _ -> TyName "A"
+
 emitDecl(d Decl) =
   match d
     | DType name tvars ctors ->
-      header = strConcat "type " (strConcat name (emitTypeParams tvars))
-      body = emitCtors ctors
-      strConcat header (strConcat " =\n" body)
+      if isMaybeAlias name tvars ctors
+        p = match tvars | s :: _ -> s | _ -> "A"
+        argTy = getMaybeArgTypeFromCtors ctors
+        strConcat "type Maybe<'" (strConcat p (strConcat "> = " (strConcat (emitType argTy) " option")))
+      else
+        header = strConcat "type " (strConcat name (emitTypeParams tvars))
+        body = emitCtors ctors
+        strConcat header (strConcat " =\n" body)
     | DFn name params _ body ->
       paramStr = emitParamStr params
-      strConcat "let rec " (strConcat (safeIdent name) (strConcat paramStr (strConcat " =\n    " (emitExpr body))))
+      isMain = if name == "main"
+        listIsEmpty params
+      else false
+      if isMain
+        strConcat "[<EntryPoint>]\nlet main (argv: string[]) =\n    " (strConcat (emitExpr body) "\n    0")
+      else
+        kw = if containsVarExpr name body
+          "let rec "
+        else "let "
+        strConcat kw (strConcat (safeIdent name) (strConcat paramStr (strConcat " =\n    " (emitExpr body))))
     | DLet name body ->
       strConcat "let " (strConcat (safeIdent name) (strConcat " = " (emitExpr body)))
     | DImport parts ->
@@ -353,10 +456,165 @@ emitDecl(d Decl) =
 emitDecls(ds List[Decl]) =
   joinWith "\n\n" (listMap emitDecl ds)
 
--- ---- Prelude ---------------------------------------------------------------
+-- ---- Declaration classification --------------------------------------------
 
-emitPrelude =
-  "// --- ll-lang stdlib prelude (auto-generated) ---\nlet listLen (xs: 'a list) : int64 = int64 (List.length xs)\nlet listMap f xs = List.map f xs\nlet listFilter p xs = List.filter p xs\nlet listFold f z xs = List.fold f z xs\nlet listReverse xs = List.rev xs\nlet listAppend xs ys = List.append xs ys\nlet listConcat xss = List.concat xss\nlet listIsEmpty xs = List.isEmpty xs\nlet strLen (s: string) : int64 = int64 s.Length\nlet strConcat (a: string) (b: string) = a + b\nlet strChars (s: string) = s |> Seq.toList\nlet strFromChars (cs: char list) = System.String(cs |> List.toArray)\nlet intToStr (n: int64) = string n\nlet charToInt (c: char) = int64 (int c)\nlet printfn (s: string) = System.Console.WriteLine(s)\nlet print (s: string) = System.Console.Write(s)\nlet listHead xs = match xs with [] -> None | x :: _ -> Some x\nlet listTail xs = match xs with [] -> None | _ :: t -> Some t\n// --- end prelude ---"
+isDTypeDecl(d Decl) =
+  match d
+    | DType _ _ _ -> true
+    | DOpaque _ -> true
+    | _ -> false
+
+isEmittable(d Decl) =
+  match d
+    | DImport _ -> false
+    | _ -> true
+
+isOtherDecl(d Decl) =
+  if isEmittable d
+    if isDTypeDecl d
+      false
+    else true
+  else false
+
+hasDeclWithName(name Str)(decls List[Decl]) =
+  match decls
+    | [] -> false
+    | DType n _ _ :: rest ->
+      if n == name
+        true
+      else hasDeclWithName name rest
+    | _ :: rest -> hasDeclWithName name rest
+
+-- ---- Prelude ---------------------------------------------------------------
+-- Exact match of stage0 fsharpPreludeCore / fsharpPreludeMaybe / fsharpPreludeResult.
+
+preludeCore =
+  "// --- ll-lang stdlib prelude (auto-generated) ---\nlet abs (x: int64) = System.Math.Abs(x)\nlet absf (x: float) = System.Math.Abs(x)\nlet sqrt (x: float) = System.Math.Sqrt(x)\nlet min (a: int64) (b: int64) = if a < b then a else b\nlet max (a: int64) (b: int64) = if a > b then a else b\nlet listLen (xs: 'a list) : int64 = int64 (List.length xs)\nlet listMap f xs = List.map f xs\nlet listFilter p xs = List.filter p xs\nlet listFold f z xs = List.fold f z xs\nlet listReverse xs = List.rev xs\nlet listAppend xs ys = List.append xs ys\nlet strLen (s: string) : int64 = int64 s.Length\nlet strConcat (a: string) (b: string) = a + b\nlet strTrim (s: string) = s.Trim()\nlet strContains (needle: string) (haystack: string) = haystack.Contains(needle: string)\nlet print (s: string) = System.Console.Write(s)\nlet printfn (s: string) = System.Console.WriteLine(s)\nlet strChars (s: string) = s |> Seq.toList\nlet charToInt (c: char) = int64 (int c)\nlet intToChar (n: int64) = char (int n)\nlet intToStr (n: int64) = string n\nlet floatToStr (f: float) = f.ToString(System.Globalization.CultureInfo.InvariantCulture)\nlet strSlice (s: string) (start: int64) (len: int64) = s.Substring(int start, int len)\nlet strIndexOf (needle: string) (haystack: string) : int64 = int64 (haystack.IndexOf(needle: string))\nlet strSplit (sep: string) (s: string) = s.Split([| sep |], System.StringSplitOptions.None) |> Array.toList\nlet strFromChars (cs: char list) = System.String(cs |> List.toArray)\nlet strReverse (s: string) = System.String(s.ToCharArray() |> Array.rev)\nlet charIsDigit (c: char) = System.Char.IsDigit(c)\nlet charIsAlpha (c: char) = System.Char.IsLetter(c)\nlet charIsSpace (c: char) = System.Char.IsWhiteSpace(c)\nlet readFile (path: string) = System.IO.File.ReadAllText(path: string)\nlet writeFile (path: string) (contents: string) = System.IO.File.WriteAllText(path, contents)\nlet fileExists (path: string) = System.IO.File.Exists(path: string)\nlet dirList (path: string) : string list = if System.IO.Directory.Exists(path) then System.IO.Directory.GetFiles(path, \"*\", System.IO.SearchOption.AllDirectories) |> Array.toList else []\nlet exit (code: int64) : unit = System.Environment.Exit(int code)\nlet listConcat (xss: 'a list list) = List.concat xss\nlet listIsEmpty (xs: 'a list) = List.isEmpty xs\nlet getArgs : string list = System.Environment.GetCommandLineArgs() |> Array.toList |> List.tail\nlet processSpawn (cmd: string) (args: string list) : int64 =\n    let psi = System.Diagnostics.ProcessStartInfo(cmd, System.String.Join(\" \", List.toArray args))\n    psi.UseShellExecute <- false\n    let p = System.Diagnostics.Process.Start(psi) in p.WaitForExit(); int64 p.ExitCode"
+
+preludeMaybe =
+  "let listHead xs = match xs with [] -> None | x :: _ -> Some x\nlet listTail xs = match xs with [] -> None | _ :: t -> Some t\nlet maybeMap f m = match m with Some x -> Some (f x) | None -> None\nlet maybeBind m f = match m with Some x -> f x | None -> None\nlet maybeWithDefault d m = match m with Some x -> x | None -> d\nlet strToInt (s: string) =\n    match System.Int64.TryParse(s: string) with\n    | true, n -> Some n\n    | false, _ -> None\nlet strToFloat (s: string) =\n    match System.Double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture) with\n    | true, n -> Some n\n    | false, _ -> None\nlet listAt (xs: 'a list) (i: int64) =\n    if int i < 0 || int i >= List.length xs then None else Some (List.item (int i) xs)"
+
+preludeResult =
+  "let resultMap f r = match r with Ok x -> Ok (f x) | Err e -> Err e\nlet resultBind r f = match r with Ok x -> f x | Err e -> Err e\nlet resultMapErr f r = match r with Ok x -> Ok x | Err e -> Err (f e)"
+
+preludeEndMark =
+  "// --- end prelude ---"
+
+-- ---- Prelude usage detection -----------------------------------------------
+-- Mirror stage0: only emit a prelude section when the module actually references
+-- at least one name from that section. Walk Expr trees to collect EVar names.
+
+isPreludeCoreName(n Str) =
+  match n
+    | "abs" -> true | "absf" -> true | "sqrt" -> true | "min" -> true | "max" -> true
+    | "listLen" -> true | "listMap" -> true | "listFilter" -> true | "listFold" -> true
+    | "listReverse" -> true | "listAppend" -> true
+    | "strLen" -> true | "strConcat" -> true | "strTrim" -> true | "strContains" -> true
+    | "print" -> true | "printfn" -> true
+    | "strChars" -> true | "charToInt" -> true | "intToChar" -> true
+    | "intToStr" -> true | "floatToStr" -> true
+    | "strSlice" -> true | "strIndexOf" -> true | "strSplit" -> true
+    | "strFromChars" -> true | "strReverse" -> true
+    | "charIsDigit" -> true | "charIsAlpha" -> true | "charIsSpace" -> true
+    | "readFile" -> true | "writeFile" -> true | "fileExists" -> true
+    | "dirList" -> true | "exit" -> true
+    | "listConcat" -> true | "listIsEmpty" -> true | "getArgs" -> true
+    | "processSpawn" -> true
+    | _ -> false
+
+isPreludeMaybeName(n Str) =
+  match n
+    | "listHead" -> true | "listTail" -> true
+    | "maybeMap" -> true | "maybeBind" -> true | "maybeWithDefault" -> true
+    | "strToInt" -> true | "strToFloat" -> true | "listAt" -> true
+    | _ -> false
+
+isPreludeResultName(n Str) =
+  match n
+    | "resultMap" -> true | "resultBind" -> true | "resultMapErr" -> true
+    | _ -> false
+
+-- Walk an expression list, collecting whether any satisfies pred.
+exprListAny(pred Expr -> Bool)(es List[Expr]) =
+  match es
+    | [] -> false
+    | e :: rest ->
+      if pred e
+        true
+      else exprListAny pred rest
+
+-- Walk an expression tree looking for any EVar satisfying `isName`.
+exprUsesName(isName Str -> Bool)(e Expr) =
+  match e
+    | EVar n -> isName n
+    | EApp f a ->
+      if exprUsesName isName f
+        true
+      else exprUsesName isName a
+    | EBinOp _ l r ->
+      if exprUsesName isName l
+        true
+      else exprUsesName isName r
+    | ELam _ body -> exprUsesName isName body
+    | ELet _ v body ->
+      if exprUsesName isName v
+        true
+      else exprUsesName isName body
+    | EIf c t f ->
+      if exprUsesName isName c
+        true
+      else if exprUsesName isName t
+        true
+      else exprUsesName isName f
+    | EList es -> exprListAny (exprUsesName isName) es
+    | EMatch s _ bods ->
+      if exprUsesName isName s
+        true
+      else exprListAny (exprUsesName isName) bods
+    | ETuple a b ->
+      if exprUsesName isName a
+        true
+      else exprUsesName isName b
+    | ECons h t ->
+      if exprUsesName isName h
+        true
+      else exprUsesName isName t
+    | _ -> false
+
+declUsesName(isName Str -> Bool)(d Decl) =
+  match d
+    | DFn _ _ _ body -> exprUsesName isName body
+    | DLet _ body -> exprUsesName isName body
+    | DExport inner -> declUsesName isName inner
+    | _ -> false
+
+declsUseName(isName Str -> Bool)(decls List[Decl]) =
+  match decls
+    | [] -> false
+    | d :: rest ->
+      if declUsesName isName d
+        true
+      else declsUseName isName rest
+
+assemblePrelude(decls List[Decl]) =
+  hasMaybe = hasDeclWithName "Maybe" decls
+  hasResult = hasDeclWithName "Result" decls
+  includeCore = declsUseName isPreludeCoreName decls
+  includeMaybe = if hasMaybe
+    declsUseName isPreludeMaybeName decls
+  else false
+  includeResult = if hasResult
+    declsUseName isPreludeResultName decls
+  else false
+  if includeCore
+    maybePart = if includeMaybe
+      strConcat "\n" preludeMaybe
+    else ""
+    resultPart = if includeResult
+      strConcat "\n" preludeResult
+    else ""
+    strConcat preludeCore (strConcat maybePart (strConcat resultPart (strConcat "\n" preludeEndMark)))
+  else ""
 
 -- ---- Module emission -------------------------------------------------------
 
@@ -367,9 +625,13 @@ emitModule(m Module) =
   match m
     | MkModule path decls ->
       header = strConcat "module " (emitModulePath path)
-      prelude = emitPrelude
-      body = emitDecls decls
-      strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
+      typeDecls = listFilter isDTypeDecl decls
+      otherDecls = listFilter isOtherDecl decls
+      typeStr = emitDecls typeDecls
+      prelude = assemblePrelude decls
+      otherStr = emitDecls otherDecls
+      parts = listFilter (\s. strLen s > 0) [header; typeStr; prelude; otherStr]
+      joinWith "\n\n" parts
 
 -- ---- Tests -----------------------------------------------------------------
 
@@ -418,10 +680,10 @@ main =
   colorDecl = DType "Color" [] colorCtors
   _ = checkContains "10 DType Color" (emitDecl colorDecl) "type Color"
 
-  -- 11. DFn add
+  -- 11. DFn add (not recursive → let, not let rec)
   addParams = MkParam "x" (TyName "Int") :: MkParam "y" (TyName "Int") :: []
   addDecl = DFn "add" addParams None (EBinOp "+" (EVar "x") (EVar "y"))
-  _ = checkContains "11 DFn add" (emitDecl addDecl) "let rec add"
+  _ = checkContains "11 DFn add" (emitDecl addDecl) "let add"
 
   -- 12. Full module emit
   idParams = MkParam "x" (TyName "Int") :: []
@@ -430,7 +692,7 @@ main =
   out = emitModule m
   _ = checkContains "12 module header" out "module Test.Mod"
   _ = checkContains "12 module type" out "type Color"
-  _ = checkContains "12 module fn" out "let rec id"
+  _ = checkContains "12 module fn" out "let id"
 
   -- 13. PWild pattern
   _ = codegenCheck "13 PWild" (emitPattern PWild) "_"
@@ -462,4 +724,14 @@ main =
   -- 22. DOpaque: emits obj alias
   _ = codegenCheck "22 DOpaque obj alias" (emitDecl (DOpaque "HttpClient")) "type HttpClient = obj"
 
-  0
+  -- 23. main() emits [<EntryPoint>] wrapper
+  mainDecl = DFn "main" [] None (EApp (EVar "printfn") (EStr "hello"))
+  _ = checkContains "23 main EntryPoint" (emitDecl mainDecl) "[<EntryPoint>]"
+  _ = checkContains "23 main argv" (emitDecl mainDecl) "(argv: string[])"
+
+  -- 24. DFn factorial (recursive) → let rec
+  factBody = EIf (EBinOp "==" (EVar "n") (EInt 0)) (EInt 1) (EBinOp "*" (EVar "n") (EApp (EVar "factorial") (EBinOp "-" (EVar "n") (EInt 1))))
+  factDecl = DFn "factorial" (MkParam "n" (TyName "Int") :: []) None factBody
+  _ = checkContains "24 DFn factorial is rec" (emitDecl factDecl) "let rec factorial"
+
+  printfn "Done"

@@ -108,15 +108,40 @@ skipBrackTypeBody(toks List[Token]) =
     | _ :: rest -> skipBrackTypeBody rest
     | [] -> []
 
--- Parse a single type expression (name or name[arg]).
-parseTypeExpr(toks List[Token]) =
+-- Parse a single type expression atom: TypeId[brackets] | Ident | (TypeApp).
+-- Parenthesised groups allow multi-arg type application: (RBMap K V).
+parseTypeExprAtom(toks List[Token]) =
   match toks
     | TypeId name :: rest ->
       rest2 = skipBrackTypeArgs rest
       (TyName name, rest2)
     | Ident name :: rest ->
       (TyName name, rest)
+    | LParen :: rest ->
+      parseTypeExprParens rest
     | _ -> (TyName "?", toks)
+
+-- Parse inside parens: head atom, then fold additional atoms as left-assoc TyApp.
+parseTypeExprParens(toks List[Token]) =
+  let (head, rest) = parseTypeExprAtom toks
+  parseTypeExprParensTail head rest
+
+parseTypeExprParensTail(acc TypeExpr)(toks List[Token]) =
+  match toks
+    | TypeId _ :: _ ->
+      let (next, rest) = parseTypeExprAtom toks
+      parseTypeExprParensTail (TyApp acc next) rest
+    | Ident _ :: _ ->
+      let (next, rest) = parseTypeExprAtom toks
+      parseTypeExprParensTail (TyApp acc next) rest
+    | LParen :: _ ->
+      let (next, rest) = parseTypeExprAtom toks
+      parseTypeExprParensTail (TyApp acc next) rest
+    | RParen :: rest -> (acc, rest)
+    | _ -> (acc, toks)
+
+-- Backward-compat alias (no callers outside this file).
+parseTypeExpr(toks List[Token]) = parseTypeExprAtom toks
 
 -- Optional return type annotation before `=`.
 parseReturnType(toks List[Token]) =
@@ -165,7 +190,11 @@ parseTypeParams(toks List[Token]) =
 parseConArgs(toks List[Token]) =
   match toks
     | TypeId _ :: _ ->
-      let (arg, rest) = parseTypeExpr toks
+      let (arg, rest) = parseTypeExprAtom toks
+      let (args, rest2) = parseConArgs rest
+      (arg :: args, rest2)
+    | LParen :: _ ->
+      let (arg, rest) = parseTypeExprAtom toks
       let (args, rest2) = parseConArgs rest
       (arg :: args, rest2)
     | _ -> ([], toks)

@@ -11,13 +11,25 @@
 #   bash tools/check-fixpoint.sh              # uses default corpus
 #   bash tools/check-fixpoint.sh --full       # (future: full corpus scan)
 #
-# Known G1.2 blockers (as of v3 step 6):
-#   1. Prelude emission: stage0 emits "open LLLang.Prelude" for library modules,
-#      self-hosted always inlines the prelude helpers.
-#   2. let vs let rec: stage0 uses containsVar to emit "let f" for non-recursive
-#      functions; self-hosted always emits "let rec f".
-#   These require either (a) updating Std.Codegen to match stage0, or (b)
-#   updating stage0 to match self-hosted — the canonical fix is (a).
+# Known G1.2 blockers (as of v3 step 6 + G1.2 fixes):
+#
+#   FIXED (now matching stage0):
+#     - let vs let rec: Std.Codegen now uses containsVarExpr to emit "let f" for
+#       non-recursive functions, matching stage0 containsVar analysis.
+#     - Prelude emission: Std.Codegen now selectively emits prelude sections only
+#       when the module actually references names from each section (core/maybe/result).
+#     - Maybe alias: Std.Codegen now emits "type Maybe<'A> = 'A option" for the
+#       canonical Maybe = Some A | None form, matching stage0.
+#     - Constructor multi-args: Std.Parser now handles LParen-wrapped type args
+#       (e.g. Node Color (RBMap K V) K V (RBMap K V)) in type declarations.
+#
+#   REMAINING (post-v2, deferred per plan):
+#     1. Mutual recursion grouping: stage0 groups sibling fns that reference each
+#        other into "let rec f ... and g ..." blocks. Std.Codegen emits each
+#        fn separately. Affects 06-stdlib (double/sumList/doubleAll/nameLen) and
+#        09-lexer-real (lexChars/lexId/lexNum/lexOp/tokenize — causes self-compile
+#        failure: "Unbound variable: lexChars").
+#     See: docs/compiler-dev/ — deferred after v2.
 
 set -uo pipefail
 
@@ -95,15 +107,22 @@ for i in "${!LABELS[@]}"; do
   # Drop everything before the first "module " line
   awk '/^module /{found=1} found{print}' "$self_raw" > "$self_fs"
 
+  # Normalize trailing newlines: strip final newline from both sides so a
+  # lone trailing-newline difference doesn't block an otherwise-identical file.
+  stage0_norm="$TMPDIR_FIXPOINT/$label.stage0.norm"
+  self_norm="$TMPDIR_FIXPOINT/$label.self.norm"
+  perl -pe 'chomp if eof' "$stage0_fs" > "$stage0_norm"
+  perl -pe 'chomp if eof' "$self_fs"   > "$self_norm"
+
   # Compare
-  if diff -q "$stage0_fs" "$self_fs" >/dev/null 2>&1; then
+  if diff -q "$stage0_norm" "$self_norm" >/dev/null 2>&1; then
     printf "PASS\n"
     passed=$((passed + 1))
   else
     printf "BLOCK\n"
     failed=$((failed + 1))
     # Show first diff line
-    first_diff="$(diff "$stage0_fs" "$self_fs" | head -6)"
+    first_diff="$(diff "$stage0_norm" "$self_norm" | head -6)"
     echo "    $first_diff" | head -4
   fi
 done
@@ -116,11 +135,10 @@ echo ""
 if [[ $failed -gt 0 ]]; then
   echo "G1.2: BLOCK"
   echo ""
-  echo "Known blockers (see file header for details):"
-  echo "  1. Prelude: stage0 emits 'open LLLang.Prelude'; self-hosted inlines helpers"
-  echo "  2. let/let rec: stage0 uses containsVar analysis; self-hosted always emits 'let rec'"
-  echo ""
-  echo "To close G1.2: update Std.Codegen to match stage0 behavior for these two cases."
+  echo "Remaining blocker (deferred post-v2, see file header):"
+  echo "  Mutual recursion grouping: stage0 emits 'let rec f ... and g ...'"
+  echo "  for sibling fns that reference each other. Std.Codegen emits separately."
+  echo "  Affects: 06-stdlib, 09-lexer-real."
   exit 1
 else
   echo "G1.2: PASS"
