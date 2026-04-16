@@ -1,221 +1,657 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="ll-lang documentation — language spec, stdlib reference, LLM best practices, error codes, and more.">
-  <title>ll-lang — Documentation</title>
-  <link rel="stylesheet" href="css/style.css">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-</head>
-<body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- ── Nav ──────────────────────────────────────────────────────────────── -->
-  <nav>
-    <div class="nav-inner">
-      <a href="index.html" class="nav-logo"><span>//</span>ll-lang</a>
-      <ul class="nav-links" id="nav-links">
-        <li><a href="index.html">Home</a></li>
-        <li><a href="docs.html">Docs</a></li>
-        <li><a href="playground.html">Playground</a></li>
-        <li><a href="https://github.com/Neftedollar/ll-lang" target="_blank" rel="noopener">GitHub</a></li>
-        <li>
-          <a href="https://github.com/Neftedollar/ll-lang/releases" class="nav-cta" target="_blank" rel="noopener">v1.0.0</a>
-        </li>
-      </ul>
-      <button class="nav-hamburger" id="nav-hamburger" aria-label="Toggle navigation" aria-expanded="false">
-        <span></span><span></span><span></span>
-      </button>
-    </div>
-  </nav>
+    <!-- Primary Meta Tags -->
+    <title>ll-lang — Documentation</title>
+    <meta
+      name="description"
+      content="ll-lang documentation — language spec, stdlib reference, LLM best practices, error codes, CLI reference, and codegen targets. The functional language built for LLM code generation."
+    />
+    <meta
+      name="keywords"
+      content="ll-lang docs, functional language documentation, LLM coding language, Hindley-Milner type inference, ADT, MCP server, lllc CLI, F# codegen"
+    />
+    <meta name="author" content="ll-lang contributors" />
+    <link
+      rel="canonical"
+      href="https://neftedollar.github.io/ll-lang/docs.html"
+    />
 
-  <!-- ── Docs layout ───────────────────────────────────────────────────────── -->
-  <div class="container">
-    <div class="docs-layout">
+    <!-- Open Graph / Social -->
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:url"
+      content="https://neftedollar.github.io/ll-lang/docs.html"
+    />
+    <meta property="og:title" content="ll-lang Documentation" />
+    <meta
+      property="og:description"
+      content="Language spec, stdlib reference, error codes, CLI guide, LLM integration docs for ll-lang — the functional language built for LLM code generation."
+    />
+    <meta
+      property="og:image"
+      content="https://neftedollar.github.io/ll-lang/og-image.png"
+    />
 
-      <!-- Sidebar -->
-      <aside class="docs-sidebar">
-        <div class="sidebar-section">
-          <div class="sidebar-section-title">Getting Started</div>
-          <ul class="sidebar-links">
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/getting-started.md" target="_blank" rel="noopener">Getting started</a></li>
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/01-installation.md" target="_blank" rel="noopener">Installation</a></li>
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/02-syntax.md" target="_blank" rel="noopener">Syntax overview</a></li>
-          </ul>
-        </div>
-        <div class="sidebar-section">
-          <div class="sidebar-section-title">Language Guide</div>
-          <ul class="sidebar-links">
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/language-spec.md" target="_blank" rel="noopener">Language spec</a></li>
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/03-types-and-inference.md" target="_blank" rel="noopener">Types &amp; inference</a></li>
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/04-tags-and-units.md" target="_blank" rel="noopener">Tags &amp; units</a></li>
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/05-traits.md" target="_blank" rel="noopener">Traits</a></li>
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/06-modules.md" target="_blank" rel="noopener">Modules</a></li>
-          </ul>
-        </div>
-        <div class="sidebar-section">
-          <div class="sidebar-section-title">Reference</div>
-          <ul class="sidebar-links">
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/stdlib-reference.md" target="_blank" rel="noopener">Stdlib reference</a></li>
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/spec/error-codes.md" target="_blank" rel="noopener">Error codes</a></li>
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/spec/grammar.ebnf" target="_blank" rel="noopener">Grammar (EBNF)</a></li>
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/08-cli.md" target="_blank" rel="noopener">CLI reference</a></li>
-          </ul>
-        </div>
-        <div class="sidebar-section">
-          <div class="sidebar-section-title">LLM Integration</div>
-          <ul class="sidebar-links">
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/llm-best-practices.md" target="_blank" rel="noopener">LLM best practices</a></li>
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/09-mcp.md" target="_blank" rel="noopener">MCP server</a></li>
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/09-llm-prompting.md" target="_blank" rel="noopener">LLM prompting</a></li>
-          </ul>
-        </div>
-        <div class="sidebar-section">
-          <div class="sidebar-section-title">Targets</div>
-          <ul class="sidebar-links">
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/10-targets.md" target="_blank" rel="noopener">Codegen targets</a></li>
-            <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/11-java-target.md" target="_blank" rel="noopener">Java target</a></li>
-          </ul>
-        </div>
-      </aside>
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:title" content="ll-lang Documentation" />
+    <meta
+      property="twitter:description"
+      content="Language spec, stdlib reference, error codes, CLI guide, and LLM integration docs."
+    />
+    <link rel="stylesheet" href="css/style.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
+      integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH"
+      crossorigin="anonymous"
+    />
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
+      integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp"
+      crossorigin="anonymous"
+    ></script>
+  </head>
+  <body>
+    <!-- Nav -->
+    <nav>
+      <div class="nav-inner">
+        <a href="index.html" class="nav-logo"><span>//</span>ll-lang</a>
+        <ul class="nav-links" id="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="docs.html">Docs</a></li>
+          <li><a href="playground.html">Playground</a></li>
+          <li>
+            <a
+              href="https://github.com/Neftedollar/ll-lang"
+              target="_blank"
+              rel="noopener"
+              >GitHub</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://github.com/Neftedollar/ll-lang/releases"
+              class="nav-cta"
+              target="_blank"
+              rel="noopener"
+              >v1.0.0</a
+            >
+          </li>
+        </ul>
+        <button
+          class="nav-hamburger"
+          id="nav-hamburger"
+          aria-label="Toggle navigation"
+          aria-expanded="false"
+        >
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </nav>
 
-      <!-- Main content -->
-      <main class="docs-content">
-        <span class="section-label">Documentation</span>
-        <h2>ll-lang docs</h2>
-        <p>
-          Browse the guides below or jump straight to a topic using the sidebar.
-          All docs live in the repository and open on GitHub.
+    <!-- Page header -->
+    <section style="padding-block: 3rem 1.5rem">
+      <div class="container">
+        <div class="section-label">Documentation</div>
+        <h1
+          style="font-size: clamp(1.8rem, 4vw, 2.6rem); margin-bottom: 0.75rem"
+        >
+          ll-lang reference
+        </h1>
+        <p style="max-width: 56ch; font-size: 1.05rem">
+          Language specification, stdlib reference, error codes, CLI guide, and
+          compiler internals.
         </p>
+      </div>
+    </section>
 
-        <!-- Getting Started -->
-        <h3 style="margin-top: 2.5rem; margin-bottom: 1rem; color: var(--text-primary)">Getting started</h3>
-        <div class="docs-cards">
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/getting-started.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x1F680;</div>
-            <h3>Getting started</h3>
-            <p>Install, write your first program, compile to F# in 5 minutes.</p>
-          </a>
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/01-installation.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x2699;&#xFE0F;</div>
-            <h3>Installation</h3>
-            <p>Build from source, .NET 10 setup, environment check.</p>
-          </a>
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/02-syntax.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x270F;&#xFE0F;</div>
-            <h3>Syntax overview</h3>
-            <p>Modules, bindings, pattern matching, and the = sign.</p>
-          </a>
-        </div>
+    <div class="divider"></div>
 
-        <!-- Language Guide -->
-        <h3 style="margin-top: 2.5rem; margin-bottom: 1rem; color: var(--text-primary)">Language guide</h3>
-        <div class="docs-cards">
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/language-spec.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x1F4D6;</div>
-            <h3>Language spec</h3>
-            <p>Formal specification — grammar, type rules, semantics.</p>
-          </a>
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/03-types-and-inference.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x1F9E0;</div>
-            <h3>Types &amp; inference</h3>
-            <p>Hindley-Milner inference, ADTs, parametric polymorphism.</p>
-          </a>
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/04-tags-and-units.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x1F3F7;&#xFE0F;</div>
-            <h3>Tags &amp; units</h3>
-            <p>Branded types like <code>Str[Email]</code> and unit checking like <code>Float[m]</code>.</p>
-          </a>
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/05-traits.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x1F9E9;</div>
-            <h3>Traits</h3>
-            <p>Ad-hoc polymorphism and typeclass-style dispatch.</p>
-          </a>
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/06-modules.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x1F4E6;</div>
-            <h3>Modules</h3>
-            <p>Module system, imports, and cross-module references.</p>
-          </a>
-        </div>
+    <!-- Docs layout -->
+    <div class="container">
+      <div class="docs-layout">
+        <!-- Sidebar -->
+        <aside class="docs-sidebar">
+          <div class="sidebar-section">
+            <div class="sidebar-section-title">Getting started</div>
+            <ul class="sidebar-links">
+              <li><a href="#quickstart">Quickstart</a></li>
+              <li><a href="#cli">CLI reference</a></li>
+              <li><a href="#project-setup">Project setup</a></li>
+            </ul>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-section-title">Language</div>
+            <ul class="sidebar-links">
+              <li><a href="#syntax">Syntax overview</a></li>
+              <li><a href="#adts">ADTs &amp; pattern matching</a></li>
+              <li><a href="#traits">Traits</a></li>
+              <li><a href="#tags">Tags &amp; unit algebra</a></li>
+              <li><a href="#modules">Modules &amp; imports</a></li>
+              <li><a href="#keywords">Keywords</a></li>
+            </ul>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-section-title">Reference</div>
+            <ul class="sidebar-links">
+              <li><a href="#errors">Error codes (E001&ndash;E026)</a></li>
+              <li><a href="#stdlib">Stdlib module index</a></li>
+            </ul>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-section-title">External</div>
+            <ul class="sidebar-links">
+              <li>
+                <a
+                  href="https://github.com/Neftedollar/ll-lang/blob/main/spec/grammar.ebnf"
+                  target="_blank"
+                  rel="noopener"
+                  >Grammar (EBNF) &rarr;</a
+                >
+              </li>
+              <li>
+                <a
+                  href="https://github.com/Neftedollar/ll-lang/blob/main/spec/type-system.md"
+                  target="_blank"
+                  rel="noopener"
+                  >Type system spec &rarr;</a
+                >
+              </li>
+              <li>
+                <a
+                  href="https://github.com/Neftedollar/ll-lang/blob/main/spec/error-codes.md"
+                  target="_blank"
+                  rel="noopener"
+                  >Full error list &rarr;</a
+                >
+              </li>
+            </ul>
+          </div>
+        </aside>
 
-        <!-- Reference -->
-        <h3 style="margin-top: 2.5rem; margin-bottom: 1rem; color: var(--text-primary)">Reference</h3>
-        <div class="docs-cards">
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/stdlib-reference.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x1F4DA;</div>
-            <h3>Stdlib reference</h3>
-            <p>All 10 stdlib modules — List, Map, Option, Result, and more.</p>
-          </a>
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/spec/error-codes.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x26A0;&#xFE0F;</div>
-            <h3>Error codes</h3>
-            <p>Full E0xx error catalog — code, message, fix hint.</p>
-          </a>
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/spec/grammar.ebnf" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x1F4DC;</div>
-            <h3>Grammar (EBNF)</h3>
-            <p>Formal grammar for parsing and tooling implementors.</p>
-          </a>
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/08-cli.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x1F4BB;</div>
-            <h3>CLI reference</h3>
-            <p><code>lllc build</code>, <code>run</code>, <code>check</code>, <code>new</code> — all flags documented.</p>
-          </a>
-        </div>
+        <!-- Content -->
+        <main class="docs-content">
+          <!-- Quickstart -->
+          <section
+            id="quickstart"
+            style="padding-top: 2rem; padding-bottom: 2.5rem"
+          >
+            <h2>Quickstart</h2>
+            <p>
+              Requires
+              <a
+                href="https://dotnet.microsoft.com/download"
+                target="_blank"
+                rel="noopener"
+                >.NET 10</a
+              >.
+            </p>
+            <div class="code-block" style="margin-top: 1rem">
+              <div class="code-block-header">
+                <span class="code-lang">shell</span
+                ><button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-bash">git clone https://github.com/Neftedollar/ll-lang.git
+cd ll-lang && dotnet build</code></pre>
+            </div>
+            <div class="code-block" style="margin-top: 1rem">
+              <div class="code-block-header">
+                <span class="code-lang">hello.lll</span
+                ><button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-haskell">module Hello
 
-        <!-- LLM Integration -->
-        <h3 style="margin-top: 2.5rem; margin-bottom: 1rem; color: var(--text-primary)">LLM integration</h3>
-        <div class="docs-cards">
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/llm-best-practices.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x1F916;</div>
-            <h3>LLM best practices</h3>
-            <p>Prompting patterns, error-recovery loops, token budget tips.</p>
-          </a>
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/09-mcp.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x1F527;</div>
-            <h3>MCP server</h3>
-            <p>Wire ll-lang to Claude Code, Cursor, or Zed via the MCP protocol.</p>
-          </a>
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/09-llm-prompting.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x1F4AC;</div>
-            <h3>LLM prompting</h3>
-            <p>System prompts, few-shot examples, and structured output modes.</p>
-          </a>
-        </div>
+greet(name Str) = printfn "Hello, %s!" name
+Hello = greet "ll-lang"</code></pre>
+            </div>
+            <div class="code-block" style="margin-top: 1rem">
+              <div class="code-block-header">
+                <span class="code-lang">shell</span
+                ><button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-bash">lllc run hello.lll
+# Hello, ll-lang!</code></pre>
+            </div>
+          </section>
 
-        <!-- Codegen Targets -->
-        <h3 style="margin-top: 2.5rem; margin-bottom: 1rem; color: var(--text-primary)">Codegen targets</h3>
-        <div class="docs-cards">
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/10-targets.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x1F3AF;</div>
-            <h3>Targets overview</h3>
-            <p>F#, TypeScript, Python, Java 21, C# — differences and flags.</p>
-          </a>
-          <a class="doc-card" href="https://github.com/Neftedollar/ll-lang/blob/main/docs/user-guide/11-java-target.md" target="_blank" rel="noopener">
-            <div class="doc-card-icon">&#x2615;</div>
-            <h3>Java target</h3>
-            <p>Sealed interfaces, record patterns, and Java 21 specifics.</p>
-          </a>
-        </div>
+          <div class="divider"></div>
 
-      </main>
+          <!-- CLI -->
+          <section id="cli" style="padding-block: 2.5rem">
+            <h2>CLI reference</h2>
+            <div class="code-block" style="margin-top: 1rem">
+              <div class="code-block-header">
+                <span class="code-lang">shell</span>
+              </div>
+              <pre><code class="language-bash">lllc build &lt;file.lll&gt;               # compile to F# (default)
+lllc build --target ts &lt;file.lll&gt;   # compile to TypeScript
+lllc build --target py &lt;file.lll&gt;   # compile to Python
+lllc build --target java &lt;file.lll&gt; # compile to Java 21
+lllc build --target cs &lt;file.lll&gt;   # compile to C#
+lllc build --target llvm &lt;file.lll&gt; # compile to LLVM IR (experimental)
+lllc build [dir]                    # compile project (reads lll.toml)
+lllc check &lt;file.lll&gt;               # type-check only, no codegen
+lllc run   &lt;file.lll&gt;               # compile and run via temp fsproj
+lllc new   &lt;name&gt;                   # scaffold new project
+lllc install                        # resolve deps into vendor/
+lllc mod tidy                       # sync deps
+lllc mod add dep=https://repo#ref   # add a dependency
+lllc mod why dep                    # explain dependency chain
+lllc mcp                            # run MCP server (stdio)</code></pre>
+            </div>
+          </section>
+
+          <div class="divider"></div>
+
+          <!-- Project setup -->
+          <section id="project-setup" style="padding-block: 2.5rem">
+            <h2>Project setup</h2>
+            <p>Multi-file projects use a <code>lll.toml</code> manifest.</p>
+            <div class="code-block" style="margin-top: 1rem">
+              <div class="code-block-header">
+                <span class="code-lang">lll.toml</span
+                ><button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-toml">[project]
+name = "myapp"
+
+[platform]
+use = ["fsharp", "typescript"]   # emit both targets on lllc build</code></pre>
+            </div>
+          </section>
+
+          <div class="divider"></div>
+
+          <!-- Syntax -->
+          <section id="syntax" style="padding-block: 2.5rem">
+            <h2>Syntax overview</h2>
+            <p>
+              Uppercase names declare types; lowercase names declare values. No
+              <code>fn</code>, <code>type</code>, <code>in</code>,
+              <code>then</code>, or <code>with</code> keywords. Layout-sensitive
+              (significant indentation).
+            </p>
+            <div class="code-block" style="margin-top: 1rem">
+              <div class="code-block-header">
+                <span class="code-lang">ll-lang</span
+                ><button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-haskell">module Examples.Basics
+
+pi = 3.14159
+
+add(a Int)(b Int) Int = a + b
+double(x Int) = x * 2
+
+clamp(x Int)(lo Int)(hi Int) Int =
+  if x < lo
+    lo
+  else if x > hi
+    hi
+  else x
+
+triple = \x. x * 3
+
+example =
+  y = double 5
+  y + 1</code></pre>
+            </div>
+          </section>
+
+          <div class="divider"></div>
+
+          <!-- ADTs -->
+          <section id="adts" style="padding-block: 2.5rem">
+            <h2>ADTs &amp; pattern matching</h2>
+            <div class="code-block">
+              <div class="code-block-header">
+                <span class="code-lang">ll-lang</span
+                ><button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-haskell">module Examples.ADTs
+
+Shape = Circle Float | Rect Float Float | Empty
+
+Maybe A = Some A | None
+Result A E = Ok A | Err E
+
+area(s Shape) Float =
+  match s with
+  | Circle r -> 3.14159 * r * r
+  | Rect w h -> w * h
+  | Empty    -> 0.0
+
+safeDivide(a Float)(b Float) Maybe[Float] =
+  if b == 0.0 then None
+  else Some (a / b)</code></pre>
+            </div>
+          </section>
+
+          <div class="divider"></div>
+
+          <!-- Traits -->
+          <section id="traits" style="padding-block: 2.5rem">
+            <h2>Traits</h2>
+            <div class="code-block">
+              <div class="code-block-header">
+                <span class="code-lang">ll-lang</span
+                ><button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-haskell">module Examples.Traits
+
+trait Show A =
+  show(a A) Str
+
+impl Show Int =
+  show(n Int) Str = intToStr n
+
+impl Show Bool =
+  show(b Bool) Str = if b then "true" else "false"
+
+printVal(x A) [Show A] = printfn (show x)</code></pre>
+            </div>
+          </section>
+
+          <div class="divider"></div>
+
+          <!-- Tags -->
+          <section id="tags" style="padding-block: 2.5rem">
+            <h2>Tags &amp; unit algebra</h2>
+            <p>
+              Tags are zero-cost type wrappers preventing confusion between
+              values of the same base type.
+            </p>
+            <div class="code-block" style="margin-top: 1rem">
+              <div class="code-block-header">
+                <span class="code-lang">ll-lang</span
+                ><button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-haskell">module Examples.Tags
+
+tag UserId
+tag Email
+
+uid = "user-42"[UserId]
+
+getUser(id Str[UserId])  Maybe[Str] = Some "alice"
+sendEmail(to Str[Email])            = to
+
+tag m
+tag s
+
+-- inferred return type: Float[m/s]
+speed(d Float[m])(t Float[s]) = d / t</code></pre>
+            </div>
+          </section>
+
+          <div class="divider"></div>
+
+          <!-- Modules -->
+          <section id="modules" style="padding-block: 2.5rem">
+            <h2>Modules &amp; imports</h2>
+            <div class="code-block">
+              <div class="code-block-header">
+                <span class="code-lang">ll-lang</span
+                ><button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-haskell">module Examples.App
+
+import Map
+import Toml
+
+config = Toml.parse (readFile "config.toml")</code></pre>
+            </div>
+          </section>
+
+          <div class="divider"></div>
+
+          <!-- Keywords -->
+          <section id="keywords" style="padding-block: 2.5rem">
+            <h2>Keywords</h2>
+            <p>
+              ll-lang has exactly <strong>15 keywords</strong>. Everything else
+              is expressed through the uppercase/lowercase convention.
+            </p>
+            <p
+              style="
+                font-family: var(--font-mono);
+                font-size: 0.9rem;
+                margin-top: 0.75rem;
+                color: var(--text-primary);
+              "
+            >
+              <code>match</code> &nbsp; <code>if</code> &nbsp;
+              <code>else</code> &nbsp; <code>import</code> &nbsp;
+              <code>export</code> &nbsp; <code>module</code> &nbsp;
+              <code>trait</code> &nbsp; <code>impl</code> &nbsp;
+              <code>external</code> &nbsp; <code>opaque</code> &nbsp;
+              <code>tag</code> &nbsp; <code>unit</code> &nbsp;
+              <code>true</code> &nbsp; <code>false</code> &nbsp;
+              <code>let</code>
+            </p>
+          </section>
+
+          <div class="divider"></div>
+
+          <!-- Error codes -->
+          <section id="errors" style="padding-block: 2.5rem">
+            <h2>Error codes</h2>
+            <p>
+              Format: <code>EXXX line:col ErrorKind details</code>. One line per
+              error, no stack traces.
+            </p>
+            <div
+              class="code-block"
+              style="margin-top: 1.25rem; overflow-x: auto"
+            >
+              <table class="error-table">
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Kind</th>
+                    <th>Example output</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="error-code">E001</td>
+                    <td>TypeMismatch</td>
+                    <td class="error-example">
+                      E001 12:5 TypeMismatch Str Str[UserId]
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">E002</td>
+                    <td>UnboundVar</td>
+                    <td class="error-example">E002 8:3 UnboundVar username</td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">E003</td>
+                    <td>NonExhaustiveMatch</td>
+                    <td class="error-example">
+                      E003 15:1 NonExhaustiveMatch Shape missing:Empty
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">E004</td>
+                    <td>UnitMismatch</td>
+                    <td class="error-example">
+                      E004 20:9 UnitMismatch Float[m] Float[s]
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">E005</td>
+                    <td>TagViolation</td>
+                    <td class="error-example">
+                      E005 7:14 TagViolation Str[Email] Str[UserId]
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">E006</td>
+                    <td>TraitNotImpl</td>
+                    <td class="error-example">
+                      E006 &mdash; no impl of Show for MyType
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">E008</td>
+                    <td>OccursCheck</td>
+                    <td class="error-example">
+                      E008 &mdash; infinite type detected
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">E020</td>
+                    <td>ModuleCycle</td>
+                    <td class="error-example">
+                      E020 &mdash; cyclic import A &rarr; B &rarr; A
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">E024</td>
+                    <td>UnresolvedDep</td>
+                    <td class="error-example">
+                      E024 &mdash; dependency not found in vendor/
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p style="margin-top: 1rem; font-size: 0.88rem">
+              Full list E001&ndash;E026:
+              <a
+                href="https://github.com/Neftedollar/ll-lang/blob/main/spec/error-codes.md"
+                target="_blank"
+                rel="noopener"
+                >spec/error-codes.md &rarr;</a
+              >
+            </p>
+          </section>
+
+          <div class="divider"></div>
+
+          <!-- Stdlib -->
+          <section id="stdlib" style="padding-block: 2.5rem">
+            <h2>Stdlib module index</h2>
+            <p>10 self-hosted modules (5,857 LOC of ll-lang).</p>
+            <div
+              class="code-block"
+              style="margin-top: 1.25rem; overflow-x: auto"
+            >
+              <table class="error-table">
+                <thead>
+                  <tr>
+                    <th>Module</th>
+                    <th>LOC</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="error-code">Map.lll</td>
+                    <td>223</td>
+                    <td>Okasaki red-black tree, O(log n)</td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">Toml.lll</td>
+                    <td>292</td>
+                    <td>TOML config parser</td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">Lexer.lll</td>
+                    <td>473</td>
+                    <td>Tokenizer with layout (INDENT/DEDENT)</td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">Parser.lll</td>
+                    <td>802</td>
+                    <td>Recursive descent parser</td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">Elaborator.lll</td>
+                    <td>344</td>
+                    <td>Type checker / name resolver</td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">Codegen.lll</td>
+                    <td>569</td>
+                    <td>F# source emitter</td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">CodegenTS.lll</td>
+                    <td>492</td>
+                    <td>TypeScript source emitter</td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">CodegenPy.lll</td>
+                    <td>501</td>
+                    <td>Python source emitter</td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">CodegenJava.lll</td>
+                    <td>633</td>
+                    <td>Java 21 source emitter</td>
+                  </tr>
+                  <tr>
+                    <td class="error-code">Compiler.lll</td>
+                    <td>1516</td>
+                    <td>Full pipeline (source &rarr; F#)</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p style="margin-top: 1rem; font-size: 0.88rem">
+              Browse source:
+              <a
+                href="https://github.com/Neftedollar/ll-lang/tree/main/stdlib"
+                target="_blank"
+                rel="noopener"
+                >github.com/Neftedollar/ll-lang/tree/main/stdlib &rarr;</a
+              >
+            </p>
+          </section>
+        </main>
+      </div>
     </div>
-  </div>
 
-  <!-- ── Footer ─────────────────────────────────────────────────────────────── -->
-  <footer>
-    <div class="footer-inner">
-      <span class="footer-logo"><span>//</span>ll-lang</span>
-      <ul class="footer-links">
-        <li><a href="https://github.com/Neftedollar/ll-lang" target="_blank" rel="noopener">GitHub</a></li>
-        <li><a href="index.html">Home</a></li>
-        <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a></li>
-      </ul>
-      <p class="footer-copy">&copy; 2025 Neftedollar &mdash; ll-lang v1.0.0</p>
-    </div>
-  </footer>
+    <!-- Footer -->
+    <footer>
+      <div class="footer-inner">
+        <span class="footer-logo"><span>//</span>ll-lang</span>
+        <ul class="footer-links">
+          <li>
+            <a
+              href="https://github.com/Neftedollar/ll-lang"
+              target="_blank"
+              rel="noopener"
+              >GitHub</a
+            >
+          </li>
+          <li><a href="index.html">Home</a></li>
+          <li><a href="playground.html">Playground</a></li>
+          <li>
+            <a
+              href="https://github.com/Neftedollar/ll-lang/blob/main/LICENSE"
+              target="_blank"
+              rel="noopener"
+              >MIT License</a
+            >
+          </li>
+        </ul>
+        <p class="footer-copy">
+          &copy; 2025 Neftedollar &mdash; ll-lang v1.0.0
+        </p>
+      </div>
+    </footer>
 
-  <script src="js/main.js"></script>
-</body>
+    <script>
+      hljs.highlightAll();
+    </script>
+    <script src="js/main.js"></script>
+  </body>
 </html>
