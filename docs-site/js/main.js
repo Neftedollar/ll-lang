@@ -1,70 +1,60 @@
 /* ll-lang docs — main.js */
 
-// ── Mobile nav toggle ────────────────────────────────────────────────────────
+// Mobile nav toggle
 (function () {
-  const hamburger = document.getElementById("nav-hamburger");
-  const navLinks = document.getElementById("nav-links");
+  var hamburger = document.getElementById('nav-hamburger');
+  var navLinks  = document.getElementById('nav-links');
   if (!hamburger || !navLinks) return;
-
-  hamburger.addEventListener("click", () => {
-    const open = navLinks.classList.toggle("open");
-    hamburger.setAttribute("aria-expanded", open);
+  hamburger.addEventListener('click', function () {
+    var open = navLinks.classList.toggle('open');
+    hamburger.setAttribute('aria-expanded', open);
   });
-
-  // Close on outside click
-  document.addEventListener("click", (e) => {
+  document.addEventListener('click', function (e) {
     if (!hamburger.contains(e.target) && !navLinks.contains(e.target)) {
-      navLinks.classList.remove("open");
-      hamburger.setAttribute("aria-expanded", false);
+      navLinks.classList.remove('open');
+      hamburger.setAttribute('aria-expanded', false);
     }
   });
 })();
 
-// ── Copy buttons ─────────────────────────────────────────────────────────────
+// Copy buttons
 (function () {
-  document.querySelectorAll(".copy-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const block = btn.closest(".code-block");
-      const code = block ? block.querySelector("code") : null;
+  document.querySelectorAll('.copy-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var block = btn.closest('.code-block');
+      var code  = block ? block.querySelector('code') : null;
       if (!code) return;
-
-      navigator.clipboard
-        .writeText(code.innerText)
-        .then(() => {
-          const orig = btn.textContent;
-          btn.textContent = "copied!";
-          setTimeout(() => (btn.textContent = orig), 1800);
-        })
-        .catch(() => {
-          // clipboard API unavailable — select text as fallback
-          const range = document.createRange();
-          range.selectNodeContents(code);
-          const sel = window.getSelection();
-          sel.removeAllRanges();
-          sel.addRange(range);
-        });
+      navigator.clipboard.writeText(code.innerText).then(function () {
+        var orig = btn.textContent;
+        btn.textContent = 'copied!';
+        setTimeout(function () { btn.textContent = orig; }, 1800);
+      }).catch(function () {
+        var range = document.createRange();
+        range.selectNodeContents(code);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      });
     });
   });
 })();
 
-// ── Active nav link ──────────────────────────────────────────────────────────
+// Active nav link
 (function () {
-  const page = location.pathname.split("/").pop() || "index.html";
-  document.querySelectorAll(".nav-links a").forEach((a) => {
-    const href = a.getAttribute("href");
-    if (href === page || (page === "" && href === "index.html")) {
-      a.classList.add("active");
+  var page = location.pathname.split('/').pop() || 'index.html';
+  document.querySelectorAll('.nav-links a').forEach(function (a) {
+    var href = a.getAttribute('href');
+    if (href === page || (page === '' && href === 'index.html')) {
+      a.classList.add('active');
     }
   });
 })();
 
-// ── Scroll-based nav shadow ──────────────────────────────────────────────────
+// Scroll nav shadow
 (function () {
-  const nav = document.querySelector("nav");
+  var nav = document.querySelector('nav');
   if (!nav) return;
-  const onScroll = () => {
-    nav.style.boxShadow =
-      window.scrollY > 10 ? "0 1px 24px rgba(0,0,0,.5)" : "";
-  };
-  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener('scroll', function () {
+    nav.style.boxShadow = window.scrollY > 10 ? '0 1px 24px rgba(0,0,0,.5)' : '';
+  }, { passive: true });
 })();
