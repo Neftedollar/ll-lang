@@ -57,5 +57,6 @@
     <Compile Include="StdlibMapTests.fs" />
     <Compile Include="StdlibStateParsecTests.fs" />
     <Compile Include="StdlibJsonTests.fs" />
+    <Compile Include="CorpusInvalidTests.fs" />
   </ItemGroup>
 </Project>
