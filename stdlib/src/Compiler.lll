@@ -23,14 +23,17 @@ showErrors(errs List[ElabError]) =
   ) "" errs
 
 -- Compile ll-lang source to F# source (or an error report).
+-- Compile ll-lang source to F# source (or an error report).
+-- Pipeline: Lexer → Parser → Elaborator → Codegen.
+-- (Use compileWithInfer for the full HM-inference pipeline.)
 compile(src Str) =
   tokens = tokenize src
   ast = parseModule tokens
-  errors = elaborate ast
-  if listIsEmpty errors
+  elabErrs = elaborate ast
+  if listIsEmpty elabErrs
     emitModule ast
   else
-    showErrors errors
+    showErrors elabErrs
 
 collectErrors(src Str) =
   tokens = tokenize src

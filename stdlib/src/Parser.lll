@@ -34,6 +34,7 @@ Expr =
   | EMatch Expr (List[Pattern]) (List[Expr])
   | ELam Str Expr
   | ELet Str Expr Expr
+  | ELetTuple Str Str Expr Expr
   | EList (List[Expr])
   | EBinOp Str Expr Expr
   | ETuple Expr Expr
@@ -296,9 +297,7 @@ parseIf(toks List[Token]) =
   (EIf cond thenE elseE, rest5)
 
 skipKwIn(toks List[Token]) =
-  match toks
-    | KwLet :: r -> skipNewlines r
-    | _ -> skipNewlines toks
+  skipNewlines toks
 
 parseLetIn(toks List[Token]) =
   match toks
@@ -307,7 +306,7 @@ parseLetIn(toks List[Token]) =
       let (e1, rest2) = parseExpr rest0
       rest3 = skipKwIn rest2
       let (e2, rest4) = parseExpr rest3
-      (ELet a e1 (ELet b (ETuple e1 e2) e2), rest4)
+      (ELetTuple a b e1 e2, rest4)
     | Ident name :: Eq :: rest ->
       rest0 = skipNewlines rest
       let (e1, rest2) = parseExpr rest0

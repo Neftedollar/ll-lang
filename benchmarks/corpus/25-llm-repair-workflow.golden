@@ -1,0 +1,51 @@
+OK 1 valid program
+OK 2 unbound variable
+OK 3 duplicate function
+OK 4 valid match with constructors
+OK 5 unbound constructor
+OK 6 let binding scoping
+OK 7 external decl registers name
+OK 8 opaque type and external
+OK 9 non-exhaustive match
+OK 1 isFlex $0=true
+OK 2 isFlex Int=false
+OK 3 isFlex a=false
+OK 4 freshVarName 0
+OK 5 freshVarName 42
+OK 6 renderType Name
+OK 7 renderType Fn
+OK 8 renderType App
+OK 9 applyType no-op
+OK 10 applyType flex->Str
+OK 11 applyType rigid
+OK 12 applyType TyFn
+OK 13 unify same
+OK 14 unify mismatch
+OK 15 unify flex=Int
+OK 16 unify TyFn
+OK 17 generalize
+OK 18 instantiate
+OK 19 occursIn true
+OK 20 occursIn false
+Done
+OK 1 EInt
+OK 2 EStr
+OK 3 EBool
+OK 4 lambda id
+OK 5 lambda const
+OK 6 app id
+OK 7 let
+OK 8 if
+OK 9 binop +
+OK 10 list
+OK 11 unbound
+OK 12 lambda arith
+Done
+OK 1 valid program no errors
+OK 2 unbound var E002 detected
+OK 3 non-exhaustive E003 detected
+OK 4 MCP JSON ok:true on good src
+OK 5 MCP JSON ok:false on bad src
+OK 6 compile produces output
+OK 7 broken and fixed differ
+Done

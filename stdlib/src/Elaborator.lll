@@ -18,6 +18,8 @@ errMsg(e ElabError) =
 
 Env = MkEnv (List[Str])
 
+TypeEntry = MkTypeEntry Str (List[Str])
+
 emptyEnv = MkEnv []
 
 envAdd(name Str)(env Env) =
@@ -160,6 +162,11 @@ checkExpr(env Env)(e Expr) =
       env2 = envAdd name env
       bodyErrs = checkExpr env2 body
       listAppend rhsErrs bodyErrs
+    | ELetTuple a b rhs body ->
+      rhsErrs = checkExpr env rhs
+      env2 = envAdd b (envAdd a env)
+      bodyErrs = checkExpr env2 body
+      listAppend rhsErrs bodyErrs
     | EMatch scrut pats bodies ->
       scrutErrs = checkExpr env scrut
       armErrs = checkArms env pats bodies
@@ -236,6 +243,102 @@ builtinNames =
   "true" :: "false" ::
   []
 
+-- ---- Type constructor map --------------------------------------------------
+
+buildTypeMap(decls List[Decl]) =
+  listFold (\acc d.
+    match d
+      | DType _ _ ctors ->
+        allNms = conNames ctors
+        listFold (\acc2 c. MkTypeEntry c allNms :: acc2) acc allNms
+      | _ -> acc
+  ) [] decls
+
+typeMapLookup(nm Str)(m List[TypeEntry]) =
+  match m
+    | [] -> []
+    | entry :: rest ->
+      match entry
+        | MkTypeEntry k vs ->
+          if k == nm
+            vs
+          else
+            typeMapLookup nm rest
+
+-- ---- Exhaustiveness checking -----------------------------------------------
+
+hasWildOrVar(pats List[Pattern]) =
+  match pats
+    | [] -> false
+    | p :: rest ->
+      match p
+        | PWild -> true
+        | PVar _ -> true
+        | _ -> hasWildOrVar rest
+
+extractConNamesFromPats(pats List[Pattern]) =
+  listFold (\acc p.
+    match p
+      | PCon name _ -> listAppend acc [name]
+      | _ -> acc
+  ) [] pats
+
+buildMissingMsg(missing List[Str]) =
+  listFold (\acc nm.
+    if strLen acc == 0
+      nm
+    else
+      strConcat acc (strConcat ", " nm)
+  ) "" missing
+
+checkExhaustPats(typeMap List[TypeEntry])(pats List[Pattern]) =
+  if hasWildOrVar pats
+    []
+  else
+    conNms = extractConNamesFromPats pats
+    match conNms
+      | [] -> []
+      | first :: _ ->
+        allCons = typeMapLookup first typeMap
+        if listIsEmpty allCons
+          []
+        else
+          missing = listFilter (\c. listContains c conNms == false) allCons
+          if listIsEmpty missing
+            []
+          else
+            msg = strConcat "Non-exhaustive match: missing " (buildMissingMsg missing)
+            [MkError msg]
+
+checkExhaustExpr(typeMap List[TypeEntry])(e Expr) =
+  match e
+    | EMatch _ pats bodies ->
+      patErrs = checkExhaustPats typeMap pats
+      bodyErrs = listFold (\acc b. listAppend acc (checkExhaustExpr typeMap b)) [] bodies
+      listAppend patErrs bodyErrs
+    | EApp f x ->
+      listAppend (checkExhaustExpr typeMap f) (checkExhaustExpr typeMap x)
+    | ELam _ body -> checkExhaustExpr typeMap body
+    | ELet _ v body -> listAppend (checkExhaustExpr typeMap v) (checkExhaustExpr typeMap body)
+    | ELetTuple _ _ v body -> listAppend (checkExhaustExpr typeMap v) (checkExhaustExpr typeMap body)
+    | EIf c t f ->
+      listAppend (listAppend (checkExhaustExpr typeMap c) (checkExhaustExpr typeMap t)) (checkExhaustExpr typeMap f)
+    | EBinOp _ l r -> listAppend (checkExhaustExpr typeMap l) (checkExhaustExpr typeMap r)
+    | EList items -> listFold (\acc i. listAppend acc (checkExhaustExpr typeMap i)) [] items
+    | ECons h t -> listAppend (checkExhaustExpr typeMap h) (checkExhaustExpr typeMap t)
+    | ETuple a b -> listAppend (checkExhaustExpr typeMap a) (checkExhaustExpr typeMap b)
+    | _ -> []
+
+checkExhaustDecl(typeMap List[TypeEntry])(d Decl) =
+  match d
+    | DFn _ _ _ body -> checkExhaustExpr typeMap body
+    | DLet _ body -> checkExhaustExpr typeMap body
+    | DExport inner -> checkExhaustDecl typeMap inner
+    | _ -> []
+
+checkExhaustDecls(typeMap List[TypeEntry])(decls List[Decl]) =
+  listFold (\acc d. listAppend acc (checkExhaustDecl typeMap d)) [] decls
+
 -- ---- Top-level elaboration -------------------------------------------------
 
 elaborate(m Module) =
@@ -245,7 +348,9 @@ elaborate(m Module) =
       env = collectDecls decls builtinEnv
       dupErrs = checkDuplicates decls
       bodyErrs = checkDecls env decls
-      listAppend dupErrs bodyErrs
+      typeMap = buildTypeMap decls
+      exhaustErrs = checkExhaustDecls typeMap decls
+      listAppend dupErrs (listAppend bodyErrs exhaustErrs)
 
 -- ---- Test helpers ----------------------------------------------------------
 
@@ -337,5 +442,18 @@ main =
     []
   m8 = MkModule ("M" :: []) decls8
   _ = assertNoErrors "8 opaque type and external" (elaborate m8)
+
+  -- Test 9: Non-exhaustive match — error reported (only Some, not None)
+  nonExhMatch =
+    EMatch (EVar "x")
+      (PCon "Red" [] :: [])
+      (EInt 1 :: [])
+  colorCtors9 = MkCon "Red" [] :: MkCon "Black" [] :: []
+  decls9 =
+    DType "Color" [] colorCtors9 ::
+    DFn "describePartial" (MkParam "x" (TyName "Color") :: []) None nonExhMatch ::
+    []
+  m9 = MkModule ("M" :: []) decls9
+  _ = assertHasError "9 non-exhaustive match" "Non-exhaustive" (elaborate m9)
 
   0

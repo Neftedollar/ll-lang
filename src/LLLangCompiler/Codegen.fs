@@ -674,7 +674,17 @@ let fileExists (path: string) = System.IO.File.Exists(path: string)
 let exit (code: int64) : unit = System.Environment.Exit(int code)
 let listConcat (xss: 'a list list) = List.concat xss
 let listIsEmpty (xs: 'a list) = List.isEmpty xs
-let getArgs : string list = System.Environment.GetCommandLineArgs() |> Array.toList |> List.tail"""
+let getArgs : string list = System.Environment.GetCommandLineArgs() |> Array.toList |> List.tail
+let ll_dirList (path: string) = System.IO.Directory.GetFiles(path) |> Array.toList
+let ll_processRun (cmd: string) (args: string list) =
+    let psi = System.Diagnostics.ProcessStartInfo(cmd)
+    for a in args do psi.ArgumentList.Add(a)
+    psi.RedirectStandardOutput <- true
+    psi.UseShellExecute <- false
+    let proc = System.Diagnostics.Process.Start(psi)
+    let output = proc.StandardOutput.ReadToEnd()
+    proc.WaitForExit()
+    output"""
 
 /// Maybe-dependent prelude block — emitted only when user declares `type Maybe`
 /// and at least one Maybe helper is referenced.
@@ -713,6 +723,7 @@ let private fsharpPreludeCoreNames : Set<string> =
         "charIsDigit"; "charIsAlpha"; "charIsSpace"
         "readFile"; "writeFile"; "fileExists"; "exit"
         "listConcat"; "listIsEmpty"; "getArgs"
+        "ll_dirList"; "ll_processRun"
     ]
 
 let private fsharpPreludeMaybeNames : Set<string> =

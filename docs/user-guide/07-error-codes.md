@@ -159,7 +159,7 @@ bad = doubled (Box 5)
 E006 MissingImpl Functor for Box
 ```
 
-**Fix:** add `impl Functor Box = fn map ... = ...` or call `doubled` with
+**Fix:** add an `impl Functor Box` block defining `map`, or call `doubled` with
 a type that already has an impl (e.g. `Maybe`).
 
 ## E007 — PlatformMismatch

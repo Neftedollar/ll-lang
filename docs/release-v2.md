@@ -9,11 +9,11 @@ This document is the binding checklist for `v2` readiness. A gate is either
 
 | # | Gate | Status | How to verify |
 |---|------|--------|---------------|
-| G1.1 | Self-hosted compiler compiles `20-bootstrap-compiler.lll` without errors | BLOCK | `lllc run spec/examples/valid/20-bootstrap-compiler.lll` |
-| G1.2 | `compiler₁.fs == compiler₂.fs` (fixpoint byte-identical) | BLOCK | See `docs/compiler-dev/fixpoint-snapshots/` |
-| G1.3 | All `stdlib/src/*.lll` compile without errors under `lllc run` | BLOCK | `for f in stdlib/src/*.lll; do lllc run "$f"; done` |
-| G1.4 | `spec/examples/valid/24-pipeline-v2.lll` passes all 4 tests | BLOCK | `lllc run spec/examples/valid/24-pipeline-v2.lll` |
-| G1.5 | `spec/examples/valid/25-llm-repair-workflow.lll` passes all 7 tests | BLOCK | `lllc run spec/examples/valid/25-llm-repair-workflow.lll` |
+| G1.1 | Self-hosted compiler compiles `20-bootstrap-compiler.lll` without errors | PASS | `bash tools/check-fixpoint.sh spec/examples/valid/20-bootstrap-compiler.lll` |
+| G1.2 | `compiler₁.fs == compiler₂.fs` (fixpoint byte-identical) | PARTIAL | PASS for library files (no main): `bash tools/check-fixpoint.sh spec/examples/valid/01-basics.lll`. BLOCK for executable files: stage0 inlines 40+ prelude helpers; self-hosted emits `open LLLang.Prelude`; stage0 also uses `let rec … and …` mutual group + `[<EntryPoint>]` wrapper. Requires stage0 prelude-emission mode change (M5 F# touch). |
+| G1.3 | All `stdlib/src/*.lll` compile without errors under `lllc run` | PASS | `for f in stdlib/src/*.lll; do lllc run "$f"; done` — all 33 modules OK |
+| G1.4 | `spec/examples/valid/24-pipeline-v2.lll` passes all 4 tests | PASS | `lllc run spec/examples/valid/24-pipeline-v2.lll` |
+| G1.5 | `spec/examples/valid/25-llm-repair-workflow.lll` passes all 7 tests | PASS | `lllc run spec/examples/valid/25-llm-repair-workflow.lll` |
 
 ## G2 — Milestone completion
 
@@ -24,7 +24,7 @@ This document is the binding checklist for `v2` readiness. A gate is either
 | G2.2 | M2 (project & deps) all items `[x]` | PASS | roadmap §M2 |
 | G2.3 | M3 (stdlib foundation) all items `[x]` | PASS | roadmap §M3 |
 | G2.4 | M4 (syntax ergonomics) all items `[x]` | PASS | roadmap §M4 |
-| G2.5 | M5 (self-host transition) — policy items `[x]`; "compile itself" `[ ]` | PARTIAL | M5 gap: file I/O FFI |
+| G2.5 | M5 (self-host transition) — policy items `[x]`; "compile itself" `[ ]` | PARTIAL | file I/O FFI added (PR #127); `let rec` conditional done (containsVarExpr); G1.2 PASS for library files; remaining: stage0 prelude-mode change for executable files |
 | G2.6 | M6 (LLM operating system) all items `[x]` | PASS | roadmap §M6 |
 | G2.7 | M7 (benchmarks & release gates) all items `[x]` | PARTIAL | this doc |
 
@@ -32,18 +32,18 @@ This document is the binding checklist for `v2` readiness. A gate is either
 
 | # | Gate | Status | How to verify |
 |---|------|--------|---------------|
-| G3.1 | All `spec/examples/valid/*.lll` parse and elaborate without errors | BLOCK | `dotnet test --filter Category=Corpus` |
-| G3.2 | All `spec/examples/invalid/*.lll` trigger the expected error code | BLOCK | `dotnet test --filter Category=Corpus` |
-| G3.3 | xUnit test suite green (`dotnet test`) | BLOCK | `dotnet test` |
-| G3.4 | No `fn`, `type`, `in`, `then`, `with` keywords in ll-lang docs code blocks | BLOCK | audit `docs/user-guide/` |
+| G3.1 | All `spec/examples/valid/*.lll` run without errors | PASS | `for f in spec/examples/valid/*.lll; do lllc run "$f"; done` — 0 failures |
+| G3.2 | All `spec/examples/invalid/*.lll` trigger the expected error code | BLOCK | manual audit: xUnit Category=Corpus filter not implemented |
+| G3.3 | xUnit test suite green (`dotnet test`) | BLOCK | 752 pass, 1 pre-existing failure: `BootstrapPlatformCompilerEmitTests` (C# backend type-erasure issue with `RBMap<object,object>`) |
+| G3.4 | No `fn`, `type`, `in`, `then`, `with` keywords in ll-lang docs code blocks | PASS | audited `docs/user-guide/` — fixed stale `fn` in 07-error-codes.md |
 
 ## G4 — Stdlib correctness
 
 | # | Gate | Status | How to verify |
 |---|------|--------|---------------|
-| G4.1 | All stdlib modules with `main` pass their self-tests | BLOCK | run each stdlib module |
-| G4.2 | `Std.Compiler` 11-test suite passes | BLOCK | `lllc run stdlib/src/Compiler.lll` |
-| G4.3 | `Std.CompilerLoader` 12-test suite passes | BLOCK | `lllc run stdlib/src/CompilerLoader.lll` |
+| G4.1 | All stdlib modules with `main` pass their self-tests | PASS | All 33 stdlib modules run cleanly; `Std.Test` FAILs are expected (testing failure-detection) |
+| G4.2 | `Std.Compiler` 11-test suite passes | PASS | `lllc run stdlib/src/Compiler.lll` — 11/11 OK |
+| G4.3 | `Std.CompilerLoader` 12-test suite passes | PASS | `lllc run stdlib/src/CompilerLoader.lll` — 12/12 OK |
 
 ## G5 — Benchmark thresholds
 

@@ -132,6 +132,127 @@ public static class LlLangProject
         printfn("Done");
     }
 
+    public interface Color { }
+    public sealed record Red() : Color;
+    public sealed record Black() : Color;
+
+    public interface RBMap<K, V> { }
+    public sealed record Leaf<K, V>() : RBMap<K, V>;
+    public sealed record Node<K, V>(Color _0, RBMap<K, V> _1, K _2, V _3, RBMap<K, V> _4) : RBMap<K, V>;
+
+    public static RBMap<K, V> mapEmpty<K, V>() => new Leaf<K, V>();
+
+    public static long mapSize<K, V>(RBMap<K, V> m) => 0L;
+
+    public static Func<K, Func<V, Func<RBMap<K, V>, RBMap<K, V>>>> balanceLeft<K, V>(RBMap<K, V> left) => k => v => right => new Leaf<K, V>();
+
+    public static Func<K, Func<V, Func<RBMap<K, V>, RBMap<K, V>>>> balanceRight<K, V>(RBMap<K, V> left) => k => v => right => new Leaf<K, V>();
+
+    public static Func<RBMap<K, V>, Func<K, Func<V, Func<RBMap<K, V>, RBMap<K, V>>>>> balance<K, V>(Color c) => left => k => v => right => new Leaf<K, V>();
+
+    public static Func<K, Func<V, Func<RBMap<K, V>, RBMap<K, V>>>> ins<K, V>(Func<K, Func<K, long>> cmp) => k => v => m => new Leaf<K, V>();
+
+    public static Func<K, Func<V, Func<RBMap<K, V>, RBMap<K, V>>>> mapInsert<K, V>(Func<K, Func<K, long>> cmp) => k => v => m => new Leaf<K, V>();
+
+    public static Func<K, Func<RBMap<K, V>, Maybe<V>>> mapLookup<V, K>(Func<K, Func<K, long>> cmp) => k => m => default;
+
+    public static Func<K, Func<RBMap<K, V>, bool>> mapContains<K, V>(Func<K, Func<K, long>> cmp) => k => m => false;
+
+    public static Func<B, Func<RBMap<K, V>, B>> mapFold<B, K, V>(Func<B, Func<K, Func<V, B>>> f) => acc => m => default!;
+
+    public static List<K> mapKeys<K, V>(RBMap<K, V> m) => new List<K>();
+
+    public static Func<long, long> intCmp(long a) => b => ((a < b) ? (0L - 1L) : ((a > b) ? 1L : 0L));
+
+    public static Func<string, long> strCmp(string a) => b => ((string.Compare(a, b, System.StringComparison.Ordinal) < 0) ? (0L - 1L) : ((string.Compare(a, b, System.StringComparison.Ordinal) > 0) ? 1L : 0L));
+
+    public static Func<bool, long> mapCheck(string label) => ok => 0L;
+
+    public static void __ll_main_Std_Map()
+    {
+        var m0 = new Leaf<long, long>();
+        (mapCheck("1 mapEmpty size=0"))((mapSize(m0) == 0L));
+        var m1 = mapInsert<long,long>(intCmp)(3L)(30L)(m0);
+        var m2 = mapInsert<long,long>(intCmp)(1L)(10L)(m1);
+        var m3 = mapInsert<long,long>(intCmp)(4L)(40L)(m2);
+        var m4 = mapInsert<long,long>(intCmp)(2L)(20L)(m3);
+        var m5 = mapInsert<long,long>(intCmp)(5L)(50L)(m4);
+        (mapCheck("2 mapInsert size=5"))((mapSize<long,long>(m5) == 5L));
+        var r3 = mapLookup<long,long>(intCmp)(3L)(m5);
+        (mapCheck("3 mapLookup found"))((System.Object.Equals(maybeWithDefault(0L)(r3), 30L)));
+        var r4 = mapLookup<long,long>(intCmp)(9L)(m5);
+        (mapCheck("4 mapLookup missing"))((r4 == new None<long>()));
+        (mapCheck("5 mapContains present"))(mapContains<long,long>(intCmp)(2L)(m5));
+        (mapCheck("6 mapContains absent"))((mapContains<long,long>(intCmp)(9L)(m5) == false));
+        var sumV = ((mapFold<long,long,long>(acc => k => v => (acc + v)))(0L))(m5);
+        (mapCheck("7 mapFold sum vals"))((sumV == 150L));
+        var ks = mapKeys<long,long>(m5);
+        (mapCheck("8 mapKeys length"))((listLen<long>(ks) == 5L));
+        var sm = mapInsert<string,long>(strCmp)("b")(2L)(mapInsert<string,long>(strCmp)("a")(1L)(new Leaf<string, long>()));
+        var r9 = mapLookup<long,string>(strCmp)("a")(sm);
+        (mapCheck("9 strCmp lookup"))((System.Object.Equals(maybeWithDefault(0L)(r9), 1L)));
+        var m10 = mapInsert<long,long>(intCmp)(42L)(1L)(new Leaf<long, long>());
+        (mapCheck("10 mapEmpty size=0"))((mapSize(new Leaf<object, object>()) == 0L));
+        var m11 = mapInsert<long,long>(intCmp)(1L)(99L)(m5);
+        var r11 = mapLookup<long,long>(intCmp)(1L)(m11);
+        (mapCheck("11 duplicate key insert"))((System.Object.Equals(maybeWithDefault(0L)(r11), 99L)));
+        var ksSorted = mapKeys<long,long>(m5);
+        var h = listHead<long>(ksSorted);
+        (mapCheck("12 sorted order"))((System.Object.Equals(maybeWithDefault(0L)(h), 1L)));
+        printfn("Done");
+    }
+
+    public static Func<List<A>, List<A>> listTake<A>(long n) => xs => new List<A>();
+
+    public static Func<List<A>, List<A>> listDrop<A>(long n) => xs => new List<A>();
+
+    public static Func<List<A>, List<B>> listFlatMap<B, A>(Func<A, List<B>> f) => xs => listConcat<B>(listMap<A,List<B>>(f)(xs));
+
+    public static Func<List<A>, bool> listAny<A>(Func<A, bool> p) => xs => ((listFold<A,bool>(acc => x => (acc ? true : p((A)(x)))))(false))(xs);
+
+    public static Func<List<A>, bool> listAll<A>(Func<A, bool> p) => xs => ((listFold<A,bool>(acc => x => (acc ? p((A)(x)) : false)))(true))(xs);
+
+    public static Func<List<A>, Maybe<A>> listFind<A>(Func<A, bool> p) => xs => default;
+
+    public static Func<Func<A, bool>, Func<List<A>, Maybe<long>>> listFindIndexFrom<A>(long i) => p => xs => default;
+
+    public static Func<List<A>, Maybe<long>> listFindIndex<A>(Func<A, bool> p) => xs => listFindIndexFrom<A>(0L)(p)(xs);
+
+    public static Func<List<A>, Tuple<List<A>, List<A>>> listPartition<A>(Func<A, bool> p) => xs => default!;
+
+    public static Func<string, Func<string, object>> listCheck(string label) => got => expected => ((got == expected) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat(" expected="))(strConcat(expected)((strConcat(" got="))(got)))))));
+
+    public static string showIntList(List<long> xs) => ((Func<string>)(() => { var strs = listMap<long,string>(intToStr)(xs); return ((listFold<string,string>(acc => s => strConcat(acc)(strConcat(",")(s))))(""))(strs); }))();
+
+    public static void __ll_main_Std_List()
+    {
+        ((listCheck("1 listTake 0"))(showIntList(listTake<long>(0L)(new List<long> { 1L, 2L, 3L }))))("");
+        ((listCheck("2 listTake 2"))(showIntList(listTake<long>(2L)(new List<long> { 1L, 2L, 3L }))))(",1,2");
+        ((listCheck("3 listTake all"))(showIntList(listTake<long>(10L)(new List<long> { 1L, 2L, 3L }))))(",1,2,3");
+        ((listCheck("4 listDrop 0"))(showIntList(listDrop<long>(0L)(new List<long> { 1L, 2L, 3L }))))(",1,2,3");
+        ((listCheck("5 listDrop 2"))(showIntList(listDrop<long>(2L)(new List<long> { 1L, 2L, 3L }))))(",3");
+        ((listCheck("6 listDrop all"))(showIntList(listDrop<long>(10L)(new List<long> { 1L, 2L, 3L }))))("");
+        ((listCheck("7 listFlatMap"))(showIntList((listFlatMap<long,long>(x => new List<long> { x, x }))(new List<long> { 1L, 2L, 3L }))))(",1,1,2,2,3,3");
+        ((listCheck("8 listAny true"))(boolStr((listAny<long>(x => (x > 2L)))(new List<long> { 1L, 2L, 3L }))))("true");
+        ((listCheck("9 listAny false"))(boolStr((listAny<long>(x => (x > 5L)))(new List<long> { 1L, 2L, 3L }))))("false");
+        ((listCheck("10 listAll true"))(boolStr((listAll<long>(x => (x > 0L)))(new List<long> { 1L, 2L, 3L }))))("true");
+        ((listCheck("11 listAll false"))(boolStr((listAll<long>(x => (x > 1L)))(new List<long> { 1L, 2L, 3L }))))("false");
+        var r12 = (listFind<long>(x => (x > 2L)))(new List<long> { 1L, 2L, 3L });
+        ((listCheck("12 listFind found"))(intToStr((long)(maybeWithDefault(0L)(r12)))))("3");
+        var r13 = (listFind<long>(x => (x > 10L)))(new List<long> { 1L, 2L, 3L });
+        ((listCheck("13 listFind none"))(intToStr((long)(maybeWithDefault(0L)(r13)))))("0");
+        var r14 = (listFindIndex<long>(x => (x == 2L)))(new List<long> { 1L, 2L, 3L });
+        ((listCheck("14 listFindIndex"))(intToStr((long)(maybeWithDefault(-1L)(r14)))))("1");
+        var r15 = (listFindIndex<long>(x => (x == 9L)))(new List<long> { 1L, 2L, 3L });
+        ((listCheck("15 listFindIndex none"))(intToStr((long)(maybeWithDefault(-1L)(r15)))))("-1");
+        var __ll_tup_380 = (listPartition<long>(x => (x > 2L)))(new List<long> { 1L, 2L, 3L, 4L });
+        var yes = __ll_tup_380.Item1;
+        var no = __ll_tup_380.Item2;
+        ((listCheck("16 partition yes"))(showIntList(yes)))(",3,4");
+        ((listCheck("16 partition no"))(showIntList(no)))(",1,2");
+        printfn("Done");
+    }
+
     public interface Token { }
     public sealed record KwLet() : Token;
     public sealed record KwTag() : Token;
@@ -246,6 +367,26 @@ public static class LlLangProject
 
     public static Func<string, Func<string, object>> checkTokens(string label) => src => expected => ((Func<object>)(() => { var got = showTokens(stripNewlines(tokenize(src))); return ((got == expected) ? printfn((strConcat("OK "))(label)) : ((Func<object>)(() => { var p1 = (strConcat("FAIL "))(label); return ((Func<object>)(() => { var p2 = strConcat(p1)("\n  expected: "); return ((Func<object>)(() => { var p3 = strConcat(p2)(expected); return ((Func<object>)(() => { var p4 = strConcat(p3)("\n  got:      "); return ((Func<object>)(() => { var p5 = strConcat(p4)(got); return printfn(p5); }))(); }))(); }))(); }))(); }))()); }))();
 
+    public static void __ll_main_Std_Lexer()
+    {
+        ((checkTokens("1 int literal"))("42"))("Int:42 Eof");
+        ((checkTokens("2 str literal"))("\"hi\""))("Str:hi Eof");
+        ((checkTokens("3 true"))("true"))("KwTrue Eof");
+        ((checkTokens("4 false"))("false"))("KwFalse Eof");
+        ((checkTokens("5 if"))("if"))("KwIf Eof");
+        ((checkTokens("6 match"))("match"))("KwMatch Eof");
+        ((checkTokens("7 ident"))("foo"))("Ident:foo Eof");
+        ((checkTokens("8 upper ident"))("Foo"))("TypeId:Foo Eof");
+        ((checkTokens("9 arrow"))("->"))("Arrow Eof");
+        ((checkTokens("10 backslash"))("\\"))("Backslash Eof");
+        ((checkTokens("11 pipe"))("|"))("Bar Eof");
+        ((checkTokens("12 equals"))("="))("Eq Eof");
+        ((checkTokens("13 let"))("let"))("KwLet Eof");
+        ((checkTokens("14 module"))("module"))("KwModule Eof");
+        ((checkTokens("15 import"))("import"))("KwImport Eof");
+        printfn("Done");
+    }
+
     public interface Pattern { }
     public sealed record PVar(string _0) : Pattern;
     public sealed record PWild() : Pattern;
@@ -268,6 +409,7 @@ public static class LlLangProject
     public sealed record EMatch(Expr _0, List<Pattern> _1, List<Expr> _2) : Expr;
     public sealed record ELam(string _0, Expr _1) : Expr;
     public sealed record ELet(string _0, Expr _1, Expr _2) : Expr;
+    public sealed record ELetTuple(string _0, string _1, Expr _2, Expr _3) : Expr;
     public sealed record EList(List<Expr> _0) : Expr;
     public sealed record EBinOp(string _0, Expr _1, Expr _2) : Expr;
     public sealed record ETuple(Expr _0, Expr _1) : Expr;
@@ -344,7 +486,7 @@ public static class LlLangProject
 
     public static Tuple<Expr, List<Token>> parseIf(List<Token> toks) => default!;
 
-    public static List<Token> skipKwIn(List<Token> toks) => new List<Token>();
+    public static List<Token> skipKwIn(List<Token> toks) => skipNewlines(toks);
 
     public static Tuple<Expr, List<Token>> parseLetIn(List<Token> toks) => default!;
 
@@ -428,19 +570,25 @@ public static class LlLangProject
 
     public static void __ll_main_Std_Parser()
     {
-        var toks = new List<Token>();
-        parserCheckModule("5")(toks)(2L);
+        var toks5 = new List<Token>();
+        ((parserCheckModule("5 module 2 decls"))(toks5))(2L);
+        var toks18 = new List<Token>();
+        ((parserCheckDecl("18 DFn"))(toks18))("DFn add body=(EBinOp(+ EVar a EVar b))");
+        printfn("Done");
     }
 
     public interface ElabError { }
     public sealed record MkError(string _0) : ElabError;
 
-    public static object errMsg(ElabError e) => default!;
+    public static string errMsg(ElabError e) => "";
 
     public interface Env { }
     public sealed record MkEnv(List<string> _0) : Env;
 
-    public static Env emptyEnv() => new MkEnv(new List<string> {  });
+    public interface TypeEntry { }
+    public sealed record MkTypeEntry(string _0, List<string> _1) : TypeEntry;
+
+    public static readonly Env emptyEnv = new MkEnv(new List<string> {  });
 
     public static Func<Env, Env> envAdd(string name) => env => default!;
 
@@ -450,17 +598,17 @@ public static class LlLangProject
 
     public static Func<Env, bool> envHas(string name) => env => false;
 
-    public static List<object> patBinders(Pattern p) => new List<object>();
+    public static List<string> patBinders(Pattern p) => new List<string>();
 
-    public static List<object> patBindersList(List<Pattern> ps) => new List<object>();
+    public static List<string> patBindersList(List<Pattern> ps) => new List<string>();
 
-    public static object paramName(Param p) => default!;
+    public static string paramName(Param p) => "";
 
-    public static List<object> paramNames(List<Param> ps) => (listMap<Param,object>(p => paramName(p)))(ps);
+    public static List<string> paramNames(List<Param> ps) => (listMap<Param,string>(p => paramName(p)))(ps);
 
-    public static object conName(Constructor c) => default!;
+    public static string conName(Constructor c) => "";
 
-    public static List<object> conNames(List<Constructor> cs) => (listMap<Constructor,object>(c => conName(c)))(cs);
+    public static List<string> conNames(List<Constructor> cs) => (listMap<Constructor,string>(c => conName(c)))(cs);
 
     public static Func<List<string>, bool> listContains(string name) => xs => ((listFold<string,bool>(acc => x => strOrEq(name)(acc)(x)))(false))(xs);
 
@@ -468,7 +616,7 @@ public static class LlLangProject
 
     public static List<string> findDuplicates(List<string> xs) => findDuplicatesAcc(xs)(new List<string> {  });
 
-    public static Maybe<object> declName(Decl d) => default;
+    public static Maybe<string> declName(Decl d) => default;
 
     public static Func<Decl, List<string>> addDeclName(List<string> acc) => d => new List<string>();
 
@@ -492,7 +640,25 @@ public static class LlLangProject
 
     public static List<ElabError> checkDuplicates(List<Decl> decls) => ((Func<List<ElabError>>)(() => { var names = collectDeclNames(decls); return ((Func<List<ElabError>>)(() => { var dups = findDuplicates(names); return (listMap<string,ElabError>(name => makeDupError(name)))(dups); }))(); }))();
 
-    public static List<string> builtinNames() => new List<string>();
+    public static readonly List<string> builtinNames = new List<string>();
+
+    public static List<TypeEntry> buildTypeMap(List<Decl> decls) => new List<TypeEntry>();
+
+    public static Func<List<TypeEntry>, List<string>> typeMapLookup(string nm) => m => new List<string>();
+
+    public static bool hasWildOrVar(List<Pattern> pats) => false;
+
+    public static List<string> extractConNamesFromPats(List<Pattern> pats) => new List<string>();
+
+    public static string buildMissingMsg(List<string> missing) => ((listFold<string,string>(acc => nm => ((strLen(acc) == 0L) ? ((nm)?.ToString() ?? "") : ((strConcat(acc)((strConcat(", "))(nm)))?.ToString() ?? ""))))(""))(missing);
+
+    public static Func<List<Pattern>, List<ElabError>> checkExhaustPats(List<TypeEntry> typeMap) => pats => new List<ElabError>();
+
+    public static Func<Expr, List<ElabError>> checkExhaustExpr(List<TypeEntry> typeMap) => e => new List<ElabError>();
+
+    public static Func<Decl, List<ElabError>> checkExhaustDecl(List<TypeEntry> typeMap) => d => new List<ElabError>();
+
+    public static Func<List<Decl>, List<ElabError>> checkExhaustDecls(List<TypeEntry> typeMap) => decls => ((listFold<Decl,List<ElabError>>(acc => d => listAppend<ElabError>(acc)(checkExhaustDecl(typeMap)(d))))(new List<ElabError> {  }))(decls);
 
     public static List<ElabError> elaborate(Module m) => new List<ElabError>();
 
@@ -506,7 +672,116 @@ public static class LlLangProject
 
     public static Func<string, Func<List<ElabError>, object>> assertHasError(string label) => needle => errs => (hasErrorWith(needle)(errs) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat(" — expected error: "))(needle)))));
 
-    public static long __ll_main_Std_Elaborator() => 0L;
+    public static readonly long __ll_main_Std_Elaborator = 0L;
+
+    public interface InferResult<A> { }
+    public sealed record InferOk<A>(A _0) : InferResult<A>;
+    public sealed record InferErr<A>(string _0) : InferResult<A>;
+
+    public static bool isFlex(string name) => ((strLen(name) > 0L) ? (strSlice(name)(0L)(1L) == "$") : false);
+
+    public static string freshVarName(long n) => strConcat("$")(intToStr(n));
+
+    public interface Scheme { }
+    public sealed record MkScheme(List<string> _0, TypeExpr _1) : Scheme;
+
+    public static Scheme schemeMono(TypeExpr t) => new MkScheme(new List<string> {  }, t);
+
+    public static List<string> schemeVars(Scheme s) => new List<string>();
+
+    public static TypeExpr schemeBody(Scheme s) => default!;
+
+    public static RBMap<K, V> substEmpty<K, V>() => new Leaf<K, V>();
+
+    public static Func<TypeExpr, Func<RBMap<string, TypeExpr>, RBMap<string, TypeExpr>>> substInsert(string v) => t => s => mapInsert<string,TypeExpr>(strCmp)(v)(t)(s);
+
+    public static Func<RBMap<string, TypeExpr>, Maybe<TypeExpr>> substLookup(string v) => s => mapLookup<TypeExpr,string>(strCmp)(v)(s);
+
+    public static Func<RBMap<string, TypeExpr>, RBMap<string, TypeExpr>> substRemove(string v) => s => ((mapFold<RBMap<string, TypeExpr>,string,TypeExpr>(acc => nk => nv => ((strCmp(v)(nk) == 0L) ? acc : mapInsert<string,TypeExpr>(strCmp)(nk)(nv)(acc))))(new Leaf<string, TypeExpr>()))(s);
+
+    public static Func<TypeExpr, TypeExpr> applyType(RBMap<string, TypeExpr> s) => t => default!;
+
+    public static Func<Scheme, Scheme> applyScheme(RBMap<string, TypeExpr> s) => sch => default!;
+
+    public static Func<RBMap<string, Scheme>, RBMap<string, Scheme>> applyEnv(RBMap<string, TypeExpr> s) => env => ((mapFold<RBMap<string, Scheme>,string,Scheme>(acc => k => sch => mapInsert<string,Scheme>(strCmp)(k)(applyScheme(s)(sch))(acc)))(new Leaf<string, Scheme>()))(env);
+
+    public static Func<RBMap<string, TypeExpr>, RBMap<string, TypeExpr>> substCompose(RBMap<string, TypeExpr> s1) => s2 => new Leaf<string, TypeExpr>();
+
+    public static List<string> ftvTypeList(TypeExpr t) => new List<string>();
+
+    public static List<string> ftvSchemeList(Scheme sch) => new List<string>();
+
+    public static List<string> strNub(List<string> xs) => ((listFold<string,List<string>>(acc => x => ((listAny<string>(y => (x == y)))(acc) ? acc : listAppend<string>(acc)(new List<string> { x }))))(new List<string> {  }))(xs);
+
+    public static List<string> ftvEnvList(RBMap<string, Scheme> env) => strNub(((mapFold<List<string>,string,Scheme>(acc => k => sch => listAppend<string>(acc)(ftvSchemeList(sch))))(new List<string> {  }))(env));
+
+    public interface Fresh { }
+    public sealed record MkFresh(long _0) : Fresh;
+
+    public static readonly Fresh freshInit = new MkFresh(0L);
+
+    public static Tuple<TypeExpr, Fresh> freshNext(Fresh f) => default!;
+
+    public static Func<TypeExpr, Scheme> generalize(RBMap<string, Scheme> env) => t => ((Func<Scheme>)(() => { var envFtv = ftvEnvList(env); return ((Func<Scheme>)(() => { var toQuant = (listFilter<string>(v => (listAll<string>(e => (v != e)))(envFtv)))(ftvTypeList(t)); return new MkScheme(toQuant, t); }))(); }))();
+
+    public static Func<List<string>, Func<TypeExpr, Tuple<TypeExpr, Fresh>>> instantiateWith(Fresh f) => vs => body => default!;
+
+    public static Func<Scheme, Tuple<TypeExpr, Fresh>> instantiate(Fresh f) => sch => default!;
+
+    public static Func<TypeExpr, InferResult<RBMap<string, TypeExpr>>> unify(TypeExpr t1) => t2 => default!;
+
+    public static Func<TypeExpr, string> unifyErrMsg(TypeExpr t1) => t2 => (strConcat("Cannot unify "))(strConcat(renderType(t1))((strConcat(" with "))(renderType(t2))));
+
+    public static Func<TypeExpr, InferResult<RBMap<string, TypeExpr>>> bindVar(string v) => t => default!;
+
+    public static Func<TypeExpr, bool> occursIn(string v) => t => (listAny<string>(w => (v == w)))(ftvTypeList(t));
+
+    public static string renderType(TypeExpr t) => "";
+
+    public static RBMap<K, V> typeEnvEmpty<K, V>() => new Leaf<K, V>();
+
+    public static Func<Scheme, Func<RBMap<string, Scheme>, RBMap<string, Scheme>>> typeEnvInsert(string name) => sch => env => mapInsert<string,Scheme>(strCmp)(name)(sch)(env);
+
+    public static Func<RBMap<string, Scheme>, Maybe<Scheme>> typeEnvLookup(string name) => env => mapLookup<Scheme,string>(strCmp)(name)(env);
+
+    public static Func<RBMap<string, Scheme>, RBMap<string, Scheme>> typeEnvApply(RBMap<string, TypeExpr> s) => env => applyEnv(s)(env);
+
+    public static Func<InferResult<RBMap<string, TypeExpr>>, string> extractBound(string v) => r => "";
+
+    public static Func<string, Func<string, object>> typesCheck(string label) => got => expected => ((got == expected) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat(" expected="))(strConcat(expected)((strConcat(" got="))(got)))))));
+
+    public static string strJoin(List<string> xs) => "";
+
+    public static void __ll_main_Std_CompilerTypes()
+    {
+        ((typesCheck("1 isFlex $0=true"))(boolStr(isFlex("$0"))))("true");
+        ((typesCheck("2 isFlex Int=false"))(boolStr(isFlex("Int"))))("false");
+        ((typesCheck("3 isFlex a=false"))(boolStr(isFlex("a"))))("false");
+        ((typesCheck("4 freshVarName 0"))(freshVarName(0L)))("$0");
+        ((typesCheck("5 freshVarName 42"))(freshVarName(42L)))("$42");
+        ((typesCheck("6 renderType Name"))(renderType(new TyName("Int"))))("Int");
+        ((typesCheck("7 renderType Fn"))(renderType(new TyFn(new TyName("Int"), new TyName("Str")))))("Int -> Str");
+        ((typesCheck("8 renderType App"))(renderType(new TyApp(new TyName("Maybe"), new TyName("Int")))))("Maybe Int");
+        var s0 = new Leaf<string, TypeExpr>();
+        ((typesCheck("9 applyType no-op"))(renderType(applyType(s0)(new TyName("Int")))))("Int");
+        var s1 = (substInsert("$0")(new TyName("Str")))(substEmpty<string, TypeExpr>());
+        ((typesCheck("10 applyType flex->Str"))(renderType(applyType(s1)(new TyName("$0")))))("Str");
+        ((typesCheck("11 applyType rigid"))(renderType(applyType(s1)(new TyName("a")))))("a");
+        ((typesCheck("12 applyType TyFn"))(renderType(applyType(s1)(new TyFn(new TyName("$0"), new TyName("Int"))))))("Str -> Int");
+        var u3 = (unify(new TyName("$0")))(new TyName("Int"));
+        ((typesCheck("15 unify flex=Int"))(extractBound("$0")(u3)))("Int");
+        var u4 = (unify(new TyFn(new TyName("$0"), new TyName("$1"))))(new TyFn(new TyName("Int"), new TyName("Str")));
+        ((typesCheck("16 unify TyFn"))(extractBound("$0")(u4)))("Int");
+        var sch1 = (generalize(new Leaf<string, Scheme>()))(new TyFn(new TyName("$0"), new TyName("$0")));
+        ((typesCheck("17 generalize"))(strJoin(schemeVars(sch1))))("$0");
+        var sch2 = new MkScheme(new List<string> { "$0" }, new TyFn(new TyName("$0"), new TyName("$0")));
+        var __ll_tup_3108 = (instantiate(new MkFresh(1L)))(sch2);
+        var t5 = __ll_tup_3108.Item1;
+        ((typesCheck("18 instantiate"))(renderType(t5)))("$1 -> $1");
+        ((typesCheck("19 occursIn true"))(boolStr(occursIn("$0")(new TyApp(new TyName("List"), new TyName("$0"))))))("true");
+        ((typesCheck("20 occursIn false"))(boolStr(occursIn("$0")(new TyApp(new TyName("List"), new TyName("$1"))))))("false");
+        printfn("Done");
+    }
 
     public static Func<List<string>, string> joinWith(string sep) => items => "";
 
@@ -526,7 +801,7 @@ public static class LlLangProject
 
     public static TypeExpr collectTyAppHead(TypeExpr t) => default!;
 
-    public static List<object> collectTyAppArgs(TypeExpr t) => new List<object>();
+    public static List<TypeExpr> collectTyAppArgs(TypeExpr t) => new List<TypeExpr>();
 
     public static string emitPattern(Pattern p) => "";
 
@@ -540,7 +815,7 @@ public static class LlLangProject
 
     public static Expr gatherAppHead(Expr e) => default!;
 
-    public static List<object> gatherAppArgs(Expr e) => new List<object>();
+    public static List<Expr> gatherAppArgs(Expr e) => new List<Expr>();
 
     public static bool isUpperStart(string s) => false;
 
@@ -566,13 +841,21 @@ public static class LlLangProject
 
     public static string emitParamStr(List<Param> ps) => "";
 
+    public static Func<List<Expr>, bool> containsVarExprs(string name) => exprs => false;
+
+    public static Func<Expr, bool> containsVarExpr(string name) => expr => false;
+
     public static string emitDecl(Decl d) => "";
 
     public static string emitDecls(List<Decl> ds) => joinWith("\n\n")(listMap<Decl,string>(emitDecl)(ds));
 
-    public static string emitPrelude() => "// --- ll-lang stdlib prelude (auto-generated) ---\nlet listLen (xs: 'a list) : int64 = int64 (List.length xs)\nlet listMap f xs = List.map f xs\nlet listFilter p xs = List.filter p xs\nlet listFold f z xs = List.fold f z xs\nlet listReverse xs = List.rev xs\nlet listAppend xs ys = List.append xs ys\nlet listConcat xss = List.concat xss\nlet listIsEmpty xs = List.isEmpty xs\nlet strLen (s: string) : int64 = int64 s.Length\nlet strConcat (a: string) (b: string) = a + b\nlet strChars (s: string) = s |> Seq.toList\nlet strFromChars (cs: char list) = System.String(cs |> List.toArray)\nlet intToStr (n: int64) = string n\nlet charToInt (c: char) = int64 (int c)\nlet printfn (s: string) = System.Console.WriteLine(s)\nlet print (s: string) = System.Console.Write(s)\nlet listHead xs = match xs with [] -> None | x :: _ -> Some x\nlet listTail xs = match xs with [] -> None | _ :: t -> Some t\n// --- end prelude ---";
+    public static readonly string emitPrelude = "open LLLang.Prelude";
 
     public static string emitModulePath(List<string> parts) => joinWith(".")(parts);
+
+    public static bool declIsMain(Decl d) => false;
+
+    public static bool moduleHasMain(List<Decl> decls) => false;
 
     public static string emitModule(Module m) => "";
 
@@ -580,11 +863,113 @@ public static class LlLangProject
 
     public static Func<string, Func<string, object>> checkContains(string label) => got => needle => (strContains(needle)(got) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat("\n  missing: "))(strConcat(needle)((strConcat("\n  in: "))(got)))))));
 
-    public static long __ll_main_Std_Codegen() => 0L;
+    public static Func<string, Func<string, object>> checkNotContains(string label) => got => needle => (strContains(needle)(got) ? printfn((strConcat("FAIL "))(strConcat(label)((strConcat("\n  unexpected: "))(strConcat(needle)((strConcat("\n  in: "))(got)))))) : printfn((strConcat("OK "))(label)));
+
+    public static readonly long __ll_main_Std_Codegen = 0L;
+
+    public interface InferState { }
+    public sealed record MkInferState(RBMap<string, Scheme> _0, Fresh _1, List<string> _2, RBMap<string, TypeExpr> _3) : InferState;
+
+    public static RBMap<string, Scheme> inferEnv(InferState st) => new Leaf<string, Scheme>();
+
+    public static Fresh inferFresh(InferState st) => default!;
+
+    public static List<string> inferErrors(InferState st) => new List<string>();
+
+    public static RBMap<string, TypeExpr> inferSubst(InferState st) => new Leaf<string, TypeExpr>();
+
+    public static Func<InferState, InferState> inferAddErr(string msg) => st => default!;
+
+    public static Func<InferState, InferState> inferWithEnv(RBMap<string, Scheme> env) => st => default!;
+
+    public static Func<InferState, InferState> inferWithFresh(Fresh f) => st => default!;
+
+    public static Func<InferState, InferState> inferWithSubst(RBMap<string, TypeExpr> s2) => st => default!;
+
+    public static Tuple<TypeExpr, InferState> inferFreshVar(InferState st) => default!;
+
+    public static readonly TypeExpr tyInt = new TyName("Int");
+
+    public static readonly TypeExpr tyStr = new TyName("Str");
+
+    public static readonly TypeExpr tyBool = new TyName("Bool");
+
+    public static readonly TypeExpr tyChar = new TyName("Char");
+
+    public static readonly TypeExpr tyUnit = new TyName("Unit");
+
+    public static TypeExpr tyList(TypeExpr a) => new TyApp(new TyName("List"), a);
+
+    public static Scheme baseScheme(TypeExpr t) => schemeMono(t);
+
+    public static readonly TypeExpr tyArith = new TyFn(tyInt, new TyFn(tyInt, tyInt));
+
+    public static readonly TypeExpr tyCmp = new TyFn(tyInt, new TyFn(tyInt, tyBool));
+
+    public static readonly TypeExpr tyFloat = new TyName("Float");
+
+    public static TypeExpr tyMaybe(TypeExpr a) => new TyApp(new TyName("Maybe"), a);
+
+    public static Func<TypeExpr, Scheme> scheme1(string v) => t => new MkScheme(new List<string> { v }, t);
+
+    public static Func<string, Func<TypeExpr, Scheme>> scheme2(string v1) => v2 => t => new MkScheme(new List<string> { v1, v2 }, t);
+
+    public static readonly RBMap<string, Scheme> baseEnv = ((Func<RBMap<string, Scheme>>)(() => { var e0 = typeEnvEmpty<string, Scheme>(); return ((Func<RBMap<string, Scheme>>)(() => { var e1 = typeEnvInsert("+")(baseScheme(tyArith))(e0); return ((Func<RBMap<string, Scheme>>)(() => { var e2 = typeEnvInsert("-")(baseScheme(tyArith))(e1); return ((Func<RBMap<string, Scheme>>)(() => { var e3 = typeEnvInsert("*")(baseScheme(tyArith))(e2); return ((Func<RBMap<string, Scheme>>)(() => { var e4 = typeEnvInsert("/")(baseScheme(tyArith))(e3); return ((Func<RBMap<string, Scheme>>)(() => { var e5 = typeEnvInsert("==")(baseScheme(tyCmp))(e4); return ((Func<RBMap<string, Scheme>>)(() => { var e6 = typeEnvInsert("!=")(baseScheme(tyCmp))(e5); return ((Func<RBMap<string, Scheme>>)(() => { var e7 = typeEnvInsert("<")(baseScheme(tyCmp))(e6); return ((Func<RBMap<string, Scheme>>)(() => { var e8 = typeEnvInsert(">")(baseScheme(tyCmp))(e7); return ((Func<RBMap<string, Scheme>>)(() => { var e9 = typeEnvInsert("<=")(baseScheme(tyCmp))(e8); return ((Func<RBMap<string, Scheme>>)(() => { var e10 = typeEnvInsert(">=")(baseScheme(tyCmp))(e9); return ((Func<RBMap<string, Scheme>>)(() => { var e11 = (typeEnvInsert("printfn")(baseScheme(new TyFn(tyStr, tyUnit))))(e10); return ((Func<RBMap<string, Scheme>>)(() => { var e11a = (typeEnvInsert("print")(baseScheme(new TyFn(tyStr, tyUnit))))(e11); return ((Func<RBMap<string, Scheme>>)(() => { var e12 = (typeEnvInsert("intToStr")(baseScheme(new TyFn(tyInt, tyStr))))(e11a); return ((Func<RBMap<string, Scheme>>)(() => { var e12a = (typeEnvInsert("intToChar")(baseScheme(new TyFn(tyInt, tyChar))))(e12); return ((Func<RBMap<string, Scheme>>)(() => { var e12b = (typeEnvInsert("charToInt")(baseScheme(new TyFn(tyChar, tyInt))))(e12a); return ((Func<RBMap<string, Scheme>>)(() => { var e13 = (typeEnvInsert("strConcat")(baseScheme(new TyFn(tyStr, new TyFn(tyStr, tyStr)))))(e12b); return ((Func<RBMap<string, Scheme>>)(() => { var e13a = (typeEnvInsert("strLen")(baseScheme(new TyFn(tyStr, tyInt))))(e13); return ((Func<RBMap<string, Scheme>>)(() => { var e13b = (typeEnvInsert("strReverse")(baseScheme(new TyFn(tyStr, tyStr))))(e13a); return ((Func<RBMap<string, Scheme>>)(() => { var e13c = (typeEnvInsert("strTrim")(baseScheme(new TyFn(tyStr, tyStr))))(e13b); return ((Func<RBMap<string, Scheme>>)(() => { var e13d = (typeEnvInsert("strContains")(baseScheme(new TyFn(tyStr, new TyFn(tyStr, tyBool)))))(e13c); return ((Func<RBMap<string, Scheme>>)(() => { var e13e = (typeEnvInsert("strSlice")(baseScheme(new TyFn(tyStr, new TyFn(tyInt, new TyFn(tyInt, tyStr))))))(e13d); return ((Func<RBMap<string, Scheme>>)(() => { var e13f = (typeEnvInsert("strIndexOf")(baseScheme(new TyFn(tyStr, new TyFn(tyStr, tyInt)))))(e13e); return ((Func<RBMap<string, Scheme>>)(() => { var e13g = (typeEnvInsert("strSplit")(baseScheme(new TyFn(tyStr, new TyFn(tyStr, tyList(tyStr))))))(e13f); return ((Func<RBMap<string, Scheme>>)(() => { var e13h = (typeEnvInsert("strToInt")(baseScheme(new TyFn(tyStr, tyMaybe(tyInt)))))(e13g); return ((Func<RBMap<string, Scheme>>)(() => { var e13i = (typeEnvInsert("strChars")(baseScheme(new TyFn(tyStr, tyList(tyChar)))))(e13h); return ((Func<RBMap<string, Scheme>>)(() => { var e13j = (typeEnvInsert("strFromChars")(baseScheme(new TyFn(tyList(tyChar), tyStr))))(e13i); return ((Func<RBMap<string, Scheme>>)(() => { var e14 = (typeEnvInsert("charIsDigit")(baseScheme(new TyFn(tyChar, tyBool))))(e13j); return ((Func<RBMap<string, Scheme>>)(() => { var e14a = (typeEnvInsert("charIsAlpha")(baseScheme(new TyFn(tyChar, tyBool))))(e14); return ((Func<RBMap<string, Scheme>>)(() => { var e14b = (typeEnvInsert("charIsSpace")(baseScheme(new TyFn(tyChar, tyBool))))(e14a); return ((Func<RBMap<string, Scheme>>)(() => { var e15 = (typeEnvInsert("abs")(baseScheme(new TyFn(tyInt, tyInt))))(e14b); return ((Func<RBMap<string, Scheme>>)(() => { var e15a = (typeEnvInsert("absf")(baseScheme(new TyFn(tyFloat, tyFloat))))(e15); return ((Func<RBMap<string, Scheme>>)(() => { var e15b = (typeEnvInsert("sqrt")(baseScheme(new TyFn(tyFloat, tyFloat))))(e15a); return ((Func<RBMap<string, Scheme>>)(() => { var e15c = (typeEnvInsert("min")(baseScheme(new TyFn(tyInt, new TyFn(tyInt, tyInt)))))(e15b); return ((Func<RBMap<string, Scheme>>)(() => { var e15d = (typeEnvInsert("max")(baseScheme(new TyFn(tyInt, new TyFn(tyInt, tyInt)))))(e15c); return ((Func<RBMap<string, Scheme>>)(() => { var e16 = (typeEnvInsert("readFile")(baseScheme(new TyFn(tyStr, tyStr))))(e15d); return ((Func<RBMap<string, Scheme>>)(() => { var e16a = (typeEnvInsert("writeFile")(baseScheme(new TyFn(tyStr, new TyFn(tyStr, tyUnit)))))(e16); return ((Func<RBMap<string, Scheme>>)(() => { var e16b = (typeEnvInsert("fileExists")(baseScheme(new TyFn(tyStr, tyBool))))(e16a); return ((Func<RBMap<string, Scheme>>)(() => { var e16c = (typeEnvInsert("exit")(baseScheme(new TyFn(tyInt, tyUnit))))(e16b); return ((Func<RBMap<string, Scheme>>)(() => { var e16d = typeEnvInsert("getArgs")(baseScheme(tyList(tyStr)))(e16c); return ((Func<RBMap<string, Scheme>>)(() => { var e17 = (typeEnvInsert("listLen")(scheme1("a")(new TyFn(tyList(new TyName("a")), tyInt))))(e16d); return ((Func<RBMap<string, Scheme>>)(() => { var e17a = (typeEnvInsert("listIsEmpty")(scheme1("a")(new TyFn(tyList(new TyName("a")), tyBool))))(e17); return ((Func<RBMap<string, Scheme>>)(() => { var e17b = (typeEnvInsert("listReverse")(scheme1("a")(new TyFn(tyList(new TyName("a")), tyList(new TyName("a"))))))(e17a); return ((Func<RBMap<string, Scheme>>)(() => { var e17c = (typeEnvInsert("listAppend")(scheme1("a")(new TyFn(tyList(new TyName("a")), new TyFn(tyList(new TyName("a")), tyList(new TyName("a")))))))(e17b); return ((Func<RBMap<string, Scheme>>)(() => { var e17d = (typeEnvInsert("listConcat")(scheme1("a")(new TyFn(tyList(tyList(new TyName("a"))), tyList(new TyName("a"))))))(e17c); return ((Func<RBMap<string, Scheme>>)(() => { var e17e = (typeEnvInsert("listHead")(scheme1("a")(new TyFn(tyList(new TyName("a")), tyMaybe(new TyName("a"))))))(e17d); return ((Func<RBMap<string, Scheme>>)(() => { var e17f = (typeEnvInsert("listTail")(scheme1("a")(new TyFn(tyList(new TyName("a")), tyMaybe(tyList(new TyName("a")))))))(e17e); return ((Func<RBMap<string, Scheme>>)(() => { var e17g = (typeEnvInsert("listAt")(scheme1("a")(new TyFn(tyList(new TyName("a")), new TyFn(tyInt, tyMaybe(new TyName("a")))))))(e17f); return ((Func<RBMap<string, Scheme>>)(() => { var e17h = (typeEnvInsert("listMap")(scheme2("a")("b")(new TyFn(new TyFn(new TyName("a"), new TyName("b")), new TyFn(tyList(new TyName("a")), tyList(new TyName("b")))))))(e17g); return ((Func<RBMap<string, Scheme>>)(() => { var e17i = (typeEnvInsert("listFilter")(scheme1("a")(new TyFn(new TyFn(new TyName("a"), tyBool), new TyFn(tyList(new TyName("a")), tyList(new TyName("a")))))))(e17h); return ((Func<RBMap<string, Scheme>>)(() => { var e17j = (typeEnvInsert("listFold")(scheme2("a")("b")(new TyFn(new TyFn(new TyName("b"), new TyFn(new TyName("a"), new TyName("b"))), new TyFn(new TyName("b"), new TyFn(tyList(new TyName("a")), new TyName("b")))))))(e17i); return ((Func<RBMap<string, Scheme>>)(() => { var e18 = (typeEnvInsert("maybeMap")(scheme2("a")("b")(new TyFn(new TyFn(new TyName("a"), new TyName("b")), new TyFn(tyMaybe(new TyName("a")), tyMaybe(new TyName("b")))))))(e17j); return ((Func<RBMap<string, Scheme>>)(() => { var e18a = (typeEnvInsert("maybeBind")(scheme2("a")("b")(new TyFn(tyMaybe(new TyName("a")), new TyFn(new TyFn(new TyName("a"), tyMaybe(new TyName("b"))), tyMaybe(new TyName("b")))))))(e18); return ((Func<RBMap<string, Scheme>>)(() => { var e18b = (typeEnvInsert("maybeWithDefault")(scheme1("a")(new TyFn(new TyName("a"), new TyFn(tyMaybe(new TyName("a")), new TyName("a"))))))(e18a); return e18b; }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))(); }))();
+
+    public static Func<Pattern, Tuple<List<Tuple<string, Scheme>>, TypeExpr, InferState>> inferPattern(InferState st) => pat => default!;
+
+    public static Func<List<Pattern>, Tuple<List<Tuple<string, Scheme>>, InferState>> inferPatternArgs(InferState st) => args => default!;
+
+    public static Func<long, TypeExpr> ctorResultType(TypeExpr ty) => n => default!;
+
+    public static Func<Scheme, Tuple<TypeExpr, InferState>> inferInstantiate(InferState st) => sch => default!;
+
+    public static Func<TypeExpr, Func<TypeExpr, Func<string, InferState>>> inferUnify(InferState st) => t1 => t2 => ctx => default!;
+
+    public static Func<Expr, Tuple<TypeExpr, InferState>> inferExpr(InferState st) => expr => default!;
+
+    public static Func<TypeExpr, Func<TypeExpr, Func<List<Pattern>, Func<List<Expr>, InferState>>>> inferMatchArms(InferState st) => scrutTy => retTy => pats => bodies => default!;
+
+    public static RBMap<string, TypeExpr> inferEnvSubst(InferState st) => inferSubst(st);
+
+    public static Func<Decl, InferState> inferDecl(InferState st) => decl => default!;
+
+    public static Func<List<Param>, Tuple<List<Tuple<string, Scheme>>, List<TypeExpr>, InferState>> inferParams(InferState st) => params_ => default!;
+
+    public static Func<TypeExpr, TypeExpr> buildFnType(List<TypeExpr> argTys) => retTy => default!;
+
+    public static Func<List<string>, TypeExpr> applyTypeVars(string base_) => vars => default!;
+
+    public static List<string> inferModule(List<Decl> decls) => ((Func<List<string>>)(() => { var st0 = new MkInferState(baseEnv, freshInit, new List<string> {  }, substEmpty<string, TypeExpr>()); return ((Func<List<string>>)(() => { var stFinal = listFold<Decl,InferState>(inferDecl)(st0)(decls); return inferErrors(stFinal); }))(); }))();
+
+    public static Func<List<Decl>, Tuple<List<string>, RBMap<string, Scheme>>> inferModuleStep(RBMap<string, Scheme> env) => decls => ((Func<Tuple<List<string>, RBMap<string, Scheme>>>)(() => { var st0 = new MkInferState(env, freshInit, new List<string> {  }, substEmpty<string, TypeExpr>()); return ((Func<Tuple<List<string>, RBMap<string, Scheme>>>)(() => { var stFinal = listFold<Decl,InferState>(inferDecl)(st0)(decls); return new Tuple<List<string>, RBMap<string, Scheme>>(inferErrors(stFinal), inferEnv(stFinal)); }))(); }))();
+
+    public static Func<string, bool> strStartsWith(string prefix) => s => ((Func<bool>)(() => { var plen = strLen(prefix); return ((Func<bool>)(() => { var slen = strLen(s); return ((plen > slen) ? false : (strSlice(s)(0L)(plen) == prefix)); }))(); }))();
+
+    public static Func<string, Func<string, object>> inferCheck(string label) => got => expected => ((got == expected) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat(" expected="))(strConcat(expected)((strConcat(" got="))(got)))))));
+
+    public static string runInfer(Expr expr) => "";
+
+    public static void __ll_main_Std_CompilerInfer()
+    {
+        ((inferCheck("1 EInt"))(runInfer(new EInt(42L))))("Int");
+        ((inferCheck("2 EStr"))(runInfer(new EStr("hello"))))("Str");
+        ((inferCheck("3 EBool"))(runInfer(new EBool(true))))("Bool");
+        ((inferCheck("4 lambda id"))(runInfer(new ELam("x", new EVar("x")))))("$0 -> $0");
+        ((inferCheck("5 lambda const"))(runInfer(new ELam("x", new EInt(42L)))))("$0 -> Int");
+        ((inferCheck("6 app id"))(runInfer(new EApp(new ELam("x", new EVar("x")), new EInt(42L)))))("Int");
+        ((inferCheck("7 let"))(runInfer(new ELet("x", new EInt(42L), new EVar("x")))))("Int");
+        ((inferCheck("8 if"))(runInfer(new EIf(new EBool(true), new EInt(1L), new EInt(2L)))))("Int");
+        ((inferCheck("9 binop +"))(runInfer(new EBinOp("+", new EInt(1L), new EInt(2L)))))("Int");
+        ((inferCheck("10 list"))(runInfer(new EList(new List<Expr> { new EInt(1L), new EInt(2L), new EInt(3L) }))))("List Int");
+        var r11 = runInfer(new EVar("noSuchName"));
+        ((inferCheck("12 lambda arith"))(runInfer(new ELam("n", new EBinOp("+", new EVar("n"), new EInt(1L))))))("Int -> Int");
+        printfn("Done");
+    }
 
     public static string showErrors(List<ElabError> errs) => ((listFold<ElabError,string>(acc => e => ((Func<string>)(() => { var msg = errMsg(e); return ((strLen(acc) == 0L) ? ((msg)?.ToString() ?? "") : ((strConcat(acc)(strConcat("\n")(msg)))?.ToString() ?? "")); }))()))(""))(errs);
 
-    public static string compile(string src) => ((Func<string>)(() => { var tokens = tokenize(src); return ((Func<string>)(() => { var ast = parseModule(tokens); return ((Func<string>)(() => { var errors = elaborate(ast); return (listIsEmpty<ElabError>(errors) ? ((emitModule(ast))?.ToString() ?? "") : ((showErrors(errors))?.ToString() ?? "")); }))(); }))(); }))();
+    public static string compile(string src) => ((Func<string>)(() => { var tokens = tokenize(src); return ((Func<string>)(() => { var ast = parseModule(tokens); return ((Func<string>)(() => { var elabErrs = elaborate(ast); return (listIsEmpty<ElabError>(elabErrs) ? ((emitModule(ast))?.ToString() ?? "") : ((showErrors(elabErrs))?.ToString() ?? "")); }))(); }))(); }))();
 
     public static List<ElabError> collectErrors(string src) => ((Func<List<ElabError>>)(() => { var tokens = tokenize(src); return ((Func<List<ElabError>>)(() => { var ast = parseModule(tokens); return elaborate(ast); }))(); }))();
 
@@ -604,7 +989,52 @@ public static class LlLangProject
 
     public static Func<string, string> lookupSymbol(string src) => name => "";
 
+    public static Func<RBMap<string, Scheme>, Tuple<List<string>, RBMap<string, Scheme>>> compileFiles(List<string> srcs) => env => default!;
+
+    public static List<string> compileProject(List<string> srcs) => new List<string>();
+
+    public static string showTypeErrors(List<string> errs) => ((listFold<string,string>(acc => e => ((strLen(acc) == 0L) ? ((e)?.ToString() ?? "") : ((strConcat(acc)(strConcat("\n")(e)))?.ToString() ?? ""))))(""))(errs);
+
+    public static string compileWithInfer(string src) => "";
+
+    public static List<string> collectAllErrors(string src) => new List<string>();
+
+    public static string nextBlockerFull(string src) => "";
+
     public static Func<string, Func<string, object>> compilerCheckContains(string label) => got => needle => (strContains(needle)(got) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat("\n  missing:  "))(strConcat(needle)((strConcat("\n  in output:\n"))(got)))))));
 
     public static Func<string, Func<string, object>> checkHasError(string label) => got => needle => (strContains(needle)(got) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat("\n  expected error containing: "))(strConcat(needle)((strConcat("\n  got: "))(got)))))));
+
+    public static Func<string, Func<string, object>> compilerCheck(string label) => got => expected => ((got == expected) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat(" expected="))(strConcat(expected)((strConcat(" got="))(got)))))));
+
+    public static int Main(string[] args)
+    {
+        var src1 = "module Test\nadd(a Int)(b Int) = a + b\n";
+        ((compilerCheckContains("1 compile basic fn"))(compile(src1)))("add");
+        var src2 = "module Test\nfoo = undeclaredName\n";
+        ((checkHasError("2 elab error undeclared"))(compile(src2)))("undeclared");
+        var errs3 = collectAllErrors(src1);
+        ((compilerCheck("3 no errors on valid"))(intToStr(listLen<string>(errs3))))("0");
+        ((compilerCheckContains("4 compileWithInfer basic"))(compileWithInfer(src1)))("add");
+        var nb5 = nextBlockerFull(src1);
+        ((compilerCheckContains("5 nextBlockerFull ok"))(nb5))("\"ok\":true");
+        var nb6 = nextBlockerFull(src2);
+        ((compilerCheckContains("6 nextBlockerFull elab"))(nb6))("\"stage\":\"elaborator\"");
+        var sym7 = lookupSymbol(src1)("add");
+        ((compilerCheckContains("7 lookupSymbol found"))(sym7))("\"found\":true");
+        var sym8 = lookupSymbol(src1)("unknown");
+        ((compilerCheckContains("8 lookupSymbol not found"))(sym8))("\"found\":false");
+        var te9 = tokenEstimate(src1);
+        ((compilerCheckContains("9 tokenEstimate ok"))(te9))("\"ok\":true");
+        var srcA = "module A\nfoo(x Int) = x\n";
+        var srcB = "module B\nbar(x Int) = x\n";
+        var proj10 = compileProject(new List<string> { srcA, srcB });
+        ((compilerCheck("10 compileProject no errs"))(intToStr(listLen<string>(proj10))))("0");
+        var srcBad = "module Bad\nresult = badFn 1\n";
+        var proj11 = compileProject(new List<string> { srcBad });
+        var proj11status = "";
+        ((compilerCheck("11 compileProject unbound err"))(proj11status))("err");
+        printfn("Done");
+        return 0;
+    }
 }

@@ -223,6 +223,8 @@ emitExpr(e Expr) =
       strConcat "(fun " (strConcat (safeIdent x) (strConcat " -> " (strConcat (emitExpr body) ")")))
     | ELet x e body ->
       strConcat "(let " (strConcat (safeIdent x) (strConcat " = " (strConcat (emitExpr e) (strConcat " in " (strConcat (emitExpr body) ")")))))
+    | ELetTuple a b e body ->
+      strConcat "(let (" (strConcat (safeIdent a) (strConcat ", " (strConcat (safeIdent b) (strConcat ") = " (strConcat (emitExpr e) (strConcat " in " (strConcat (emitExpr body) ")")))))))
     | EList items ->
       strConcat "[" (strConcat (joinWith "; " (listMap emitExpr items)) "]")
     | EBinOp op l r ->
@@ -328,6 +330,61 @@ emitParamStr(ps List[Param]) =
     | [] -> ""
     | _ -> strConcat " " (joinWith " " (listMap emitParamName ps))
 
+-- ---- Recursion detection --------------------------------------------------
+-- Walk an Expr and return true if the given name appears as a variable reference.
+-- Used to decide whether to emit "let rec" or "let" for a function declaration.
+
+containsVarExprs(name Str)(exprs List[Expr]) =
+  match exprs
+    | [] -> false
+    | e :: rest ->
+      if containsVarExpr name e
+        true
+      else containsVarExprs name rest
+
+containsVarExpr(name Str)(expr Expr) =
+  match expr
+    | EVar n -> n == name
+    | EApp f arg ->
+      if containsVarExpr name f
+        true
+      else containsVarExpr name arg
+    | EIf c t e ->
+      if containsVarExpr name c
+        true
+      else if containsVarExpr name t
+        true
+      else containsVarExpr name e
+    | EMatch scrut _ bodies ->
+      if containsVarExpr name scrut
+        true
+      else containsVarExprs name bodies
+    | ELam _ body -> containsVarExpr name body
+    | ELet _ v body ->
+      if containsVarExpr name v
+        true
+      else containsVarExpr name body
+    | ELetTuple _ _ v body ->
+      if containsVarExpr name v
+        true
+      else containsVarExpr name body
+    | EList xs -> containsVarExprs name xs
+    | EBinOp _ l r ->
+      if containsVarExpr name l
+        true
+      else containsVarExpr name r
+    | ETuple l r ->
+      if containsVarExpr name l
+        true
+      else containsVarExpr name r
+    | ECons l r ->
+      if containsVarExpr name l
+        true
+      else containsVarExpr name r
+    | _ -> false
+
+-- ---- Declaration emission --------------------------------------------------
+
 emitDecl(d Decl) =
   match d
     | DType name tvars ctors ->
@@ -336,7 +393,11 @@ emitDecl(d Decl) =
       strConcat header (strConcat " =\n" body)
     | DFn name params _ body ->
       paramStr = emitParamStr params
-      strConcat "let rec " (strConcat (safeIdent name) (strConcat paramStr (strConcat " =\n    " (emitExpr body))))
+      kw =
+        if containsVarExpr name body
+          "let rec "
+        else "let "
+      strConcat kw (strConcat (safeIdent name) (strConcat paramStr (strConcat " =\n    " (emitExpr body))))
     | DLet name body ->
       strConcat "let " (strConcat (safeIdent name) (strConcat " = " (emitExpr body)))
     | DImport parts ->
@@ -356,20 +417,42 @@ emitDecls(ds List[Decl]) =
 -- ---- Prelude ---------------------------------------------------------------
 
 emitPrelude =
-  "// --- ll-lang stdlib prelude (auto-generated) ---\nlet listLen (xs: 'a list) : int64 = int64 (List.length xs)\nlet listMap f xs = List.map f xs\nlet listFilter p xs = List.filter p xs\nlet listFold f z xs = List.fold f z xs\nlet listReverse xs = List.rev xs\nlet listAppend xs ys = List.append xs ys\nlet listConcat xss = List.concat xss\nlet listIsEmpty xs = List.isEmpty xs\nlet strLen (s: string) : int64 = int64 s.Length\nlet strConcat (a: string) (b: string) = a + b\nlet strChars (s: string) = s |> Seq.toList\nlet strFromChars (cs: char list) = System.String(cs |> List.toArray)\nlet intToStr (n: int64) = string n\nlet charToInt (c: char) = int64 (int c)\nlet printfn (s: string) = System.Console.WriteLine(s)\nlet print (s: string) = System.Console.Write(s)\nlet listHead xs = match xs with [] -> None | x :: _ -> Some x\nlet listTail xs = match xs with [] -> None | _ :: t -> Some t\n// --- end prelude ---"
+  "open LLLang.Prelude"
 
 -- ---- Module emission -------------------------------------------------------
 
 emitModulePath(parts List[Str]) =
   joinWith "." parts
 
+-- Returns true if the decl is a zero-param `main` function or value binding.
+-- Used to decide whether to inject the prelude open (only executable modules need it).
+declIsMain(d Decl) =
+  match d
+    | DFn n params _ _ ->
+      if n == "main"
+        listIsEmpty params
+      else false
+    | DLet n _ -> n == "main"
+    | _ -> false
+
+moduleHasMain(decls List[Decl]) =
+  match decls
+    | [] -> false
+    | d :: rest ->
+      if declIsMain d
+        true
+      else moduleHasMain rest
+
 emitModule(m Module) =
   match m
     | MkModule path decls ->
       header = strConcat "module " (emitModulePath path)
-      prelude = emitPrelude
       body = emitDecls decls
-      strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
+      if moduleHasMain decls
+        prelude = emitPrelude
+        strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
+      else
+        strConcat header (strConcat "\n\n" body)
 
 -- ---- Tests -----------------------------------------------------------------
 
@@ -384,6 +467,12 @@ checkContains(label Str)(got Str)(needle Str) =
     printfn (strConcat "OK " label)
   else
     printfn (strConcat "FAIL " (strConcat label (strConcat "\n  missing: " (strConcat needle (strConcat "\n  in: " got)))))
+
+checkNotContains(label Str)(got Str)(needle Str) =
+  if strContains needle got
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  unexpected: " (strConcat needle (strConcat "\n  in: " got)))))
+  else
+    printfn (strConcat "OK " label)
 
 main =
   -- 1. EInt
@@ -418,19 +507,33 @@ main =
   colorDecl = DType "Color" [] colorCtors
   _ = checkContains "10 DType Color" (emitDecl colorDecl) "type Color"
 
-  -- 11. DFn add
+  -- 11. DFn add: non-recursive → "let add" (not "let rec")
   addParams = MkParam "x" (TyName "Int") :: MkParam "y" (TyName "Int") :: []
   addDecl = DFn "add" addParams None (EBinOp "+" (EVar "x") (EVar "y"))
-  _ = checkContains "11 DFn add" (emitDecl addDecl) "let rec add"
+  _ = checkContains "11 DFn add non-rec" (emitDecl addDecl) "let add"
 
-  -- 12. Full module emit
+  -- 11b. DFn loop: recursive → "let rec loop"
+  loopParams = MkParam "n" (TyName "Int") :: []
+  loopBody = EIf (EBinOp "==" (EVar "n") (EInt 0)) (EInt 0) (EApp (EVar "loop") (EBinOp "-" (EVar "n") (EInt 1)))
+  loopDecl = DFn "loop" loopParams None loopBody
+  _ = checkContains "11b DFn loop rec" (emitDecl loopDecl) "let rec loop"
+
+  -- 12. Full module emit — library module (no main) → no prelude
   idParams = MkParam "x" (TyName "Int") :: []
   modDecls = DType "Color" [] colorCtors :: DFn "id" idParams None (EVar "x") :: []
   m = MkModule ("Test" :: "Mod" :: []) modDecls
   out = emitModule m
   _ = checkContains "12 module header" out "module Test.Mod"
   _ = checkContains "12 module type" out "type Color"
-  _ = checkContains "12 module fn" out "let rec id"
+  _ = checkContains "12 module fn non-rec" out "let id"
+  _ = checkNotContains "12 library module: no prelude" out "open LLLang.Prelude"
+
+  -- 12b. Executable module (has main) → prelude injected
+  mainBody = EApp (EVar "printfn") (EStr "hello")
+  mainDecl = DFn "main" [] None mainBody
+  mainModule = MkModule ("Test" :: "Exe" :: []) (listAppend modDecls [mainDecl])
+  outExe = emitModule mainModule
+  _ = checkContains "12b executable module: has prelude" outExe "open LLLang.Prelude"
 
   -- 13. PWild pattern
   _ = codegenCheck "13 PWild" (emitPattern PWild) "_"
@@ -447,6 +550,9 @@ main =
 
   -- 17. ETuple
   _ = codegenCheck "17 ETuple" (emitExpr (ETuple (EVar "a") (EVar "b"))) "(a, b)"
+
+  -- 17b. ELetTuple: let (a, b) = expr in body
+  _ = codegenCheck "17b ELetTuple" (emitExpr (ELetTuple "a" "b" (EVar "pair") (EVar "a"))) "(let (a, b) = pair in a)"
 
   -- 18. keyword escaping
   _ = codegenCheck "18 safeIdent let" (safeIdent "let") "__ll_let"

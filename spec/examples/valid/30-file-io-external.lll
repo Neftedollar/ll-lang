@@ -1,0 +1,25 @@
+module Examples.FileIoExternal
+
+external fileReadAll(path Str) Str
+external fileExists(path Str) Bool
+
+checkExists(path Str) Str =
+  if fileExists path
+    "OK fileExists"
+  else
+    "FAIL fileExists"
+
+checkRead(path Str) Str =
+  content = fileReadAll path
+  if strLen content > 0
+    "OK fileReadAll"
+  else
+    "FAIL fileReadAll"
+
+main() =
+  path = "spec/examples/valid/06-stdlib.lll"
+  r1 = checkExists path
+  r2 = checkRead path
+  _ = printfn r1
+  _ = printfn r2
+  0

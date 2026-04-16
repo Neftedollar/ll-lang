@@ -493,8 +493,11 @@ and private patternType (st: InferState) (env: Env) (pat: Pattern) : TypeExpr * 
                 List.zip (List.truncate nExpected argPats) expectedArgTys
                 |> List.collect (fun (subPat, expTy) ->
                     let (actualTy, bs) = patternType st env subPat
-                    ignore (unifyS st actualTy expTy)
-                    bs)
+                    let s = unifyS st actualTy expTy
+                    // Apply the unification result so PVar bindings carry the
+                    // constructor's concrete arg type (e.g. `v` in `Some v`
+                    // gets type `V`, not an unconstrained flex var).
+                    bs |> List.map (fun (n, t) -> (n, applyType s t)))
             (retTy, bindings)
 
 // ---- Build fn type from param list + return ---------------------------------

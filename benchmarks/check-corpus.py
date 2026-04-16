@@ -10,9 +10,13 @@ Modes:
   check    Run corpus files, diff against golden outputs.
   list     Show corpus entries and golden-file status.
 
+Flags:
+  --strict  Fail immediately on first mismatch (check mode only).
+
 Usage:
   python3 benchmarks/check-corpus.py update
   python3 benchmarks/check-corpus.py check
+  python3 benchmarks/check-corpus.py check --strict
   python3 benchmarks/check-corpus.py list
 """
 
@@ -90,7 +94,7 @@ def cmd_update() -> int:
     return 0 if fail == 0 else 1
 
 
-def cmd_check() -> int:
+def cmd_check(strict: bool = False) -> int:
     if not CORPUS_DIR.exists():
         print("ERROR: no corpus directory. Run 'update' first.")
         return 2
@@ -104,6 +108,9 @@ def cmd_check() -> int:
         if not gp.exists():
             print(f"  MISSING golden: {label}")
             missing += 1
+            if strict:
+                print("PARITY: FAILED (missing golden — run 'update' first)")
+                return 1
             continue
 
         print(f"  {label} ...", end=" ", flush=True)
@@ -112,6 +119,10 @@ def cmd_check() -> int:
         if code != expected_exit:
             print(f"FAIL (exit {code} ≠ {expected_exit})")
             failed += 1
+            if strict:
+                total = passed + failed + missing
+                print(f"\nPARITY: {passed}/{total} corpus entries match golden")
+                return 1
             continue
 
         expected = gp.read_text(encoding="utf-8")
@@ -131,6 +142,10 @@ def cmd_check() -> int:
             if len(exp_lines) != len(got_lines):
                 print(f"    line count: expected={len(exp_lines)} got={len(got_lines)}")
             failed += 1
+            if strict:
+                total = passed + failed + missing
+                print(f"\nPARITY: {passed}/{total} corpus entries match golden")
+                return 1
 
     total = passed + failed + missing
     print(f"\n{passed}/{total} passed, {failed} failed, {missing} missing goldens.")
@@ -138,20 +153,26 @@ def cmd_check() -> int:
     if missing > 0:
         print("Run 'update' to populate missing golden files.")
 
-    return 0 if failed == 0 and missing == 0 else 1
+    all_match = failed == 0 and missing == 0
+    print(f"PARITY: {passed}/{total} corpus entries match golden")
+
+    return 0 if all_match else 1
 
 
 def main() -> int:
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "list"
+    args = sys.argv[1:]
+    cmd = args[0] if args else "list"
+    strict = "--strict" in args
+
     if cmd == "list":
         return cmd_list()
     elif cmd == "update":
         return cmd_update()
     elif cmd == "check":
-        return cmd_check()
+        return cmd_check(strict=strict)
     else:
         print(f"Unknown command: {cmd}")
-        print("Usage: check-corpus.py [list|update|check]")
+        print("Usage: check-corpus.py [list|update|check] [--strict]")
         return 2
 
 
