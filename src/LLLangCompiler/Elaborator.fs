@@ -148,11 +148,13 @@ let private builtinEnv : TypeEnv =
         "readFile",   TyFn(tStr, tStr)
         "writeFile",  TyFn(tStr, TyFn(tStr, TyName "Unit"))
         "fileExists", TyFn(tStr, tBool)
+        "dirList",    TyFn(tStr, listOf tStr)
     ]
     // Process
     let proc = [
-        "exit",       TyFn(tInt, TyName "Unit")
-        "getArgs",    listOf tStr
+        "exit",          TyFn(tInt, TyName "Unit")
+        "getArgs",       listOf tStr
+        "processSpawn",  TyFn(tStr, TyFn(listOf tStr, tInt))
     ]
     // List extras (listAt requires user-declared `type Maybe`)
     let listExtra = [

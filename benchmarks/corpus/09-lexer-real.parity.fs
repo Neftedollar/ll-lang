@@ -53,20 +53,15 @@ let charIsSpace (c: char) = System.Char.IsWhiteSpace(c)
 let readFile (path: string) = System.IO.File.ReadAllText(path: string)
 let writeFile (path: string) (contents: string) = System.IO.File.WriteAllText(path, contents)
 let fileExists (path: string) = System.IO.File.Exists(path: string)
+let dirList (path: string) : string list = System.IO.Directory.GetFiles(path) |> Array.toList
 let exit (code: int64) : unit = System.Environment.Exit(int code)
 let listConcat (xss: 'a list list) = List.concat xss
 let listIsEmpty (xs: 'a list) = List.isEmpty xs
 let getArgs : string list = System.Environment.GetCommandLineArgs() |> Array.toList |> List.tail
-let ll_dirList (path: string) = System.IO.Directory.GetFiles(path) |> Array.toList
-let ll_processRun (cmd: string) (args: string list) =
-    let psi = System.Diagnostics.ProcessStartInfo(cmd)
-    for a in args do psi.ArgumentList.Add(a)
-    psi.RedirectStandardOutput <- true
+let processSpawn (cmd: string) (args: string list) : int64 =
+    let psi = System.Diagnostics.ProcessStartInfo(cmd, System.String.Join(" ", List.toArray args))
     psi.UseShellExecute <- false
-    let proc = System.Diagnostics.Process.Start(psi)
-    let output = proc.StandardOutput.ReadToEnd()
-    proc.WaitForExit()
-    output
+    let p = System.Diagnostics.Process.Start(psi) in p.WaitForExit(); int64 p.ExitCode
 // --- end prelude ---
 
 let rec isIdStart c =
