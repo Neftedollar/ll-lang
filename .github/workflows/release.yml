@@ -1,0 +1,195 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_NOLOGO: true
+
+jobs:
+  # ── 1. Build self-contained binaries (matrix) ──────────────────────────────
+  build-binary:
+    name: Build (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            ext: tar.gz
+          - os: ubuntu-latest
+            rid: linux-arm64
+            ext: tar.gz
+          - os: macos-latest
+            rid: osx-x64
+            ext: tar.gz
+          - os: macos-latest
+            rid: osx-arm64
+            ext: tar.gz
+          - os: windows-latest
+            rid: win-x64
+            ext: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish self-contained binary
+        shell: bash
+        run: |
+          dotnet publish src/LLLangTool/LLLangTool.fsproj \
+            -c Release \
+            -r ${{ matrix.rid }} \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -o dist/${{ matrix.rid }}/
+
+      - name: Archive (tar.gz)
+        if: matrix.ext == 'tar.gz'
+        run: tar -czf lllc-${{ matrix.rid }}.tar.gz -C dist/${{ matrix.rid }} lllc
+
+      - name: Archive (zip)
+        if: matrix.ext == 'zip'
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path dist\${{ matrix.rid }}\lllc.exe `
+            -DestinationPath lllc-${{ matrix.rid }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.rid }}
+          path: lllc-${{ matrix.rid }}.${{ matrix.ext }}
+          retention-days: 1
+
+  # ── 2. Create GitHub Release and attach binaries ───────────────────────────
+  create-release:
+    name: GitHub Release
+    needs: build-binary
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            lllc-linux-x64.tar.gz
+            lllc-linux-arm64.tar.gz
+            lllc-osx-x64.tar.gz
+            lllc-osx-arm64.tar.gz
+            lllc-win-x64.zip
+
+  # ── 3. NuGet ────────────────────────────────────────────────────────────────
+  publish-nuget:
+    name: Publish NuGet
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Extract version
+        id: ver
+        run: echo "V=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Pack
+        run: |
+          dotnet pack src/LLLangTool/LLLangTool.fsproj \
+            -c Release \
+            -p:Version=${{ steps.ver.outputs.V }} \
+            -o nuget-out/
+
+      - name: Push to NuGet.org
+        run: |
+          dotnet nuget push nuget-out/*.nupkg \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+  # ── 4. npm ──────────────────────────────────────────────────────────────────
+  publish-npm:
+    name: Publish npm
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Extract version
+        id: ver
+        run: echo "V=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Set package version
+        working-directory: packages/npm/lllc
+        run: npm version ${{ steps.ver.outputs.V }} --no-git-tag-version
+
+      - name: Publish
+        working-directory: packages/npm/lllc
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ── 5. PyPI ─────────────────────────────────────────────────────────────────
+  publish-pypi:
+    name: Publish PyPI
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Extract version
+        id: ver
+        run: echo "V=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp version
+        working-directory: packages/pip
+        run: |
+          V=${{ steps.ver.outputs.V }}
+          sed -i "s/^version = \".*\"/version = \"${V}\"/" pyproject.toml
+          sed -i "s/^VERSION = \".*\"/VERSION = \"${V}\"/" lllc/_download.py
+          sed -i "s/^__version__ = \".*\"/__version__ = \"${V}\"/" lllc/__init__.py
+
+      - name: Build
+        working-directory: packages/pip
+        run: |
+          pip install hatchling build twine
+          python -m build
+
+      - name: Publish to PyPI
+        working-directory: packages/pip
+        run: twine upload dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}

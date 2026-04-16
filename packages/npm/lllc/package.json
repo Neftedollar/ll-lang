@@ -1,0 +1,36 @@
+{
+  "name": "lllc",
+  "version": "1.1.0",
+  "description": "lllc — compiler for ll-lang, a minimal statically-typed functional language that compiles to F#, TypeScript, Python, Java, and C#.",
+  "keywords": [
+    "compiler",
+    "functional",
+    "llm",
+    "ll-lang",
+    "codegen"
+  ],
+  "homepage": "https://github.com/Neftedollar/ll-lang",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Neftedollar/ll-lang.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Neftedollar/ll-lang/issues"
+  },
+  "license": "MIT",
+  "bin": {
+    "lllc": "./bin/lllc"
+  },
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "files": [
+    "bin/",
+    "postinstall.js",
+    "package.json",
+    "README.md"
+  ]
+}

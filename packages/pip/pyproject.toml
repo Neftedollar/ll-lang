@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lllc"
+version = "1.1.0"
+description = "lllc — compiler for ll-lang, a minimal statically-typed functional language that compiles to F#, TypeScript, Python, Java, and C#."
+readme = { file = "../../README.md", content-type = "text/markdown" }
+license = { text = "MIT" }
+requires-python = ">=3.8"
+keywords = ["compiler", "functional", "llm", "ll-lang", "codegen"]
+authors = [{ name = "Neftedollar", email = "oildollar@gmail.com" }]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Other",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/Neftedollar/ll-lang"
+Repository = "https://github.com/Neftedollar/ll-lang"
+Issues = "https://github.com/Neftedollar/ll-lang/issues"
+
+[project.scripts]
+lllc = "lllc.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["lllc"]

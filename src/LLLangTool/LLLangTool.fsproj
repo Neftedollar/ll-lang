@@ -5,6 +5,19 @@
     <LangVersion>preview</LangVersion>
     <Nullable>enable</Nullable>
     <AssemblyName>lllc</AssemblyName>
+    <!-- NuGet / dotnet tool packaging -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>lllc</ToolCommandName>
+    <PackageId>lllc</PackageId>
+    <Authors>Neftedollar</Authors>
+    <Description>lllc — compiler for ll-lang, a minimal statically-typed functional language that compiles to F#, TypeScript, Python, Java, and C#. Designed for LLM-assisted code generation.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>compiler;functional;llm;fsharp;typescript;codegen;dotnet-tool</PackageTags>
+    <PackageProjectUrl>https://github.com/Neftedollar/ll-lang</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Neftedollar/ll-lang</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <Copyright>Copyright (c) 2025 Neftedollar</Copyright>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Mcp.fs" />
@@ -16,5 +29,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LLLangCompiler\LLLangCompiler.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 </Project>

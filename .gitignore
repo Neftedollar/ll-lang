@@ -26,3 +26,11 @@ spec/examples/**/package.json
 # macOS / Python local artifacts
 .DS_Store
 __pycache__/
+
+# npm package — native binary downloaded at install time
+packages/npm/lllc/bin/native/
+
+# pip package — native binary downloaded at build/run time
+packages/pip/lllc/native/
+packages/pip/dist/
+packages/pip/*.egg-info/
