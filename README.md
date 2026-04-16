@@ -2,175 +2,100 @@
 
 [![Build & Test](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml/badge.svg)](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml)
 
-> **A statically-typed functional language designed for LLM code generation.** Token-efficient syntax, compiled = works, errors formatted for LLMs to read directly.
+> **A statically-typed functional language designed for LLM code generation.**
+> Token-efficient syntax. Compiled means works. Errors your agent can parse in one line.
 
 ```
 module Hello
 
-Hello = printfn "Hello, ll-lang!"
+main() = printfn "Hello, ll-lang!"
 ```
 
-```
+```bash
 $ lllc run hello.lll
 Hello, ll-lang!
 ```
 
-Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting Started](#getting-started).
+---
 
-## Status
+## Why ll-lang?
 
-Working end-to-end compiler with a large automated xUnit suite (see CI badge), written in F# / .NET 10. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib → module system → MCP server → TypeScript + Python + Java + C# + LLVM codegen.
-Current release line: **1.0.0**.
+LLMs writing TypeScript or Python burn tokens on ceremony — `function`, `const`, `: string`, braces, semicolons — then ship code that only fails at runtime. By then it's too late.
 
-**Release contract (1.0):**
-- **Stable:** core compiler + `lllc build/check/run/new/install/mcp` + targets `fs/ts/py/java/cs`
-- **Experimental:** `lllc reverse` and `--target llvm` (subset backend, non-blocking for 1.0)
-- Full contract: [`docs/release-contract-1.0.md`](docs/release-contract-1.0.md)
+ll-lang fixes both problems at once.
 
-**Bootstrap: COMPLETE.** `compiler₁.fs == compiler₂.fs` — ll-lang compiles itself (2900+ line bootstrap compiler, fixpoint achieved).
+**Less to generate:**
 
-**Self-hosted stdlib** — 10 modules (5857 LOC of ll-lang), covering parsing, type inference, codegen, and data structures:
+| Task | TypeScript | ll-lang |
+|------|-----------|---------|
+| Declare a tagged type | `type UserId = string & { __brand: 'UserId' }` | `tag UserId` |
+| Define a sum type | `type Shape = \| { kind: 'Circle'; r: number } \| { kind: 'Rect'; w: number; h: number }` | `Shape = Circle Float \| Rect Float Float` |
+| Write a generic function | `function map<A, B>(f: (a: A) => B, xs: A[]): B[]` | `map(f A -> B)(xs List[A]) List[B]` |
 
-| Module | LOC | Description |
-|--------|-----|-------------|
-| `Map.lll` | 223 | Okasaki red-black tree, O(log n) |
-| `Toml.lll` | 292 | TOML config parser |
-| `Lexer.lll` | 473 | Tokenizer |
-| `Parser.lll` | 802 | Recursive descent parser |
-| `Elaborator.lll` | 344 | Type checker / name resolver |
-| `Codegen.lll` | 569 | F# emitter |
-| `CodegenTS.lll` | 492 | TypeScript emitter |
-| `CodegenPy.lll` | 501 | Python emitter |
-| `CodegenJava.lll` | 633 | Java 21 emitter |
-| `Compiler.lll` | 1516 | Full pipeline (source → F#) |
+ll-lang is **8–17% more compact than F#** and **1.3–5.9× more compact than TypeScript / Python / Java** on real type-heavy code.
 
-**Token efficiency** — ll-lang is 8–17% more compact than F# on real code, and 1.3–5.9× more compact than TypeScript / Python / Java on type definitions.
+**Earlier failures:**
 
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 1 | Spec (grammar + corpus) | ✅ |
-| 2 | Lexer + Parser | ✅ |
-| 3 | Elaborator (exhaustiveness, tag/unit checks) | ✅ |
-| 4 | Hindley-Milner + TypedAST + trait dispatch | ✅ |
-| 5 | F# codegen + `lllc` CLI | ✅ |
-| 6 | Stdlib (~50 builtins) | ✅ |
-| **7** | **Bootstrap fixpoint** — ll-lang compiles itself (`compiler₁.fs == compiler₂.fs`) | ✅ |
-| **8** | **Module system** — `lll.toml`, multi-file builds, `lllc new`, topo-sort, E020/E024 | ✅ |
-| **9** | **MCP server** — `lllc mcp` stdio server with 10 tools for Claude Code / Cursor / Zed | ✅ |
-| **10** | **Multi-platform codegen** — `lllc build --target ts\|py\|java\|cs\|llvm`; TypeScript DU + Python @dataclass + Java sealed interfaces + C# records + LLVM IR (`llvm` is experimental subset in 1.0) | ✅ |
+```
+E001 12:5  TypeMismatch Str Str[UserId]
+E005 7:14  TagViolation Str[Email] Str[UserId]
+E003 15:1  NonExhaustiveMatch Shape missing:Empty
+```
 
-## Getting Started
+One line per error. No stack traces. Regex-parseable. Your agent reads them directly and fixes on the next attempt — no extraction, no prose, no guessing.
 
-Requires [.NET 10](https://dotnet.microsoft.com/download).
+**Compiles to everything you already use:**
+
+```bash
+lllc build --target ts   shapes.lll   # TypeScript discriminated unions
+lllc build --target py   shapes.lll   # Python @dataclass + Union
+lllc build --target java shapes.lll   # Java 21 sealed interfaces
+lllc build --target cs   shapes.lll   # C# records + interfaces
+lllc build --target fs   shapes.lll   # F# (default)
+lllc build --target llvm shapes.lll   # LLVM IR (experimental)
+```
+
+---
+
+## Quick Start
+
+**Requires [.NET 10](https://dotnet.microsoft.com/download).**
 
 ```bash
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # run full test suite (current count in CI)
 ```
 
-### Run your first program
+### 30 seconds to first program
 
 ```bash
 cat > hello.lll <<'EOF'
 module Hello
 
-Hello = printfn "Hello, ll-lang!"
+main() = printfn "Hello, ll-lang!"
 EOF
 
-lllc run hello.lll
+dotnet run --project src/LLLangTool -- run hello.lll
 # → Hello, ll-lang!
 ```
 
-### CLI
-
-```
-lllc build <file.lll>               # compile → <file>.fs  (F# default)
-lllc build --target ts <file.lll>   # compile → <file>.ts  (TypeScript)
-lllc build --target py <file.lll>   # compile → <file>.py  (Python)
-lllc build --target java <file.lll> # compile → <file>.java (Java 21)
-lllc build --target cs <file.lll>   # compile → <file>.cs  (C#)
-lllc build --target llvm <file.lll> # compile → <file>.ll  (LLVM IR)
-lllc build [dir]                    # compile project (reads lll.toml)
-lllc check <file.lll>               # type-check single file (no codegen)
-lllc check [dir]                    # type-check project (no codegen)
-lllc run   <file.lll>               # compile and run via temporary F# project
-lllc new   <name>                   # scaffold new project
-lllc install                        # resolve direct+transitive deps into vendor/ + rewrite ll.sum
-lllc mod tidy                       # same as install (canonical dependency sync)
-lllc mod add dep=https://repo#ref   # add dependency and sync
-lllc mod why dep                    # explain dependency chain + local direct importers
-lllc mcp                            # run MCP server (stdio, for Claude/Cursor)
-```
-
-### Create a multi-file project
+### Scaffold a project
 
 ```bash
 lllc new myapp          # creates myapp/lll.toml + myapp/src/Main.lll
 cd myapp
-# edit src/Main.lll, add more .lll files to src/
-lllc build              # → bin/fsharp/myapp.fsproj (+ Prelude.fs + module .fs files)
+lllc build              # → bin/fsharp/myapp.fsproj
 dotnet run --project bin/fsharp/myapp.fsproj
 ```
 
-### Multi-target from lll.toml
+---
 
-```toml
-# lll.toml
-[project]
-name = "myapp"
+## Language Tour
 
-[platform]
-use = ["fsharp", "typescript"]
-```
+### Functions — no `fn` keyword
 
-```bash
-lllc build    # compiles once, emits to both targets:
-              #   bin/fsharp/myapp.fs
-              #   bin/typescript/myapp.ts
-```
-
-## For LLM Agents: MCP Integration
-
-ll-lang ships a built-in MCP server. Wire it to Claude Code, Cursor, or Zed — your LLM client gains structured tools to compile, check, and run ll-lang code without parsing shell output:
-
-```json
-// claude_desktop_config.json / .cursor/mcp.json
-{
-  "mcpServers": {
-    "lllc": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/path/to/ll-lang/src/LLLangTool", "--", "mcp"]
-    }
-  }
-}
-```
-
-Available MCP tools (10): `compile_file`, `compile_source`, `check_file`, `check_source`, `run_file`, `list_errors`, `lookup_error`, `stdlib_search`, `grammar_lookup`, `project_info`.
-
-The agent can ask "does this compile?" and get a structured JSON response with error codes, line numbers, and fix hints — no scraping required.
-
-## Problem
-
-LLMs writing code in mainstream languages face two compounding problems: verbose syntax wastes tokens on ceremony rather than logic, and type errors only surface at runtime — after execution, often after damage is done. An LLM generating Python or TypeScript gets no signal that a tagged `UserId` string was passed where an `Email` is expected until the server blows up.
-
-The feedback loop is slow, expensive, and noisy.
-
-## Solution
-
-ll-lang is built around four properties:
-
-- **Token-efficient syntax** — no braces, no semicolons, no boilerplate. No `fn`/`type`/`in`/`then`/`with` keywords — declarations use an uppercase/lowercase convention.
-- **Static types with inference** — Hindley-Milner type inference. Declare types where they matter, elide them everywhere else.
-- **Compiled = works** — tag violations, unbound variables, non-exhaustive matches, and unit mismatches are caught at compile time, not runtime.
-- **LLM-readable errors** — all errors follow a compact machine-readable format (`E001 12:5 TypeMismatch ...`) designed for direct consumption by an LLM agent.
-
-## Syntax
-
-### Functions and let bindings
-
-No `fn` keyword — uppercase names declare types, lowercase names declare values. The body follows `=`.
+Uppercase names = types. Lowercase names = values. The body follows `=`.
 
 ```
 module Examples.Basics
@@ -178,12 +103,9 @@ module Examples.Basics
 pi = 3.14159
 
 add(a Int)(b Int) Int = a + b
-double(x Int) = x * 2
+double(x Int) = x * 2           -- return type inferred
 
--- inferred return type
-square(x Int) = x * x
-
--- multi-branch if
+-- multi-branch
 clamp(x Int)(lo Int)(hi Int) Int =
   if x < lo
     lo
@@ -202,26 +124,20 @@ example =
 
 ### Algebraic Data Types and Pattern Matching
 
-Uppercase names introduce type declarations. `tag` declares a zero-cost wrapper.
-
 ```
 module Examples.ADTs
 
--- sum type
 Shape = Circle Float | Rect Float Float | Empty
 
--- parametric types
 Maybe A = Some A | None
 Result A E = Ok A | Err E
 
--- exhaustive pattern match
 area(s Shape) Float =
   match s with
-  | Circle r -> 3.14159 * r * r
-  | Rect w h -> w * h
-  | Empty    -> 0.0
+  | Circle r   -> 3.14159 * r * r
+  | Rect w h   -> w * h
+  | Empty      -> 0.0
 
--- returning Maybe
 safeDivide(a Float)(b Float) Maybe[Float] =
   if b == 0.0 then None
   else Some (a / b)
@@ -249,23 +165,22 @@ printVal(x A) [Show A] = printfn (show x)
 ```
 module Examples.Tags
 
--- declare tags (zero-cost type wrappers)
 tag UserId
 tag Email
 
--- tagged value
 uid = "user-42"[UserId]
 
--- functions reject wrong tags at compile time
 getUser(id Str[UserId]) Maybe[Str] = Some "alice"
 sendEmail(to Str[Email]) = to
 
--- unit algebra: inferred return type Float[m/s]
+-- unit algebra: speed has type Float[m/s], inferred
 tag m
 tag s
 
 speed(d Float[m])(t Float[s]) = d / t
 ```
+
+Passing `uid` to `sendEmail` is a **compile-time error** (`E005 TagViolation`), not a runtime one.
 
 ### Modules and Imports
 
@@ -276,100 +191,197 @@ import Map
 import Toml
 
 config = Toml.parse (readFile "config.toml")
+entries = Map.fromList [("key", "value")]
 ```
 
-### Keywords
+### Only 15 keywords
 
-ll-lang has 15 keywords: `match`, `if`, `else`, `import`, `export`, `module`, `trait`, `impl`, `external`, `opaque`, `tag`, `unit`, `true`, `false`, `let`. Everything else — most function/type declaration forms — is expressed through the uppercase/lowercase convention.
+`match`, `if`, `else`, `import`, `export`, `module`, `trait`, `impl`, `external`, `opaque`, `tag`, `unit`, `true`, `false`, `let`.
 
-## Error Format
+Everything else — functions, types, traits, let bindings — is expressed through the uppercase/lowercase convention.
 
-All compiler errors are short, structured, and machine-readable — designed so an LLM agent can parse them without extracting from prose:
+---
 
-| Code | Meaning | Example |
-|------|---------|---------|
+## Error Codes
+
+All compiler errors are compact, structured, and machine-readable:
+
+| Code | Meaning | Example output |
+|------|---------|---------------|
 | `E001` | Type mismatch | `E001 12:5 TypeMismatch Str Str[UserId]` |
 | `E002` | Unbound variable | `E002 8:3 UnboundVar username` |
 | `E003` | Non-exhaustive match | `E003 15:1 NonExhaustiveMatch Shape missing:Empty` |
 | `E004` | Unit mismatch | `E004 20:9 UnitMismatch Float[m] Float[s]` |
 | `E005` | Tag violation | `E005 7:14 TagViolation Str[Email] Str[UserId]` |
 
-Format: `EXXX line:col ErrorKind details`. No stack traces, no paragraphs, one line per error, parseable by regex.
+Format: `EXXX line:col ErrorKind details`. Full list: [`spec/error-codes.md`](spec/error-codes.md).
 
-## Multi-Platform Output
+---
 
-Write once in ll-lang, compile to any target:
+## MCP Integration
 
-```bash
-lllc build --target fs   adts.lll   # → F# discriminated unions
-lllc build --target ts   adts.lll   # → TypeScript sealed interfaces
-lllc build --target py   adts.lll   # → Python @dataclass + Union
-lllc build --target java adts.lll   # → Java 21 sealed interfaces
-lllc build --target cs   adts.lll   # → C# records + interfaces
-lllc build --target llvm adts.lll   # → LLVM IR (experimental subset)
+ll-lang ships a built-in [MCP](https://modelcontextprotocol.io/) server. Wire it to Claude Code, Cursor, or Zed — your LLM client gains structured tools to compile, type-check, and run ll-lang code without parsing shell output.
+
+```json
+// claude_desktop_config.json / .cursor/mcp.json
+{
+  "mcpServers": {
+    "lllc": {
+      "command": "dotnet",
+      "args": ["run", "--project", "/path/to/ll-lang/src/LLLangTool", "--", "mcp"]
+    }
+  }
+}
 ```
 
-Same source, same semantics on stable targets (`fs/ts/py/java/cs`), with an additional experimental LLVM backend.
+**10 MCP tools:** `compile_file`, `compile_source`, `check_file`, `check_source`, `run_file`, `list_errors`, `lookup_error`, `stdlib_search`, `grammar_lookup`, `project_info`.
 
-## Compiler Pipeline
+The agent asks "does this compile?" and gets structured JSON with error codes, line numbers, and fix hints — no scraping required.
+
+---
+
+## CLI Reference
 
 ```
-Source (.lll)
-    ▼  Lexer       — tokenizes with synthetic INDENT/DEDENT
-    ▼  Parser      — produces AST
-    ▼  Elaborator  — name resolution, tag checks, exhaustiveness
-    ▼  HMInfer     — Algorithm W, let-generalization, trait dispatch (E006),
-                     occurs check (E008), unit algebra preservation
-    ▼  Codegen     — emits idiomatic F# / TS / Python / Java / C# / LLVM
-    ▼  dotnet run --project <tmp fsproj>  — runs the result (via `lllc run`)
+lllc build <file.lll>               compile → <file>.fs  (F# default)
+lllc build --target ts <file.lll>   compile → <file>.ts
+lllc build --target py <file.lll>   compile → <file>.py
+lllc build --target java <file.lll> compile → <file>.java (Java 21)
+lllc build --target cs <file.lll>   compile → <file>.cs
+lllc build --target llvm <file.lll> compile → <file>.ll  (experimental)
+lllc build [dir]                    compile project (reads lll.toml)
+lllc check <file.lll>               type-check, no codegen
+lllc run   <file.lll>               compile and run via temporary F# project
+lllc new   <name>                   scaffold new project
+lllc install                        resolve deps into vendor/ + write ll.sum
+lllc mod tidy                       sync dependencies
+lllc mod add dep=https://repo#ref   add dependency
+lllc mod why dep                    explain dependency chain
+lllc mcp                            run MCP server (stdio)
 ```
+
+---
+
+## Status
+
+All 10 compiler phases are complete and green in CI. Current release: **1.0.0**.
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Spec (grammar + corpus) | done |
+| 2 | Lexer + Parser | done |
+| 3 | Elaborator (exhaustiveness, tag/unit checks) | done |
+| 4 | Hindley-Milner inference + TypedAST + trait dispatch | done |
+| 5 | F# codegen + `lllc` CLI | done |
+| 6 | Stdlib (~50 builtins) | done |
+| 7 | Bootstrap fixpoint — `compiler₁.fs == compiler₂.fs` | done |
+| 8 | Module system — `lll.toml`, multi-file, `lllc new`, topo-sort | done |
+| 9 | MCP server — `lllc mcp` stdio server (10 tools) | done |
+| 10 | Multi-platform codegen — TypeScript, Python, Java 21, C#, LLVM | done |
+
+**Release contract (1.0):**
+- **Stable:** core compiler + `lllc build/check/run/new/install/mcp` + targets `fs/ts/py/java/cs`
+- **Experimental:** `lllc reverse`, `--target llvm` (subset backend)
+- Full contract: [`docs/release-contract-1.0.md`](docs/release-contract-1.0.md)
+
+**Self-hosted stdlib** — 10 modules (5857 LOC of ll-lang):
+
+| Module | LOC | Description |
+|--------|-----|-------------|
+| `Map.lll` | 223 | Okasaki red-black tree, O(log n) |
+| `Toml.lll` | 292 | TOML config parser |
+| `Lexer.lll` | 473 | Tokenizer |
+| `Parser.lll` | 802 | Recursive descent parser |
+| `Elaborator.lll` | 344 | Type checker / name resolver |
+| `Codegen.lll` | 569 | F# emitter |
+| `CodegenTS.lll` | 492 | TypeScript emitter |
+| `CodegenPy.lll` | 501 | Python emitter |
+| `CodegenJava.lll` | 633 | Java 21 emitter |
+| `Compiler.lll` | 1516 | Full pipeline (source → F#) |
+
+**Bootstrap: COMPLETE.** `compiler₁.fs == compiler₂.fs` — ll-lang compiles itself (2900+ line bootstrap compiler, fixpoint achieved).
+
+---
 
 ## Project Structure
 
 ```
-spec/                      — formal grammar (EBNF), type rules, example corpus
+spec/                      formal grammar (EBNF), type rules, example corpus
   grammar.ebnf
   type-system.md
   error-codes.md
-  examples/valid/          — working .lll programs (hello, basics, ADTs, ...)
-  examples/invalid/        — programs annotated with expected error codes
-src/LLLangCompiler/        — compiler library (F#)
-  AST.fs                   — untyped surface AST
-  Lexer.fs                 — tokenizer with layout (INDENT/DEDENT)
-  Parser.fs                — recursive-descent parser
-  Elaborator.fs            — name resolution, declared-type checking (E001-E005)
-  Types.fs                 — TypeScheme, Subst, generalize/instantiate
-  TypedAST.fs              — typed AST after H-M inference
-  HMInfer.fs               — Algorithm W, unification (E008), trait dispatch
-  Codegen.fs               — F# source emitter
-  CodegenTS.fs             — TypeScript source emitter
-  CodegenPy.fs             — Python source emitter
-  CodegenJava.fs           — Java 21 source emitter
-  Compiler.fs              — end-to-end pipeline + Target dispatch
-src/LLLangTool/            — `lllc` CLI (build / run / self / new / install / mcp + experimental reverse)
-  Mcp.fs                   — MCP server (10 tools for LLM clients)
-  Program.fs               — entry point
-stdlib/                    — self-hosted stdlib (10 modules, 5857 LOC ll-lang)
-tests/LLLangTests/         — xUnit test suite (see CI for current count)
-docs/user-guide/           — user documentation
-docs/compiler-dev/         — compiler developer documentation
+  examples/valid/          working .lll programs (hello, basics, ADTs, ...)
+  examples/invalid/        programs annotated with expected error codes
+src/LLLangCompiler/        compiler library (F#)
+  AST.fs                   untyped surface AST
+  Lexer.fs                 tokenizer with layout (INDENT/DEDENT)
+  Parser.fs                recursive-descent parser
+  Elaborator.fs            name resolution, declared-type checking (E001-E005)
+  Types.fs                 TypeScheme, Subst, generalize/instantiate
+  TypedAST.fs              typed AST after H-M inference
+  HMInfer.fs               Algorithm W, unification (E008), trait dispatch
+  Codegen.fs               F# source emitter
+  CodegenTS.fs             TypeScript source emitter
+  CodegenPy.fs             Python source emitter
+  CodegenJava.fs           Java 21 source emitter
+  Compiler.fs              end-to-end pipeline + Target dispatch
+src/LLLangTool/            lllc CLI
+  Mcp.fs                   MCP server (10 tools)
+  Program.fs               entry point
+stdlib/                    self-hosted stdlib (10 modules, 5857 LOC ll-lang)
+tests/LLLangTests/         xUnit test suite (see CI for current count)
+docs/user-guide/           user documentation
+docs/compiler-dev/         compiler developer documentation
 ```
 
-## Roadmap
+---
 
-All 10 phases complete. Upcoming work:
+## Roadmap
 
 - **Language quality** — structured `LLError` fields, lexer error recovery, parser module split
 - **Stdlib expansion** — more string/list/IO builtins, async IO primitives
 - **Package registry** — `lllc install` with a central package index
-- **LLVM parity + WASM target** — close remaining LLVM feature gaps, then native executables
+- **LLVM parity + WASM** — close remaining LLVM feature gaps, then native executables
 - **Language server** — LSP hover, go-to-definition, inline errors
+
+---
 
 ## Design Philosophy
 
 ll-lang is not a general-purpose language. It is optimized for one use case: **LLM agents writing correct code on the first attempt**. Every design decision — significant indentation, juxtaposition-based application, compact error codes, unit algebra, concise keyword vocabulary — is evaluated against that goal.
 
 Less syntax to generate. More errors caught before execution. Faster iteration loops.
+
+---
+
+## Documentation
+
+- [User Guide](docs/user-guide/) — language reference for ll-lang programmers
+- [Getting Started](docs/getting-started.md) — step-by-step introduction
+- [Language Spec](docs/language-spec.md) — formal language description
+- [LLM Best Practices](docs/llm-best-practices.md) — how to use ll-lang with AI agents
+- [Stdlib Reference](docs/stdlib-reference.md) — built-in functions and modules
+- [Error Codes](spec/error-codes.md) — full list of compiler error codes
+- [Compiler Dev Docs](docs/compiler-dev/) — contributing to the compiler itself
+
+---
+
+## Contributing
+
+We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, architecture overview, and PR guidelines.
+
+Quick start:
+
+```bash
+git clone https://github.com/Neftedollar/ll-lang.git
+cd ll-lang
+dotnet build
+dotnet test
+```
+
+Found a bug? [Open an issue](https://github.com/Neftedollar/ll-lang/issues/new/choose).
+
+---
 
 ## License
 
