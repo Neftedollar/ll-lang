@@ -79,14 +79,14 @@ ins(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) =
       else Node c left nk v right
 
 -- mapInsert: insert k->v into map, replacing value if key exists
-export mapInsert(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) =
+export mapInsert(cmp K -> K -> Int)(k K)(v V)(m RBMap[K][V]) RBMap[K][V] =
   t = ins cmp k v m
   match t
     | Leaf -> Leaf
     | Node _ left nk nv right -> Node (Black) left nk nv right
 
 -- mapLookup: lookup key k
-export mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) =
+export mapLookup(cmp K -> K -> Int)(k K)(m RBMap[K][V]) Maybe[V] =
   match m
     | Leaf -> None
     | Node _ left nk nv right ->
@@ -113,7 +113,7 @@ export mapFold(f B -> K -> V -> B)(acc B)(m RBMap[K][V]) =
       mapFold f acc2 right
 
 -- mapKeys: return list of keys in sorted (in-order) order
-export mapKeys(m RBMap[K][V]) =
+export mapKeys(m RBMap[K][V]) List[K] =
   match m
     | Leaf -> []
     | Node _ left k _ right ->

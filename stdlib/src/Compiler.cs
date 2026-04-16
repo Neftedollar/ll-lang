@@ -245,9 +245,9 @@ public static class LlLangProject
         ((listCheck("14 listFindIndex"))(intToStr((long)(maybeWithDefault(-1L)(r14)))))("1");
         var r15 = (listFindIndex<long>(x => (x == 9L)))(new List<long> { 1L, 2L, 3L });
         ((listCheck("15 listFindIndex none"))(intToStr((long)(maybeWithDefault(-1L)(r15)))))("-1");
-        var __ll_tup_54045 = (listPartition<long>(x => (x > 2L)))(new List<long> { 1L, 2L, 3L, 4L });
-        var yes = __ll_tup_54045.Item1;
-        var no = __ll_tup_54045.Item2;
+        var __ll_tup_380 = (listPartition<long>(x => (x > 2L)))(new List<long> { 1L, 2L, 3L, 4L });
+        var yes = __ll_tup_380.Item1;
+        var no = __ll_tup_380.Item2;
         ((listCheck("16 partition yes"))(showIntList(yes)))(",3,4");
         ((listCheck("16 partition no"))(showIntList(no)))(",1,2");
         printfn("Done");
@@ -775,8 +775,8 @@ public static class LlLangProject
         var sch1 = (generalize(new Leaf<string, Scheme>()))(new TyFn(new TyName("$0"), new TyName("$0")));
         ((typesCheck("17 generalize"))(strJoin(schemeVars(sch1))))("$0");
         var sch2 = new MkScheme(new List<string> { "$0" }, new TyFn(new TyName("$0"), new TyName("$0")));
-        var __ll_tup_90616 = (instantiate(new MkFresh(1L)))(sch2);
-        var t5 = __ll_tup_90616.Item1;
+        var __ll_tup_3108 = (instantiate(new MkFresh(1L)))(sch2);
+        var t5 = __ll_tup_3108.Item1;
         ((typesCheck("18 instantiate"))(renderType(t5)))("$1 -> $1");
         ((typesCheck("19 occursIn true"))(boolStr(occursIn("$0")(new TyApp(new TyName("List"), new TyName("$0"))))))("true");
         ((typesCheck("20 occursIn false"))(boolStr(occursIn("$0")(new TyApp(new TyName("List"), new TyName("$1"))))))("false");
@@ -853,11 +853,17 @@ public static class LlLangProject
 
     public static string emitModulePath(List<string> parts) => joinWith(".")(parts);
 
+    public static bool declIsMain(Decl d) => false;
+
+    public static bool moduleHasMain(List<Decl> decls) => false;
+
     public static string emitModule(Module m) => "";
 
     public static Func<string, Func<string, object>> codegenCheck(string label) => got => expected => ((got == expected) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat("\n  got:      "))(strConcat(got)((strConcat("\n  expected: "))(expected)))))));
 
     public static Func<string, Func<string, object>> checkContains(string label) => got => needle => (strContains(needle)(got) ? printfn((strConcat("OK "))(label)) : printfn((strConcat("FAIL "))(strConcat(label)((strConcat("\n  missing: "))(strConcat(needle)((strConcat("\n  in: "))(got)))))));
+
+    public static Func<string, Func<string, object>> checkNotContains(string label) => got => needle => (strContains(needle)(got) ? printfn((strConcat("FAIL "))(strConcat(label)((strConcat("\n  unexpected: "))(strConcat(needle)((strConcat("\n  in: "))(got)))))) : printfn((strConcat("OK "))(label)));
 
     public static readonly long __ll_main_Std_Codegen = 0L;
 
