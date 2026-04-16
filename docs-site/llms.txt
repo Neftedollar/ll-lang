@@ -1,0 +1,73 @@
+# ll-lang
+
+> A statically-typed functional language designed for LLM code generation.
+> Token-efficient syntax. Compiled = works. Errors your agent can parse.
+
+## What is ll-lang?
+
+ll-lang is a functional programming language with Hindley-Milner type inference, designed specifically for use with large language models (LLMs). Its syntax removes ceremony keywords (`fn`, `type`, `let`) that waste tokens without adding meaning.
+
+## Key properties
+
+- **Token efficiency**: 8-17% more compact than F#, 1.3-5.9x more compact than TypeScript/Python/Java on type-heavy code
+- **Machine-readable errors**: All diagnostics follow `EXXX line:col Name details` format (e.g., `E001 3:5 TypeMismatch expected Int got Str`)
+- **Multi-target codegen**: One .lll source -> F# (default), TypeScript, Python, Java, C#
+- **Static typing**: Hindley-Milner inference with rank-1 polymorphism
+- **Self-hosted**: 10 stdlib modules (5857 LOC) written in ll-lang itself
+
+## Syntax examples
+
+### Hello world
+```
+module Hello
+main() = printfn "Hello!"
+```
+
+### Functions
+```
+add(a Int)(b Int) = a + b
+```
+
+### Types (ADTs)
+```
+Shape = Circle Float | Rect Float Float
+
+area(s Shape) =
+  match s
+    | Circle r -> 3.14159 * r * r
+    | Rect w h -> w * h
+```
+
+### Generic map
+```
+map(f A -> B)(xs List[A]) List[B] =
+  match xs
+    | [] -> []
+    | h :: t -> f h :: map f t
+```
+
+## Error format (machine-readable)
+```
+E001 3:5 TypeMismatch expected Int got Str
+E002 7:1 UnboundVar `processInput` is not defined
+E003 12:3 NonExhaustiveMatch missing pattern `None`
+```
+
+## CLI usage
+```
+lllc run hello.lll               # compile and run
+lllc build --target ts hello.lll  # compile to TypeScript
+lllc check hello.lll             # type-check only
+lllc mcp                         # start MCP server
+```
+
+## MCP server
+ll-lang ships with a built-in MCP (Model Context Protocol) server: `lllc mcp`
+Tools: compile_file, check_file, run_file, compile_source, check_source, list_errors, lookup_error, stdlib_search, grammar_lookup, project_info
+
+## Links
+- GitHub: https://github.com/Neftedollar/ll-lang
+- Documentation: https://neftedollar.github.io/ll-lang/docs.html
+- Language spec: https://github.com/Neftedollar/ll-lang/blob/main/docs/language-spec.md
+- Error codes: https://github.com/Neftedollar/ll-lang/blob/main/spec/error-codes.md
+- LLM best practices: https://github.com/Neftedollar/ll-lang/blob/main/docs/llm-best-practices.md
