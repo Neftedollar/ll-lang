@@ -1,0 +1,77 @@
+module Std.SelfHostedRun
+
+import Std.Compiler
+
+-- Self-hosted run pipeline: compile and execute a .lll file.
+-- Usage: `lllc run stdlib/src/SelfHostedRun.lll`
+
+-- ============================================================
+-- STRING HELPERS
+-- ============================================================
+
+-- Get the last component of a path (filename after last "/").
+strBasename(path Str) =
+  parts = strSplit "/" path
+  match listReverse parts
+    | [] -> ""
+    | head :: _ -> head
+
+-- Drop suffix if present; return s unchanged otherwise.
+strDropSuffix(suffix Str)(s Str) =
+  sLen = strLen s
+  sufLen = strLen suffix
+  if sLen >= sufLen
+    tail = strSlice s (sLen - sufLen) sufLen
+    if tail == suffix
+      strSlice s 0 (sLen - sufLen)
+    else s
+  else s
+
+-- ============================================================
+-- CORE FUNCTIONS
+-- ============================================================
+
+-- Read the file at path, compile it to F# source, return F# string.
+selfCompile(path Str) =
+  src = readFile path
+  compile src
+
+-- Compile a .lll file and run it via dotnet.
+-- Returns the exit code from dotnet run.
+selfRun(path Str) =
+  fsCode = selfCompile path
+  basename = strBasename path
+  stem = strDropSuffix ".lll" basename
+  fsPath = strConcat "/tmp/lllc-self-run-" (strConcat stem ".fs")
+  fsprojPath = strConcat "/tmp/lllc-self-run-" (strConcat stem ".fsproj")
+  _ = writeFile fsPath fsCode
+  l1 = "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n"
+  l2 = "    <OutputType>Exe</OutputType>\n    <TargetFramework>net10.0</TargetFramework>\n"
+  l3 = "    <LangVersion>preview</LangVersion>\n    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
+  l4 = "  </PropertyGroup>\n  <ItemGroup>\n    <Compile Include=\"lllc-self-run-"
+  l5 = strConcat stem ".fs\" />\n  </ItemGroup>\n</Project>\n"
+  fsprojContents = strConcat l1 (strConcat l2 (strConcat l3 (strConcat l4 l5)))
+  _ = writeFile fsprojPath fsprojContents
+  processSpawn "dotnet" ["run"; "--project"; fsprojPath]
+
+-- ============================================================
+-- SELF-TESTS
+-- ============================================================
+
+check(label Str)(ok Bool) =
+  if ok
+    _ = printfn (strConcat "OK " label)
+    0
+  else
+    _ = printfn (strConcat "FAIL " label)
+    1
+
+main =
+  -- Test 1: selfCompile List.lll returns non-empty F# string
+  fsharp = selfCompile "stdlib/src/List.lll"
+  _ = check "1 selfCompile List.lll" (strLen fsharp > 0)
+
+  -- Test 2: the compiled F# contains "module"
+  _ = check "2 fsharp contains module" (strContains "module" fsharp)
+
+  printfn "Done"

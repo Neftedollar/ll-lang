@@ -1,10 +1,12 @@
 module Lllcself.Main
 
 import Std.Compiler
+import Std.SelfHostedRun
 
 -- Self-hosted ll-lang CLI.
 -- Commands:
 --   compile <file>  -> emit F#
+--   run     <file>  -> compile to F# and execute via dotnet
 --   check   <file>  -> emit compact diagnostics JSON
 --   next    <file>  -> emit nearest blocking stage JSON
 --   render  <file>  -> emit canonical ll-lang source
@@ -14,7 +16,7 @@ import Std.Compiler
 -- With a single bare path argument, defaults to `compile <file>`.
 
 usageText =
-  "usage: lllcself <command> <file> [arg]\ncommands: compile | check | next | render | tokens | symbol"
+  "usage: lllcself <command> <file> [arg]\ncommands: compile | run | check | next | render | tokens | symbol"
 
 encodeJsonEscape(c Char) =
   match c
@@ -90,10 +92,14 @@ runSymbol(path Str)(name Str) =
     _ = print (ioError (strConcat "File not found: " path))
     1
 
+runSelfRun(path Str) =
+  selfRun path
+
 runArgs(args List[Str]) =
   match args
     | "check" :: path :: [] -> runCheck path
     | "compile" :: path :: [] -> runCompile path
+    | "run" :: path :: [] -> runSelfRun path
     | "next" :: path :: [] -> runNext path
     | "render" :: path :: [] -> runRender path
     | "tokens" :: path :: [] -> runTokens path
