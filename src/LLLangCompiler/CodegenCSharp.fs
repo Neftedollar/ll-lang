@@ -373,6 +373,17 @@ let private isSimpleMatchReturnType (t: TypeExpr) : bool =
     | TyName "Int" -> true
     | _ -> false
 
+// #135: zero-arg method pre-registration — populated before each module emission
+// so TEVar call sites know which names need () appended.
+let private zeroArgMethods : Set<string> ref = ref Set.empty
+
+// #136: per-method counter for tuple temp variables.
+let mutable private tupleTemp = 0
+let private freshTupleTemp () =
+    let n = tupleTemp
+    tupleTemp <- tupleTemp + 1
+    sprintf "__ll_tup_%d" n
+
 let rec private tryEmitExpr (te: TypedExpr) : string option =
     match tryAsSymbolicOp te with
     | Some (">>=", left, right) ->
@@ -400,7 +411,11 @@ let rec private tryEmitExpr (te: TypedExpr) : string option =
         | None ->
             match te.Expr with
             | TELit l -> Some (emitLit l)
-            | TEVar x -> Some (safeIdent x)
+            | TEVar x ->
+                let name = safeIdent x
+                // #135: zero-arg methods must be called with () at use sites
+                if Set.contains name !zeroArgMethods then Some (name + "()")
+                else Some name
             | TECon c ->
                 match c with
                 | "true"
@@ -643,16 +658,29 @@ let rec private flattenMainPrelude (te: TypedExpr) : string list * TypedExpr =
         (bindLine :: rest, tail)
     | TELetPat(tp, valueExpr, Some body) ->
         let valueText = emitExprOrDefault valueExpr.Type valueExpr
-        let bindLine =
+        let bindLines =
             match tp.Pat with
             | PWild ->
-                valueText + ";"
+                [valueText + ";"]
             | PVar name when not (isUnitType valueExpr.Type) ->
-                "var " + safeIdent name + " = " + valueText + ";"
+                ["var " + safeIdent name + " = " + valueText + ";"]
+            | PTuple subPats ->
+                // #136: use a per-method counter so two identical RHS exprs don't
+                // collide on the same temp name within the same function body.
+                let tmp = freshTupleTemp ()
+                let tmpLine = "var " + tmp + " = " + valueText + ";"
+                let varLines =
+                    subPats
+                    |> List.mapi (fun i sub ->
+                        match sub with
+                        | PVar name -> "var " + safeIdent name + " = " + tmp + ".Item" + string (i + 1) + ";"
+                        | _ -> "")
+                    |> List.filter (fun s -> s <> "")
+                tmpLine :: varLines
             | _ ->
-                valueText + ";"
+                [valueText + ";"]
         let rest, tail = flattenMainPrelude body
-        (bindLine :: rest, tail)
+        (bindLines @ rest, tail)
     | _ -> ([], te)
 
 /// Emit the body of a void (Unit-returning) function as C# statements.
@@ -730,6 +758,7 @@ let private emitCSharpExternalDecl (sig_: TypedFnSig) : string =
             "    public static " + lambdaRet + " " + safeIdent sig_.Name + tpStr + "(" + emitType pt + " " + safeIdent p + ") => " + lambda + ";"
 
 let private emitFnCSharp (sig_: TypedFnSig) (body: TypedExpr) : string =
+    tupleTemp <- 0   // #136: reset per-method counter before emitting each function body
     if isMainFn sig_ then
         "    public static int Main(string[] args)\n    {\n" + emitMainBody body + "\n    }"
     else
@@ -987,7 +1016,19 @@ let private moduleNeedsJsonExternal (tm: TypedModule) : bool =
             | _ -> false
         | _ -> false)
 
+// #135: scan declarations for zero-arg non-main functions that become C# methods.
+// These need () at use sites; populated before emission so TEVar can add it.
+let private collectZeroArgMethodNames (decls: (TypedDecl * bool) list) : Set<string> =
+    decls
+    |> List.choose (fun (decl, _) ->
+        match decl with
+        | TDFn(sig_, _, _) when List.isEmpty sig_.Params && not (isMainFn sig_) ->
+            Some (safeIdent sig_.Name)
+        | _ -> None)
+    |> Set.ofList
+
 let private emitModule (includePreludeMembers: bool) (tm: TypedModule) : string =
+    zeroArgMethods := collectZeroArgMethodNames tm.Decls  // #135: pre-register
     let cls = className tm.Path
     let moduleDecls =
         tm.Decls
@@ -1070,6 +1111,8 @@ let emitProjectModules (tms: TypedModule list) : string =
         let includeJsonUsing =
             rewritten |> List.exists moduleNeedsJsonExternal
         let projectDecls =
+            // #135: pre-register zero-arg methods across all modules
+            zeroArgMethods := dedupedDecls |> List.map (fun d -> (d, false)) |> collectZeroArgMethodNames
             dedupedDecls
             |> List.map emitDecl
             |> List.filter (fun s -> not (String.IsNullOrWhiteSpace s))

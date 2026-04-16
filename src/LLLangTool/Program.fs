@@ -1040,7 +1040,8 @@ let private cmdRunSelf (toolArgs: string list) : int =
                             + "</Project>\n"
                         let fsprojPath = Path.Combine(tempDir, "lllcself.fsproj")
                         File.WriteAllText(fsprojPath, fsproj)
-                        runDotnetProject fsprojPath (Some tempDir) toolArgs
+                        // Run from original CWD so that relative paths in tool args resolve correctly.
+                        runDotnetProject fsprojPath None toolArgs
                     finally
                         let keepTemp =
                             match tryGetEnv "LL_KEEP_SELF_TEMP" with

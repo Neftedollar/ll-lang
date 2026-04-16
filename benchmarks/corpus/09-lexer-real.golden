@@ -1,0 +1,1 @@
+kw:fn id:add ( id:a ) ( id:b ) = id:a + id:b

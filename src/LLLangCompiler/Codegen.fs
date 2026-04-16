@@ -671,10 +671,16 @@ let charIsSpace (c: char) = System.Char.IsWhiteSpace(c)
 let readFile (path: string) = System.IO.File.ReadAllText(path: string)
 let writeFile (path: string) (contents: string) = System.IO.File.WriteAllText(path, contents)
 let fileExists (path: string) = System.IO.File.Exists(path: string)
+let dirList (path: string) : string list = if System.IO.Directory.Exists(path) then System.IO.Directory.GetFiles(path, "*", System.IO.SearchOption.AllDirectories) |> Array.toList else []
 let exit (code: int64) : unit = System.Environment.Exit(int code)
 let listConcat (xss: 'a list list) = List.concat xss
 let listIsEmpty (xs: 'a list) = List.isEmpty xs
-let getArgs : string list = System.Environment.GetCommandLineArgs() |> Array.toList |> List.tail"""
+let getArgs : string list = System.Environment.GetCommandLineArgs() |> Array.toList |> List.tail
+let processSpawn (cmd: string) (args: string list) : int64 =
+    let psi = System.Diagnostics.ProcessStartInfo(cmd)
+    psi.UseShellExecute <- false
+    args |> List.iter (fun a -> psi.ArgumentList.Add(a))
+    let p = System.Diagnostics.Process.Start(psi) in p.WaitForExit(); int64 p.ExitCode"""
 
 /// Maybe-dependent prelude block — emitted only when user declares `type Maybe`
 /// and at least one Maybe helper is referenced.
@@ -711,8 +717,8 @@ let private fsharpPreludeCoreNames : Set<string> =
         "strChars"; "charToInt"; "intToChar"; "intToStr"; "floatToStr"
         "strSlice"; "strIndexOf"; "strSplit"; "strFromChars"; "strReverse"
         "charIsDigit"; "charIsAlpha"; "charIsSpace"
-        "readFile"; "writeFile"; "fileExists"; "exit"
-        "listConcat"; "listIsEmpty"; "getArgs"
+        "readFile"; "writeFile"; "fileExists"; "dirList"; "exit"
+        "listConcat"; "listIsEmpty"; "getArgs"; "processSpawn"
     ]
 
 let private fsharpPreludeMaybeNames : Set<string> =

@@ -1,0 +1,16 @@
+# ll-lang gh-pages site
+# Plain HTML/CSS/JS — no Jekyll processing needed.
+# This file tells GitHub Pages not to apply a Jekyll theme.
+
+title: ll-lang
+description: The language built for LLMs to write, compile, and fix.
+url: https://neftedollar.github.io/ll-lang
+
+# Disable Jekyll theme (site is plain HTML)
+theme: ~
+
+# Exclude source files from Jekyll build
+exclude:
+  - "*.md"
+  - Gemfile
+  - Gemfile.lock

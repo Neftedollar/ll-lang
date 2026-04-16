@@ -1,0 +1,289 @@
+module Std.ProjectLoader
+
+import Std.Maybe
+import Std.List
+import Std.Str
+import Std.Lexer
+import Std.Parser
+import Std.CompilerLoader
+
+-- ============================================================
+-- Project loader for ll-lang v3 self-hosting.
+-- Canonical owner: Compiler.Project.ProjectLoader
+--
+-- Provides filesystem I/O layer on top of Std.CompilerLoader:
+--   - discovers .lll files under a project's src/ directory
+--   - reads and parses each file to extract module path + imports
+--   - constructs LoadedFile records and feeds them to CompilerLoader
+--
+-- Builtins used: dirList, readFile, fileExists
+-- ============================================================
+
+-- ---- Path helpers ---------------------------------------------------------
+
+-- Join two path segments with "/".
+pathJoin(a Str)(b Str) =
+  strConcat a (strConcat "/" b)
+
+-- Split a string by a single-character separator (e.g., "/").
+-- Returns list of segments (may include empty strings for leading/trailing sep).
+strSplitBy(sep Str)(src Str) =
+  strSplitByAcc sep src []
+
+strSplitByAcc(sep Str)(src Str)(acc List[Str]) =
+  srcLen = strLen src
+  sepLen = strLen sep
+  if srcLen == 0
+    listAppend acc [""]
+  else
+    idx = strIndexOf sep src
+    if idx < 0
+      listAppend acc [src]
+    else
+      segment = strSlice src 0 idx
+      remainder = strSlice src (idx + sepLen) (srcLen - idx - sepLen)
+      strSplitByAcc sep remainder (listAppend acc [segment])
+
+-- Drop last n characters from a string.
+strDropLast(dropN Int)(dropS Str) =
+  dropLen = strLen dropS
+  if dropN >= dropLen
+    ""
+  else
+    strSlice dropS 0 (dropLen - dropN)
+
+-- Capitalize first character of a string (ASCII a-z → A-Z).
+strCapFirst(str Str) =
+  if strLen str == 0
+    str
+  else
+    tailStr = strSlice str 1 (strLen str - 1)
+    headChar = strSlice str 0 1
+    match strChars headChar
+      | c :: _ ->
+        codePoint = charToInt c
+        if codePoint >= 97
+          if codePoint <= 122
+            upperChar = intToChar (codePoint - 32)
+            strConcat (strFromChars [upperChar]) tailStr
+          else str
+        else str
+      | [] -> str
+
+-- ---- .lll file discovery --------------------------------------------------
+
+-- Return only .lll files from dirList output.
+findLllFiles(dir Str) =
+  listFilter (strEndsWith ".lll") (dirList dir)
+
+-- ---- Module path derivation -----------------------------------------------
+
+-- Strip a prefix from a string. Returns the string unchanged if no match.
+strStripPrefix(pfx Str)(pfxS Str) =
+  pfxLen = strLen pfx
+  pfxSLen = strLen pfxS
+  if pfxLen > pfxSLen
+    pfxS
+  else
+    if strSlice pfxS 0 pfxLen == pfx
+      strSlice pfxS pfxLen (pfxSLen - pfxLen)
+    else pfxS
+
+-- Derive module path (List[Str]) from a file path.
+--
+-- Example:
+--   rootDir = "/home/user/myapp"
+--   projectName = "myapp"
+--   filePath = "/home/user/myapp/src/Foo/Bar.lll"
+--   → ["Myapp", "Foo", "Bar"]
+--
+-- Steps:
+--   1. Strip rootDir + "/src/" prefix
+--   2. Strip ".lll" suffix
+--   3. Split on "/"
+--   4. Capitalize first segment (the project name)
+fileToModulePath(rootDir Str)(projectName Str)(filePath Str) =
+  srcPrefix = strConcat rootDir "/src/"
+  rel = strStripPrefix srcPrefix filePath
+  noExt = strDropLast 4 rel
+  segments = strSplitBy "/" noExt
+  cappedProj = strCapFirst projectName
+  match segments
+    | [] -> [cappedProj]
+    | first :: segsRest ->
+      cappedFirst = strCapFirst first
+      if first == projectName
+        cappedFirst :: segsRest
+      else
+        cappedProj :: cappedFirst :: segsRest
+
+-- Join a list of strings with "." separator.
+joinDots(segs List[Str]) =
+  match segs
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat "." (joinDots rest))
+
+-- ---- Import extraction from parsed module ---------------------------------
+
+-- Extract the import declarations from a parsed Module's declarations.
+extractImports(decls List[Decl]) =
+  listFlatMap (\d.
+    match d
+      | DImport segs ->
+        imp = joinDots segs
+        [imp]
+      | _ -> []
+  ) decls
+
+-- ---- Read and parse a single file to LoadedFile ---------------------------
+
+fileToLoadedFile(rootDir Str)(projectName Str)(filePath Str) =
+  src = readFile filePath
+  toks = tokenize src
+  m = parseModule toks
+  modulePath = fileToModulePath rootDir projectName filePath
+  imports = match m | MkModule _ decls -> extractImports decls
+  MkLoadedFile filePath modulePath imports
+
+-- ---- Load all .lll files from a project's src/ directory ------------------
+
+loadProjectFiles(rootDir Str)(projectName Str) =
+  srcDir = pathJoin rootDir "src"
+  files = findLllFiles srcDir
+  listMap (fileToLoadedFile rootDir projectName) files
+
+-- ---- Main project loader entry point --------------------------------------
+
+-- Read lll.toml (or ll.toml) from rootDir, get name, load all files.
+-- Falls back gracefully if no manifest found (uses empty project name).
+loadProjectFromDir(rootDir Str) =
+  manifestPath = pathJoin rootDir "lll.toml"
+  altManifestPath = pathJoin rootDir "ll.toml"
+  -- Determine project name from manifest if available.
+  projectName =
+    if fileExists manifestPath
+      src = readFile manifestPath
+      nameIdx = strIndexOf "name" src
+      if nameIdx < 0
+        "project"
+      else
+        -- Quick name extraction: find first quoted value after "name"
+        -- (simplified; full parse would use CompilerManifest)
+        afterName = strSlice src (nameIdx + 4) (strLen src - nameIdx - 4)
+        eqIdx = strIndexOf "=" afterName
+        if eqIdx < 0
+          "project"
+        else
+          afterEq = strSlice afterName (eqIdx + 1) (strLen afterName - eqIdx - 1)
+          q1Idx = strIndexOf "\"" afterEq
+          if q1Idx < 0
+            "project"
+          else
+            afterQ1 = strSlice afterEq (q1Idx + 1) (strLen afterEq - q1Idx - 1)
+            q2Idx = strIndexOf "\"" afterQ1
+            if q2Idx < 0
+              "project"
+            else
+              strSlice afterQ1 0 q2Idx
+    else
+      if fileExists altManifestPath
+        src = readFile altManifestPath
+        nameIdx = strIndexOf "name" src
+        if nameIdx < 0
+          "project"
+        else
+          afterName = strSlice src (nameIdx + 4) (strLen src - nameIdx - 4)
+          eqIdx = strIndexOf "=" afterName
+          if eqIdx < 0
+            "project"
+          else
+            afterEq = strSlice afterName (eqIdx + 1) (strLen afterName - eqIdx - 1)
+            q1Idx = strIndexOf "\"" afterEq
+            if q1Idx < 0
+              "project"
+            else
+              afterQ1 = strSlice afterEq (q1Idx + 1) (strLen afterEq - q1Idx - 1)
+              q2Idx = strIndexOf "\"" afterQ1
+              if q2Idx < 0
+                "project"
+              else
+                strSlice afterQ1 0 q2Idx
+      else
+        "project"
+  files = loadProjectFiles rootDir projectName
+  loadProject files
+
+-- ---- Self-test ------------------------------------------------------------
+
+check(label Str)(ok Bool) =
+  if ok
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " label)
+
+main =
+  -- Test 1: findLllFiles returns .lll files from stdlib/src
+  files = findLllFiles "stdlib/src"
+  count = listLen files
+  _ = check "1 findLllFiles returns files" (count > 0)
+  _ = printfn (strConcat "  found " (strConcat (intToStr count) " .lll files in stdlib/src"))
+
+  -- Test 2: all returned files end with .lll
+  allLll = listAll (strEndsWith ".lll") files
+  _ = check "2 all files end with .lll" allLll
+
+  -- Test 3: strSplitBy splits correctly
+  segs = strSplitBy "/" "a/b/c"
+  _ = check "3 strSplitBy basic" (listLen segs == 3)
+  _ = check "4 strSplitBy first" (match segs | h :: _ -> h == "a" | [] -> false)
+
+  -- Test 4: strDropLast
+  s = strDropLast 4 "hello.lll"
+  _ = check "5 strDropLast" (s == "hello")
+
+  -- Test 5: strCapFirst
+  cap = strCapFirst "foo"
+  _ = check "6 strCapFirst" (cap == "Foo")
+  capAlready = strCapFirst "Foo"
+  _ = check "7 strCapFirst already upper" (capAlready == "Foo")
+
+  -- Test 6: fileToModulePath
+  -- File directly in src/: prepends capped project name
+  mp = fileToModulePath "/root/myapp" "myapp" "/root/myapp/src/Foo/Bar.lll"
+  _ = check "8 fileToModulePath length" (listLen mp == 3)
+  _ = check "9 fileToModulePath[0]" (match mp | h :: _ -> h == "Myapp" | [] -> false)
+  _ = check "10 fileToModulePath[1]" (match mp | _ :: h :: _ -> h == "Foo" | _ -> false)
+  _ = check "10b fileToModulePath[2]" (match mp | _ :: _ :: h :: _ -> h == "Bar" | _ -> false)
+  -- File with project subdir: src/myapp/Foo.lll -> ["Myapp", "Foo"] (no doubling)
+  mp2 = fileToModulePath "/root/myapp" "myapp" "/root/myapp/src/myapp/Foo.lll"
+  _ = check "11 fileToModulePath with project subdir" (match mp2 | h :: _ -> h == "Myapp" | [] -> false)
+  _ = check "11b fileToModulePath no double prefix" (listLen mp2 == 2)
+
+  -- Test 7: read and parse a single file (Str.lll)
+  src = readFile "stdlib/src/Str.lll"
+  toks = tokenize src
+  m = parseModule toks
+  modPath = match m | MkModule p _ -> p
+  _ = check "12 parseModule returns module" (listLen modPath > 0)
+  _ = check "13 Str module path[0]" (match modPath | h :: _ -> h == "Std" | [] -> false)
+
+  -- Test 8: loadProjectFiles on stdlib
+  loadedFiles = loadProjectFiles "stdlib" "std"
+  loadedCount = listLen loadedFiles
+  _ = check "14 loadProjectFiles returns files" (loadedCount > 0)
+  _ = printfn (strConcat "  loaded " (strConcat (intToStr loadedCount) " files from stdlib/src"))
+
+  -- Test 9: verify each loaded file has non-empty module path
+  allHavePath = listAll (\f. listLen (lfModule f) > 0) loadedFiles
+  _ = check "15 all files have module path" allHavePath
+
+  -- Test 10: run topo-sort on loaded stdlib files
+  result = loadProject loadedFiles
+  _ = match result
+    | LoaderOk sorted ->
+      check "16 topo-sort succeeds" true
+    | LoaderErr errs ->
+      printfn (strConcat "FAIL 16 topo-sort error: " (match errs | e :: _ -> renderLoaderError e | [] -> "?"))
+
+  printfn "Done"
