@@ -1,135 +1,174 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Playground &mdash; ll-lang</title>
-  <meta name="description" content="Try ll-lang in your terminal using the lllc CLI." />
-  <link rel="stylesheet" href="css/style.css" />
-  <link
-    rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
-    integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH"
-    crossorigin="anonymous"
-  />
-  <script
-    src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
-    integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp"
-    crossorigin="anonymous"
-  ></script>
-</head>
-<body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Playground &mdash; ll-lang</title>
+    <meta
+      name="description"
+      content="Try ll-lang in your terminal using the lllc CLI."
+    />
+    <link rel="stylesheet" href="css/style.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
+      integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH"
+      crossorigin="anonymous"
+    />
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
+      integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp"
+      crossorigin="anonymous"
+    ></script>
+  </head>
+  <body>
+    <!-- Nav -->
+    <nav>
+      <div class="nav-inner">
+        <a href="index.html" class="nav-logo"><span>//</span>ll-lang</a>
+        <ul class="nav-links" id="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="docs.html">Docs</a></li>
+          <li><a href="playground.html">Playground</a></li>
+          <li>
+            <a
+              href="https://github.com/Neftedollar/ll-lang"
+              target="_blank"
+              rel="noopener"
+              >GitHub</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://github.com/Neftedollar/ll-lang/releases"
+              class="nav-cta"
+              target="_blank"
+              rel="noopener"
+              >v1.1.0</a
+            >
+          </li>
+        </ul>
+        <button
+          class="nav-hamburger"
+          id="nav-hamburger"
+          aria-label="Toggle navigation"
+          aria-expanded="false"
+        >
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </nav>
 
-<!-- Nav -->
-<nav>
-  <div class="nav-inner">
-    <a href="index.html" class="nav-logo"><span>//</span>ll-lang</a>
-    <ul class="nav-links" id="nav-links">
-      <li><a href="index.html">Home</a></li>
-      <li><a href="docs.html">Docs</a></li>
-      <li><a href="playground.html">Playground</a></li>
-      <li><a href="https://github.com/Neftedollar/ll-lang" target="_blank" rel="noopener">GitHub</a></li>
-      <li><a href="https://github.com/Neftedollar/ll-lang/releases" class="nav-cta" target="_blank" rel="noopener">v1.1.0</a></li>
-    </ul>
-    <button class="nav-hamburger" id="nav-hamburger" aria-label="Toggle navigation" aria-expanded="false">
-      <span></span><span></span><span></span>
-    </button>
-  </div>
-</nav>
+    <!-- Hero -->
+    <section style="padding-block: 4rem 2rem; text-align: center">
+      <div class="container">
+        <div class="section-label">Playground</div>
+        <h1 style="font-size: clamp(1.8rem, 4vw, 2.6rem); margin-bottom: 1rem">
+          Try ll-lang
+        </h1>
+        <p
+          style="
+            max-width: 52ch;
+            margin-inline: auto;
+            font-size: 1.05rem;
+            margin-bottom: 3rem;
+          "
+        >
+          A browser-based playground is on the roadmap. For now, run ll-lang
+          locally in under a minute using <code>lllc</code>.
+        </p>
 
-<!-- Hero -->
-<section style="padding-block:4rem 2rem;text-align:center">
-  <div class="container">
-    <div class="section-label">Playground</div>
-    <h1 style="font-size:clamp(1.8rem,4vw,2.6rem);margin-bottom:1rem">Try ll-lang</h1>
-    <p style="max-width:52ch;margin-inline:auto;font-size:1.05rem;margin-bottom:3rem">
-      A browser-based playground is on the roadmap. For now, run ll-lang
-      locally in under a minute using <code>lllc</code>.
-    </p>
+        <div class="coming-soon-card">
+          <div class="icon">&#x1F4BB;</div>
+          <h2>Run it locally</h2>
+          <p>
+            The fastest way to try ll-lang is the CLI. Clone the repo, build
+            once, then use <code>lllc run</code> or <code>lllc check</code> on
+            any <code>.lll</code> file.
+          </p>
+          <a
+            href="https://github.com/Neftedollar/ll-lang"
+            class="btn btn-primary"
+            target="_blank"
+            rel="noopener"
+            style="display: inline-flex; margin-bottom: 1rem"
+          >
+            &#x2605; Get lllc on GitHub
+          </a>
+          <p style="font-size: 0.85rem; color: var(--text-muted)">
+            Online playground coming in a future release.
+          </p>
+        </div>
+      </div>
+    </section>
 
-    <div class="coming-soon-card">
-      <div class="icon">&#x1F4BB;</div>
-      <h2>Run it locally</h2>
-      <p>
-        The fastest way to try ll-lang is the CLI. Clone the repo,
-        build once, then use <code>lllc run</code> or <code>lllc check</code>
-        on any <code>.lll</code> file.
-      </p>
-      <a
-        href="https://github.com/Neftedollar/ll-lang"
-        class="btn btn-primary"
-        target="_blank"
-        rel="noopener"
-        style="display:inline-flex;margin-bottom:1rem"
-      >
-        &#x2605; Get lllc on GitHub
-      </a>
-      <p style="font-size:.85rem;color:var(--text-muted)">
-        Online playground coming in a future release.
-      </p>
-    </div>
-  </div>
-</section>
+    <div class="divider"></div>
 
-<div class="divider"></div>
+    <!-- Runnable examples -->
+    <section>
+      <div class="container">
+        <div class="section-label">Examples</div>
+        <h2 class="section-title">Try these snippets</h2>
+        <p class="section-sub">
+          Copy any snippet, save it as <code>example.lll</code>, and run
+          <code>lllc run example.lll</code>.
+        </p>
 
-<!-- Runnable examples -->
-<section>
-  <div class="container">
-    <div class="section-label">Examples</div>
-    <h2 class="section-title">Try these snippets</h2>
-    <p class="section-sub">Copy any snippet, save it as <code>example.lll</code>, and run <code>lllc run example.lll</code>.</p>
-
-    <div style="display:flex;flex-direction:column;gap:2rem">
-
-      <!-- Hello World -->
-      <div>
-        <h3 style="color:var(--text-primary);margin-bottom:.75rem">Hello, world</h3>
-        <div class="code-block">
-          <div class="code-block-header">
-            <span class="code-lang">hello.lll</span>
-            <button class="copy-btn">copy</button>
-          </div>
-          <pre><code class="language-haskell">module Hello
+        <div style="display: flex; flex-direction: column; gap: 2rem">
+          <!-- Hello World -->
+          <div>
+            <h3 style="color: var(--text-primary); margin-bottom: 0.75rem">
+              Hello, world
+            </h3>
+            <div class="code-block">
+              <div class="code-block-header">
+                <span class="code-lang">hello.lll</span>
+                <button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-haskell">module Hello
 
 greet(name Str) = printfn "Hello, %s!" name
 Hello = greet "ll-lang"</code></pre>
-        </div>
-      </div>
-
-      <!-- ADTs and pattern matching -->
-      <div>
-        <h3 style="color:var(--text-primary);margin-bottom:.75rem">ADTs and pattern matching</h3>
-        <div class="code-block">
-          <div class="code-block-header">
-            <span class="code-lang">shapes.lll</span>
-            <button class="copy-btn">copy</button>
+            </div>
           </div>
-          <pre><code class="language-haskell">module Shapes
+
+          <!-- ADTs and pattern matching -->
+          <div>
+            <h3 style="color: var(--text-primary); margin-bottom: 0.75rem">
+              ADTs and pattern matching
+            </h3>
+            <div class="code-block">
+              <div class="code-block-header">
+                <span class="code-lang">shapes.lll</span>
+                <button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-haskell">module Shapes
 
 Shape = Circle Float | Rect Float Float | Empty
 
 area(s Shape) Float =
-  match s with
-  | Circle r -> 3.14159 * r * r
-  | Rect w h -> w * h
-  | Empty    -> 0.0
+  match s
+    | Circle r -> 3.14159 * r * r
+    | Rect w h -> w * h
+    | Empty    -> 0.0
 
 Shapes =
   printfn "circle area: %f" (area (Circle 5.0))
   printfn "rect area:   %f" (area (Rect 3.0 4.0))</code></pre>
-        </div>
-      </div>
-
-      <!-- Tagged types -->
-      <div>
-        <h3 style="color:var(--text-primary);margin-bottom:.75rem">Tagged types (branded strings)</h3>
-        <div class="code-block">
-          <div class="code-block-header">
-            <span class="code-lang">tags.lll</span>
-            <button class="copy-btn">copy</button>
+            </div>
           </div>
-          <pre><code class="language-haskell">module Tags
+
+          <!-- Tagged types -->
+          <div>
+            <h3 style="color: var(--text-primary); margin-bottom: 0.75rem">
+              Tagged types (branded strings)
+            </h3>
+            <div class="code-block">
+              <div class="code-block-header">
+                <span class="code-lang">tags.lll</span>
+                <button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-haskell">module Tags
 
 tag UserId
 tag Email
@@ -143,18 +182,20 @@ Tags =
   email = "hi@example.com"[Email]
   printfn "%s" (getUser uid)
   printfn "%s" (sendEmail email)</code></pre>
-        </div>
-      </div>
-
-      <!-- Traits -->
-      <div>
-        <h3 style="color:var(--text-primary);margin-bottom:.75rem">Traits (ad-hoc polymorphism)</h3>
-        <div class="code-block">
-          <div class="code-block-header">
-            <span class="code-lang">traits.lll</span>
-            <button class="copy-btn">copy</button>
+            </div>
           </div>
-          <pre><code class="language-haskell">module Traits
+
+          <!-- Traits -->
+          <div>
+            <h3 style="color: var(--text-primary); margin-bottom: 0.75rem">
+              Traits (ad-hoc polymorphism)
+            </h3>
+            <div class="code-block">
+              <div class="code-block-header">
+                <span class="code-lang">traits.lll</span>
+                <button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-haskell">module Traits
 
 trait Show A =
   show(a A) Str
@@ -163,52 +204,73 @@ impl Show Int =
   show(n Int) Str = intToStr n
 
 impl Show Bool =
-  show(b Bool) Str = if b then "true" else "false"
+  show(b Bool) Str =
+    if b "true"
+    else "false"
 
 printVal(x A) [Show A] = printfn "%s" (show x)
 
 Traits =
   printVal 42
   printVal true</code></pre>
-        </div>
-      </div>
-
-      <!-- Multi-target build -->
-      <div>
-        <h3 style="color:var(--text-primary);margin-bottom:.75rem">Compile to multiple targets</h3>
-        <div class="code-block">
-          <div class="code-block-header">
-            <span class="code-lang">shell</span>
-            <button class="copy-btn">copy</button>
+            </div>
           </div>
-          <pre><code class="language-bash"># compile shapes.lll to every stable target
+
+          <!-- Multi-target build -->
+          <div>
+            <h3 style="color: var(--text-primary); margin-bottom: 0.75rem">
+              Compile to multiple targets
+            </h3>
+            <div class="code-block">
+              <div class="code-block-header">
+                <span class="code-lang">shell</span>
+                <button class="copy-btn">copy</button>
+              </div>
+              <pre><code class="language-bash"># compile shapes.lll to every stable target
 lllc build --target fs   shapes.lll   # shapes.fs
 lllc build --target ts   shapes.lll   # shapes.ts
 lllc build --target py   shapes.lll   # shapes.py
 lllc build --target java shapes.lll   # Shapes.java
 lllc build --target cs   shapes.lll   # Shapes.cs</code></pre>
+            </div>
+          </div>
         </div>
       </div>
+    </section>
 
-    </div>
-  </div>
-</section>
+    <!-- Footer -->
+    <footer>
+      <div class="footer-inner">
+        <span class="footer-logo"><span>//</span>ll-lang</span>
+        <ul class="footer-links">
+          <li>
+            <a
+              href="https://github.com/Neftedollar/ll-lang"
+              target="_blank"
+              rel="noopener"
+              >GitHub</a
+            >
+          </li>
+          <li><a href="docs.html">Docs</a></li>
+          <li><a href="index.html">Home</a></li>
+          <li>
+            <a
+              href="https://github.com/Neftedollar/ll-lang/blob/main/LICENSE"
+              target="_blank"
+              rel="noopener"
+              >MIT License</a
+            >
+          </li>
+        </ul>
+        <p class="footer-copy">
+          &copy; 2025 Neftedollar &mdash; ll-lang v1.1.0
+        </p>
+      </div>
+    </footer>
 
-<!-- Footer -->
-<footer>
-  <div class="footer-inner">
-    <span class="footer-logo"><span>//</span>ll-lang</span>
-    <ul class="footer-links">
-      <li><a href="https://github.com/Neftedollar/ll-lang" target="_blank" rel="noopener">GitHub</a></li>
-      <li><a href="docs.html">Docs</a></li>
-      <li><a href="index.html">Home</a></li>
-      <li><a href="https://github.com/Neftedollar/ll-lang/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a></li>
-    </ul>
-    <p class="footer-copy">&copy; 2025 Neftedollar &mdash; ll-lang v1.1.0</p>
-  </div>
-</footer>
-
-<script>hljs.highlightAll();</script>
-<script src="js/main.js"></script>
-</body>
+    <script>
+      hljs.highlightAll();
+    </script>
+    <script src="js/main.js"></script>
+  </body>
 </html>

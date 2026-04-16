@@ -321,13 +321,13 @@ Maybe A = Some A | None
 Result A E = Ok A | Err E
 
 area(s Shape) Float =
-  match s with
-  | Circle r -> 3.14159 * r * r
-  | Rect w h -> w * h
-  | Empty    -> 0.0
+  match s
+    | Circle r -> 3.14159 * r * r
+    | Rect w h -> w * h
+    | Empty    -> 0.0
 
 safeDivide(a Float)(b Float) Maybe[Float] =
-  if b == 0.0 then None
+  if b == 0.0 None
   else Some (a / b)</code></pre>
             </div>
           </section>
@@ -351,7 +351,9 @@ impl Show Int =
   show(n Int) Str = intToStr n
 
 impl Show Bool =
-  show(b Bool) Str = if b then "true" else "false"
+  show(b Bool) Str =
+    if b "true"
+    else "false"
 
 printVal(x A) [Show A] = printfn (show x)</code></pre>
             </div>
