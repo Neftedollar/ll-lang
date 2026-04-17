@@ -36,7 +36,9 @@ The wrapper performs four stages end-to-end:
 
 ## Supported features
 
-Validated against examples `spec/examples/valid/36-llvm-*.lll` through `48-llvm-*.lll`.
+Validated against examples `spec/examples/valid/36-llvm-*.lll` through `48-llvm-*.lll`,
+plus a growing set of non-LLVM examples that exercise the same pipeline via post-processor
+patches (see "Stretch-tested non-LLVM examples" below).
 
 | Feature | Example | Status |
 |---|---|---|
@@ -79,11 +81,15 @@ These compensate for codegen shortcuts in the frozen `CodegenLLVM.fs`. Each is i
 2. **Instruction-form GEP with extra parens** —
    `%t0 = getelementptr inbounds ([N x i8], ptr @.s, i64 0, i64 0)` is illegal as an instruction
    (only legal as a constant-expression). Script unwraps the parens.
-3. **Rename `define void @main()` → `define void @ll_main()`** — the C runtime owns the real
+3. **Rename `define <ret> @main()` → `define void @ll_main()`** — the C runtime owns the real
    `int main(int argc, char** argv)` so it can capture `argv` for `getArgs` and return a
    proper OS exit code. Previously the script rewrote `void @main` → `i32 @main` + `ret i32 0`;
    moving to renaming lets the runtime wrap user code cleanly. A `__attribute__((weak))`
-   fallback in C keeps linking alive if a .ll ever lacks a `main`.
+   fallback in C keeps linking alive if a .ll ever lacks a `main`. The rename also handles
+   value-returning mains (e.g. `define i32 @main()` or `i64`, emitted when the user's `main`
+   body evaluates to a scalar — example 21's `main = rbSize m`). The signature is coerced
+   to `void` and any `ret <ty> <val>` inside is rewritten to `ret void`; the OS exit code
+   still comes from the C wrapper and the user-level return value is discarded.
 4. **Duplicate `@__ll_alloc` definition** — ADT examples trigger codegen to emit a local
    definition of `@__ll_alloc`, which collides with the C runtime's version at link time
    (`duplicate symbol '___ll_alloc'`). Script strips the generated definition; the runtime
@@ -100,6 +106,53 @@ These compensate for codegen shortcuts in the frozen `CodegenLLVM.fs`. Each is i
    @printArgs(ptr %x)`. `@ll_getArgs` is provided by the C runtime and materialises a cons
    list from `argv[1..]` using the same `{ i64 tag, i64 payload, ptr tail }` node ABI as list
    literals. See example 48.
+7. **Synthesise `strConcat` in match arms shaped `"lit" + payload`** — a match arm whose
+   body contains exactly a literal-string GEP + a payload `inttoptr i64 %tN to ptr` + a
+   branch to `match_end` is a frozen-codegen drop of the `+` operator for string concat.
+   The match-end phi entry for that body is `null`. Script detects the signature tightly
+   (one GEP of `[K x i8] @.strX`, one inttoptr, direct branch to `match_end_M`, phi entry
+   `null`) and inserts `%cat_<body> = call ptr @strConcat(ptr %gep, ptr %payload)` before
+   the branch, then rewrites the phi entry to use `%cat_<body>`. Example 10's
+   `TIdent s -> "id:" + s` / `TNum s -> "num:" + s` arms depend on this patch.
+
+## Stretch-tested non-LLVM examples
+
+These examples predate the LLVM backend but now build end-to-end through the
+pipeline (post-processor + C runtime). They were never written with LLVM in
+mind, so any "works" here is pure reach.
+
+| Example | Status | Output |
+|---|---|---|
+| `hello.lll` | works | `Hello, ll-lang!` |
+| `06-stdlib.lll` | works (main only prints a literal; higher-order helpers are stubs — see limitations) | `stdlib example` |
+| `10-multiline-sum.lll` | works (patch #7 wires `strConcat` into match arms) | `id:foo` |
+| `02-adts.lll` | builds (no `main` → exit 0, no output — treated as a library) | _(none)_ |
+| `21-multi-param-types.lll` | builds (value-returning `main` coerced to void via patch #3 generalisation) | _(none, exit 0)_ |
+| `23-external-opaque.lll` | builds (no `main` → exit 0) | _(none)_ |
+
+### Known non-LLVM blockers (documented; not yet patched)
+
+- `07-text-processing.lll` — uses `listFold` over `strChars`; frozen codegen
+  drops the higher-order `listFold` call (`countDigits` just calls `strChars`
+  and returns `0`). Same class as the `listMap` limitation. Blocker: frozen
+  codegen's higher-order-function handling.
+- `03-tags.lll` — codegen produces an IR type mismatch (`ret ptr %t0` where
+  `%t0` is a `double`). Not a post-processor patchable issue.
+- `04-traits.lll` — trait `impl` generates `call @f` as if `f` were a global,
+  yielding `Undefined symbols: _f` at link time. Blocker: trait / HOF codegen.
+- `05-modules.lll` — compilation fails earlier (`E002 UnboundVar head`).
+  Module resolution, not a codegen issue.
+- `30-file-io-external.lll` — `external` declarations have no LLVM mapping
+  (`E026 UnknownExternalMapping target:llvm name:fileReadAll`). Adding
+  symbol mappings + runtime stubs for `fileReadAll`/`fileExists` would
+  unblock this and similar `external`-heavy examples.
+- `31-fixpoint-test.lll` — `E002 UnboundVar compileSingleFile` (imports
+  not resolved).
+- `33-io-sequence.lll` — IO monad example; pulls in `Std.IO` and emits
+  duplicate `@.str0` globals (codegen bug when merging imported modules).
+- `35-monad-module.lll` — heavy higher-order / monad code, same HOF-drop
+  class as example 44 but at much larger scale; no single post-processor
+  patch unlocks it.
 
 ## Running the pipeline
 

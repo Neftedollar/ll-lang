@@ -88,11 +88,19 @@ INSTR_GEP_RE = re.compile(
     r"\((?P<inner>.*)\)\s*$"
 )
 
-# `define void @main() {` -- the user entry point. We rename it to `@ll_main`
-# so the C runtime's `int main(int, char**)` can wrap it (capturing argv)
-# and return a real i32 exit code. Previously we rewrote this to
-# `define i32 @main()` + `ret i32 0`, but that precluded CLI args.
-VOID_MAIN_SIG_RE = re.compile(r"^(\s*)define\s+void\s+@main\s*\(\s*\)\s*\{\s*$")
+# `define <ret> @main() {` -- the user entry point. We rename it to
+# `@ll_main` so the C runtime's `int main(int, char**)` can wrap it
+# (capturing argv) and return a real i32 exit code. Previously we rewrote
+# this to `define i32 @main()` + `ret i32 0`, but that precluded CLI args.
+#
+# Frozen codegen emits either `void @main` (for statement-shaped entries
+# like `printfn "..."`) or a value-returning `<type> @main` (e.g. `i32`
+# / `i64` when main's body evaluates to a scalar — see example 21 where
+# `rbSize m` produces `i32 @main`). In the latter case we coerce the
+# signature to void and rewrite any `ret <type> <val>` to `ret void`;
+# the user-level return value is discarded because the OS exit code comes
+# from the C runtime's `int main` wrapper.
+MAIN_SIG_RE = re.compile(r"^(\s*)define\s+(\S+)\s+@main\s*\(\s*\)\s*\{\s*$")
 
 # `call void @printArgs(ptr null)` — the pattern emitted by the frozen
 # codegen when the user writes `main() = printArgs []`. We intercept it
@@ -187,25 +195,31 @@ def fix_instruction_geps(lines: List[str]) -> List[str]:
 
 
 def rename_main_to_ll_main(lines: List[str]) -> List[str]:
-    """Rename `define void @main()` to `define void @ll_main()`.
+    """Rename `define <ret> @main()` to `define void @ll_main()`.
 
     The C runtime (lllc_runtime.c) defines the real `int main(int, char**)`
-    which captures argv and delegates to `ll_main`. Keeping the body void
-    matches lllc's output shape — the C wrapper returns the OS exit code.
+    which captures argv and delegates to `ll_main`. We coerce the signature
+    to `void` even when the frozen codegen emits a value-returning main
+    (e.g. `i32`/`i64` when the body evaluates to a scalar) — the user-level
+    return value is discarded because the OS exit code comes from the C
+    wrapper. Any `ret <type> <val>` inside the body is rewritten to
+    `ret void` in that case.
 
-    We also rewrite any self-recursive `call void @main(...)` inside the
+    We also rewrite any self-recursive `call ... @main(` inside the
     renamed body (unusual but possible). Calls to *other* functions named
     `main` in user code are disambiguated by lllc's module suffix, so this
     only fires on the synthesised entry.
     """
     out: List[str] = []
     in_main = False
+    ret_ty: Optional[str] = None
     brace_depth = 0
     for line in lines:
         if not in_main:
-            m = VOID_MAIN_SIG_RE.match(line)
+            m = MAIN_SIG_RE.match(line)
             if m is not None:
                 indent = m.group(1)
+                ret_ty = m.group(2)
                 out.append(f"{indent}define void @ll_main() {{")
                 in_main = True
                 brace_depth = 1
@@ -213,14 +227,22 @@ def rename_main_to_ll_main(lines: List[str]) -> List[str]:
             out.append(line)
             continue
 
-        # Inside the renamed main: rewrite any `call ... @main(` to @ll_main.
-        # (Self-recursion on an entry point is rare but cheap to handle.)
-        rewritten = re.sub(r"call\s+(\S+)\s+@main\(", r"call \1 @ll_main(", line)
+        # Inside the renamed main.
+        rewritten = line
+        # If main was value-returning, coerce every `ret <ty> <val>` to `ret void`.
+        if ret_ty is not None and ret_ty != "void":
+            ret_pattern = re.compile(r"^(\s*)ret\s+\S+\s+\S+\s*$")
+            if ret_pattern.match(rewritten):
+                indent = ret_pattern.match(rewritten).group(1)
+                rewritten = f"{indent}ret void"
+        # Rewrite self-recursive calls to the old name.
+        rewritten = re.sub(r"call\s+(\S+)\s+@main\(", r"call \1 @ll_main(", rewritten)
         out.append(rewritten)
 
         brace_depth += line.count("{") - line.count("}")
         if brace_depth <= 0:
             in_main = False
+            ret_ty = None
     return out
 
 
@@ -454,6 +476,147 @@ def _repair_phis_in_func(flines: List[str]) -> List[str]:
     return flines
 
 
+MATCH_BODY_RE       = re.compile(r"^match_body_\d+:\s*$")
+GEP_LITSTR_RE       = re.compile(
+    r"^\s*%(?P<name>t\d+)\s*=\s*getelementptr\s+inbounds\s+"
+    r"(?:\()?\[\s*\d+\s*x\s*i8\s*\],\s*ptr\s+@\.str\d+\s*,\s*i64\s+0\s*,\s*i64\s+0\)?\s*$"
+)
+INTTOPTR_RE         = re.compile(
+    r"^\s*%(?P<name>t\d+)\s*=\s*inttoptr\s+i64\s+%t\d+\s+to\s+ptr\s*$"
+)
+BR_MATCH_END_RE     = re.compile(r"^(?P<indent>\s*)br\s+label\s+%(?P<lbl>match_end_\d+)\s*$")
+
+
+def fix_match_arm_str_concat(lines: List[str]) -> List[str]:
+    """Synthesise `strConcat` inside match arms whose body operand sequence
+    looks like "literal string + payload cast to ptr" — a pattern the frozen
+    codegen emits without the actual concat call (phi entry ends up `null`).
+
+    Detection (per `match_body_N` block, function-scoped):
+
+      match_body_N:
+        %tA = getelementptr inbounds ([K x i8], ptr @.strX, i64 0, i64 0)
+        %tB = inttoptr i64 %tY to ptr
+        br label %match_end_M                                   ; last instr
+
+      match_end_M:
+        %tZ = phi ptr [ null, %match_body_N ], ...
+
+    Rewrite: insert `%cat_N = call ptr @strConcat(ptr %tA, ptr %tB)` before
+    the branch, and change the phi entry `[ null, %match_body_N ]` to
+    `[ %cat_N, %match_body_N ]`. The declare for `@strConcat` is added
+    automatically by `prepend_declares`.
+
+    Scoped narrowly (exactly: one literal GEP + one inttoptr, a null phi
+    entry, a ptr phi) so non-matching arms are untouched. This compensates
+    for a frozen-codegen drop in match arms that evaluate `"lit" + payload`,
+    e.g. example 10's `TIdent s -> "id:" + s` arm.
+    """
+    out_lines = list(lines)
+
+    # Index label -> line number, scope-bounded by function braces.
+    labels: Dict[str, int] = {}
+    i = 0
+    while i < len(out_lines):
+        ln = out_lines[i]
+        m = LABEL_RE.match(ln.rstrip())
+        if m:
+            labels[m.group(1)] = i
+        i += 1
+
+    # Snapshot only the match_body_* labels (by name); look up positions
+    # in the live `labels` dict each iteration so inserts stay consistent.
+    body_labels = [n for n in labels if re.match(r"^match_body_\d+$", n)]
+    for lbl in body_labels:
+        body_line = labels.get(lbl)
+        if body_line is None:
+            continue
+        if not re.match(r"^match_body_\d+:\s*$", out_lines[body_line]):
+            continue
+
+        # Collect the block until the next label or close brace.
+        gep_name: Optional[str] = None
+        intptr_name: Optional[str] = None
+        br_line_idx: Optional[int] = None
+        match_end_lbl: Optional[str] = None
+        j = body_line + 1
+        stray = False
+        while j < len(out_lines):
+            ln = out_lines[j]
+            if LABEL_RE.match(ln.rstrip()) or ln.strip() == "}":
+                break
+            gm = GEP_LITSTR_RE.match(ln)
+            if gm:
+                if gep_name is None:
+                    gep_name = gm.group("name")
+                else:
+                    # More than one literal-GEP in the arm — bail.
+                    stray = True
+                j += 1
+                continue
+            im = INTTOPTR_RE.match(ln)
+            if im:
+                if intptr_name is None:
+                    intptr_name = im.group("name")
+                else:
+                    stray = True
+                j += 1
+                continue
+            bm = BR_MATCH_END_RE.match(ln)
+            if bm:
+                br_line_idx = j
+                match_end_lbl = bm.group("lbl")
+                break
+            # Any other instruction in the block disqualifies the rewrite.
+            # (We only care about the "1 literal + 1 payload + br" shape.)
+            stray = True
+            j += 1
+
+        if stray or gep_name is None or intptr_name is None or br_line_idx is None or match_end_lbl is None:
+            continue
+
+        # The phi at match_end_lbl must have a `null` entry for this body.
+        phi_idx = labels.get(match_end_lbl)
+        if phi_idx is None:
+            continue
+        phi_line_idx: Optional[int] = None
+        for k in range(phi_idx + 1, len(out_lines)):
+            l2 = out_lines[k]
+            if LABEL_RE.match(l2.rstrip()) or l2.strip() == "}":
+                break
+            if "phi ptr " in l2 and f"%{lbl}" in l2:
+                phi_line_idx = k
+                break
+        if phi_line_idx is None:
+            continue
+
+        phi_line = out_lines[phi_line_idx]
+        null_entry_re = re.compile(r"\[\s*null\s*,\s*%" + re.escape(lbl) + r"\s*\]")
+        if not null_entry_re.search(phi_line):
+            continue
+
+        # All clear — synthesise the strConcat.
+        cat_name = f"cat_{lbl}"
+        br_line = out_lines[br_line_idx]
+        indent_m = re.match(r"^(\s*)", br_line)
+        indent = indent_m.group(1) if indent_m else "  "
+        call_line = f"{indent}%{cat_name} = call ptr @strConcat(ptr %{gep_name}, ptr %{intptr_name})"
+
+        # Replace the phi's null entry with %cat_name.
+        new_phi_line = null_entry_re.sub(f"[ %{cat_name}, %{lbl} ]", phi_line, count=1)
+
+        # Apply edits in reverse order so earlier indices remain valid.
+        out_lines[phi_line_idx] = new_phi_line
+        out_lines.insert(br_line_idx, call_line)
+
+        # Re-index labels since we've inserted a line.
+        for name in list(labels.keys()):
+            if labels[name] > br_line_idx:
+                labels[name] += 1
+
+    return out_lines
+
+
 def patch(text: str) -> str:
     lines = text.splitlines()
     lines = strip_runtime_owned_defs(lines)
@@ -461,6 +624,7 @@ def patch(text: str) -> str:
     lines = rename_main_to_ll_main(lines)
     lines = fix_cli_args_main(lines)
     lines = fix_match_phi_predecessors(lines)
+    lines = fix_match_arm_str_concat(lines)
     lines = prepend_declares(lines)
     result = "\n".join(lines)
     if text.endswith("\n"):
