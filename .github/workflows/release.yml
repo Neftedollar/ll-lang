@@ -150,6 +150,9 @@ jobs:
     name: Publish NuGet
     needs: create-release
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -172,7 +175,6 @@ jobs:
       - name: Push to NuGet.org
         run: |
           dotnet nuget push nuget-out/*.nupkg \
-            --api-key ${{ secrets.NUGET_API_KEY }} \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
 
