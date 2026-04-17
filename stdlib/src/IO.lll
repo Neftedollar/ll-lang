@@ -1,0 +1,209 @@
+module Std.IO
+
+-- Monadic IO for composing imperative effects in a functional style.
+--
+-- ll-lang is already impure — printfn, readFile, writeFile, dirList are
+-- builtin functions that perform side effects directly.  This module wraps
+-- them in a composable IO type so you can BUILD a description of effects
+-- and then RUN it, just like State wraps (S -> (A, S)).
+--
+-- IO A = MkIO (Int -> A)
+--
+-- The Int parameter is a dummy (always passed 0) — it exists solely to
+-- suspend evaluation.  When you call `ioRun`, the thunk is forced.
+--
+-- Naming convention follows Std.Monad:
+--   ioPure (pure), ioMap (map), ioBind (bind)
+
+import Std.List
+
+-- ---- Core type ---------------------------------------------------------------
+
+export IO A = MkIO (Int -> A)
+
+-- ---- Primitives --------------------------------------------------------------
+
+-- Wrap a pure value in IO.
+export ioPure(x A) =
+  MkIO (\dummy. x)
+
+-- Execute an IO action, producing its result.
+export ioRun(io IO[A]) =
+  match io
+    | MkIO f -> f 0
+
+-- ---- Functor / Monad ---------------------------------------------------------
+
+-- Transform the result of an IO action.
+export ioMap(f A -> B)(io IO[A]) =
+  MkIO (\dummy.
+    a = ioRun io
+    f a
+  )
+
+-- Monadic bind: run the first action, feed its result to k, run the second.
+export ioBind(io IO[A])(k A -> IO[B]) =
+  MkIO (\dummy.
+    a = ioRun io
+    ioRun (k a)
+  )
+
+-- Sequence two actions, discarding the first result (>> operator).
+export ioThen(first IO[A])(second IO[B]) =
+  MkIO (\dummy.
+    _ = ioRun first
+    ioRun second
+  )
+
+-- ---- Wrapped builtins --------------------------------------------------------
+
+-- Print a string followed by a newline.  Returns 0.
+export ioPutStrLn(s Str) =
+  MkIO (\dummy.
+    _ = printfn s
+    0
+  )
+
+-- Read file contents.
+export ioReadFile(path Str) =
+  MkIO (\dummy.
+    readFile path
+  )
+
+-- Write content to a file.  Returns 0.
+export ioWriteFile(path Str)(content Str) =
+  MkIO (\dummy.
+    _ = writeFile path content
+    0
+  )
+
+-- List directory contents.
+export ioDirList(path Str) =
+  MkIO (\dummy.
+    dirList path
+  )
+
+-- ---- Combinators -------------------------------------------------------------
+
+-- Run an IO action for each element of a list. Returns 0.
+export ioForEach(xs List[A])(f A -> IO[Int]) =
+  MkIO (\dummy.
+    listFold
+      (\acc x.
+        _ = ioRun (f x)
+        0
+      )
+      0
+      xs
+  )
+
+-- Conditionally run an IO action.  If cond is false, return 0.
+export ioWhen(cond Bool)(action IO[Int]) =
+  if cond
+    action
+  else ioPure 0
+
+-- Run a list of IO actions and collect their results in order.
+export ioSequence(actions List[IO[A]]) =
+  MkIO (\dummy.
+    reversed =
+      listFold
+        (\acc act.
+          result = ioRun act
+          result :: acc
+        )
+        []
+        actions
+    listReverse reversed
+  )
+
+-- ---- Self-tests ---------------------------------------------------------------
+
+check(label Str)(ok Bool) =
+  if ok
+    _ = printfn (strConcat "OK " label)
+    0
+  else
+    _ = printfn (strConcat "FAIL " label)
+    1
+
+showIntList(xs List[Int]) =
+  strs = listMap intToStr xs
+  listFold (\acc s. strConcat acc (strConcat "," s)) "" strs
+
+main =
+  -- 1. ioPure + ioRun: pure value round-trips
+  _ = check "1 ioPure+ioRun" (ioRun (ioPure 42) == 42)
+
+  -- 2. ioPure with string
+  _ = check "2 ioPure str" (ioRun (ioPure "hello") == "hello")
+
+  -- 3. ioMap: transform result
+  r3 = ioRun (ioMap (\x. x * 3) (ioPure 7))
+  _ = check "3 ioMap" (r3 == 21)
+
+  -- 4. ioMap composition: two maps
+  r4 = ioRun (ioMap (\x. x + 1) (ioMap (\x. x * 2) (ioPure 5)))
+  _ = check "4 ioMap compose" (r4 == 11)
+
+  -- 5. ioBind: chain two pure computations
+  r5 = ioRun (ioBind (ioPure 10) (\x. ioPure (x + 5)))
+  _ = check "5 ioBind" (r5 == 15)
+
+  -- 6. ioBind chain: three steps
+  r6 = ioRun (ioBind (ioPure 2) (\a. ioBind (ioPure (a * 3)) (\b. ioPure (b + 1))))
+  _ = check "6 ioBind chain" (r6 == 7)
+
+  -- 7. ioThen: first result is discarded
+  r7 = ioRun (ioThen (ioPure 99) (ioPure 1))
+  _ = check "7 ioThen" (r7 == 1)
+
+  -- 8. ioPutStrLn: returns 0 (and prints)
+  r8 = ioRun (ioPutStrLn "  (test 8 output)")
+  _ = check "8 ioPutStrLn" (r8 == 0)
+
+  -- 9. ioThen with ioPutStrLn: sequence two prints
+  r9 = ioRun (ioThen (ioPutStrLn "  (test 9a)") (ioPutStrLn "  (test 9b)"))
+  _ = check "9 ioThen print" (r9 == 0)
+
+  -- 10. ioForEach: iterate a list with effects
+  items = [1; 2; 3]
+  r10 = ioRun (ioForEach items (\x. ioPutStrLn (strConcat "  forEach " (intToStr x))))
+  _ = check "10 ioForEach" (r10 == 0)
+
+  -- 11. ioForEach empty list
+  r11 = ioRun (ioForEach [] (\x. ioPutStrLn "never"))
+  _ = check "11 ioForEach empty" (r11 == 0)
+
+  -- 12. ioWhen true: action runs
+  r12 = ioRun (ioWhen true (ioPutStrLn "  (test 12 ran)"))
+  _ = check "12 ioWhen true" (r12 == 0)
+
+  -- 13. ioWhen false: action skipped, returns 0
+  r13 = ioRun (ioWhen false (ioPutStrLn "SHOULD NOT PRINT"))
+  _ = check "13 ioWhen false" (r13 == 0)
+
+  -- 14. ioSequence: collect results in order
+  actions14 = [ioPure 10; ioPure 20; ioPure 30]
+  r14 = ioRun (ioSequence actions14)
+  _ = check "14 ioSequence" (showIntList r14 == ",10,20,30")
+
+  -- 15. ioSequence empty
+  r15 = ioRun (ioSequence [])
+  _ = check "15 ioSequence empty" (showIntList r15 == "")
+
+  -- 16. ioBind + ioMap composition: build a pipeline
+  pipeline = ioBind (ioPure 4) (\x. ioMap (\y. y * y) (ioPure (x + 1)))
+  r16 = ioRun pipeline
+  _ = check "16 bind+map pipeline" (r16 == 25)
+
+  -- 17. ioThen chain: three sequential actions
+  r17 = ioRun (ioThen (ioPutStrLn "  (17a)") (ioThen (ioPutStrLn "  (17b)") (ioPure 42)))
+  _ = check "17 ioThen chain" (r17 == 42)
+
+  -- 18. ioSequence with effects: verify ordering via ioPutStrLn
+  actions18 = [ioPutStrLn "  seq-A"; ioPutStrLn "  seq-B"; ioPutStrLn "  seq-C"]
+  r18 = ioRun (ioSequence actions18)
+  _ = check "18 ioSequence effects" (showIntList r18 == ",0,0,0")
+
+  printfn "Done"
