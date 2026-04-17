@@ -1,0 +1,104 @@
+module Examples.BuilderPipeline
+
+import Std.Builder
+
+-- ============================================================
+-- Std.Builder computation-expression pipelines.
+--
+-- Monadic bind chains get unreadable fast:
+--
+--   maybeBind m1 (\a. maybeBind m2 (\b. maybeBind m3 (\c. f a b c)))
+--
+-- Std.Builder flattens the nesting with per-monad pipe combinators:
+--
+--   maybePipe3 m1 m2 m3 (\a b c. f a b c)
+--
+-- This example shows maybePipe2, maybePipe3, maybeAll, and
+-- maybeGuard alongside the raw maybeBind version, so the
+-- readability improvement is obvious.
+-- ============================================================
+
+-- Render a Maybe[Int] as text (helper for assertions).
+showMaybe(m Maybe[Int]) =
+  match m
+    | Some v -> intToStr v
+    | None   -> "none"
+
+-- Build a Maybe using a positivity guard: positive inputs are
+-- kept, non-positive inputs collapse to None.
+positive(x Int) =
+  if x > 0
+    Some x
+  else None
+
+-- Nested-bind version: sum three Maybe[Int] the hard way.
+nestedSum3(m1 Maybe[Int])(m2 Maybe[Int])(m3 Maybe[Int]) =
+  maybeBind m1 (\a. maybeBind m2 (\b. maybeBind m3 (\c. Some (a + b + c))))
+
+-- Pipeline version: the same thing via maybePipe3.
+pipeSum3(m1 Maybe[Int])(m2 Maybe[Int])(m3 Maybe[Int]) =
+  maybePipe3 m1 m2 m3 (\a b c. Some (a + b + c))
+
+checkBool(label Str)(ok Bool) =
+  if ok
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " label)
+
+main =
+  -- ── 1. maybePipe2: combine two Somes ──────────────────────
+  r1 = maybePipe2 (Some 3) (Some 4) (\a b. Some (a + b))
+  _ = checkBool "1 pipe2 both Some" (showMaybe r1 == "7")
+
+  -- ── 2. maybePipe2 short-circuits on first None ────────────
+  r2 = maybePipe2 None (Some 4) (\a b. Some (a + b))
+  _ = checkBool "2 pipe2 first None" (showMaybe r2 == "none")
+
+  -- ── 3. maybePipe3: combine three Somes ────────────────────
+  r3 = maybePipe3 (Some 1) (Some 2) (Some 3) (\a b c. Some (a + b + c))
+  _ = checkBool "3 pipe3 all Some" (showMaybe r3 == "6")
+
+  -- ── 4. Nested-bind and pipeline produce identical results ─
+  nested = nestedSum3 (Some 10) (Some 20) (Some 30)
+  piped  = pipeSum3   (Some 10) (Some 20) (Some 30)
+  _ = checkBool "4 nested == piped" (showMaybe nested == showMaybe piped)
+
+  -- ── 5. maybeAll: every element must be Some ───────────────
+  all1 = maybeAll [Some 5; Some 6; Some 7]
+  got1 = match all1
+    | Some xs -> listFold (\a x. a + x) 0 xs
+    | None    -> 0 - 1
+  _ = checkBool "5 maybeAll all Some (sum=18)" (got1 == 18)
+
+  -- ── 6. maybeAll short-circuits on any None ────────────────
+  all2 = maybeAll [Some 5; None; Some 7]
+  got2 = match all2
+    | Some _ -> "ok"
+    | None   -> "short-circuited"
+  _ = checkBool "6 maybeAll short-circuit" (got2 == "short-circuited")
+
+  -- ── 7. maybeGuard: guarded path passes ────────────────────
+  r7 = maybeBind (maybeGuard true) (\g. maybePipe2 (Some 11) (Some 22) (\a b. Some (a + b)))
+  _ = checkBool "7 guard true then pipe2" (showMaybe r7 == "33")
+
+  -- ── 8. maybeGuard: guarded path fails, whole thing None ───
+  r8 = maybeBind (maybeGuard false) (\g. maybePipe2 (Some 11) (Some 22) (\a b. Some (a + b)))
+  _ = checkBool "8 guard false short-circuits" (showMaybe r8 == "none")
+
+  -- ── 9. maybeAll over computed Maybes using positivity ─────
+  xs9 = listMap positive [1; 2; 3; 4]
+  r9 = maybeAll xs9
+  got9 = match r9
+    | Some vs -> listFold (\a x. a + x) 0 vs
+    | None    -> 0 - 1
+  _ = checkBool "9 maybeAll computed (sum=10)" (got9 == 10)
+
+  -- ── 10. Same list with a negative — maybeAll returns None ─
+  xs10 = listMap positive [1; 2; 0 - 5; 4]
+  r10 = maybeAll xs10
+  got10 = match r10
+    | Some _ -> "ok"
+    | None   -> "none"
+  _ = checkBool "10 maybeAll with neg" (got10 == "none")
+
+  printfn "Done"
