@@ -1,0 +1,74 @@
+name: LLVM SDK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sdks/Platform.LLVM.SDK/**'
+      - 'stdlib/src/CodegenLLVM.lll'
+      - 'initial-compiler/src/**/CodegenLLVM.fs'
+      - 'tools/llvm-*'
+      - 'spec/examples/valid/3[6-9]-llvm-*.lll'
+      - '.github/workflows/llvm.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'sdks/Platform.LLVM.SDK/**'
+      - 'stdlib/src/CodegenLLVM.lll'
+      - 'initial-compiler/src/**/CodegenLLVM.fs'
+      - 'tools/llvm-*'
+      - 'spec/examples/valid/3[6-9]-llvm-*.lll'
+      - '.github/workflows/llvm.yml'
+
+jobs:
+  native-binary-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build bootstrap lllc
+        run: dotnet build initial-compiler/src/LLLangTool/LLLangTool.fsproj -c Debug
+
+      - name: Build 36-llvm-native-hello
+        run: tools/llvm-build.sh spec/examples/valid/36-llvm-native-hello.lll /tmp/hello
+
+      - name: Run 36-llvm-native-hello
+        run: |
+          OUT=$(/tmp/hello)
+          echo "stdout: $OUT"
+          test "$OUT" = "Hello from native binary!" || { echo "expected 'Hello from native binary!'"; exit 1; }
+
+      - name: Build 37-llvm-arith
+        run: tools/llvm-build.sh spec/examples/valid/37-llvm-arith.lll /tmp/arith
+
+      - name: Run 37-llvm-arith
+        run: |
+          OUT=$(/tmp/arith)
+          echo "stdout: $OUT"
+          test "$OUT" = "42" || { echo "expected '42'"; exit 1; }
+
+      - name: Build 38-llvm-conditional
+        run: tools/llvm-build.sh spec/examples/valid/38-llvm-conditional.lll /tmp/cond
+
+      - name: Run 38-llvm-conditional
+        run: |
+          OUT=$(/tmp/cond)
+          echo "stdout: $OUT"
+          test "$OUT" = "13" || { echo "expected '13'"; exit 1; }
+
+      - name: Build 39-llvm-strings
+        run: tools/llvm-build.sh spec/examples/valid/39-llvm-strings.lll /tmp/strings
+
+      - name: Run 39-llvm-strings
+        run: |
+          OUT=$(/tmp/strings)
+          echo "stdout: $OUT"
+          test "$OUT" = "Hello, LLVM!" || { echo "expected 'Hello, LLVM!'"; exit 1; }

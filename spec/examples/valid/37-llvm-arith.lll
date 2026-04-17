@@ -1,0 +1,7 @@
+module LlvmArith
+
+add(a Int)(b Int) Int = a + b
+
+main() =
+  x = add 10 32
+  printfn (intToStr x)

@@ -1,0 +1,5 @@
+module LlvmStrings
+
+main() =
+  greeting = strConcat "Hello, " "LLVM!"
+  printfn greeting

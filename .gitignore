@@ -12,6 +12,9 @@ my-mcps/
 # local build artifacts (AOT/R2R outputs, dSYM, etc.)
 artifacts/
 
+# LLVM SDK runtime build artifact (built by runtime/Makefile)
+sdks/Platform.LLVM.SDK/runtime/*.o
+
 # generated output from `lllc build` next to .lll sources (all targets)
 spec/examples/**/*.fs
 spec/examples/**/*.cs
