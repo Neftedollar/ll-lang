@@ -90,6 +90,13 @@ KNOWN_EXTERNALS: Dict[str, Tuple[str, List[str]]] = {
     "listMap":      ("ptr", ["ptr", "ptr"]),
     "listFold":     ("i64", ["ptr", "i64", "ptr"]),
     "listFilter":   ("ptr", ["ptr", "ptr"]),
+    "listAny":      ("i1",  ["ptr", "ptr"]),
+    "listAll":      ("i1",  ["ptr", "ptr"]),
+    "listFind":     ("i64", ["ptr", "ptr"]),
+    "listFindIndex":("i64", ["ptr", "ptr"]),
+    "listFindIndexFrom": ("i64", ["ptr", "i64", "ptr"]),
+    "listPartition":("ptr", ["ptr", "ptr"]),
+    "make_closure": ("ptr", ["ptr", "ptr"]),
     "listHead":     ("ptr", ["ptr"]),
     "listTail":     ("ptr", ["ptr"]),
     "strChars":     ("ptr", ["ptr"]),
@@ -150,7 +157,16 @@ CLI_ARGS_CALL_RE = re.compile(
 # `duplicate symbol '___ll_alloc'`. We keep the runtime as source of
 # truth (so memory-management tweaks land in C, not in frozen codegen)
 # and strip the generated definition textually.
-RUNTIME_OWNED_DEFS = {"__ll_alloc"}
+RUNTIME_OWNED_DEFS = {
+    "__ll_alloc",
+    # Higher-order list helpers: the C runtime owns these now that they
+    # accept a Closure* first argument (see lllc_runtime.c). The .lll
+    # stdlib still defines them the old way (bare fn_ptr), so we strip
+    # the IR-emitted copies to let the runtime version win.
+    "listFold", "listMap", "listFilter",
+    "listAny", "listAll", "listFind",
+    "listFindIndex", "listFindIndexFrom", "listPartition",
+}
 DEFINE_OWNED_RE = re.compile(
     r"^\s*define\s+\S+\s+@(" + "|".join(re.escape(n) for n in RUNTIME_OWNED_DEFS) + r")\s*\("
 )

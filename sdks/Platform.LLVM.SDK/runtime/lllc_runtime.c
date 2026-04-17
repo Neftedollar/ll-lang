@@ -370,6 +370,69 @@ static ll_node_t* ll_cons(int64_t payload, ll_node_t* tail) {
     return n;
 }
 
+/* ---- Closures ----------------------------------------------------------
+ * A closure is a two-pointer struct `{fn, env}`. Two ABI conventions live
+ * behind it, discriminated by whether env is NULL:
+ *
+ *   env == NULL : fn has signature `T (args...)`        — bare function
+ *   env != NULL : fn has signature `T (env, args...)`   — env-taking lambda
+ *
+ * The codegen wraps every first-class function value (lambdas, top-level
+ * fn references passed as arguments) into a closure. Higher-order runtime
+ * helpers (listFold/listMap/etc.) receive a Closure* and branch on env to
+ * pick the right call shape. This lets `listMap emitParam ps` and
+ * `listMap (\p. ... base ...) ps` both work without trampolines.
+ * --------------------------------------------------------------------- */
+
+typedef struct ll_closure {
+    void* fn;
+    void* env;
+} ll_closure_t;
+
+void* make_closure(void* fn, void* env) {
+    ll_closure_t* c = (ll_closure_t*)malloc(sizeof(ll_closure_t));
+    if (c == NULL) return NULL;
+    c->fn = fn;
+    c->env = env;
+    return c;
+}
+
+/* Call a Closure that returns i64 and takes one i64 argument. */
+static int64_t call_closure_i64_i64(ll_closure_t* c, int64_t a) {
+    if (c == NULL || c->fn == NULL) return 0;
+    if (c->env == NULL) {
+        int64_t (*fn)(int64_t) = (int64_t (*)(int64_t))c->fn;
+        return fn(a);
+    } else {
+        int64_t (*fn)(void*, int64_t) = (int64_t (*)(void*, int64_t))c->fn;
+        return fn(c->env, a);
+    }
+}
+
+/* Call a Closure that returns i64 and takes two i64 arguments. */
+static int64_t call_closure_i64_i64_i64(ll_closure_t* c, int64_t a, int64_t b) {
+    if (c == NULL || c->fn == NULL) return 0;
+    if (c->env == NULL) {
+        int64_t (*fn)(int64_t, int64_t) = (int64_t (*)(int64_t, int64_t))c->fn;
+        return fn(a, b);
+    } else {
+        int64_t (*fn)(void*, int64_t, int64_t) = (int64_t (*)(void*, int64_t, int64_t))c->fn;
+        return fn(c->env, a, b);
+    }
+}
+
+/* Call a Closure that returns i8 (Bool) and takes one i64 argument. */
+static int8_t call_closure_i8_i64(ll_closure_t* c, int64_t a) {
+    if (c == NULL || c->fn == NULL) return 0;
+    if (c->env == NULL) {
+        int8_t (*fn)(int64_t) = (int8_t (*)(int64_t))c->fn;
+        return fn(a);
+    } else {
+        int8_t (*fn)(void*, int64_t) = (int8_t (*)(void*, int64_t))c->fn;
+        return fn(c->env, a);
+    }
+}
+
 /* Char / Int helpers ------------------------------------------------------ */
 
 int8_t charIsDigit(int8_t c) {
@@ -439,15 +502,15 @@ ll_node_t* listConcat(ll_node_t* lst) {
     return out;
 }
 
-/* listMap: apply a function to each element.
- * `fn` is a raw function pointer `int64_t (*)(int64_t)` — payloads are
- * passed as i64 (caller guarantees element type matches fn's param type
- * up to i64-punning, which is how the codegen treats all list payloads). */
-ll_node_t* listMap(int64_t (*fn)(int64_t), ll_node_t* lst) {
+/* listMap: apply a closure to each element.
+ * `fn` is a Closure* — the runtime unpacks it via `call_closure_i64_i64`
+ * which handles both bare-fn (env=NULL) and env-taking lambdas uniformly.
+ * Payloads are passed as i64 (caller guarantees element type punning). */
+ll_node_t* listMap(ll_closure_t* fn, ll_node_t* lst) {
     /* Build the mapped list in reverse, then reverse to restore order. */
     ll_node_t* acc = NULL;
     while (lst != NULL) {
-        int64_t mapped = fn(lst->payload);
+        int64_t mapped = call_closure_i64_i64(fn, lst->payload);
         acc = ll_cons(mapped, acc);
         lst = lst->tail;
     }
@@ -458,15 +521,13 @@ ll_node_t* listMap(int64_t (*fn)(int64_t), ll_node_t* lst) {
  * Called as `listFold fn initial list`. We pass acc and payload both as
  * i64 (pointer-pun via listFold's caller contract).
  *
- * NB: This signature assumes `fn` has direct two-arg uncurried calling
- * convention. The frozen F# codegen (Codegen.fs) is currently curried,
- * but the LLVM codegen uncurries fully, so `(\acc x. ...)` becomes
- * `i64 (int64_t, int64_t)`. Runtime treats the fn_ptr as opaque and
- * trusts the caller's signature. */
-int64_t listFold(int64_t (*fn)(int64_t, int64_t), int64_t z, ll_node_t* lst) {
+ * `fn` is a Closure* (see make_closure / call_closure_* helpers above).
+ * This is what unblocks `\acc d. listAppend acc (checkDecl env d)` and
+ * every other captureful fold in the stdlib. */
+int64_t listFold(ll_closure_t* fn, int64_t z, ll_node_t* lst) {
     int64_t acc = z;
     while (lst != NULL) {
-        acc = fn(acc, lst->payload);
+        acc = call_closure_i64_i64_i64(fn, acc, lst->payload);
         lst = lst->tail;
     }
     return acc;
@@ -474,15 +535,94 @@ int64_t listFold(int64_t (*fn)(int64_t, int64_t), int64_t z, ll_node_t* lst) {
 
 /* listFilter: keep elements where `fn` returns non-zero.
  * fn :: elem -> Bool (i1 returned as int8_t for ABI clarity). */
-ll_node_t* listFilter(int8_t (*fn)(int64_t), ll_node_t* lst) {
+ll_node_t* listFilter(ll_closure_t* fn, ll_node_t* lst) {
     ll_node_t* acc = NULL;
     while (lst != NULL) {
-        if (fn(lst->payload)) {
+        if (call_closure_i8_i64(fn, lst->payload)) {
             acc = ll_cons(lst->payload, acc);
         }
         lst = lst->tail;
     }
     return listReverse(acc);
+}
+
+/* listAny: return true if any element satisfies `fn`. */
+int8_t listAny(ll_closure_t* fn, ll_node_t* lst) {
+    while (lst != NULL) {
+        if (call_closure_i8_i64(fn, lst->payload)) return 1;
+        lst = lst->tail;
+    }
+    return 0;
+}
+
+/* listAll: return true if every element satisfies `fn` (vacuously true
+ * for empty list). */
+int8_t listAll(ll_closure_t* fn, ll_node_t* lst) {
+    while (lst != NULL) {
+        if (!call_closure_i8_i64(fn, lst->payload)) return 0;
+        lst = lst->tail;
+    }
+    return 1;
+}
+
+/* listFind: first element for which `fn` returns true.
+ * Returns the payload as i64 (0 if not found — same as strToInt,
+ * caller should treat as Maybe[_] if applicable). Stdlib's `listFind`
+ * is typed as `List[A] -> (A -> Bool) -> Maybe[A]` but at the LLVM
+ * ABI level we return a bare payload; callers that need `Maybe`
+ * should use a higher-level wrapper. */
+int64_t listFind(ll_closure_t* fn, ll_node_t* lst) {
+    while (lst != NULL) {
+        if (call_closure_i8_i64(fn, lst->payload)) return lst->payload;
+        lst = lst->tail;
+    }
+    return 0;
+}
+
+/* listFindIndex: index of first element where `fn` returns true,
+ * -1 if none. */
+int64_t listFindIndex(ll_closure_t* fn, ll_node_t* lst) {
+    int64_t i = 0;
+    while (lst != NULL) {
+        if (call_closure_i8_i64(fn, lst->payload)) return i;
+        i++;
+        lst = lst->tail;
+    }
+    return -1;
+}
+
+/* listFindIndexFrom: index of first element >= start where `fn` is true,
+ * -1 if none. */
+int64_t listFindIndexFrom(ll_closure_t* fn, int64_t start, ll_node_t* lst) {
+    int64_t i = 0;
+    while (lst != NULL) {
+        if (i >= start && call_closure_i8_i64(fn, lst->payload)) return i;
+        i++;
+        lst = lst->tail;
+    }
+    return -1;
+}
+
+/* listPartition: split into (matching, rest). Returned as a pair encoded
+ * in the same two-slot heap node ABI the codegen uses for tuples: a single
+ * cons cell whose payload holds the `matching` list ptr (as i64) and whose
+ * tail holds the `rest` list ptr. */
+ll_node_t* listPartition(ll_closure_t* fn, ll_node_t* lst) {
+    ll_node_t* yes = NULL;
+    ll_node_t* no = NULL;
+    while (lst != NULL) {
+        if (call_closure_i8_i64(fn, lst->payload)) {
+            yes = ll_cons(lst->payload, yes);
+        } else {
+            no = ll_cons(lst->payload, no);
+        }
+        lst = lst->tail;
+    }
+    yes = listReverse(yes);
+    no = listReverse(no);
+    /* Pair = 2-slot cons chain: {tag=-1, payload=yes, tail={tag=-1, payload=no, tail=NULL}}. */
+    ll_node_t* second = ll_cons((int64_t)(intptr_t)no, NULL);
+    return ll_cons((int64_t)(intptr_t)yes, second);
 }
 
 /* listHead: unchecked — return payload of first node as i64. On null list

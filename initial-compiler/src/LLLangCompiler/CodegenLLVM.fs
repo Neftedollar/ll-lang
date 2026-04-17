@@ -269,6 +269,114 @@ let rec private coerceValue (ctx: EmitCtx) (fromTy: string) (toTy: string) (valu
             coerceValue ctx "i64" "double" i64v
         | _, _ -> value
 
+// Runtime higher-order helpers whose first argument is a Closure*. When a
+// caller passes a bare global fn like `listMap emitParam xs`, we wrap
+// `emitParam` into a closure via `@make_closure` before the call site.
+// Captureful lambdas (via TELam) already evaluate to a Closure*.
+let private runtimeHOFNames : Set<string> =
+    Set.ofList [
+        "listFold"; "listMap"; "listFilter"
+        "listAny"; "listAll"; "listFind"
+        "listFindIndex"; "listFindIndexFrom"; "listPartition"
+    ]
+
+// Wrap a function-typed SSA value in a closure struct if it isn't already
+// one. The heuristic: a raw global fn reference looks like `@name`; any
+// other value (e.g. `%t3`) is assumed to already be a Closure* — that is
+// the invariant this codegen maintains for SSA-bound function values.
+let private wrapIfFnRef (ctx: EmitCtx) (argExpr: TypedExpr) (argVal: string) : string =
+    let rec isFnTy t =
+        match t with
+        | TyFn(_, _) -> true
+        | TyTagged(inner, _) -> isFnTy inner
+        | _ -> false
+    if not (isFnTy argExpr.Type) then argVal
+    elif argVal.StartsWith("@") then
+        ctx.NeedsRuntime <- true
+        let tmp = freshTmp ctx
+        emitInstr ctx (tmp + " = call ptr @make_closure(ptr " + argVal + ", ptr null)")
+        tmp
+    else argVal
+
+// Coerce a value to the ABI-uniform type used at the closure-call boundary.
+// Scalar types flatten to i64; pointer types stay as ptr; void disappears.
+let private abiOf (ty: string) =
+    match ty with
+    | "ptr" -> "ptr"
+    | "void" -> "void"
+    | _ -> "i64"
+
+// Invoke a Closure* value: load fn_ptr and env_ptr, branch on env==NULL,
+// call the bare-fn or env-taking fn accordingly, phi the result.
+// Every argument is coerced to its ABI-uniform type (i64 for scalars,
+// ptr for pointers) before being passed; the return is coerced back to
+// the caller's expected type. This matches the uniform lambda signature
+// emitted by `TELam` and the Closure* dispatch helpers in the C runtime
+// — no i1/i8/i32-vs-i64 ABI mismatches across the boundary.
+let private emitClosureCall (ctx: EmitCtx) (retTy: string) (closurePtr: string) (argTys: string list) (argVals: string list) : string option =
+    // Load fn and env from the closure struct (offset 0 and 8).
+    let fnPtr = freshTmp ctx
+    emitInstr ctx (fnPtr + " = load ptr, ptr " + closurePtr)
+    let envPtrSlot = freshTmp ctx
+    emitInstr ctx (envPtrSlot + " = getelementptr inbounds i8, ptr " + closurePtr + ", i64 8")
+    let envPtr = freshTmp ctx
+    emitInstr ctx (envPtr + " = load ptr, ptr " + envPtrSlot)
+    let envIsNull = freshTmp ctx
+    emitInstr ctx (envIsNull + " = icmp eq ptr " + envPtr + ", null")
+    let bareLbl = freshLabel ctx "clo_bare"
+    let envLbl = freshLabel ctx "clo_env"
+    let endLbl = freshLabel ctx "clo_end"
+    emitInstr ctx ("br i1 " + envIsNull + ", label %" + bareLbl + ", label %" + envLbl)
+
+    // Coerce each arg to its ABI-uniform type.
+    let argAbiTys = argTys |> List.map abiOf
+    let abiVals =
+        List.zip3 argTys argAbiTys argVals
+        |> List.map (fun (srcTy, abiTy, v) -> coerceValue ctx srcTy abiTy v)
+    let bareArgs =
+        List.zip argAbiTys abiVals
+        |> List.map (fun (ty, value) -> ty + " " + value)
+        |> String.concat ", "
+    let envArgs =
+        if List.isEmpty argAbiTys then "ptr " + envPtr
+        else "ptr " + envPtr + ", " + bareArgs
+
+    let retAbi = abiOf retTy
+
+    emitLabel ctx bareLbl
+    let bareResult =
+        if retAbi = "void" then
+            emitInstr ctx ("call void " + fnPtr + "(" + bareArgs + ")")
+            None
+        else
+            let t = freshTmp ctx
+            emitInstr ctx (t + " = call " + retAbi + " " + fnPtr + "(" + bareArgs + ")")
+            Some t
+    emitInstr ctx ("br label %" + endLbl)
+
+    emitLabel ctx envLbl
+    let envResult =
+        if retAbi = "void" then
+            emitInstr ctx ("call void " + fnPtr + "(" + envArgs + ")")
+            None
+        else
+            let t = freshTmp ctx
+            emitInstr ctx (t + " = call " + retAbi + " " + fnPtr + "(" + envArgs + ")")
+            Some t
+    emitInstr ctx ("br label %" + endLbl)
+
+    emitLabel ctx endLbl
+    if retAbi = "void" then
+        Some "0"
+    else
+        match bareResult, envResult with
+        | Some br, Some er ->
+            let phi = freshTmp ctx
+            emitInstr ctx (phi + " = phi " + retAbi + " [ " + br + ", %" + bareLbl + " ], [ " + er + ", %" + envLbl + " ]")
+            // Coerce back to the caller's requested type.
+            Some (coerceValue ctx retAbi retTy phi)
+        | _ -> None
+
 let private LIST_CONS_TAG = -1L
 
 let mutable private ctorTagMap: Map<string, int64> = Map.empty
@@ -439,7 +547,29 @@ let private emitStringPtr (ctx: EmitCtx) (s: string) : string =
 
 let rec private emitExprValue (ctx: EmitCtx) (te: TypedExpr) : string option =
     let wantedTy = emitType te.Type
+    // Strict Str equality check. `==`/`!=` on two Str-typed operands must
+    // call `strEq` (byte-wise), not `icmp eq ptr` (pointer identity) —
+    // otherwise any comparison between two separately-allocated strings
+    // with equal contents falsely returns 0. This bites every captureful
+    // `envHas name == x` lambda in the stdlib elaborator.
+    let isStrTy t =
+        match t with
+        | TyName "Str" -> true
+        | TyTagged(TyName "Str", _) -> true
+        | _ -> false
     match tryAsBinOp te with
+    | Some (op, a, b) when (op = "==" || op = "!=") && isStrTy a.Type && isStrTy b.Type ->
+        match emitExprValue ctx a, emitExprValue ctx b with
+        | Some aVal, Some bVal ->
+            ctx.NeedsRuntime <- true
+            let eqTmp = freshTmp ctx
+            emitInstr ctx (eqTmp + " = call i1 @strEq(ptr " + aVal + ", ptr " + bVal + ")")
+            if op = "==" then Some eqTmp
+            else
+                let notTmp = freshTmp ctx
+                emitInstr ctx (notTmp + " = xor i1 " + eqTmp + ", 1")
+                Some notTmp
+        | _ -> None
     | Some (op, a, b) ->
         match emitExprValue ctx a, emitExprValue ctx b with
         | Some aRaw, Some bRaw ->
@@ -976,80 +1106,166 @@ let rec private emitExprValue (ctx: EmitCtx) (te: TypedExpr) : string option =
                 | None -> None
                 | Some vals ->
                     let argTys = args |> List.map (fun a -> emitType a.Type)
-                    emitCall ctx wantedTy fnName argTys vals
+                    // When `fnName` is a local SSA binding it's a Closure*;
+                    // emit an env-branching call so the same callsite works
+                    // for both bare-fn (env=NULL) and env-taking lambdas.
+                    // Global fn references still use a direct `call @name`.
+                    match Map.tryFind fnName ctx.VarEnv with
+                    | Some (_, closurePtr) ->
+                        emitClosureCall ctx wantedTy closurePtr argTys vals
+                    | None ->
+                        // Before emitting the plain call, wrap any function-
+                        // typed argument in a closure if it isn't already.
+                        // Call convention for HOF runtime helpers: the fn
+                        // argument is a Closure*. If we're passing a top-level
+                        // fn ref like `emitParam`, wrap with `make_closure`.
+                        let isRuntimeHOF = Set.contains fnName runtimeHOFNames
+                        let wrappedVals =
+                            if isRuntimeHOF then
+                                List.zip args vals
+                                |> List.map (fun (a, v) -> wrapIfFnRef ctx a v)
+                            else vals
+                        emitCall ctx wantedTy fnName argTys wrappedVals
             | _ -> None
         | TELam(lamParams, body) ->
-            // Captureless lambda lifting (Strategy A): synthesise a fresh
-            // top-level LLVM function `@__lam_N` and evaluate to its address
-            // as a function pointer (ptr). Works as long as the lambda body
-            // does not reference any SSA-local binding from the enclosing
-            // scope (globals and lambda's own params are fine).
+            // Strategy B: every lambda evaluates to a heap-allocated
+            // Closure struct `{fn, env}` (see runtime make_closure/
+            // call_closure_*). env=NULL discriminates "bare fn" (captureless
+            // lambdas and top-level fn refs) from "env-taking fn" (captureful
+            // lambdas). Runtime HOF helpers (listFold/listMap/etc.) unpack.
             //
-            // When a true capture is detected, we currently emit a null
-            // pointer and record a comment — good enough to keep codegen
-            // progressing; call sites of such lambdas will trap at runtime.
-            // Full closure support (Strategy B: struct { fn_ptr, env }) is
-            // future work.
+            // ABI uniformity: every lambda parameter is i64 (or, for ptr-
+            // typed params, "ptr"). Return value is i64 for scalar types,
+            // ptr for pointer-shaped types. The runtime HOF helpers and
+            // `emitClosureCall` treat all values as i64/ptr, so matching
+            // that at the lambda's own signature avoids ABI mismatches
+            // (e.g. `i1 @lam(i1)` called through an `int64_t(int64_t)`
+            // pointer cast leaves high bits undefined on ARM64 — bug).
+            // At entry, each arg is i64-coerced to its inferred type and
+            // bound in the lambda's VarEnv; at exit, the body's typed
+            // value is coerced back to i64.
             let paramNames = lamParams |> List.map fst |> Set.ofList
             let bodyFree = freeVars body
             let outsideRefs = Set.difference bodyFree paramNames
-            let captures =
+            // Only SSA-bound names are captures. Top-level symbols (globals,
+            // other functions) resolve at codegen time via `@name` — no env
+            // roundtrip needed.
+            let captureList =
                 outsideRefs
-                |> Set.filter (fun n -> Map.containsKey n ctx.VarEnv)
-            if not (Set.isEmpty captures) then
-                // Document the capture-miss inline so the .ll output is
-                // self-describing during this bring-up.
-                let capList = captures |> Set.toList |> String.concat ","
-                emitInstr ctx ("; NOTE: captureful lambda skipped (free: " + capList + ")")
-                Some "null"
-            else
-                let lamName = freshLambdaName ()
-                let retTy =
-                    match te.Type with
-                    | TyFn(_, r) -> emitType r
-                    | _ -> emitType body.Type
-                let argsSig =
+                |> Set.toList
+                |> List.filter (fun n -> Map.containsKey n ctx.VarEnv)
+            let hasCaptures = not (List.isEmpty captureList)
+
+            let lamName = freshLambdaName ()
+            // ABI-uniform param type: ptr for pointer-typed params, i64
+            // for everything else.
+            let paramAbiTy (t: TypeExpr) =
+                match emitType t with
+                | "ptr" -> "ptr"
+                | _ -> "i64"
+            let bodyTy = emitType body.Type
+            let retAbiTy =
+                match bodyTy with
+                | "void" -> "void"
+                | "ptr" -> "ptr"
+                | _ -> "i64"
+
+            // Build the lambda's signature. When captureful, prepend
+            // `ptr %__env` and pre-load each capture from the env struct.
+            let argsSig =
+                let baseArgs =
                     lamParams
-                    |> List.mapi emitParam
+                    |> List.mapi (fun i (_, t) ->
+                        (paramAbiTy t) + " %arg" + string i)
                     |> String.concat ", "
-                let lamVarEnv =
-                    lamParams
-                    |> List.mapi (fun i (n, t) -> (n, (emitType t, "%arg" + string i)))
-                    |> Map.ofList
-                let lamCtx = {
-                    TempCounter = 0
-                    LabelCounter = 0
-                    Instructions = ResizeArray<string>()
-                    VarEnv = lamVarEnv
-                    StringLits = ctx.StringLits
-                    NeedsRuntime = false
-                    NullaryGlobals = ctx.NullaryGlobals
-                }
-                let bodyVal = emitExprValue lamCtx body
+                if hasCaptures then
+                    if String.IsNullOrWhiteSpace baseArgs then "ptr %__env"
+                    else "ptr %__env, " + baseArgs
+                else baseArgs
+
+            let lamCtx = {
+                TempCounter = 0
+                LabelCounter = 0
+                Instructions = ResizeArray<string>()
+                VarEnv = Map.empty
+                StringLits = ctx.StringLits
+                NeedsRuntime = false
+                NullaryGlobals = ctx.NullaryGlobals
+            }
+
+            // Coerce ABI-typed arg to the lambda parameter's inferred type
+            // and bind in VarEnv. This isolates the "ABI-uniform on the
+            // boundary, natural inside the body" convention.
+            for (i, (name, t)) in List.indexed lamParams do
+                let abiTy = paramAbiTy t
+                let nativeTy = emitType t
+                let coerced = coerceValue lamCtx abiTy nativeTy ("%arg" + string i)
+                lamCtx.VarEnv <- Map.add name (nativeTy, coerced) lamCtx.VarEnv
+
+            // Preload captures from env. Each capture is stored as i64 at
+            // slot `i` of the env struct `{i64, i64, i64, ...}`.
+            let captureInfo =
+                captureList
+                |> List.mapi (fun i n ->
+                    let (origTy, _) = ctx.VarEnv.[n]
+                    (i, n, origTy))
+
+            for (idx, n, origTy) in captureInfo do
+                let gepTmp = freshTmp lamCtx
+                emitInstr lamCtx (gepTmp + " = getelementptr inbounds i64, ptr %__env, i64 " + string idx)
+                let rawLoadTmp = freshTmp lamCtx
+                emitInstr lamCtx (rawLoadTmp + " = load i64, ptr " + gepTmp)
+                let coerced = coerceValue lamCtx "i64" origTy rawLoadTmp
+                lamCtx.VarEnv <- Map.add n (origTy, coerced) lamCtx.VarEnv
+
+            let bodyVal = emitExprValue lamCtx body
+            // Coerce the body value to the ABI return type BEFORE rendering
+            // the instruction block — `coerceValue` may append a `zext`/
+            // `trunc`/`inttoptr`/etc. that must live inside the function body.
+            let retValue =
+                if retAbiTy = "void" then ""
+                else
+                    match bodyVal with
+                    | Some v -> coerceValue lamCtx bodyTy retAbiTy v
+                    | None -> defaultValue body.Type
+            let defText =
                 let instrBlock =
                     if lamCtx.Instructions.Count = 0 then ""
                     else "\n" + String.concat "\n" lamCtx.Instructions
-                let defText =
-                    if retTy = "void" then
-                        "define void @" + lamName + "(" + argsSig + ") {\n" +
-                        "entry:" + instrBlock + "\n" +
-                        "  ret void\n" +
-                        "}"
-                    else
-                        let retValue =
-                            match bodyVal with
-                            | Some v -> coerceValue lamCtx (emitType body.Type) retTy v
-                            | None -> defaultValue body.Type
-                        let instrBlock2 =
-                            if lamCtx.Instructions.Count = 0 then ""
-                            else "\n" + String.concat "\n" lamCtx.Instructions
-                        "define " + retTy + " @" + lamName + "(" + argsSig + ") {\n" +
-                        "entry:" + instrBlock2 + "\n" +
-                        "  ret " + retTy + " " + retValue + "\n" +
-                        "}"
-                liftedLambdas.Add(defText)
-                if lamCtx.NeedsRuntime then ctx.NeedsRuntime <- true
-                Some ("@" + lamName)
+                if retAbiTy = "void" then
+                    "define void @" + lamName + "(" + argsSig + ") {\n" +
+                    "entry:" + instrBlock + "\n" +
+                    "  ret void\n" +
+                    "}"
+                else
+                    "define " + retAbiTy + " @" + lamName + "(" + argsSig + ") {\n" +
+                    "entry:" + instrBlock + "\n" +
+                    "  ret " + retAbiTy + " " + retValue + "\n" +
+                    "}"
+            liftedLambdas.Add(defText)
+            if lamCtx.NeedsRuntime then ctx.NeedsRuntime <- true
+            ctx.NeedsRuntime <- true
+
+            // Build the closure at this call-site: allocate env (if any),
+            // store captures, then call `@make_closure(fn, env)`.
+            let envVal =
+                if hasCaptures then
+                    // Malloc env struct (i64 per capture).
+                    let nCaps = List.length captureList
+                    let envTmp = freshTmp ctx
+                    emitInstr ctx (envTmp + " = call ptr @malloc(i64 " + string (nCaps * 8) + ")")
+                    for (idx, n, origTy) in captureInfo do
+                        let (ssaTy, ssaVal) = ctx.VarEnv.[n]
+                        let asI64 = coerceValue ctx ssaTy "i64" ssaVal
+                        let slotPtr = freshTmp ctx
+                        emitInstr ctx (slotPtr + " = getelementptr inbounds i64, ptr " + envTmp + ", i64 " + string idx)
+                        emitInstr ctx ("store i64 " + asI64 + ", ptr " + slotPtr)
+                    envTmp
+                else
+                    "null"
+            let cloTmp = freshTmp ctx
+            emitInstr ctx (cloTmp + " = call ptr @make_closure(ptr @" + lamName + ", ptr " + envVal + ")")
+            Some cloTmp
         | _ -> None
 
 let private emitCastToMainI32 (ctx: EmitCtx) (bodyTy: string) (value: string) : string =
@@ -1411,9 +1627,15 @@ let private parseArgTypes (args: string) : string =
 // or else clang rejects the redefinition/LTO breaks at runtime ABI).
 let private runtimeExternalSigs : Map<string, string * string> =
     Map.ofList [
-        "listFold",   ("i64", "ptr, i64, ptr")
-        "listFilter", ("ptr", "ptr, ptr")
-        "listMap",    ("ptr", "ptr, ptr")
+        "listFold",          ("i64", "ptr, i64, ptr")
+        "listFilter",        ("ptr", "ptr, ptr")
+        "listMap",           ("ptr", "ptr, ptr")
+        "listAny",           ("i1",  "ptr, ptr")
+        "listAll",           ("i1",  "ptr, ptr")
+        "listFind",          ("i64", "ptr, ptr")
+        "listFindIndex",     ("i64", "ptr, ptr")
+        "listFindIndexFrom", ("i64", "ptr, i64, ptr")
+        "listPartition",     ("ptr", "ptr, ptr")
         "listHead",   ("ptr", "ptr")
         "listTail",   ("ptr", "ptr")
         "listReverse",("ptr", "ptr")
@@ -1421,6 +1643,7 @@ let private runtimeExternalSigs : Map<string, string * string> =
         "listConcat", ("ptr", "ptr")
         "listLen",    ("i64", "ptr")
         "listIsEmpty",("i1",  "ptr")
+        "make_closure", ("ptr", "ptr, ptr")
     ]
 
 let private prependExternalDecls (llvmText: string) : string =
