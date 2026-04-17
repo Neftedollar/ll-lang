@@ -310,6 +310,30 @@ let private ctorTag (name: string) : int64 =
         ctorTagMap <- Map.add name t ctorTagMap
         t
 
+// Pre-pass over a TypedModule's declared ADTs to assign tags to every
+// constructor BEFORE expression emission walks the bodies. When combined
+// across all project modules this yields a single global tag table — same
+// constructor name gets the same tag in every module, so a value built in
+// module A and matched in module B agrees on the tag.
+//
+// Walks only TDType (sum-type) declarations: record/wrapped bodies carry
+// no constructors. Tag assignment is order-dependent (first-seen wins),
+// so `seedCtorTagsFromModules` must be driven with a deterministic list
+// of modules (the topo-sorted project order used by emitProjectModules).
+let private seedCtorTagsFromModule (tm: TypedModule) : unit =
+    for (decl, _) in tm.Decls do
+        match decl with
+        | TDType(_, _, TBSum ctors) ->
+            for (ctorName, _) in ctors do
+                // ctorTag has the side effect of assigning a fresh tag
+                // when `ctorName` is new; reuses the existing tag otherwise.
+                ctorTag ctorName |> ignore
+        | _ -> ()
+
+let private seedCtorTagsFromModules (tms: TypedModule list) : unit =
+    for tm in tms do
+        seedCtorTagsFromModule tm
+
 let private emitAllocNode (ctx: EmitCtx) (tagVal: string) (payloadI64: string) (tailPtr: string) : string =
     ctx.NeedsRuntime <- true
     let tmp = freshTmp ctx
@@ -1279,7 +1303,9 @@ let private collectNullaryGlobals (tm: TypedModule) : Set<string> =
     |> Set.ofList
 
 let private emitModule (tm: TypedModule) =
-    resetCtorTags ()
+    // NOTE: ctor tags are NOT reset here — they live at project scope so
+    // that a value built in module A and matched in module B agrees on
+    // the tag. `emit` and `emitProjectModules` reset + seed before calling.
     resetLambdas ()
     let (stringPool, stringDecls) = buildStringPool tm
     let nullaryGlobals = collectNullaryGlobals tm
@@ -1310,6 +1336,11 @@ let private emitModule (tm: TypedModule) =
 
 let emit (tm: TypedModule) : string =
     resetLambdaCounter ()
+    // Single-module entry (target=LLVM on raw source, used by tests and the
+    // `compileToLLVM` convenience). Reset + seed from this module's ADT
+    // decls so ctor tags are deterministic and stable per call.
+    resetCtorTags ()
+    seedCtorTagsFromModule tm
     emitModule tm
 
 let private isMainFn (sig_: TypedFnSig) =
@@ -1436,6 +1467,14 @@ let private prependExternalDecls (llvmText: string) : string =
 
 let emitProjectModules (tms: TypedModule list) : string =
     resetLambdaCounter ()
+    // Pass 1: walk ALL modules and seed a project-wide constructor→tag
+    // table. Without this, each module's `emitModule` would assign tags
+    // in its own local order and a constructor used across modules
+    // (e.g. `MkModule`) would get tag N in the producer module but tag
+    // M ≠ N in the consumer module's match arm. The resulting mismatch
+    // silently makes every match arm miss. See commit log for repro.
+    resetCtorTags ()
+    seedCtorTagsFromModules tms
     match tms with
     | [] -> ""
     | [_] -> tms |> List.map emitModule |> String.concat "\n"
