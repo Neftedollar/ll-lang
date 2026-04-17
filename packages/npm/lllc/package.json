@@ -1,6 +1,6 @@
 {
   "name": "@neftedollar/lllc",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "lllc — compiler for ll-lang, a minimal statically-typed functional language that compiles to F#, TypeScript, Python, Java, and C#.",
   "keywords": [
     "compiler",
