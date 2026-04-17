@@ -2,6 +2,7 @@ module Lllcself.Main
 
 import Std.Compiler
 import Std.SelfHostedRun
+import Lllcself.Mcp
 
 -- Self-hosted ll-lang CLI.
 -- Commands:
@@ -12,11 +13,12 @@ import Std.SelfHostedRun
 --   render  <file>  -> emit canonical ll-lang source
 --   tokens  <file>  -> emit token estimate JSON
 --   symbol  <file> <name> -> lookup top-level symbol kind JSON
+--   mcp                   -> start JSON-RPC 2.0 MCP server on stdio
 --
 -- With a single bare path argument, defaults to `compile <file>`.
 
 usageText =
-  "usage: lllcself <command> <file> [arg]\ncommands: compile | run | check | next | render | tokens | symbol"
+  "usage: lllcself <command> <file> [arg]\ncommands: compile | run | check | next | render | tokens | symbol | mcp"
 
 encodeJsonEscape(c Char) =
   match c
@@ -104,6 +106,9 @@ runArgs(args List[Str]) =
     | "render" :: path :: [] -> runRender path
     | "tokens" :: path :: [] -> runTokens path
     | "symbol" :: path :: name :: [] -> runSymbol path name
+    | "mcp" :: [] ->
+      _ = mcpLoop
+      0
     | path :: [] -> runCompile path
     | _ ->
       _ = printfn usageText
