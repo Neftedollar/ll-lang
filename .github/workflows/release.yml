@@ -24,21 +24,29 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Install current lllc from NuGet
-        run: dotnet tool install -g lllc
+      # Use the bootstrap compiler from initial-compiler/ — the published lllc
+      # may lag behind and lack required features. The bootstrap always has
+      # every target implemented.
+      - name: Build bootstrap lllc
+        run: dotnet build initial-compiler/src/LLLangTool/LLLangTool.fsproj -c Release
+
+      - name: Set bootstrap alias
+        run: |
+          BOOTSTRAP="initial-compiler/src/LLLangTool/bin/Release/net10.0/lllc.dll"
+          echo "LLLC=dotnet $PWD/$BOOTSTRAP" >> $GITHUB_ENV
 
       - name: Compile lllcself → F# (full CLI with compiler + MCP)
-        run: lllc build --target fs lllcself/src/Main.lll
+        run: $LLLC build --target fs lllcself/src/Main.lll
 
       - name: Compile Compiler.lll → TypeScript
-        run: lllc build --target ts stdlib/src/Compiler.lll
+        run: $LLLC build --target ts stdlib/src/Compiler.lll
 
       - name: Bundle TypeScript → CJS
         run: node packages/npm/lllc/scripts/build-compiler.js
 
       - name: Compile Compiler.lll → Python
         run: |
-          lllc build --target py stdlib/src/Compiler.lll
+          $LLLC build --target py stdlib/src/Compiler.lll
           cp stdlib/src/Compiler.py packages/pip/lllc/compiler.py
 
       - name: Upload F# output (for NuGet + binaries)
