@@ -212,9 +212,6 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Upgrade npm to >=11.5.1 (required for OIDC)
-        run: npm install -g npm@latest
-
       - name: Extract version
         id: ver
         run: echo "V=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
@@ -229,13 +226,14 @@ jobs:
         working-directory: packages/npm/lllc
         run: npm version ${{ steps.ver.outputs.V }} --no-git-tag-version --allow-same-version
 
-      - name: Publish (OIDC trusted publishing)
+      - name: Publish (OIDC trusted publishing via npm@latest)
         working-directory: packages/npm/lllc
         run: |
           # Remove _authToken line injected by setup-node so npm uses OIDC instead
           sed -i '/:_authToken/d' "$NPM_CONFIG_USERCONFIG"
           unset NODE_AUTH_TOKEN
-          npm publish --provenance --access public
+          # Use npx to run npm@latest (>=11.5.1 with OIDC) without breaking global install
+          npx npm@latest publish --provenance --access public
 
   # ── 6. PyPI ─────────────────────────────────────────────────────────────────
   publish-pypi:
