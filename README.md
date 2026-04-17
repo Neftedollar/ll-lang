@@ -42,15 +42,17 @@ Jump to [Getting Started](#getting-started), [Syntax](#syntax), [Problem](#probl
 
 ## Status
 
-Working end-to-end compiler with a large automated xUnit suite (see CI badge), written in F# / .NET 10. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib → module system → MCP server → TypeScript + Python + Java + C# + LLVM codegen.
-Current release line: **1.0.0**.
+> **The compiler is written in ll-lang itself** and compiled to .NET, TypeScript, and Python distributions.
+> The F# bootstrap (`src/LLLangCompiler/`) is a one-time seed — the canonical compiler lives in `stdlib/src/`.
 
-**Release contract (1.0):**
-- **Stable:** core compiler + `lllc build/check/run/new/install/mcp` + targets `fs/ts/py/java/cs`
-- **Experimental:** `lllc reverse` and `--target llvm` (subset backend, non-blocking for 1.0)
+**Fixpoint achieved:** `compiler₁.fs == compiler₂.fs` — compiling the compiler with itself produces byte-identical output. All 10 pipeline phases self-hosted: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → CLI → stdlib → module system → MCP server → TypeScript + Python + Java + C# + LLVM codegen.
+
+Current release: **1.1.1** | Packages: [`npm`](https://www.npmjs.com/package/@neftedollar/lllc) · [`pip`](https://pypi.org/project/lllc/) · [`nuget`](https://www.nuget.org/packages/lllc)
+
+**Release contract (1.x):**
+- **Stable:** `lllc build/check/run/new/install/mcp` + targets `fs/ts/py/java/cs`
+- **Experimental:** `lllc reverse`, `--target llvm` (subset backend)
 - Full contract: [`docs/release-contract-1.0.md`](docs/release-contract-1.0.md)
-
-**Bootstrap: COMPLETE.** `compiler₁.fs == compiler₂.fs` — ll-lang compiles itself (2900+ line bootstrap compiler, fixpoint achieved).
 
 **Self-hosted stdlib** — 10 modules (5857 LOC of ll-lang), covering parsing, type inference, codegen, and data structures:
 
