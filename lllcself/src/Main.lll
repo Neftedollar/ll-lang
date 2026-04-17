@@ -3,22 +3,28 @@ module Lllcself.Main
 import Std.Compiler
 import Std.SelfHostedRun
 import Lllcself.Mcp
+import Lllcself.CompileTs
+import Lllcself.CompilePy
+import Lllcself.CompileCsharp
+import Lllcself.CompileJava
+import Lllcself.CompileLlvm
 
 -- Self-hosted ll-lang CLI.
 -- Commands:
---   compile <file>  -> emit F#
---   run     <file>  -> compile to F# and execute via dotnet
---   check   <file>  -> emit compact diagnostics JSON
---   next    <file>  -> emit nearest blocking stage JSON
---   render  <file>  -> emit canonical ll-lang source
---   tokens  <file>  -> emit token estimate JSON
---   symbol  <file> <name> -> lookup top-level symbol kind JSON
---   mcp                   -> start JSON-RPC 2.0 MCP server on stdio
+--   compile [--target T] <file>  -> emit target source (default: fs)
+--     targets: fs | ts | py | cs | java | llvm
+--   run     <file>                -> compile to F# and execute via dotnet
+--   check   <file>                -> emit compact diagnostics JSON
+--   next    <file>                -> emit nearest blocking stage JSON
+--   render  <file>                -> emit canonical ll-lang source
+--   tokens  <file>                -> emit token estimate JSON
+--   symbol  <file> <name>         -> lookup top-level symbol kind JSON
+--   mcp                           -> start JSON-RPC 2.0 MCP server on stdio
 --
--- With a single bare path argument, defaults to `compile <file>`.
+-- With a single bare path argument, defaults to `compile <file>` (F# target).
 
 usageText =
-  "usage: lllcself <command> <file> [arg]\ncommands: compile | run | check | next | render | tokens | symbol | mcp"
+  "usage: lllcself <command> [--target T] <file> [arg]\ncommands: compile | run | check | next | render | tokens | symbol | mcp\ntargets : fs (default) | ts | py | cs | java | llvm"
 
 encodeJsonEscape(c Char) =
   match c
@@ -49,6 +55,54 @@ runCheck(path Str) =
     _ = print (ioError (strConcat "File not found: " path))
     1
 
+-- Target-specific output-file extensions.
+targetExt(target Str) =
+  match target
+    | "fs" -> ".fs"
+    | "ts" -> ".ts"
+    | "py" -> ".py"
+    | "cs" -> ".cs"
+    | "java" -> ".java"
+    | "llvm" -> ".ll"
+    | _ -> ".out"
+
+-- Dispatch to the appropriate codegen facade. Unknown target falls back to F#.
+compileForTarget(target Str)(src Str) =
+  match target
+    | "fs" -> compile src
+    | "ts" -> compileTs src
+    | "py" -> compilePy src
+    | "cs" -> compileCsharp src
+    | "java" -> compileJava src
+    | "llvm" -> compileLlvm src
+    | _ -> compile src
+
+-- Strip trailing ".lll" extension if present; then append the target extension.
+-- Returns the output path next to the input path.
+outputPath(inputPath Str)(target Str) =
+  ext = targetExt target
+  n = strLen inputPath
+  if n >= 4
+    tail = strSlice inputPath (n - 4) 4
+    if tail == ".lll"
+      strConcat (strSlice inputPath 0 (n - 4)) ext
+    else strConcat inputPath ext
+  else strConcat inputPath ext
+
+runCompileTarget(target Str)(path Str) =
+  if fileExists path
+    src = readFile path
+    out = compileForTarget target src
+    outPath = outputPath path target
+    _ = writeFile outPath out
+    _ = printfn (strConcat "Built " outPath)
+    0
+  else
+    _ = print (ioError (strConcat "File not found: " path))
+    1
+
+-- `compile <file>` with no --target flag prints F# to stdout
+-- (preserves backward compat with tools that pipe output).
 runCompile(path Str) =
   if fileExists path
     src = readFile path
@@ -100,6 +154,7 @@ runSelfRun(path Str) =
 runArgs(args List[Str]) =
   match args
     | "check" :: path :: [] -> runCheck path
+    | "compile" :: "--target" :: target :: path :: [] -> runCompileTarget target path
     | "compile" :: path :: [] -> runCompile path
     | "run" :: path :: [] -> runSelfRun path
     | "next" :: path :: [] -> runNext path

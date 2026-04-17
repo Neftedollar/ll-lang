@@ -1,0 +1,23 @@
+module Lllcself.CompileJava
+
+import Std.Elaborator
+import Std.CodegenJava
+
+-- Facade: calls CodegenJava's uniquely-named `emitModuleJava`.
+
+showJavaErrors(errs List[ElabError]) =
+  listFold (\acc e.
+    msg = errMsg e
+    if strLen acc == 0
+      msg
+    else strConcat acc (strConcat "\n" msg)
+  ) "" errs
+
+compileJava(src Str) =
+  tokens = tokenize src
+  ast = parseModule tokens
+  errors = elaborate ast
+  if listIsEmpty errors
+    emitModuleJava ast
+  else
+    showJavaErrors errors

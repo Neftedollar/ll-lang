@@ -1,0 +1,23 @@
+module Lllcself.CompileCsharp
+
+import Std.Elaborator
+import Std.CodegenCSharp
+
+-- Facade: calls CodegenCSharp's uniquely-named `emitModuleCs`.
+
+showCsErrors(errs List[ElabError]) =
+  listFold (\acc e.
+    msg = errMsg e
+    if strLen acc == 0
+      msg
+    else strConcat acc (strConcat "\n" msg)
+  ) "" errs
+
+compileCsharp(src Str) =
+  tokens = tokenize src
+  ast = parseModule tokens
+  errors = elaborate ast
+  if listIsEmpty errors
+    emitModuleCs ast
+  else
+    showCsErrors errors

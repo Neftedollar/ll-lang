@@ -328,6 +328,10 @@ emitModule(m Module) =
       body = emitDecls decls
       strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
 
+-- Uniquely-named alias so callers that import multiple codegens can pick
+-- Python's emitter without bare-name shadowing.
+emitModulePy(m Module) = emitModule m
+
 codegenPyCheck(label Str)(got Str)(expected Str) =
   if got == expected
     printfn (strConcat "OK " label)

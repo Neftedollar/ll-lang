@@ -462,6 +462,10 @@ emitModule(m Module) =
       body = emitDecls decls 0
       strConcat prelude (strConcat header (strConcat "\n\n" body))
 
+-- Uniquely-named alias so callers that import multiple codegens can pick
+-- LLVM's emitter without bare-name shadowing.
+emitModuleLlvm(m Module) = emitModule m
+
 -- ---- Test helpers ----------------------------------------------------------
 
 checkContains(label Str)(got Str)(needle Str) =
