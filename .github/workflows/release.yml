@@ -156,10 +156,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # setup-dotnet with source-url + GITHUB_TOKEN handles NuGet OIDC trusted publishing
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+          source-url: https://api.nuget.org/v3/index.json
+        env:
+          NUGET_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract version
         id: ver
@@ -176,7 +180,6 @@ jobs:
         run: |
           dotnet nuget push nuget-out/*.nupkg \
             --source https://api.nuget.org/v3/index.json \
-            --api-key ${{ secrets.NUGET_API_KEY }} \
             --skip-duplicate
 
   # ── 5. npm ──────────────────────────────────────────────────────────────────
@@ -209,10 +212,9 @@ jobs:
         working-directory: packages/npm/lllc
         run: npm version ${{ steps.ver.outputs.V }} --no-git-tag-version --allow-same-version
 
+      # setup-node with registry-url + id-token:write handles npm OIDC trusted publishing
       - name: Publish
         working-directory: packages/npm/lllc
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --provenance --access public
 
   # ── 6. PyPI ─────────────────────────────────────────────────────────────────
