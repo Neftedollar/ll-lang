@@ -2,8 +2,32 @@
 
 **Status: MVP — native binaries work for a growing subset of ll-lang.**
 
-The end-to-end pipeline (`tools/llvm-build.sh <file.lll>`) compiles `.lll` sources to native
-executables by:
+## Quick start
+
+```bash
+# Build and run:
+tools/lllc-native spec/examples/valid/36-llvm-native-hello.lll ./hello
+./hello    # -> "Hello from native binary!"
+```
+
+`tools/lllc-native` is the canonical user-facing command (a thin wrapper around
+`tools/llvm-build.sh`). Eventually this lives under `lllc build --native`; for
+now it's a standalone launcher because the frozen bootstrap `lllc` (in
+`initial-compiler/`) can't grow new subcommands.
+
+### Prerequisites
+
+| Platform | Install |
+|---|---|
+| macOS    | Xcode Command Line Tools (ships `clang`, `make`) + [.NET 10 SDK](https://dotnet.microsoft.com/download) + `python3` |
+| Linux    | `sudo apt-get install -y clang make python3` + [.NET 10 SDK](https://dotnet.microsoft.com/download) |
+
+Before the first run: `dotnet build initial-compiler/src/LLLangTool/LLLangTool.fsproj -c Debug`
+so that `lllc.dll` exists.
+
+## Pipeline
+
+The wrapper performs four stages end-to-end:
 
 1. `lllc build --target llvm` emits `.ll`
 2. `tools/llvm-add-declares.py` patches the IR (missing `declare`s, instruction-form GEPs, `void main`)
@@ -68,17 +92,18 @@ These compensate for codegen shortcuts in the frozen `CodegenLLVM.fs`. Each is i
 ## Running the pipeline
 
 ```bash
-tools/llvm-build.sh spec/examples/valid/37-llvm-arith.lll /tmp/arith
+tools/lllc-native spec/examples/valid/37-llvm-arith.lll /tmp/arith
 /tmp/arith   # -> 42
 ```
 
-Requires: `dotnet`, `python3`, `clang`, `make`.
+Requires: `dotnet` (.NET 10 SDK), `python3`, `clang`, `make`.
 
 ## CI
 
 `.github/workflows/llvm.yml` builds and runs all ten `36-45` examples on `ubuntu-latest` and
 asserts stdout matches the expected output. Triggered on changes to the SDK, codegen source,
-the build tools, or the example corpus.
+the build tools, or the example corpus (path filter: `spec/examples/valid/[3-9][0-9]-llvm-*.lll`,
+so new examples auto-enroll). Also runnable manually via `gh workflow run llvm.yml`.
 
 ## Scope / non-goals (yet)
 

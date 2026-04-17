@@ -8,8 +8,8 @@ on:
       - 'stdlib/src/CodegenLLVM.lll'
       - 'initial-compiler/src/**/CodegenLLVM.fs'
       - 'tools/llvm-*'
-      - 'spec/examples/valid/3[6-9]-llvm-*.lll'
-      - 'spec/examples/valid/4[0-5]-llvm-*.lll'
+      - 'tools/lllc-native'
+      - 'spec/examples/valid/[3-9][0-9]-llvm-*.lll'
       - '.github/workflows/llvm.yml'
   pull_request:
     branches: [main]
@@ -18,9 +18,10 @@ on:
       - 'stdlib/src/CodegenLLVM.lll'
       - 'initial-compiler/src/**/CodegenLLVM.fs'
       - 'tools/llvm-*'
-      - 'spec/examples/valid/3[6-9]-llvm-*.lll'
-      - 'spec/examples/valid/4[0-5]-llvm-*.lll'
+      - 'tools/lllc-native'
+      - 'spec/examples/valid/[3-9][0-9]-llvm-*.lll'
       - '.github/workflows/llvm.yml'
+  workflow_dispatch:
 
 jobs:
   native-binary-build:
@@ -39,8 +40,11 @@ jobs:
       - name: Build bootstrap lllc
         run: dotnet build initial-compiler/src/LLLangTool/LLLangTool.fsproj -c Debug
 
+      - name: Clean runtime (ensure Linux-built .o)
+        run: make -C sdks/Platform.LLVM.SDK/runtime clean
+
       - name: Build 36-llvm-native-hello
-        run: tools/llvm-build.sh spec/examples/valid/36-llvm-native-hello.lll /tmp/hello
+        run: tools/lllc-native spec/examples/valid/36-llvm-native-hello.lll /tmp/hello
 
       - name: Run 36-llvm-native-hello
         run: |
@@ -49,7 +53,7 @@ jobs:
           test "$OUT" = "Hello from native binary!" || { echo "expected 'Hello from native binary!'"; exit 1; }
 
       - name: Build 37-llvm-arith
-        run: tools/llvm-build.sh spec/examples/valid/37-llvm-arith.lll /tmp/arith
+        run: tools/lllc-native spec/examples/valid/37-llvm-arith.lll /tmp/arith
 
       - name: Run 37-llvm-arith
         run: |
@@ -58,7 +62,7 @@ jobs:
           test "$OUT" = "42" || { echo "expected '42'"; exit 1; }
 
       - name: Build 38-llvm-conditional
-        run: tools/llvm-build.sh spec/examples/valid/38-llvm-conditional.lll /tmp/cond
+        run: tools/lllc-native spec/examples/valid/38-llvm-conditional.lll /tmp/cond
 
       - name: Run 38-llvm-conditional
         run: |
@@ -67,7 +71,7 @@ jobs:
           test "$OUT" = "13" || { echo "expected '13'"; exit 1; }
 
       - name: Build 39-llvm-strings
-        run: tools/llvm-build.sh spec/examples/valid/39-llvm-strings.lll /tmp/strings
+        run: tools/lllc-native spec/examples/valid/39-llvm-strings.lll /tmp/strings
 
       - name: Run 39-llvm-strings
         run: |
@@ -76,7 +80,7 @@ jobs:
           test "$OUT" = "Hello, LLVM!" || { echo "expected 'Hello, LLVM!'"; exit 1; }
 
       - name: Build 40-llvm-recursion
-        run: tools/llvm-build.sh spec/examples/valid/40-llvm-recursion.lll /tmp/rec
+        run: tools/lllc-native spec/examples/valid/40-llvm-recursion.lll /tmp/rec
 
       - name: Run 40-llvm-recursion
         run: |
@@ -85,7 +89,7 @@ jobs:
           test "$OUT" = "120" || { echo "expected '120'"; exit 1; }
 
       - name: Build 41-llvm-adt-maybe
-        run: tools/llvm-build.sh spec/examples/valid/41-llvm-adt-maybe.lll /tmp/maybe
+        run: tools/lllc-native spec/examples/valid/41-llvm-adt-maybe.lll /tmp/maybe
 
       - name: Run 41-llvm-adt-maybe
         run: |
@@ -95,7 +99,7 @@ jobs:
           test "$OUT" = "$EXPECTED" || { echo "expected:"; echo "$EXPECTED"; exit 1; }
 
       - name: Build 42-llvm-adt-shape
-        run: tools/llvm-build.sh spec/examples/valid/42-llvm-adt-shape.lll /tmp/shape
+        run: tools/lllc-native spec/examples/valid/42-llvm-adt-shape.lll /tmp/shape
 
       - name: Run 42-llvm-adt-shape
         run: |
@@ -105,7 +109,7 @@ jobs:
           test "$OUT" = "$EXPECTED" || { echo "expected:"; echo "$EXPECTED"; exit 1; }
 
       - name: Build 43-llvm-list-sum
-        run: tools/llvm-build.sh spec/examples/valid/43-llvm-list-sum.lll /tmp/listsum
+        run: tools/lllc-native spec/examples/valid/43-llvm-list-sum.lll /tmp/listsum
 
       - name: Run 43-llvm-list-sum
         run: |
@@ -114,7 +118,7 @@ jobs:
           test "$OUT" = "15" || { echo "expected '15'"; exit 1; }
 
       - name: Build 44-llvm-list-map
-        run: tools/llvm-build.sh spec/examples/valid/44-llvm-list-map.lll /tmp/listmap
+        run: tools/lllc-native spec/examples/valid/44-llvm-list-map.lll /tmp/listmap
 
       - name: Run 44-llvm-list-map
         run: |
@@ -123,7 +127,7 @@ jobs:
           test "$OUT" = "2,4,6" || { echo "expected '2,4,6'"; exit 1; }
 
       - name: Build 45-llvm-list-of-maybe
-        run: tools/llvm-build.sh spec/examples/valid/45-llvm-list-of-maybe.lll /tmp/listmaybe
+        run: tools/lllc-native spec/examples/valid/45-llvm-list-of-maybe.lll /tmp/listmaybe
 
       - name: Run 45-llvm-list-of-maybe
         run: |
