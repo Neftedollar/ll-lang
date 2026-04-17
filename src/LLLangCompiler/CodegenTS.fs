@@ -171,22 +171,24 @@ let private stdlibMap = Map.ofList [
     "strChars",     "(s: string): string[] => Array.from(s)"
     "intToStr",     "(n: number): string => String(n)"
     "floatToStr",   "(f: number): string => String(f)"
-    "strToInt",     "(s: string): number | null => { const n = parseInt(s, 10); return isNaN(n) ? null : n }"
-    "strToFloat",   "(s: string): number | null => { const n = Number(s); return Number.isFinite(n) ? n : null }"
+    // strToInt / strToFloat return tagged-union Maybe so that `match strToInt x | Some n -> ... | None -> ...` works.
+    "strToInt",     "(s: string) => { const n = parseInt(s, 10); return isNaN(n) ? ({ _tag: `None` as const }) : ({ _tag: `Some` as const, _0: n }); }"
+    "strToFloat",   "(s: string) => { const n = Number(s); return !Number.isFinite(n) ? ({ _tag: `None` as const }) : ({ _tag: `Some` as const, _0: n }); }"
     // List
     "listLen",      "<T>(xs: T[]): number => xs.length"
     "listMap",      "<A, B>(f: (x: A) => B) => (xs: A[]): B[] => xs.map(f)"
     "listFilter",   "<A>(p: (x: A) => boolean) => (xs: A[]): A[] => xs.filter(p)"
     "listFold",     "<A, B>(f: (acc: B) => (x: A) => B) => (z: B) => (xs: A[]): B => xs.reduce((a, x) => f(a)(x), z)"
-    "listHead",     "<T>(xs: T[]): T | null => xs.length > 0 ? xs[0] : null"
-    "listTail",     "<T>(xs: T[]): T[] | null => xs.length > 0 ? xs.slice(1) : null"
+    // listHead / listTail / listAt return tagged-union Maybe for the same reason.
+    "listHead",     "<T>(xs: T[]) => xs.length > 0 ? ({ _tag: `Some` as const, _0: xs[0] }) : ({ _tag: `None` as const })"
+    "listTail",     "<T>(xs: T[]) => xs.length > 0 ? ({ _tag: `Some` as const, _0: xs.slice(1) }) : ({ _tag: `None` as const })"
     "listReverse",  "<T>(xs: T[]): T[] => [...xs].reverse()"
     "listAppend",   "<T>(xs: T[]) => (ys: T[]): T[] => [...xs, ...ys]"
     "listIsEmpty",  "<T>(xs: T[]): boolean => xs.length === 0"
     "listContains", "<T>(xs: T[]) => (x: T): boolean => xs.includes(x)"
     "listRange",    "(lo: number) => (hi: number): number[] => Array.from({length: hi - lo}, (_, i) => lo + i)"
     "listConcat",   "<T>(xss: T[][]): T[] => xss.flat()"
-    "listAt",       "<T>(xs: T[]) => (i: number): T | null => i >= 0 && i < xs.length ? xs[i] : null"
+    "listAt",       "<T>(xs: T[]) => (i: number) => i >= 0 && i < xs.length ? ({ _tag: `Some` as const, _0: xs[i] }) : ({ _tag: `None` as const })"
     // Char
     "charToInt",    "(c: string): number => c.charCodeAt(0)"
     "intToChar",    "(n: number): string => String.fromCharCode(n)"
@@ -301,40 +303,104 @@ let rec private emitPattern (p: Pattern) : string =
 // ── TypeScript match: emit branches as nested if/else ─────────────────────────
 // Generates an IIFE so the match can be used as an expression.
 
+/// Recursively decompose a nested PCons pattern into guards + bindings.
+/// Returns (minLength, guardConditions, varBindings) where:
+///   minLength       = minimum list length required
+///   guardConditions = complete condition expressions (e.g. "scrut[1]?._tag === `Tok`")
+///   varBindings     = "const x = ..." binding statements
+let rec private decompCons (scrut: string) (p: Pattern) (depth: int)
+    : int * string list * string list =
+    match p with
+    | PCons(PLit l, rest) ->
+        let elemCheck = scrut + "[" + string depth + "] === " + emitLit l
+        let (minLen, conds, binds) = decompCons scrut rest (depth + 1)
+        (max minLen (depth + 1), elemCheck :: conds, binds)
+    | PCons(PVar h, rest) ->
+        let bind = "const " + safeIdent h + " = " + scrut + "[" + string depth + "]"
+        let (minLen, conds, binds) = decompCons scrut rest (depth + 1)
+        (max minLen (depth + 1), conds, bind :: binds)
+    | PCons(PWild, rest) ->
+        decompCons scrut rest (depth + 1)
+    | PCons(PCon(c, args), rest) ->
+        // Constructor head: e.g. Newline :: rest  or  IntLit n :: rest
+        let tagCheck = scrut + "[" + string depth + "]?._tag === `" + c + "`"
+        let argBinds =
+            args |> List.mapi (fun i arg ->
+                match arg with
+                | PVar v ->
+                    Some ("const " + safeIdent v + " = (" + scrut + "[" + string depth +
+                          "] as Record<string, unknown>)[`_" + string i + "`]")
+                | _ -> None)
+            |> List.choose id
+        let (minLen, conds, tailBinds) = decompCons scrut rest (depth + 1)
+        (max minLen (depth + 1), tagCheck :: conds, argBinds @ tailBinds)
+    | PVar t ->
+        (depth, [], ["const " + safeIdent t + " = " + scrut + ".slice(" + string depth + ")"])
+    | PWild ->
+        (depth, [], [])
+    | PCon("[]", []) ->
+        // Nil at tail position: list must end exactly here
+        (depth, [scrut + ".length === " + string depth], [])
+    | _ ->
+        (0, [], [])
+
 let rec private emitMatchBranches (scrut: string) (branches: (TypedPattern * TypedExpr) list) : string =
+    // Always alias the scrutinee to a reserved temp name.
+    // This prevents TDZ errors when pattern variables shadow the scrutinee variable
+    // (e.g. `match e | ELet x e body -> ...` where pattern var 'e' would shadow
+    //  the outer 'e' in `const e = e[`_1`]` making the RHS refer to the new TDZ 'e').
+    let s = "_ll_s"
     let emitBranch (tp: TypedPattern) (body: TypedExpr) : string =
         match tp.Pat with
         | PWild ->
             "  return " + emitExprTS body + ";"
 
         | PVar x ->
-            "  const " + safeIdent x + " = " + scrut + "; return " + emitExprTS body + ";"
+            "  const " + safeIdent x + " = " + s + "; return " + emitExprTS body + ";"
 
         | PLit l ->
-            "  if (" + scrut + " === " + emitLit l + ") { return " + emitExprTS body + "; }"
+            "  if (" + s + " === " + emitLit l + ") { return " + emitExprTS body + "; }"
 
         | PCon("[]", []) ->
-            "  if (" + scrut + ".length === 0) { return " + emitExprTS body + "; }"
+            "  if (" + s + ".length === 0) { return " + emitExprTS body + "; }"
 
-        | PCons(PVar h, PVar t) ->
-            "  if (" + scrut + ".length > 0) { const " + safeIdent h + " = " + scrut + "[0], " +
-            safeIdent t + " = " + scrut + ".slice(1); return " + emitExprTS body + "; }"
+        | PCons _ ->
+            // General nested cons: h::t,  h::_,  'x'::rest,  Tok::rest,  'x'::'y'::rest, etc.
+            let (minLen, conds, varBinds) = decompCons s tp.Pat 0
+            let parts =
+                [ if minLen > 0 then yield s + ".length >= " + string minLen
+                  yield! conds ]
+            let guardStr = String.concat " && " parts
+            let bindsStr = varBinds |> String.concat "; "
+            let inner =
+                (if bindsStr <> "" then bindsStr + "; " else "") +
+                "return " + emitExprTS body + ";"
+            if guardStr = "" then "  { " + inner + " }"
+            else "  if (" + guardStr + ") { " + inner + " }"
 
         | PCon(c, []) ->
             // Zero-arg constructor or bare tag
             let cond =
-                if c = "true" || c = "false" then scrut + " === " + c
-                else scrut + "?._tag === `" + c + "`"
+                if c = "true" || c = "false" then s + " === " + c
+                else s + "?._tag === `" + c + "`"
             "  if (" + cond + ") { return " + emitExprTS body + "; }"
 
         | PCon(c, args) ->
             // N-arg constructor: destructure _0, _1, ...
-            let cond = scrut + "?._tag === `" + c + "`"
+            // Also emit inner checks for PLit args (e.g. TyName "?" checks _0 === '?').
+            let tagCond = s + "?._tag === `" + c + "`"
+            let innerConds =
+                args |> List.mapi (fun i arg ->
+                    match arg with
+                    | PLit l -> Some ("(" + s + " as Record<string, unknown>)[`_" + string i + "`] === " + emitLit l)
+                    | _ -> None)
+                |> List.choose id
+            let cond = (tagCond :: innerConds) |> String.concat " && "
             let binds =
                 args |> List.mapi (fun i arg ->
                     match arg with
-                    | PVar v -> "const " + safeIdent v + " = (" + scrut + " as Record<string, unknown>)[`_" + string i + "`];"
-                    | _ -> "") // nested patterns not fully supported in MVP
+                    | PVar v -> "const " + safeIdent v + " = (" + s + " as Record<string, unknown>)[`_" + string i + "`];"
+                    | _ -> "")
                 |> List.filter (fun s -> s <> "")
                 |> String.concat " "
             "  if (" + cond + ") { " + binds + " return " + emitExprTS body + "; }"
@@ -343,18 +409,16 @@ let rec private emitMatchBranches (scrut: string) (branches: (TypedPattern * Typ
             let binds =
                 ps |> List.mapi (fun i p ->
                     match p with
-                    | PVar v -> "const " + safeIdent v + " = " + scrut + "[" + string i + "];"
+                    | PVar v -> "const " + safeIdent v + " = " + s + "[" + string i + "];"
                     | _ -> "")
                 |> List.filter (fun s -> s <> "")
                 |> String.concat " "
             "  { " + binds + " return " + emitExprTS body + "; }"
 
-        | _ ->
-            "  return " + emitExprTS body + ";"
-
     let branchLines = branches |> List.map (fun (tp, body) -> emitBranch tp body)
     let body = String.concat "\n" branchLines + "\n  throw new Error(`Non-exhaustive match`);"
-    "(() => {\n" + body + "\n})()"
+    // Indent the _ll_s alias so build-compiler.js dedup (/^const \w+ =/) doesn't match it.
+    "(() => {\n  const " + s + " = " + scrut + ";\n" + body + "\n})()"
 
 // ── Expression emission ───────────────────────────────────────────────────────
 
@@ -519,7 +583,7 @@ let private emitSumType (name: TypeIdent) (ps: TypeParam list) (branches: (TypeI
 
 let private emitCurriedValue (ps: (string * TypeExpr) list) (body: TypedExpr) : string =
     match ps with
-    | [] -> "() => " + emitExprTS body
+    | [] -> "(() => " + emitExprTS body + ")()"
     | _ ->
         let lambdas =
             ps
@@ -573,27 +637,13 @@ let private emitDecl (decl: TypedDecl) : string =
     | TDFn(sig_, _, body) ->
         if isMainFn sig_ then
             "function main(): void {\n  " + emitExprTS body + ";\n}"
+        elif sig_.Name.StartsWith("__ll_main_") then
+            // Renamed sub-module test runner (from rewriteNonEntryMain).
+            // Emit as a no-op so it doesn't execute sub-module tests during library load.
+            "const " + safeIdent sig_.Name + " = () => {};"
         else
-            let isRec =
-                let rec contains name (te: TypedExpr) =
-                    match te.Expr with
-                    | TEVar x when x = name -> true
-                    | TEApp(a, b) | TEPipe(a, b) | TECons(a, b) -> contains name a || contains name b
-                    | TELam(_, b) | TETagged(b, _) -> contains name b
-                    | TELet(_, _, e1, e2) -> contains name e1 || e2 |> Option.exists (contains name)
-                    | TELetPat(_, e1, e2) -> contains name e1 || e2 |> Option.exists (contains name)
-                    | TEIf(c, t, e) -> contains name c || contains name t || contains name e
-                    | TEMatch(s, brs) | TEMatchOf(s, brs) ->
-                        contains name s || List.exists (fun (_, b) -> contains name b) brs
-                    | TEList es | TETuple es -> List.exists (contains name) es
-                    | _ -> false
-                contains sig_.Name body
             let valueExpr = emitCurriedValue sig_.Params body
-            if isRec then
-                // TypeScript doesn't have let rec — use var for forward reference
-                "const " + safeIdent sig_.Name + " = " + valueExpr + ";"
-            else
-                "const " + safeIdent sig_.Name + " = " + valueExpr + ";"
+            "const " + safeIdent sig_.Name + " = " + valueExpr + ";"
 
     | TDLet(x, _, e) ->
         "const " + safeIdent x + " = " + emitExprTS e + ";"

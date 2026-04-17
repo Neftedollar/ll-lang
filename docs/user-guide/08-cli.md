@@ -290,3 +290,29 @@ Use this as a migration/bootstrap tool for target code that follows emitted idio
 - F# nested `let ... in ...` chains are flattened into ll-lang local-binding statement blocks
 - F# tuple-style DU constructor calls (e.g. `Ctor(a, b)`) are normalized to curried ll-lang constructor application
 - Identifier normalization from `PascalCase` to ll-lang-compatible `lowerCamelCase` during recovery
+
+---
+
+## Known issues and limitations
+
+### `lllc check <file.lll>` — single-file import resolution (issue #139)
+
+**Symptom**: `lllc check` may report `E002 UnboundVar` for names that come from `import` declarations,
+even though the code is correct.
+
+```
+$ lllc check spec/examples/valid/05-modules.lll
+E002 8:9 UnboundVar head
+E002 8:17 UnboundVar map
+```
+
+**Cause**: Single-file `check` runs the stage-0 type checker against the built-in base environment
+only. It does not load or type-check imported modules. Affected files include any `.lll` that
+uses names imported from `Std.*` or other multi-module libraries.
+
+**Workarounds**:
+- Use `lllc check [dir]` (project mode) when a `lll.toml` manifest is present — this resolves imports correctly.
+- For stdlib builtins (`listMap`, `listFold`, etc.) the built-in base env covers all standard names;
+  non-standard aliases like `map`/`head` are not in scope without import resolution.
+
+**Status**: tracked in Neftedollar/ll-lang#139. Fix: wire stdlib import resolution into single-file `check`.

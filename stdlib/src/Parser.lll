@@ -108,13 +108,28 @@ skipBrackTypeBody(toks List[Token]) =
     | _ :: rest -> skipBrackTypeBody rest
     | [] -> []
 
+-- Parse bracket type args like [Int] in List[Int], building TyApp.
+-- Handles simple TypeId/Ident atoms and one level of nesting.
+-- Falls back to skipping for unknown/complex bracket content.
+applyBrackTypeArgs(base TypeExpr)(toks List[Token]) =
+  match toks
+    | LBrack :: TypeId arg :: LBrack :: TypeId inner :: RBrack :: RBrack :: rest ->
+      applyBrackTypeArgs (TyApp base (TyApp (TyName arg) (TyName inner))) rest
+    | LBrack :: TypeId arg :: RBrack :: rest ->
+      applyBrackTypeArgs (TyApp base (TyName arg)) rest
+    | LBrack :: Ident arg :: RBrack :: rest ->
+      applyBrackTypeArgs (TyApp base (TyName arg)) rest
+    | LBrack :: rest ->
+      rest2 = skipBrackTypeBody rest
+      (base, rest2)
+    | _ -> (base, toks)
+
 -- Parse a single type expression atom: TypeId[brackets] | Ident | (TypeApp).
 -- Parenthesised groups allow multi-arg type application: (RBMap K V).
 parseTypeExprAtom(toks List[Token]) =
   match toks
     | TypeId name :: rest ->
-      rest2 = skipBrackTypeArgs rest
-      (TyName name, rest2)
+      applyBrackTypeArgs (TyName name) rest
     | Ident name :: rest ->
       (TyName name, rest)
     | LParen :: rest ->
@@ -147,8 +162,8 @@ parseTypeExpr(toks List[Token]) = parseTypeExprAtom toks
 parseReturnType(toks List[Token]) =
   match toks
     | TypeId name :: rest ->
-      rest2 = skipBrackTypeArgs rest
-      (Some (TyName name), rest2)
+      let (ty, rest2) = applyBrackTypeArgs (TyName name) rest
+      (Some ty, rest2)
     | _ -> (None, toks)
 
 -- ---- Param group parsing -----------------------------------------------
@@ -158,19 +173,19 @@ parseParamGroups(toks List[Token]) =
   match toks
     | LParen :: RParen :: rest -> ([], rest)
     | LParen :: Ident pname :: TypeId tname :: rest ->
-      rest2 = skipBrackTypeArgs rest
+      let (ty, rest2) = applyBrackTypeArgs (TyName tname) rest
       rest3 = match rest2
         | RParen :: r -> r
         | _ -> rest2
       let (ps, rest4) = parseParamGroups rest3
-      (MkParam pname (TyName tname) :: ps, rest4)
+      (MkParam pname ty :: ps, rest4)
     | LParen :: Underscore :: Ident pname :: TypeId tname :: rest ->
-      rest2 = skipBrackTypeArgs rest
+      let (ty, rest2) = applyBrackTypeArgs (TyName tname) rest
       rest3 = match rest2
         | RParen :: r -> r
         | _ -> rest2
       let (ps, rest4) = parseParamGroups rest3
-      (MkParam (strConcat "_" pname) (TyName tname) :: ps, rest4)
+      (MkParam (strConcat "_" pname) ty :: ps, rest4)
     | LParen :: Ident pname :: RParen :: rest ->
       let (ps, rest2) = parseParamGroups rest
       (MkParam pname (TyName "?") :: ps, rest2)

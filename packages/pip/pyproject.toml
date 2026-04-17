@@ -8,7 +8,7 @@ version = "1.1.0"
 description = "lllc — compiler for ll-lang, a minimal statically-typed functional language that compiles to F#, TypeScript, Python, Java, and C#."
 readme = { file = "../../README.md", content-type = "text/markdown" }
 license = { text = "MIT" }
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 keywords = ["compiler", "functional", "llm", "ll-lang", "codegen"]
 authors = [{ name = "Neftedollar", email = "oildollar@gmail.com" }]
 classifiers = [

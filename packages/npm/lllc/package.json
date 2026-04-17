@@ -21,15 +21,13 @@
   "bin": {
     "lllc": "./bin/lllc"
   },
-  "scripts": {
-    "postinstall": "node postinstall.js"
-  },
   "engines": {
-    "node": ">=16"
+    "bun": ">=1.0"
   },
   "files": [
     "bin/",
-    "postinstall.js",
+    "lib/compiler.ts",
+    "scripts/build-compiler.js",
     "package.json",
     "README.md"
   ]

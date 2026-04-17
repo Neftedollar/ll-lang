@@ -60,14 +60,18 @@ inferFreshVar(st InferState) =
 
 -- ---- Built-in types ---------------------------------------------------
 
-tyInt  = TyName "Int"
-tyStr  = TyName "Str"
-tyBool = TyName "Bool"
-tyChar = TyName "Char"
-tyUnit = TyName "Unit"
+tyInt   = TyName "Int"
+tyStr   = TyName "Str"
+tyBool  = TyName "Bool"
+tyChar  = TyName "Char"
+tyUnit  = TyName "Unit"
+tyFloat = TyName "Float"
 
 -- List[A] is TyApp (TyName "List") A
 tyList(a TypeExpr) = TyApp (TyName "List") a
+
+-- Maybe[A] is TyApp (TyName "Maybe") A
+tyMaybe(a TypeExpr) = TyApp (TyName "Maybe") a
 
 -- ---- Base type environment --------------------------------------------
 -- Prelude functions and operators
@@ -107,7 +111,55 @@ baseEnv() =
   e13 = typeEnvInsert "strConcat" (baseScheme (TyFn tyStr (TyFn tyStr tyStr))) e12
   -- strLen: Str -> Int
   e14 = typeEnvInsert "strLen" (baseScheme (TyFn tyStr tyInt)) e13
-  e14
+  -- str extras
+  e15 = typeEnvInsert "strTrim"      (baseScheme (TyFn tyStr tyStr))                              e14
+  e16 = typeEnvInsert "strContains"  (baseScheme (TyFn tyStr (TyFn tyStr tyBool)))               e15
+  e17 = typeEnvInsert "strChars"     (baseScheme (TyFn tyStr (tyList tyChar)))                    e16
+  e18 = typeEnvInsert "strFromChars" (baseScheme (TyFn (tyList tyChar) tyStr))                    e17
+  e19 = typeEnvInsert "strReverse"   (baseScheme (TyFn tyStr tyStr))                              e18
+  e20 = typeEnvInsert "strSlice"     (baseScheme (TyFn tyStr (TyFn tyInt (TyFn tyInt tyStr))))   e19
+  e21 = typeEnvInsert "strIndexOf"   (baseScheme (TyFn tyStr (TyFn tyStr tyInt)))                 e20
+  e22 = typeEnvInsert "strSplit"     (baseScheme (TyFn tyStr (TyFn tyStr (tyList tyStr))))        e21
+  e23 = typeEnvInsert "strToInt"     (baseScheme (TyFn tyStr tyInt))                              e22
+  -- char ops
+  e24 = typeEnvInsert "charToInt"   (baseScheme (TyFn tyChar tyInt))                              e23
+  e25 = typeEnvInsert "intToChar"   (baseScheme (TyFn tyInt tyChar))                              e24
+  e26 = typeEnvInsert "charIsDigit" (baseScheme (TyFn tyChar tyBool))                             e25
+  e27 = typeEnvInsert "charIsAlpha" (baseScheme (TyFn tyChar tyBool))                             e26
+  e28 = typeEnvInsert "charIsSpace" (baseScheme (TyFn tyChar tyBool))                             e27
+  -- math
+  e29 = typeEnvInsert "abs"  (baseScheme (TyFn tyInt tyInt))                                      e28
+  e30 = typeEnvInsert "absf" (baseScheme (TyFn tyFloat tyFloat))                                  e29
+  e31 = typeEnvInsert "sqrt" (baseScheme (TyFn tyFloat tyFloat))                                  e30
+  e32 = typeEnvInsert "min"  (baseScheme (TyFn tyInt (TyFn tyInt tyInt)))                        e31
+  e33 = typeEnvInsert "max"  (baseScheme (TyFn tyInt (TyFn tyInt tyInt)))                        e32
+  -- IO
+  e34 = typeEnvInsert "print"     (baseScheme (TyFn tyStr tyUnit))                                e33
+  e35 = typeEnvInsert "readFile"  (baseScheme (TyFn tyStr tyStr))                                 e34
+  e36 = typeEnvInsert "writeFile" (baseScheme (TyFn tyStr (TyFn tyStr tyUnit)))                  e35
+  e37 = typeEnvInsert "fileExists"(baseScheme (TyFn tyStr tyBool))                                e36
+  e38 = typeEnvInsert "exit"      (baseScheme (TyFn tyInt tyUnit))                                e37
+  e39 = typeEnvInsert "getArgs"   (baseScheme (tyList tyStr))                                     e38
+  -- list (polymorphic) — scheme vars must start with $ (flex var convention)
+  e40 = typeEnvInsert "listLen"     (MkScheme ["$a"] (TyFn (tyList (TyName "$a")) tyInt))                                                                                                      e39
+  e41 = typeEnvInsert "listIsEmpty" (MkScheme ["$a"] (TyFn (tyList (TyName "$a")) tyBool))                                                                                                     e40
+  e42 = typeEnvInsert "listReverse" (MkScheme ["$a"] (TyFn (tyList (TyName "$a")) (tyList (TyName "$a"))))                                                                                     e41
+  e43 = typeEnvInsert "listAppend"  (MkScheme ["$a"] (TyFn (tyList (TyName "$a")) (TyFn (tyList (TyName "$a")) (tyList (TyName "$a")))))                                                      e42
+  e44 = typeEnvInsert "listConcat"  (MkScheme ["$a"] (TyFn (tyList (tyList (TyName "$a"))) (tyList (TyName "$a"))))                                                                            e43
+  e45 = typeEnvInsert "listHead"    (MkScheme ["$a"] (TyFn (tyList (TyName "$a")) (tyMaybe (TyName "$a"))))                                                                                    e44
+  e46 = typeEnvInsert "listTail"    (MkScheme ["$a"] (TyFn (tyList (TyName "$a")) (tyList (TyName "$a"))))                                                                                     e45
+  e47 = typeEnvInsert "listAt"      (MkScheme ["$a"] (TyFn (tyList (TyName "$a")) (TyFn tyInt (tyMaybe (TyName "$a")))))                                                                      e46
+  e48 = typeEnvInsert "listMap"     (MkScheme ["$a"; "$b"] (TyFn (TyFn (TyName "$a") (TyName "$b")) (TyFn (tyList (TyName "$a")) (tyList (TyName "$b")))))                                    e47
+  e49 = typeEnvInsert "listFilter"  (MkScheme ["$a"] (TyFn (TyFn (TyName "$a") tyBool) (TyFn (tyList (TyName "$a")) (tyList (TyName "$a")))))                                                 e48
+  e50 = typeEnvInsert "listFold"    (MkScheme ["$a"; "$b"] (TyFn (TyFn (TyName "$b") (TyFn (TyName "$a") (TyName "$b"))) (TyFn (TyName "$b") (TyFn (tyList (TyName "$a")) (TyName "$b"))))) e49
+  -- maybe (polymorphic)
+  e51 = typeEnvInsert "maybeMap"         (MkScheme ["$a"; "$b"] (TyFn (TyFn (TyName "$a") (TyName "$b")) (TyFn (tyMaybe (TyName "$a")) (tyMaybe (TyName "$b")))))                            e50
+  e52 = typeEnvInsert "maybeBind"        (MkScheme ["$a"; "$b"] (TyFn (TyFn (TyName "$a") (tyMaybe (TyName "$b"))) (TyFn (tyMaybe (TyName "$a")) (tyMaybe (TyName "$b")))))                 e51
+  e53 = typeEnvInsert "maybeWithDefault" (MkScheme ["$a"] (TyFn (TyName "$a") (TyFn (tyMaybe (TyName "$a")) (TyName "$a"))))                                                                 e52
+  -- boolean literals as values
+  e54 = typeEnvInsert "true"  (baseScheme tyBool) e53
+  e55 = typeEnvInsert "false" (baseScheme tyBool) e54
+  e55
 
 -- ---- Pattern type inference -------------------------------------------
 -- Returns (env_bindings, TypeExpr, errors)
