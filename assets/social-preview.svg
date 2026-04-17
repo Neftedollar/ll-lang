@@ -218,40 +218,37 @@
   <!-- ── FOOTER ── -->
   <line x1="48" y1="574" x2="1232" y2="574" stroke="#30363d" stroke-width="1"/>
 
-  <!-- Install commands -->
-  <text x="64" y="608"
+  <!-- Install commands — 3 equal columns, centered, no overlap -->
+  <text x="220" y="608" text-anchor="middle"
         font-family="'SF Mono','Fira Code','Cascadia Code',monospace"
-        font-size="16" fill="#6e7681">npm install -g </text>
-  <text x="192" y="608"
-        font-family="'SF Mono','Fira Code','Cascadia Code',monospace"
-        font-size="16" fill="#4ec9b0">@neftedollar/lllc</text>
+        font-size="15">
+    <tspan fill="#6e7681">npm install -g </tspan><tspan fill="#4ec9b0">@neftedollar/lllc</tspan>
+  </text>
 
-  <text x="430" y="608"
+  <text x="395" y="608" text-anchor="middle"
         font-family="'SF Mono','Fira Code','Cascadia Code',monospace"
-        font-size="16" fill="#6e7681">·</text>
+        font-size="15" fill="#4a4f55">·</text>
 
-  <text x="460" y="608"
+  <text x="530" y="608" text-anchor="middle"
         font-family="'SF Mono','Fira Code','Cascadia Code',monospace"
-        font-size="16" fill="#6e7681">pip install </text>
-  <text x="564" y="608"
-        font-family="'SF Mono','Fira Code','Cascadia Code',monospace"
-        font-size="16" fill="#4ec9b0">lllc</text>
+        font-size="15">
+    <tspan fill="#6e7681">pip install </tspan><tspan fill="#4ec9b0">lllc</tspan>
+  </text>
 
-  <text x="640" y="608"
+  <text x="665" y="608" text-anchor="middle"
         font-family="'SF Mono','Fira Code','Cascadia Code',monospace"
-        font-size="16" fill="#6e7681">·</text>
+        font-size="15" fill="#4a4f55">·</text>
 
-  <text x="668" y="608"
+  <text x="820" y="608" text-anchor="middle"
         font-family="'SF Mono','Fira Code','Cascadia Code',monospace"
-        font-size="16" fill="#6e7681">dotnet tool install -g </text>
-  <text x="868" y="608"
-        font-family="'SF Mono','Fira Code','Cascadia Code',monospace"
-        font-size="16" fill="#4ec9b0">lllc</text>
+        font-size="15">
+    <tspan fill="#6e7681">dotnet tool install -g </tspan><tspan fill="#4ec9b0">lllc</tspan>
+  </text>
 
   <!-- GitHub link -->
   <text x="1216" y="608" text-anchor="end"
         font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
-        font-size="15" fill="#30363d">github.com/Neftedollar/ll-lang</text>
+        font-size="14" fill="#30363d">github.com/Neftedollar/ll-lang</text>
 
   <!-- Accent line bottom -->
   <rect y="637" width="1280" height="3" fill="url(#glowLine)"/>
