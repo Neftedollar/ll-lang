@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "lllc"
+name = "ll-lang"
 version = "1.1.2"
 description = "lllc — compiler for ll-lang, a minimal statically-typed functional language that compiles to F#, TypeScript, Python, Java, and C#."
 readme = { file = "README.md", content-type = "text/markdown" }
