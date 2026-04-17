@@ -638,21 +638,69 @@ let rec private emitExprValue (ctx: EmitCtx) (te: TypedExpr) : string option =
                 Some ev
         | TELetPat(tp, e, bodyOpt) ->
             // Elaborator maps `_ = rhs` and other pattern-LHS bindings to
-            // TELetPat. Codegen must still emit the RHS (for side effects)
-            // and recurse into the body. The minimal shape used in practice
-            // is PWild (`_ = expr`) and PVar (shouldn't normally occur —
-            // parser prefers TELet for PVar — but we handle it for safety).
-            // Complex patterns (PCons/PCon/PTuple) aren't needed by any
-            // current .lll under self-hosting; fall through to generic
-            // "emit RHS, bind nothing" which at minimum preserves side effects.
+            // TELetPat. Codegen must emit the RHS (for side effects) and
+            // recurse into the body.
+            //
+            // Supported shapes:
+            //   PVar   — bind name to RHS value (same as TELet)
+            //   PWild  — evaluate RHS, drop
+            //   PTuple — destructure an N-cell cons chain (same ABI as list
+            //            cons: {tag=-1, payload, tail}); each sub-pattern
+            //            binds to `payload` of the i-th cell. Nested PTuples
+            //            recurse by walking into the payload as a ptr.
+            //
+            // Other pattern shapes (PCons/PCon in let position, or literal
+            // patterns) fall through to "emit RHS, bind nothing" — those
+            // aren't used by stdlib/self-hosting today.
             match emitExprValue ctx e with
             | None -> None
             | Some ev ->
                 let evTy = emitType e.Type
                 let old = ctx.VarEnv
+                // Bind a single sub-pattern against `cellPtr` (a ptr to a
+                // cons cell whose payload holds the value we want to bind).
+                // Returns unit — mutates ctx.VarEnv. `PTuple` recurses by
+                // first converting payload i64 -> ptr, then unpacking again.
+                let rec bindSubPattern (cellPtr: string) (p: Pattern) : unit =
+                    match p with
+                    | PWild -> ()
+                    | PVar n ->
+                        let payload = emitLoadNodePayload ctx cellPtr
+                        ctx.VarEnv <- Map.add n ("i64", payload) ctx.VarEnv
+                    | PTuple inner ->
+                        // Nested tuple: payload is (i64-encoded) ptr to
+                        // another cons chain. Convert and recurse.
+                        let payload = emitLoadNodePayload ctx cellPtr
+                        let innerPtr = coerceValue ctx "i64" "ptr" payload
+                        bindTuplePattern innerPtr inner
+                    | _ ->
+                        // PCons/PCon/PLit in let-destructure — not needed by
+                        // any current .lll; skip binding (RHS side-effect is
+                        // preserved via the outer `emitExprValue ev`).
+                        ()
+                // Walk the cons chain: pats.[0] -> payload(base),
+                // pats.[1] -> payload(tail(base)),
+                // pats.[2] -> payload(tail(tail(base))), etc.
+                and bindTuplePattern (basePtr: string) (pats: Pattern list) : unit =
+                    let rec walk (cur: string) (remaining: Pattern list) =
+                        match remaining with
+                        | [] -> ()
+                        | [p] -> bindSubPattern cur p
+                        | p :: rest ->
+                            bindSubPattern cur p
+                            let nextTail = emitLoadNodeTail ctx cur
+                            walk nextTail rest
+                    walk basePtr pats
                 match tp.Pat with
                 | PVar name ->
-                    ctx.VarEnv <- Map.add name (evTy, ev) old
+                    ctx.VarEnv <- Map.add name (evTy, ev) ctx.VarEnv
+                | PWild -> ()
+                | PTuple items ->
+                    // RHS must be a ptr to the cons chain. `ev` from
+                    // TETuple/TECall returning a tuple is already ptr, but
+                    // be defensive via coerceValue.
+                    let basePtr = coerceValue ctx evTy "ptr" ev
+                    bindTuplePattern basePtr items
                 | _ -> ()
                 let out =
                     match bodyOpt with
