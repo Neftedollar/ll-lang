@@ -172,10 +172,26 @@ jobs:
             -p:Version=${{ steps.ver.outputs.V }} \
             -o nuget-out/
 
-      - name: Push to NuGet.org
+      - name: Push to NuGet.org (trusted publishing via OIDC)
         run: |
+          # 1. Get GitHub OIDC token
+          OIDC_TOKEN=$(curl -s \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" \
+            | jq -r '.value')
+
+          # 2. Exchange for short-lived NuGet API key
+          NUGET_KEY=$(curl -s -f -X POST https://api.nuget.org/v1/publishers/token \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            --data "{\"audience\":\"api://AzureADTokenExchange\",\"requestedTokenType\":\"urn:ietf:params:oauth:token-type:api_key\",\"subjectToken\":\"${OIDC_TOKEN}\",\"subjectTokenType\":\"urn:ietf:params:oauth:token-type:id_token\"}" \
+            | jq -r '.access_token')
+          echo "::add-mask::${NUGET_KEY}"
+
+          # 3. Push
           dotnet nuget push nuget-out/*.nupkg \
             --source https://api.nuget.org/v3/index.json \
+            --api-key "${NUGET_KEY}" \
             --skip-duplicate
 
   # ── 5. npm ──────────────────────────────────────────────────────────────────
