@@ -17,10 +17,8 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Doc Contract Check
         run: ./tools/check-doc-contract.sh
-        working-directory: initial-compiler
       - name: Nullability Suppression Guard
         run: ./tools/check-no-fs3261-suppression.sh
-        working-directory: initial-compiler
       - name: Build
         run: dotnet clean --nologo && dotnet build --nologo -warnaserror
         working-directory: initial-compiler
