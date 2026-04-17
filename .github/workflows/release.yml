@@ -181,6 +181,9 @@ jobs:
     name: Publish npm
     needs: [create-release, build-compiler-sources]
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -201,13 +204,11 @@ jobs:
 
       - name: Set package version
         working-directory: packages/npm/lllc
-        run: npm version ${{ steps.ver.outputs.V }} --no-git-tag-version
+        run: npm version ${{ steps.ver.outputs.V }} --no-git-tag-version --allow-same-version
 
       - name: Publish
         working-directory: packages/npm/lllc
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
 
   # ── 6. PyPI ─────────────────────────────────────────────────────────────────
   publish-pypi:
