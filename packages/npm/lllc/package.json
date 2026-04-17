@@ -12,14 +12,14 @@
   "homepage": "https://github.com/Neftedollar/ll-lang",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Neftedollar/ll-lang.git"
+    "url": "git+https://github.com/Neftedollar/ll-lang.git"
   },
   "bugs": {
     "url": "https://github.com/Neftedollar/ll-lang/issues"
   },
   "license": "MIT",
   "bin": {
-    "lllc": "./bin/lllc"
+    "lllc": "bin/lllc"
   },
   "engines": {
     "bun": ">=1.0"
