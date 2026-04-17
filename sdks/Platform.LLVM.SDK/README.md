@@ -12,7 +12,7 @@ executables by:
 
 ## Supported features
 
-Validated against examples `spec/examples/valid/36-llvm-*.lll` through `39-llvm-*.lll`.
+Validated against examples `spec/examples/valid/36-llvm-*.lll` through `42-llvm-*.lll`.
 
 | Feature | Example | Status |
 |---|---|---|
@@ -20,9 +20,11 @@ Validated against examples `spec/examples/valid/36-llvm-*.lll` through `39-llvm-
 | Integer arithmetic + user-defined functions | `37-llvm-arith.lll` | works |
 | `if`/`else` with integer comparison + `phi` | `38-llvm-conditional.lll` | works |
 | `strConcat` of two string literals | `39-llvm-strings.lll` | works |
-| `intToStr` | 37, 38 | works (via runtime `intToStr`) |
-| ADTs / pattern matching | — | not exercised yet |
-| `let`/`in` chained bindings | 37, 38, 39 | works (via `=` bindings) |
+| `intToStr` | 37, 38, 40, 42 | works (via runtime `intToStr`) |
+| Recursion (`factorial`) | `40-llvm-recursion.lll` | works |
+| ADT `Maybe A` + `match` (1-field ctor) | `41-llvm-adt-maybe.lll` | works |
+| ADT `Shape` + `match` (0/1/2-field ctors) | `42-llvm-adt-shape.lll` | works (arms must order nullary before multi-field — codegen limitation, see example) |
+| `let`/`in` chained bindings | 37, 38, 39, 40, 41, 42 | works (via named `=` bindings; `_ =` arms are silently dropped by frozen codegen) |
 | Lists (`list_nil`/`list_cons`) | — | runtime stubs only |
 | I/O (`read_line`, `read_file`) | — | runtime stubs only |
 | GC | — | stubbed (raw `malloc`) |
@@ -50,6 +52,10 @@ These compensate for codegen shortcuts in the frozen `CodegenLLVM.fs`. Each is i
 3. **`define void @main()`** — codegen emits `void` return but C runtime expects `int` (or the
    process inherits garbage from the return register). Script rewrites the signature to
    `i32 @main()` and swaps `ret void` for `ret i32 0`.
+4. **Duplicate `@__ll_alloc` definition** — ADT examples trigger codegen to emit a local
+   definition of `@__ll_alloc`, which collides with the C runtime's version at link time
+   (`duplicate symbol '___ll_alloc'`). Script strips the generated definition; the runtime
+   remains the single source of truth.
 
 ## Running the pipeline
 
@@ -62,13 +68,20 @@ Requires: `dotnet`, `python3`, `clang`, `make`.
 
 ## CI
 
-`.github/workflows/llvm.yml` builds and runs all four `36-39` examples on `ubuntu-latest` and
+`.github/workflows/llvm.yml` builds and runs all seven `36-42` examples on `ubuntu-latest` and
 asserts stdout matches the expected output. Triggered on changes to the SDK, codegen source,
 the build tools, or the example corpus.
 
 ## Scope / non-goals (yet)
 
-Real GC, exceptions, FFI into arbitrary C libraries, sum-type codegen, and tail-call
-optimization are all out-of-scope for the MVP. Add examples and extend
-`tools/llvm-add-declares.py` + `runtime/lllc_runtime.c` as codegen grows into more language
-features.
+Real GC, exceptions, FFI into arbitrary C libraries, and tail-call optimization are all
+out-of-scope for the MVP. Add examples and extend `tools/llvm-add-declares.py` +
+`runtime/lllc_runtime.c` as codegen grows into more language features.
+
+### Known frozen-codegen limitations (workarounds required in example sources)
+
+- **`_ =` bindings are silently dropped.** Use a named binding when sequencing side-effects:
+  `r1 = printfn s1; r2 = printfn s2; r2` (not `_ = printfn s1`). Examples 41/42 use this idiom.
+- **ADT match arms dereference tail pointers unconditionally.** When an ADT has both nullary
+  and multi-field constructors, list the nullary arm *before* any multi-field arm so the match
+  succeeds before the codegen tries to load from a null tail. Example 42 demonstrates.

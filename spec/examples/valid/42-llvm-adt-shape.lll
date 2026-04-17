@@ -1,0 +1,20 @@
+module LlvmShape
+
+Shape = Circle Int | Rect Int Int | Empty
+
+-- NOTE: arms ordered so `Empty` (nullary) is checked before `Rect` (2-field,
+-- cons-style chain). The frozen codegen unconditionally dereferences the
+-- tail pointer when probing for a multi-field ctor, so an earlier nullary
+-- case with a null tail segfaults if it comes *after* the multi-field case.
+-- Semantic order is irrelevant (arms are disjoint).
+perimeter(s Shape) Int =
+  match s
+    | Circle r -> 6 * r
+    | Empty -> 0
+    | Rect w h -> 2 * (w + h)
+
+main() =
+  a = printfn (intToStr (perimeter (Circle 5)))
+  b = printfn (intToStr (perimeter (Rect 3 4)))
+  c = printfn (intToStr (perimeter Empty))
+  c

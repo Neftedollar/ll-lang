@@ -9,6 +9,7 @@ on:
       - 'initial-compiler/src/**/CodegenLLVM.fs'
       - 'tools/llvm-*'
       - 'spec/examples/valid/3[6-9]-llvm-*.lll'
+      - 'spec/examples/valid/4[0-2]-llvm-*.lll'
       - '.github/workflows/llvm.yml'
   pull_request:
     branches: [main]
@@ -18,6 +19,7 @@ on:
       - 'initial-compiler/src/**/CodegenLLVM.fs'
       - 'tools/llvm-*'
       - 'spec/examples/valid/3[6-9]-llvm-*.lll'
+      - 'spec/examples/valid/4[0-2]-llvm-*.lll'
       - '.github/workflows/llvm.yml'
 
 jobs:
@@ -72,3 +74,32 @@ jobs:
           OUT=$(/tmp/strings)
           echo "stdout: $OUT"
           test "$OUT" = "Hello, LLVM!" || { echo "expected 'Hello, LLVM!'"; exit 1; }
+
+      - name: Build 40-llvm-recursion
+        run: tools/llvm-build.sh spec/examples/valid/40-llvm-recursion.lll /tmp/rec
+
+      - name: Run 40-llvm-recursion
+        run: |
+          OUT=$(/tmp/rec)
+          echo "stdout: $OUT"
+          test "$OUT" = "120" || { echo "expected '120'"; exit 1; }
+
+      - name: Build 41-llvm-adt-maybe
+        run: tools/llvm-build.sh spec/examples/valid/41-llvm-adt-maybe.lll /tmp/maybe
+
+      - name: Run 41-llvm-adt-maybe
+        run: |
+          OUT=$(/tmp/maybe)
+          echo "stdout: $OUT"
+          EXPECTED=$'5\ndiv-by-zero'
+          test "$OUT" = "$EXPECTED" || { echo "expected:"; echo "$EXPECTED"; exit 1; }
+
+      - name: Build 42-llvm-adt-shape
+        run: tools/llvm-build.sh spec/examples/valid/42-llvm-adt-shape.lll /tmp/shape
+
+      - name: Run 42-llvm-adt-shape
+        run: |
+          OUT=$(/tmp/shape)
+          echo "stdout: $OUT"
+          EXPECTED=$'30\n14\n0'
+          test "$OUT" = "$EXPECTED" || { echo "expected:"; echo "$EXPECTED"; exit 1; }

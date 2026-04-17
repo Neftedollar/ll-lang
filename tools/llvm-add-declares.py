@@ -87,6 +87,17 @@ INSTR_GEP_RE = re.compile(
 # become `i32` so the process exits 0 instead of with stack garbage.
 VOID_MAIN_SIG_RE = re.compile(r"^(\s*)define\s+void\s+@main\s*\(\s*\)\s*\{\s*$")
 
+# Codegen emits a local definition of @__ll_alloc (ADT allocator) that
+# duplicates the implementation in lllc_runtime.c. When an example uses
+# ADT pattern matching both symbols appear in the link, yielding
+# `duplicate symbol '___ll_alloc'`. We keep the runtime as source of
+# truth (so memory-management tweaks land in C, not in frozen codegen)
+# and strip the generated definition textually.
+RUNTIME_OWNED_DEFS = {"__ll_alloc"}
+DEFINE_OWNED_RE = re.compile(
+    r"^\s*define\s+\S+\s+@(" + "|".join(re.escape(n) for n in RUNTIME_OWNED_DEFS) + r")\s*\("
+)
+
 
 def parse_arg_types(args: str) -> List[str]:
     """Extract just the types from a call-site arg list like `ptr %t0, i64 3`."""
@@ -228,8 +239,34 @@ def prepend_declares(lines: List[str]) -> List[str]:
     return lines[:insert_at] + banner + lines[insert_at:]
 
 
+def strip_runtime_owned_defs(lines: List[str]) -> List[str]:
+    """Drop `define ... @name(...) { ... }` blocks for functions the C runtime
+    owns. Brace-counting keeps nested-brace safety (rare, but cheap).
+
+    Without this, examples with ADT pattern matching fail linking with
+    `duplicate symbol '___ll_alloc'` because both the IR-emitted and
+    C-runtime versions end up in the object file.
+    """
+    out: List[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if DEFINE_OWNED_RE.match(line):
+            # Skip until matching close brace.
+            brace_depth = line.count("{") - line.count("}")
+            i += 1
+            while i < len(lines) and brace_depth > 0:
+                brace_depth += lines[i].count("{") - lines[i].count("}")
+                i += 1
+            continue
+        out.append(line)
+        i += 1
+    return out
+
+
 def patch(text: str) -> str:
     lines = text.splitlines()
+    lines = strip_runtime_owned_defs(lines)
     lines = fix_instruction_geps(lines)
     lines = fix_void_main(lines)
     lines = prepend_declares(lines)
