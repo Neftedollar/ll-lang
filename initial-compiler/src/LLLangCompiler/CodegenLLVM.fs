@@ -172,17 +172,27 @@ let private collectOptions (items: string option list) : string list option =
         | Some v :: xs -> loop (v :: acc) xs
     loop [] items
 
+let private resolveCallee (ctx: EmitCtx) (fnName: string) : string =
+    // If the callee name is bound in the local SSA environment (e.g. a
+    // function-typed parameter or let-binding), emit it as an SSA register
+    // holding a function pointer — `%arg0`, not `@f`. Otherwise treat it
+    // as a global symbol reference.
+    match Map.tryFind fnName ctx.VarEnv with
+    | Some (_, ssaValue) -> ssaValue
+    | None -> "@" + fnName
+
 let private emitCall (ctx: EmitCtx) (retTy: string) (fnName: string) (argTys: string list) (argVals: string list) : string option =
     let args =
         List.zip argTys argVals
         |> List.map (fun (ty, value) -> ty + " " + value)
         |> String.concat ", "
+    let callee = resolveCallee ctx fnName
     if retTy = "void" then
-        emitInstr ctx ("call void @" + fnName + "(" + args + ")")
+        emitInstr ctx ("call void " + callee + "(" + args + ")")
         Some "0"
     else
         let tmp = freshTmp ctx
-        emitInstr ctx (tmp + " = call " + retTy + " @" + fnName + "(" + args + ")")
+        emitInstr ctx (tmp + " = call " + retTy + " " + callee + "(" + args + ")")
         Some tmp
 
 let private emitIntCmp (ctx: EmitCtx) (pred: string) (aVal: string) (bVal: string) : string =
@@ -439,9 +449,19 @@ let rec private emitExprValue (ctx: EmitCtx) (te: TypedExpr) : string option =
             | _ -> Some (emitLit l)
         | TEVar name ->
             match Map.tryFind name ctx.VarEnv with
-            | None -> None
             | Some (fromTy, value) ->
                 Some (coerceValue ctx fromTy wantedTy value)
+            | None ->
+                // Not a local SSA binding. If the reference is function-typed,
+                // fall back to the global symbol — this lets callers pass a
+                // top-level function as a first-class value (function pointer).
+                let rec isFnTy t =
+                    match t with
+                    | TyFn(_, _) -> true
+                    | TyTagged(inner, _) -> isFnTy inner
+                    | _ -> false
+                if isFnTy te.Type then Some ("@" + name)
+                else None
         | TETagged(inner, _) -> emitExprValue ctx inner
         | TECon c ->
             let tagV = string (ctorTag c)

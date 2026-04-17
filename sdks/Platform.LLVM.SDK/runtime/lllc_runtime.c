@@ -315,3 +315,249 @@ void* ll_getArgs(void) {
     }
     return tail;
 }
+
+/* ---- Extended runtime helpers (for lllcself stretch) ---------------------
+ * All list functions assume the codegen's heap-node ABI:
+ *   struct node { i64 tag; i64 payload; struct node* tail; }
+ * with `tag == -1` (LIST_CONS_TAG) for cons cells and NULL for nil. Element
+ * values are i64 in the payload slot (pointer-typed elements cast to i64).
+ *
+ * `strChars` returns a list of Char (payload = char zext to i64).
+ * `strFromChars` consumes such a list and builds a C string.
+ * -----------------------------------------------------------------------*/
+
+#define LIST_CONS_TAG ((int64_t)-1)
+
+typedef struct ll_node {
+    int64_t tag;
+    int64_t payload;
+    struct ll_node* tail;
+} ll_node_t;
+
+static ll_node_t* ll_cons(int64_t payload, ll_node_t* tail) {
+    ll_node_t* n = (ll_node_t*)malloc(sizeof(ll_node_t));
+    if (n == NULL) return NULL;
+    n->tag = LIST_CONS_TAG;
+    n->payload = payload;
+    n->tail = tail;
+    return n;
+}
+
+/* Char / Int helpers ------------------------------------------------------ */
+
+int8_t charIsDigit(int8_t c) {
+    return (int8_t)(c >= '0' && c <= '9');
+}
+
+int8_t charIsSpace(int8_t c) {
+    return (int8_t)(c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v');
+}
+
+int64_t charToInt(int8_t c) {
+    return (int64_t)(uint8_t)c;
+}
+
+int8_t intToChar(int64_t n) {
+    return (int8_t)(n & 0xFF);
+}
+
+/* List helpers ------------------------------------------------------------ */
+
+int8_t listIsEmpty(ll_node_t* lst) {
+    return (int8_t)(lst == NULL);
+}
+
+int64_t listLen(ll_node_t* lst) {
+    int64_t n = 0;
+    while (lst != NULL) {
+        n++;
+        lst = lst->tail;
+    }
+    return n;
+}
+
+/* listReverse: return a reversed shallow copy. */
+ll_node_t* listReverse(ll_node_t* lst) {
+    ll_node_t* acc = NULL;
+    while (lst != NULL) {
+        acc = ll_cons(lst->payload, acc);
+        lst = lst->tail;
+    }
+    return acc;
+}
+
+/* listAppend: non-destructive concat of two lists. */
+ll_node_t* listAppend(ll_node_t* a, ll_node_t* b) {
+    /* Reverse-a then prepend onto b. */
+    ll_node_t* ra = listReverse(a);
+    ll_node_t* out = b;
+    while (ra != NULL) {
+        out = ll_cons(ra->payload, out);
+        ra = ra->tail;
+    }
+    return out;
+}
+
+/* listConcat: flatten a list-of-lists. Each payload is itself a list ptr. */
+ll_node_t* listConcat(ll_node_t* lst) {
+    ll_node_t* out = NULL;
+    /* Walk `lst` once to get a reversed list of sublists, then prepend in
+     * order so the final flat list preserves original element order. */
+    ll_node_t* ra = listReverse(lst);
+    while (ra != NULL) {
+        ll_node_t* sub = (ll_node_t*)(intptr_t)ra->payload;
+        out = listAppend(sub, out);
+        ra = ra->tail;
+    }
+    return out;
+}
+
+/* listMap: apply a function to each element.
+ * `fn` is a raw function pointer `int64_t (*)(int64_t)` — payloads are
+ * passed as i64 (caller guarantees element type matches fn's param type
+ * up to i64-punning, which is how the codegen treats all list payloads). */
+ll_node_t* listMap(int64_t (*fn)(int64_t), ll_node_t* lst) {
+    /* Build the mapped list in reverse, then reverse to restore order. */
+    ll_node_t* acc = NULL;
+    while (lst != NULL) {
+        int64_t mapped = fn(lst->payload);
+        acc = ll_cons(mapped, acc);
+        lst = lst->tail;
+    }
+    return listReverse(acc);
+}
+
+/* String helpers --------------------------------------------------------- */
+
+/* strChars: string -> List[Char]. Each char zext to i64 as payload. */
+ll_node_t* strChars(const char* s) {
+    if (s == NULL) return NULL;
+    /* Build reversed then flip so list order matches byte order. */
+    ll_node_t* acc = NULL;
+    for (const char* p = s; *p != '\0'; p++) {
+        acc = ll_cons((int64_t)(uint8_t)(*p), acc);
+    }
+    return listReverse(acc);
+}
+
+/* strFromChars: List[Char] -> string. Payload is i64-zext'd char. */
+char* strFromChars(ll_node_t* lst) {
+    int64_t n = listLen(lst);
+    char* buf = (char*)malloc((size_t)n + 1);
+    if (buf == NULL) return NULL;
+    int64_t i = 0;
+    while (lst != NULL) {
+        buf[i++] = (char)(lst->payload & 0xFF);
+        lst = lst->tail;
+    }
+    buf[n] = '\0';
+    return buf;
+}
+
+/* strContains: substring check. */
+int8_t strContains(const char* hay, const char* needle) {
+    if (hay == NULL || needle == NULL) return 0;
+    return (int8_t)(strstr(hay, needle) != NULL);
+}
+
+/* strSlice(s, start, end): substring [start, end), byte-indexed.
+ * Out-of-range indices are clamped. Returns a freshly malloc'd string. */
+char* strSlice(const char* s, int64_t start, int64_t end) {
+    if (s == NULL) return empty_string();
+    int64_t len = (int64_t)strlen(s);
+    if (start < 0) start = 0;
+    if (end > len) end = len;
+    if (start >= end) return empty_string();
+    size_t n = (size_t)(end - start);
+    char* out = (char*)malloc(n + 1);
+    if (out == NULL) return NULL;
+    memcpy(out, s + start, n);
+    out[n] = '\0';
+    return out;
+}
+
+/* strSplit(sep, s): split `s` on every occurrence of `sep`. Returns a
+ * List[Str] with payload = Str ptr cast to i64. Empty segments are
+ * preserved. A NULL/empty separator returns the whole string as a single
+ * element. */
+ll_node_t* strSplit(const char* sep, const char* s) {
+    if (s == NULL) return NULL;
+    if (sep == NULL || sep[0] == '\0') {
+        /* Whole string as single element. */
+        char* copy = strConcat(s, "");  /* cheap dup */
+        return ll_cons((int64_t)(intptr_t)copy, NULL);
+    }
+    size_t sep_len = strlen(sep);
+    ll_node_t* acc = NULL;
+    const char* cur = s;
+    while (1) {
+        const char* hit = strstr(cur, sep);
+        if (hit == NULL) {
+            /* Emit the remainder and stop. */
+            char* seg = strConcat(cur, "");
+            acc = ll_cons((int64_t)(intptr_t)seg, acc);
+            break;
+        }
+        size_t seg_len = (size_t)(hit - cur);
+        char* seg = (char*)malloc(seg_len + 1);
+        if (seg != NULL) {
+            memcpy(seg, cur, seg_len);
+            seg[seg_len] = '\0';
+            acc = ll_cons((int64_t)(intptr_t)seg, acc);
+        }
+        cur = hit + sep_len;
+    }
+    return listReverse(acc);
+}
+
+/* strTrim: drop ASCII whitespace from both ends. */
+char* strTrim(const char* s) {
+    if (s == NULL) return empty_string();
+    const char* start = s;
+    while (*start != '\0' && charIsSpace((int8_t)*start)) start++;
+    const char* end = s + strlen(s);
+    while (end > start && charIsSpace((int8_t)*(end - 1))) end--;
+    size_t n = (size_t)(end - start);
+    char* out = (char*)malloc(n + 1);
+    if (out == NULL) return NULL;
+    memcpy(out, start, n);
+    out[n] = '\0';
+    return out;
+}
+
+/* strToInt: parse a decimal integer. Returns a Maybe[Int]-shaped pointer,
+ * but we cannot synthesise the codegen's per-module Some/None tag here.
+ * The safe, portable answer is NULL on failure — pattern matches that
+ * test for None via `null` succeed. For `Some n`, callers that pattern
+ * match on Some expect tag=ctorTag("Some"), which varies per module.
+ *
+ * MVP: return NULL unconditionally, which means all callers see `None`.
+ * This is a known limitation until codegen or runtime agrees on a stable
+ * ADT tag scheme. Callers that use strToIntWithDefault (fallback to 0)
+ * still work. */
+void* strToInt(const char* s) {
+    (void)s;
+    return NULL;
+}
+
+/* fileExists: best-effort file existence check. */
+int8_t fileExists(const char* path) {
+    if (path == NULL) return 0;
+    struct stat st;
+    return (int8_t)(stat(path, &st) == 0);
+}
+
+/* readLine: read one line from stdin. Returns Maybe[Str]-shaped pointer;
+ * see strToInt comment for the Some/None tag caveat. We return NULL on
+ * EOF (correct `None` semantics under null-as-nil convention) and also
+ * return NULL on success because we can't build `Some s` here. */
+void* readLine(int64_t unit) {
+    (void)unit;
+    /* Consume a line to preserve correct stream positioning even though
+     * we can't return Some(s). */
+    int c;
+    while ((c = getchar()) != EOF && c != '\n') {
+        (void)c;
+    }
+    return NULL;
+}

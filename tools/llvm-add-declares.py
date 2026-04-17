@@ -73,6 +73,26 @@ KNOWN_EXTERNALS: Dict[str, Tuple[str, List[str]]] = {
     "__ll_alloc":  ("ptr",  ["i64", "i64", "ptr"]),
     # CLI arg support (see fix_cli_args_main below)
     "ll_getArgs":  ("ptr",  []),
+    # Extended runtime (used by lllcself) — see lllc_runtime.c
+    "charIsDigit":  ("i1",  ["i8"]),
+    "charIsSpace":  ("i1",  ["i8"]),
+    "charToInt":    ("i64", ["i8"]),
+    "intToChar":    ("i8",  ["i64"]),
+    "listIsEmpty":  ("i1",  ["ptr"]),
+    "listLen":      ("i64", ["ptr"]),
+    "listReverse":  ("ptr", ["ptr"]),
+    "listAppend":   ("ptr", ["ptr", "ptr"]),
+    "listConcat":   ("ptr", ["ptr"]),
+    "listMap":      ("ptr", ["ptr", "ptr"]),
+    "strChars":     ("ptr", ["ptr"]),
+    "strFromChars": ("ptr", ["ptr"]),
+    "strContains":  ("i1",  ["ptr", "ptr"]),
+    "strSlice":     ("ptr", ["ptr", "i64", "i64"]),
+    "strSplit":     ("ptr", ["ptr", "ptr"]),
+    "strTrim":      ("ptr", ["ptr"]),
+    "strToInt":     ("ptr", ["ptr"]),
+    "readLine":     ("ptr", ["i64"]),
+    "fileExists":   ("i1",  ["ptr"]),
 }
 
 
