@@ -107,7 +107,7 @@ runArgs(args List[Str]) =
     | "tokens" :: path :: [] -> runTokens path
     | "symbol" :: path :: name :: [] -> runSymbol path name
     | "mcp" :: [] ->
-      _ = mcpLoop
+      _ = mcpLoop 0
       0
     | path :: [] -> runCompile path
     | _ ->

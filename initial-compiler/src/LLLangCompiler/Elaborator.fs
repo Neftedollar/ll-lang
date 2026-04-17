@@ -149,6 +149,11 @@ let private builtinEnv : TypeEnv =
         "writeFile",  TyFn(tStr, TyFn(tStr, TyName "Unit"))
         "fileExists", TyFn(tStr, tBool)
         "dirList",    TyFn(tStr, listOf tStr)
+        // Stdio streaming. Dummy Int arg forces codegen to emit an F# function
+        // rather than a value (so the side effect runs on each call).
+        // readLine: returns None on EOF, Some line otherwise.
+        "readLine",    TyFn(tInt, maybeOf tStr)
+        "flushStdout", TyFn(tInt, TyName "Unit")
     ]
     // Process
     let proc = [

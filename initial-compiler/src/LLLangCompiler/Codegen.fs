@@ -672,6 +672,7 @@ let readFile (path: string) = System.IO.File.ReadAllText(path: string)
 let writeFile (path: string) (contents: string) = System.IO.File.WriteAllText(path, contents)
 let fileExists (path: string) = System.IO.File.Exists(path: string)
 let dirList (path: string) : string list = if System.IO.Directory.Exists(path) then System.IO.Directory.GetFiles(path, "*", System.IO.SearchOption.AllDirectories) |> Array.toList else []
+let flushStdout (_: int64) : unit = System.Console.Out.Flush()
 let exit (code: int64) : unit = System.Environment.Exit(int code)
 let listConcat (xss: 'a list list) = List.concat xss
 let listIsEmpty (xs: 'a list) = List.isEmpty xs
@@ -698,7 +699,10 @@ let strToFloat (s: string) =
     | true, n -> Some n
     | false, _ -> None
 let listAt (xs: 'a list) (i: int64) =
-    if int i < 0 || int i >= List.length xs then None else Some (List.item (int i) xs)"""
+    if int i < 0 || int i >= List.length xs then None else Some (List.item (int i) xs)
+let readLine (_: int64) : string option =
+    let line = System.Console.In.ReadLine()
+    if isNull line then None else Some line"""
 
 /// Result-dependent prelude block — emitted only when user declares `type Result`
 /// and at least one Result helper is referenced.
@@ -719,6 +723,7 @@ let private fsharpPreludeCoreNames : Set<string> =
         "charIsDigit"; "charIsAlpha"; "charIsSpace"
         "readFile"; "writeFile"; "fileExists"; "dirList"; "exit"
         "listConcat"; "listIsEmpty"; "getArgs"; "processSpawn"
+        "flushStdout"
     ]
 
 let private fsharpPreludeMaybeNames : Set<string> =
@@ -727,6 +732,7 @@ let private fsharpPreludeMaybeNames : Set<string> =
         "maybeMap"; "maybeBind"; "maybeWithDefault"
         "strToInt"; "strToFloat"
         "listAt"
+        "readLine"
     ]
 
 let private fsharpPreludeResultNames : Set<string> =

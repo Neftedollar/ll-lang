@@ -79,9 +79,9 @@ parseNullVal(cs List[Char]) =
 
 negateIf(n Int)(val Int) =
   if n == 0
-    0 - val
-  else
     val
+  else
+    0 - val
 
 crDigits(cr CharResult) =
   match cr
@@ -96,14 +96,19 @@ parseNumber(cs List[Char]) =
     match cs
       | '-' :: _ -> 1
       | _ -> 0
-  cs1 = maybeWithDefault cs (listTail cs)
+  -- Advance past the leading '-' only when present.
+  cs1 =
+    match cs
+      | '-' :: rest -> rest
+      | _ -> cs
   parseResult = collectDigits cs1 []
   digits = crDigits parseResult
   rest = crRest parseResult
   if listIsEmpty digits
     MkJVal (MJNum 0) cs
   else
-    numStr = strFromChars (listReverse digits)
+    -- collectDigits already returns forward-order digits
+    numStr = strFromChars digits
     val = strToIntWithDefault numStr
     MkJVal (MJNum (negateIf isNeg val)) rest
 
@@ -125,7 +130,8 @@ parseStringVal(cs List[Char]) =
   match cs
     | '"' :: rest ->
       let (chars, remaining) = parseStringChars rest []
-      MkJVal (MJStr (strFromChars (listReverse chars))) remaining
+      -- parseStringChars already returns chars in forward order
+      MkJVal (MJStr (strFromChars chars)) remaining
     | _ -> MkJVal MJNull cs
 
 parseStringChars(cs List[Char])(acc List[Char]) =
@@ -155,12 +161,14 @@ parseArrayItems(cs List[Char])(acc List[JsonVal]) =
   match skipSpace cs
     | ']' :: rest -> (acc, rest)
     | ';' :: rest -> parseArrayItems (skipSpace rest) acc
+    | ',' :: rest -> parseArrayItems (skipSpace rest) acc
     | _ ->
       jval = parseValue (skipSpace cs)
       val = match jval | MkJVal v _ -> v
       rest1 = match jval | MkJVal _ r -> r
       match skipSpace rest1
         | ';' :: rest2 -> parseArrayItems (skipSpace rest2) (val :: acc)
+        | ',' :: rest2 -> parseArrayItems (skipSpace rest2) (val :: acc)
         | ']' :: rest3 -> (val :: acc, rest3)
         | _ -> (val :: acc, rest1)
 
@@ -176,6 +184,7 @@ parseObjectPairs(cs List[Char])(acc List[JsonVal]) =
   match cs1
     | '}' :: rest -> (acc, rest)
     | ';' :: rest -> parseObjectPairs (skipSpace rest) acc
+    | ',' :: rest -> parseObjectPairs (skipSpace rest) acc
     | '"' :: _ ->
       let (key, rest1) = parseKeyString cs1
       rest2 = skipSpace rest1
@@ -186,17 +195,21 @@ parseObjectPairs(cs List[Char])(acc List[JsonVal]) =
       jval = parseValue rest3
       val = match jval | MkJVal v _ -> v
       rest4 = match jval | MkJVal _ r -> r
+      -- Push in order (val :: MJStr key :: acc) so after listReverse the pairs
+      -- come out as [key0; val0; key1; val1; ...] — the shape jsonGetPairs expects.
       match skipSpace rest4
-        | ';' :: rest5 -> parseObjectPairs (skipSpace rest5) (MJStr key :: val :: acc)
-        | '}' :: rest6 -> (MJStr key :: val :: acc, rest6)
-        | _ -> (MJStr key :: val :: acc, rest4)
+        | ';' :: rest5 -> parseObjectPairs (skipSpace rest5) (val :: MJStr key :: acc)
+        | ',' :: rest5 -> parseObjectPairs (skipSpace rest5) (val :: MJStr key :: acc)
+        | '}' :: rest6 -> (val :: MJStr key :: acc, rest6)
+        | _ -> (val :: MJStr key :: acc, rest4)
     | _ -> (acc, cs)
 
 parseKeyString(cs List[Char]) =
   match cs
     | '"' :: rest ->
       let (chars, remaining) = parseStringChars rest []
-      (strFromChars (listReverse chars), remaining)
+      -- parseStringChars already returns chars in forward order
+      (strFromChars chars, remaining)
     | _ -> ("", cs)
 
 -- ---- JSON helpers ----
@@ -258,7 +271,7 @@ jsonEsc(s Str) =
       strConcat esc (jsonEsc (strFromChars rest))
 
 jsonEncArr(xs List[JsonVal]) =
-  strConcat "[" (strConcat (jsonJoin (listMap jsonSerialize xs) ";") "]")
+  strConcat "[" (strConcat (jsonJoin (listMap jsonSerialize xs) ",") "]")
 
 jsonEncObj(pairs List[JsonVal]) =
   strConcat "{" (strConcat (jsonJoinObj pairs) "}")
@@ -465,37 +478,26 @@ handleListTargets(params JsonVal) =
   MJArr (listMap targetToJson knownTargets)
 
 -- ---- Main MCP loop ----
-mcpLoop() =
-  input = readStdin
-  lines = splitLines input
-  responses = processAllLines lines []
-  print (joinResponses responses)
-
-readStdin() =
-  if fileExists "/dev/stdin"
-    readFile "/dev/stdin"
-  else
-    ""
-
-splitLines(s Str) =
-  strSplit "\n" s
-
-processAllLines(lines List[Str])(acc List[Str]) =
-  match lines
-    | [] -> listReverse acc
-    | line :: rest ->
+-- Real JSON-RPC stdio event loop: read one line, dispatch, flush, repeat.
+-- Exits cleanly when stdin reaches EOF (readLine returns None).
+-- The `dummy Int` parameter forces codegen to emit an F# function rather than
+-- a value — critical so the recursive call actually re-runs the body.
+mcpLoop(dummy Int) =
+  match readLine 0
+    | None -> 0
+    | Some line ->
       trimmed = strTrim line
       if strLen trimmed == 0
-        processAllLines rest acc
+        mcpLoop 0
       else
         chars = strChars trimmed
         jval = parseValue chars
-        match jval
-          | MkJVal jsonVal _ ->
-            response = processOneRequest jsonVal
-            serialized = jsonSerialize response
-            processAllLines rest (serialized :: acc)
-          | _ -> processAllLines rest acc
+        response =
+          match jval
+            | MkJVal jsonVal _ -> jsonSerialize (processOneRequest jsonVal)
+        _ = printfn response
+        _ = flushStdout 0
+        mcpLoop 0
 
 processOneRequest(json JsonVal) =
   req = parseRequest json
