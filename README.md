@@ -36,6 +36,10 @@ fact(n Int) Int =
 
 Jump to [Getting Started](#getting-started), [Syntax](#syntax), [Problem](#problem).
 
+<br>
+
+<img src="assets/demo.svg" alt="ll-lang terminal demo" width="100%"/>
+
 ## Status
 
 Working end-to-end compiler with a large automated xUnit suite (see CI badge), written in F# / .NET 10. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib → module system → MCP server → TypeScript + Python + Java + C# + LLVM codegen.

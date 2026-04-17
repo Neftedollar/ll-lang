@@ -46,6 +46,8 @@ def safe_divide(a: float, b: float) -> Result:
     return Ok(a / b)
 ```
 
+<img src="https://raw.githubusercontent.com/Neftedollar/ll-lang/main/assets/demo-py.svg" alt="ll-lang → Python demo" width="100%"/>
+
 ## Install
 
 Requires **Python ≥ 3.9**. No .NET needed for Python output.

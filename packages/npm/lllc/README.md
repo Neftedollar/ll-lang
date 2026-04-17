@@ -35,6 +35,8 @@ export function safeDivide(a: number, b: number): Result<number, string> {
 }
 ```
 
+<img src="https://raw.githubusercontent.com/Neftedollar/ll-lang/main/assets/demo-ts.svg" alt="ll-lang → TypeScript demo" width="100%"/>
+
 ## Install
 
 Requires **[Bun](https://bun.sh)** ≥ 1.0. No .NET needed for TypeScript/JavaScript output.
