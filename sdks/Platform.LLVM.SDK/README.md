@@ -2,6 +2,8 @@
 
 **Status: MVP — native binaries work for a growing subset of ll-lang.**
 
+See the user-facing walkthrough: [`docs/tutorials/05-llvm-native-binary.md`](../../docs/tutorials/05-llvm-native-binary.md).
+
 ## Quick start
 
 ```bash
@@ -14,6 +16,22 @@ tools/lllc-native spec/examples/valid/36-llvm-native-hello.lll ./hello
 `tools/llvm-build.sh`). Eventually this lives under `lllc build --native`; for
 now it's a standalone launcher because the frozen bootstrap `lllc` (in
 `initial-compiler/`) can't grow new subcommands.
+
+### How `tools/llvm-build.sh` finds `lllc`
+
+The wrapper probes, in order:
+
+1. `lllc` on `PATH` that advertises the bootstrap-style `Usage:` banner (i.e.
+   supports `build --target llvm`). Future NuGet / npm releases will land here.
+2. Fallback: the bootstrap `lllc.dll` at
+   `initial-compiler/src/LLLangTool/bin/Debug/net10.0/lllc.dll` (requires a
+   prior `dotnet build initial-compiler/...`).
+3. Otherwise errors with install hints.
+
+The currently-published NuGet `lllc` v1.2.0 is the self-hosted `lllcself`
+front-end (`compile` / `check` / `run`) and does **not** yet expose
+`--target llvm`; the script detects its banner and silently falls back to
+the bootstrap path.
 
 ### Prerequisites
 
