@@ -1,0 +1,23 @@
+module LlvmListMap
+
+double(x Int) Int = x * 2
+
+mapList(xs List[Int]) List[Int] =
+  match xs
+    | [] -> []
+    | x :: rest -> double x :: mapList rest
+
+showList(xs List[Int]) Str =
+  match xs
+    | [] -> ""
+    | x :: rest ->
+      restStr = showList rest
+      xStr = intToStr x
+      if strLen restStr == 0
+        xStr
+      else strConcat xStr (strConcat "," restStr)
+
+main() =
+  xs = [1; 2; 3]
+  ys = mapList xs
+  printfn (showList ys)

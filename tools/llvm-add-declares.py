@@ -264,11 +264,143 @@ def strip_runtime_owned_defs(lines: List[str]) -> List[str]:
     return out
 
 
+LABEL_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*):\s*$")
+PHI_ENTRY_RE = re.compile(r"\[\s*([^,\]]+?)\s*,\s*%([A-Za-z0-9_.]+)\s*\]")
+BR_RE = re.compile(r"^\s*br\s+(?:label\s+%([A-Za-z0-9_.]+)|i1\s+\S+\s*,\s*label\s+%([A-Za-z0-9_.]+)\s*,\s*label\s+%([A-Za-z0-9_.]+))")
+
+
+def fix_match_phi_predecessors(lines: List[str]) -> List[str]:
+    """Repair stale match_end phi predecessor labels.
+
+    When a match-arm body contains nested control flow (e.g. if/else),
+    codegen emits an `if_end_N` block that branches to `match_end_M`, but
+    the phi at `match_end_M` still references `match_body_K` as the
+    predecessor. We fix each stale entry by searching forward from the
+    original body label to the actual block that branches to the phi's
+    containing block along the arm's control path.
+
+    The repair is scoped per function (bounded by `define ... {` /
+    closing `}`). A block "reaches" match_end along path P if a DFS
+    from the body label reaches a `br label %match_end_M` without
+    leaving the function; we pick the direct-predecessor block found.
+    """
+    out: List[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        # Find function start.
+        if DEFINE_RE.match(line):
+            # Collect function body until matching close brace.
+            body_start = i
+            brace = line.count("{") - line.count("}")
+            j = i + 1
+            while j < n and brace > 0:
+                brace += lines[j].count("{") - lines[j].count("}")
+                j += 1
+            body_end = j  # exclusive
+            func_lines = lines[body_start:body_end]
+            func_lines = _repair_phis_in_func(func_lines)
+            out.extend(func_lines)
+            i = body_end
+            continue
+        out.append(line)
+        i += 1
+    return out
+
+
+def _repair_phis_in_func(flines: List[str]) -> List[str]:
+    # Parse labels -> line-range, and collect terminators.
+    # A "block" is the sequence of lines from label+1 until the next label or `}`.
+    label_positions: List[Tuple[int, str]] = []  # (idx, name)
+    for idx, ln in enumerate(flines):
+        m = LABEL_RE.match(ln.rstrip())
+        if m:
+            label_positions.append((idx, m.group(1)))
+    # Determine block ranges: block i is (label_positions[i].idx + 1, next_label_idx_or_end)
+    blocks: Dict[str, Tuple[int, int]] = {}
+    for k, (idx, name) in enumerate(label_positions):
+        start = idx + 1
+        end = label_positions[k + 1][0] if k + 1 < len(label_positions) else len(flines)
+        blocks[name] = (start, end)
+
+    # Compute terminator successors for each block.
+    succs: Dict[str, List[str]] = {name: [] for name in blocks}
+    for name, (s, e) in blocks.items():
+        for li in range(e - 1, s - 1, -1):
+            ln = flines[li]
+            bm = BR_RE.match(ln)
+            if bm:
+                if bm.group(1) is not None:
+                    succs[name] = [bm.group(1)]
+                else:
+                    succs[name] = [bm.group(2), bm.group(3)]
+                break
+
+    # Build predecessors.
+    preds: Dict[str, List[str]] = {name: [] for name in blocks}
+    for src, sl in succs.items():
+        for dst in sl:
+            if dst in preds:
+                preds[dst].append(src)
+
+    # For each phi, check entries; repair stale ones.
+    for block_name, (s, e) in blocks.items():
+        block_preds = set(preds.get(block_name, []))
+        for li in range(s, e):
+            ln = flines[li]
+            if "phi " not in ln:
+                continue
+            entries = PHI_ENTRY_RE.findall(ln)
+            if not entries:
+                continue
+            new_ln = ln
+            entry_labels = [lab for (_, lab) in entries]
+            # For each stale entry, attempt to find a replacement: a real
+            # predecessor reachable from the stale label via forward DFS.
+            for idx_entry, (val, lab) in enumerate(entries):
+                if lab in block_preds:
+                    continue
+                # Find predecessors reachable from `lab`.
+                reachable_real_preds: List[str] = []
+                visited = set()
+                stack = [lab]
+                while stack:
+                    cur = stack.pop()
+                    if cur in visited:
+                        continue
+                    visited.add(cur)
+                    if cur in block_preds and cur not in entry_labels:
+                        reachable_real_preds.append(cur)
+                        continue
+                    for nxt in succs.get(cur, []):
+                        if nxt == block_name:
+                            # The immediate predecessor of this path is `cur`.
+                            if cur in block_preds and cur not in entry_labels:
+                                reachable_real_preds.append(cur)
+                        else:
+                            stack.append(nxt)
+                if len(reachable_real_preds) == 1:
+                    replacement = reachable_real_preds[0]
+                    # Replace the specific entry `[val, %lab]` with `[val, %replacement]`.
+                    old = f"[ {val}, %{lab} ]"
+                    new = f"[ {val}, %{replacement} ]"
+                    # Because bracket spacing may vary, do a safer regex-based swap.
+                    pattern = re.compile(
+                        r"\[\s*" + re.escape(val) + r"\s*,\s*%" + re.escape(lab) + r"\s*\]"
+                    )
+                    new_ln = pattern.sub(f"[ {val}, %{replacement} ]", new_ln, count=1)
+            if new_ln != ln:
+                flines[li] = new_ln
+    return flines
+
+
 def patch(text: str) -> str:
     lines = text.splitlines()
     lines = strip_runtime_owned_defs(lines)
     lines = fix_instruction_geps(lines)
     lines = fix_void_main(lines)
+    lines = fix_match_phi_predecessors(lines)
     lines = prepend_declares(lines)
     result = "\n".join(lines)
     if text.endswith("\n"):

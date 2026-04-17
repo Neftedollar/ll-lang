@@ -12,7 +12,7 @@ executables by:
 
 ## Supported features
 
-Validated against examples `spec/examples/valid/36-llvm-*.lll` through `42-llvm-*.lll`.
+Validated against examples `spec/examples/valid/36-llvm-*.lll` through `45-llvm-*.lll`.
 
 | Feature | Example | Status |
 |---|---|---|
@@ -20,12 +20,15 @@ Validated against examples `spec/examples/valid/36-llvm-*.lll` through `42-llvm-
 | Integer arithmetic + user-defined functions | `37-llvm-arith.lll` | works |
 | `if`/`else` with integer comparison + `phi` | `38-llvm-conditional.lll` | works |
 | `strConcat` of two string literals | `39-llvm-strings.lll` | works |
-| `intToStr` | 37, 38, 40, 42 | works (via runtime `intToStr`) |
+| `intToStr` | 37, 38, 40, 42, 43, 44, 45 | works (via runtime `intToStr`) |
 | Recursion (`factorial`) | `40-llvm-recursion.lll` | works |
 | ADT `Maybe A` + `match` (1-field ctor) | `41-llvm-adt-maybe.lll` | works |
 | ADT `Shape` + `match` (0/1/2-field ctors) | `42-llvm-adt-shape.lll` | works (arms must order nullary before multi-field — codegen limitation, see example) |
 | `let`/`in` chained bindings | 37, 38, 39, 40, 41, 42 | works (via named `=` bindings; `_ =` arms are silently dropped by frozen codegen) |
-| Lists (`list_nil`/`list_cons`) | — | runtime stubs only |
+| List literal `[1; 2; 3]` + `match x :: rest` + recursion | `43-llvm-list-sum.lll` | works (cons-style ADT cell, tag `-1`, reuses `__ll_alloc`) |
+| User-defined `mapList` + `showList` over lists, nested if in match arm | `44-llvm-list-map.lll` | works (post-processor repairs stale match-end phi predecessors) |
+| `List[Maybe[Int]]` (nested ADT inside list, heterogeneous values via `ptrtoint`/`inttoptr`) | `45-llvm-list-of-maybe.lll` | works |
+| Higher-order `listMap` (functions as values) | — | unsupported — `ys = listMap double xs` is silently dropped by frozen codegen; use a recursive user-defined `mapList` instead (see example 44) |
 | I/O (`read_line`, `read_file`) | — | runtime stubs only |
 | GC | — | stubbed (raw `malloc`) |
 
@@ -56,6 +59,11 @@ These compensate for codegen shortcuts in the frozen `CodegenLLVM.fs`. Each is i
    definition of `@__ll_alloc`, which collides with the C runtime's version at link time
    (`duplicate symbol '___ll_alloc'`). Script strips the generated definition; the runtime
    remains the single source of truth.
+5. **Stale match-end `phi` predecessors** — when a match arm contains nested control flow
+   (e.g. `if`/`else`), the codegen writes `phi [ %v, %match_body_K ]` but the actual
+   predecessor is the arm's `if_end_N` block, yielding `PHI node entries do not match
+   predecessors`. The script walks the CFG per function and replaces each stale entry label
+   with the unique real predecessor reachable from the original body block.
 
 ## Running the pipeline
 
@@ -68,7 +76,7 @@ Requires: `dotnet`, `python3`, `clang`, `make`.
 
 ## CI
 
-`.github/workflows/llvm.yml` builds and runs all seven `36-42` examples on `ubuntu-latest` and
+`.github/workflows/llvm.yml` builds and runs all ten `36-45` examples on `ubuntu-latest` and
 asserts stdout matches the expected output. Triggered on changes to the SDK, codegen source,
 the build tools, or the example corpus.
 
@@ -85,3 +93,9 @@ out-of-scope for the MVP. Add examples and extend `tools/llvm-add-declares.py` +
 - **ADT match arms dereference tail pointers unconditionally.** When an ADT has both nullary
   and multi-field constructors, list the nullary arm *before* any multi-field arm so the match
   succeeds before the codegen tries to load from a null tail. Example 42 demonstrates.
+- **Higher-order calls in `main` are silently dropped.** `ys = listMap double xs` produces IR
+  that only allocates `xs` and returns — `listMap` never appears. Use a recursive user-defined
+  wrapper instead (`mapList(xs List[Int]) List[Int] = match xs ...`). Example 44 demonstrates.
+- **Match-end `phi` uses stale predecessor labels** when arms contain nested control flow. The
+  post-processor repairs these via CFG analysis (see patch #5 above). No source-level workaround
+  is required.

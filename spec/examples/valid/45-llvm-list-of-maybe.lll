@@ -1,0 +1,22 @@
+module LlvmListOfMaybe
+
+Maybe A = Some A | None
+
+showM(m Maybe[Int]) Str =
+  match m
+    | None -> "X"
+    | Some v -> intToStr v
+
+showList(xs List[Maybe[Int]]) Str =
+  match xs
+    | [] -> ""
+    | x :: rest ->
+      restStr = showList rest
+      xStr = showM x
+      if strLen restStr == 0
+        xStr
+      else strConcat xStr (strConcat "," restStr)
+
+main() =
+  xs = [Some 1; None; Some 3]
+  printfn (showList xs)
