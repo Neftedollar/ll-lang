@@ -1,0 +1,357 @@
+module Std.Builder
+
+import Std.Maybe
+import Std.Result
+import Std.IO
+import Std.State
+import Std.List
+
+-- Computation Expression Pipelines for ll-lang
+--
+-- ll-lang has no higher-kinded types and no do-notation. Monadic composition
+-- requires nested bind calls which quickly become hard to read:
+--
+--   maybeBind (Some 5) (\x. maybeBind (Some 10) (\y. Some (x + y)))
+--
+-- This module provides per-monad PIPELINE combinators that flatten the
+-- nesting into a more ergonomic style:
+--
+--   maybePipe2 (Some 5) (Some 10) (\x y. Some (x + y))
+--
+-- Pattern:
+--   pipe2  — bind two monadic values, apply a combining function
+--   pipe3  — bind three monadic values, apply a combining function
+--   all    — sequence a list of monadic values (like Haskell's `sequence`)
+--   guard  — short-circuit on a boolean condition (where applicable)
+--
+-- Each monad family (Maybe, Result, IO, State) gets its own concrete
+-- pipeline functions since there is no generic Monad typeclass.
+
+-- ============================================================================
+-- Maybe Pipelines
+-- ============================================================================
+
+-- Bind two Maybes and combine their results.
+-- If either is None, the whole expression is None.
+maybePipe2(m1 Maybe[A])(m2 Maybe[B])(f A -> B -> Maybe[C]) =
+  maybeBind m1 (\a. maybeBind m2 (\b. f a b))
+
+-- Bind three Maybes and combine their results.
+maybePipe3(m1 Maybe[A])(m2 Maybe[B])(m3 Maybe[C])(f A -> B -> C -> Maybe[D]) =
+  maybeBind m1 (\a. maybeBind m2 (\b. maybeBind m3 (\c. f a b c)))
+
+-- Sequence a list of Maybes: all must be Some, or the result is None.
+-- Like Haskell's `sequence :: [Maybe a] -> Maybe [a]`.
+maybeAll(xs List[Maybe[A]]) =
+  maybeAllAcc xs []
+
+maybeAllAcc(xs List[Maybe[A]])(acc List[A]) =
+  match xs
+    | [] -> Some (listReverse acc)
+    | h :: t ->
+      match h
+        | None -> None
+        | Some v -> maybeAllAcc t (v :: acc)
+
+-- Guard: return Some 0 if condition is true, None if false.
+-- Useful in pipe chains to short-circuit on a boolean check.
+maybeGuard(cond Bool) =
+  if cond
+    Some 0
+  else None
+
+-- ============================================================================
+-- Result Pipelines
+-- ============================================================================
+
+-- Bind two Results and combine their results.
+-- Short-circuits on the first Err encountered.
+resultPipe2(r1 Result[A][E])(r2 Result[B][E])(f A -> B -> Result[C][E]) =
+  resultBind r1 (\a. resultBind r2 (\b. f a b))
+
+-- Bind three Results and combine their results.
+resultPipe3(r1 Result[A][E])(r2 Result[B][E])(r3 Result[C][E])(f A -> B -> C -> Result[D][E]) =
+  resultBind r1 (\a. resultBind r2 (\b. resultBind r3 (\c. f a b c)))
+
+-- Sequence a list of Results: all must be Ok, or return the first Err.
+-- Already exists as resultSequence in Std.Result, re-exported here for
+-- consistency with the Builder naming pattern.
+resultAll(xs List[Result[A][E]]) =
+  resultSequence xs
+
+-- Wrap a pure function application in a Result, catching nothing (pure lift).
+-- Applies f to x and wraps the result in Ok.
+-- Useful for lifting pure computations into Result pipelines.
+resultTry(f A -> B)(x A) =
+  Ok (f x)
+
+-- ============================================================================
+-- IO Pipelines
+-- ============================================================================
+
+-- Bind two IO actions and combine their results.
+ioPipe2(io1 IO[A])(io2 IO[B])(f A -> B -> IO[C]) =
+  ioBind io1 (\a. ioBind io2 (\b. f a b))
+
+-- Bind three IO actions and combine their results.
+ioPipe3(io1 IO[A])(io2 IO[B])(io3 IO[C])(f A -> B -> C -> IO[D]) =
+  ioBind io1 (\a. ioBind io2 (\b. ioBind io3 (\c. f a b c)))
+
+-- Sequence a list of IO actions and collect results.
+-- Already exists as ioSequence in Std.IO, re-exported here for
+-- consistency with the Builder naming pattern.
+ioAll(actions List[IO[A]]) =
+  ioSequence actions
+
+-- ============================================================================
+-- State Pipelines
+-- ============================================================================
+
+-- Bind two State actions and combine their results.
+statePipe2(s1 State[S][A])(s2 State[S][B])(f A -> B -> State[S][C]) =
+  stateBind s1 (\a. stateBind s2 (\b. f a b))
+
+-- Bind three State actions and combine their results.
+statePipe3(s1 State[S][A])(s2 State[S][B])(s3 State[S][C])(f A -> B -> C -> State[S][D]) =
+  stateBind s1 (\a. stateBind s2 (\b. stateBind s3 (\c. f a b c)))
+
+-- Sequence a list of State actions and collect results.
+stateAll(actions List[State[S][A]]) =
+  stateAllAcc actions []
+
+stateAllAcc(actions List[State[S][A]])(acc List[A]) =
+  match actions
+    | [] -> statePure (listReverse acc)
+    | h :: t ->
+      stateBind h (\v. stateAllAcc t (v :: acc))
+
+-- ============================================================================
+-- Self-tests
+-- ============================================================================
+
+check(label Str)(ok Bool) =
+  if ok
+    _ = printfn (strConcat "OK " label)
+    0
+  else
+    _ = printfn (strConcat "FAIL " label)
+    1
+
+showIntList(xs List[Int]) =
+  strs = listMap intToStr xs
+  listFold (\acc s. strConcat acc (strConcat "," s)) "" strs
+
+maybeIntStr(m Maybe[Int]) =
+  match m
+    | Some v -> intToStr v
+    | None -> "none"
+
+resultIntStr(r Result[Int][Str]) =
+  match r
+    | Ok v -> intToStr v
+    | Err e -> strConcat "err:" e
+
+-- Named helper functions for multi-line if/else (cannot be inline lambdas)
+addIfPositive(x Int) =
+  if x > 0
+    Some x
+  else None
+
+safeDiv10(x Int) =
+  if x == 0
+    Err "div0"
+  else Ok (10 / x)
+
+main =
+  -- ========================================================================
+  -- Maybe pipeline tests
+  -- ========================================================================
+
+  -- 1. maybePipe2: both Some
+  r1 = maybePipe2 (Some 3) (Some 7) (\a b. Some (a + b))
+  _ = check "1 maybePipe2 both Some" (maybeIntStr r1 == "10")
+
+  -- 2. maybePipe2: first None
+  r2 = maybePipe2 None (Some 7) (\a b. Some (a + b))
+  _ = check "2 maybePipe2 first None" (maybeIntStr r2 == "none")
+
+  -- 3. maybePipe2: second None
+  r3 = maybePipe2 (Some 3) None (\a b. Some (a + b))
+  _ = check "3 maybePipe2 second None" (maybeIntStr r3 == "none")
+
+  -- 4. maybePipe3: all Some
+  r4 = maybePipe3 (Some 1) (Some 2) (Some 3) (\a b c. Some (a + b + c))
+  _ = check "4 maybePipe3 all Some" (maybeIntStr r4 == "6")
+
+  -- 5. maybePipe3: middle None
+  r5 = maybePipe3 (Some 1) None (Some 3) (\a b c. Some (a + b + c))
+  _ = check "5 maybePipe3 middle None" (maybeIntStr r5 == "none")
+
+  -- 6. maybePipe3: function returns None
+  r6 = maybePipe3 (Some 1) (Some 2) (Some 3) (\a b c. None)
+  _ = check "6 maybePipe3 f returns None" (maybeIntStr r6 == "none")
+
+  -- 7. maybeAll: all Some
+  r7 = maybeAll [Some 10; Some 20; Some 30]
+  s7 = match r7
+    | Some xs -> showIntList xs
+    | None -> "none"
+  _ = check "7 maybeAll all Some" (s7 == ",10,20,30")
+
+  -- 8. maybeAll: one None
+  r8 = maybeAll [Some 10; None; Some 30]
+  s8 = match r8
+    | Some xs -> showIntList xs
+    | None -> "none"
+  _ = check "8 maybeAll one None" (s8 == "none")
+
+  -- 9. maybeAll: empty list
+  r9 = maybeAll []
+  s9 = match r9
+    | Some xs -> showIntList xs
+    | None -> "none"
+  _ = check "9 maybeAll empty" (s9 == "")
+
+  -- 10. maybeGuard: true
+  r10 = maybeGuard true
+  _ = check "10 maybeGuard true" (maybeIntStr r10 == "0")
+
+  -- 11. maybeGuard: false
+  r11 = maybeGuard false
+  _ = check "11 maybeGuard false" (maybeIntStr r11 == "none")
+
+  -- ========================================================================
+  -- Result pipeline tests
+  -- ========================================================================
+
+  -- 12. resultPipe2: both Ok
+  r12 = resultPipe2 (Ok 4) (Ok 6) (\a b. Ok (a * b))
+  _ = check "12 resultPipe2 both Ok" (resultIntStr r12 == "24")
+
+  -- 13. resultPipe2: first Err
+  r13 = resultPipe2 (Err "bad") (Ok 6) (\a b. Ok (a * b))
+  _ = check "13 resultPipe2 first Err" (resultIntStr r13 == "err:bad")
+
+  -- 14. resultPipe2: second Err
+  r14 = resultPipe2 (Ok 4) (Err "fail") (\a b. Ok (a * b))
+  _ = check "14 resultPipe2 second Err" (resultIntStr r14 == "err:fail")
+
+  -- 15. resultPipe3: all Ok
+  r15 = resultPipe3 (Ok 2) (Ok 3) (Ok 5) (\a b c. Ok (a + b + c))
+  _ = check "15 resultPipe3 all Ok" (resultIntStr r15 == "10")
+
+  -- 16. resultPipe3: middle Err
+  r16 = resultPipe3 (Ok 2) (Err "mid") (Ok 5) (\a b c. Ok (a + b + c))
+  _ = check "16 resultPipe3 middle Err" (resultIntStr r16 == "err:mid")
+
+  -- 17. resultPipe3: function returns Err
+  r17 = resultPipe3 (Ok 2) (Ok 3) (Ok 5) (\a b c. Err "nope")
+  _ = check "17 resultPipe3 f returns Err" (resultIntStr r17 == "err:nope")
+
+  -- 18. resultAll: all Ok
+  r18 = resultAll [Ok 1; Ok 2; Ok 3]
+  s18 = match r18
+    | Ok xs -> showIntList xs
+    | Err e -> strConcat "err:" e
+  _ = check "18 resultAll all Ok" (s18 == ",1,2,3")
+
+  -- 19. resultAll: one Err
+  r19 = resultAll [Ok 1; Err "boom"; Ok 3]
+  s19 = match r19
+    | Ok xs -> showIntList xs
+    | Err e -> strConcat "err:" e
+  _ = check "19 resultAll one Err" (s19 == "err:boom")
+
+  -- 20. resultTry: pure lift
+  r20 = resultTry (\x. x * 2) 21
+  _ = check "20 resultTry" (resultIntStr r20 == "42")
+
+  -- ========================================================================
+  -- IO pipeline tests
+  -- ========================================================================
+
+  -- 21. ioPipe2: combine two pure IOs
+  r21 = ioRun (ioPipe2 (ioPure 3) (ioPure 7) (\a b. ioPure (a + b)))
+  _ = check "21 ioPipe2" (r21 == 10)
+
+  -- 22. ioPipe3: combine three pure IOs
+  r22 = ioRun (ioPipe3 (ioPure 2) (ioPure 3) (ioPure 4) (\a b c. ioPure (a * b * c)))
+  _ = check "22 ioPipe3" (r22 == 24)
+
+  -- 23. ioPipe2 with effects
+  r23 = ioRun (ioPipe2 (ioPutStrLn "  (test 23a)") (ioPutStrLn "  (test 23b)") (\a b. ioPure (a + b)))
+  _ = check "23 ioPipe2 effects" (r23 == 0)
+
+  -- 24. ioAll: sequence pure IOs
+  r24 = ioRun (ioAll [ioPure 10; ioPure 20; ioPure 30])
+  _ = check "24 ioAll" (showIntList r24 == ",10,20,30")
+
+  -- 25. ioAll: empty list
+  r25 = ioRun (ioAll [])
+  _ = check "25 ioAll empty" (showIntList r25 == "")
+
+  -- ========================================================================
+  -- State pipeline tests
+  -- ========================================================================
+
+  -- 26. statePipe2: combine two state actions
+  prog26 = statePipe2 (statePure 10) (statePure 20) (\a b. statePure (a + b))
+  _ = check "26 statePipe2" (stateEval prog26 0 == 30)
+
+  -- 27. statePipe3: combine three state actions
+  prog27 = statePipe3 (statePure 2) (statePure 3) (statePure 5) (\a b c. statePure (a + b + c))
+  _ = check "27 statePipe3" (stateEval prog27 0 == 10)
+
+  -- 28. statePipe2 with state modification
+  prog28 = statePipe2 (stateModify (\s. s + 1)) (stateGet 0) (\u s. statePure s)
+  _ = check "28 statePipe2 modify+get" (stateEval prog28 5 == 6)
+
+  -- 29. stateAll: sequence state actions
+  prog29 = stateAll [statePure 1; statePure 2; statePure 3]
+  r29 = stateEval prog29 0
+  _ = check "29 stateAll" (showIntList r29 == ",1,2,3")
+
+  -- 30. stateAll: empty
+  prog30 = stateAll []
+  r30 = stateEval prog30 0
+  _ = check "30 stateAll empty" (showIntList r30 == "")
+
+  -- ========================================================================
+  -- Composition tests: pipe inside pipe
+  -- ========================================================================
+
+  -- 31. maybeGuard in maybePipe2: guard passes
+  r31 = maybeBind (maybeGuard true) (\g. maybePipe2 (Some 3) (Some 4) (\a b. Some (a + b)))
+  _ = check "31 guard+pipe2 pass" (maybeIntStr r31 == "7")
+
+  -- 32. maybeGuard in maybePipe2: guard fails
+  r32 = maybeBind (maybeGuard false) (\g. maybePipe2 (Some 3) (Some 4) (\a b. Some (a + b)))
+  _ = check "32 guard+pipe2 fail" (maybeIntStr r32 == "none")
+
+  -- 33. nested maybePipe2: pipe2 result feeds into another pipe2
+  inner33 = maybePipe2 (Some 2) (Some 3) (\a b. Some (a + b))
+  r33 = maybePipe2 inner33 (Some 10) (\x y. Some (x * y))
+  _ = check "33 nested maybePipe2" (maybeIntStr r33 == "50")
+
+  -- 34. nested resultPipe2: pipe2 result feeds into another pipe2
+  inner34 = resultPipe2 (Ok 5) (Ok 3) (\a b. Ok (a - b))
+  r34 = resultPipe2 inner34 (Ok 10) (\x y. Ok (x + y))
+  _ = check "34 nested resultPipe2" (resultIntStr r34 == "12")
+
+  -- 35. maybeAll with computed Maybes
+  xs35 = listMap (\x. addIfPositive x) [1; 2; 3]
+  r35 = maybeAll xs35
+  s35 = match r35
+    | Some vs -> showIntList vs
+    | None -> "none"
+  _ = check "35 maybeAll computed" (s35 == ",1,2,3")
+
+  -- 36. maybeAll with computed Maybes including negative
+  xs36 = listMap (\x. addIfPositive x) [1; 0 - 1; 3]
+  r36 = maybeAll xs36
+  s36 = match r36
+    | Some vs -> showIntList vs
+    | None -> "none"
+  _ = check "36 maybeAll computed None" (s36 == "none")
+
+  printfn "Done"
