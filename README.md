@@ -1,21 +1,40 @@
 # ll-lang
 
 [![Build & Test](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml/badge.svg)](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml)
+[![npm](https://img.shields.io/npm/v/%40neftedollar%2Flllc)](https://www.npmjs.com/package/@neftedollar/lllc)
+[![PyPI](https://img.shields.io/pypi/v/lllc)](https://pypi.org/project/lllc/)
+[![NuGet](https://img.shields.io/nuget/v/lllc)](https://www.nuget.org/packages/lllc)
 
-> **A statically-typed functional language designed for LLM code generation.** Token-efficient syntax, compiled = works, errors formatted for LLMs to read directly.
+> **Write once → compile to F#, TypeScript, Python, Java, and C#.**
+> Statically typed. Token-efficient. LLM-optimized. Self-hosting.
 
+```lll
+module Factorial
+
+fact(n Int) Int =
+  if n <= 1
+    1
+  else n * fact (n - 1)
 ```
-module Hello
 
-Hello = printfn "Hello, ll-lang!"
-```
+| Target | Output |
+|--------|--------|
+| `lllc build fact.lll` | `fact.fs` — `let rec fact (n: int64) ...` |
+| `lllc build --target ts fact.lll` | `fact.ts` — `function fact(n: number) ...` |
+| `lllc build --target py fact.lll` | `fact.py` — `def fact(n: int) ...` |
+| `lllc build --target java fact.lll` | `fact.java` — `static long fact(long n) ...` |
+| `lllc build --target cs fact.lll` | `fact.cs` — `static long Fact(long n) ...` |
 
-```
-$ lllc run hello.lll
-Hello, ll-lang!
-```
+## Install
 
-Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting Started](#getting-started).
+| Platform | Command | .NET needed? |
+|----------|---------|--------------|
+| **npm / Bun** | `npm install -g @neftedollar/lllc` | No — TS/JS output works standalone |
+| **pip** | `pip install lllc` | No — Python output works standalone |
+| **.NET tool** | `dotnet tool install -g lllc` | Yes — full compiler, all targets |
+| **from source** | `git clone https://github.com/Neftedollar/ll-lang && dotnet build` | Yes |
+
+Jump to [Getting Started](#getting-started), [Syntax](#syntax), [Problem](#problem).
 
 ## Status
 
@@ -61,26 +80,40 @@ Current release line: **1.0.0**.
 
 ## Getting Started
 
-Requires [.NET 10](https://dotnet.microsoft.com/download).
+Pick your platform and run your first program in under 2 minutes:
+
+```bash
+# npm/Bun
+npm install -g @neftedollar/lllc
+
+# pip
+pip install lllc
+
+# .NET tool (all targets)
+dotnet tool install -g lllc
+```
+
+### Hello, ll-lang!
+
+```bash
+cat > hello.lll << 'EOF'
+module Hello
+
+main() = printfn "Hello, ll-lang!"
+EOF
+
+lllc run hello.lll            # compile + run (F# by default)
+lllc run --target ts hello.lll  # compile + run via TypeScript
+lllc run --target py hello.lll  # compile + run via Python
+```
+
+### Build from source
 
 ```bash
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 dotnet build
-dotnet test    # run full test suite (current count in CI)
-```
-
-### Run your first program
-
-```bash
-cat > hello.lll <<'EOF'
-module Hello
-
-Hello = printfn "Hello, ll-lang!"
-EOF
-
-lllc run hello.lll
-# → Hello, ll-lang!
+dotnet test    # run full test suite
 ```
 
 ### CLI
@@ -216,14 +249,15 @@ Result A E = Ok A | Err E
 
 -- exhaustive pattern match
 area(s Shape) Float =
-  match s with
-  | Circle r -> 3.14159 * r * r
-  | Rect w h -> w * h
-  | Empty    -> 0.0
+  match s
+    | Circle r -> 3.14159 * r * r
+    | Rect w h -> w * h
+    | Empty    -> 0.0
 
 -- returning Maybe
 safeDivide(a Float)(b Float) Maybe[Float] =
-  if b == 0.0 then None
+  if b == 0.0
+    None
   else Some (a / b)
 ```
 
@@ -239,7 +273,10 @@ impl Show Int =
   show(n Int) Str = intToStr n
 
 impl Show Bool =
-  show(b Bool) Str = if b then "true" else "false"
+  show(b Bool) Str =
+    if b
+      "true"
+    else "false"
 
 printVal(x A) [Show A] = printfn (show x)
 ```
@@ -281,6 +318,72 @@ config = Toml.parse (readFile "config.toml")
 ### Keywords
 
 ll-lang has 15 keywords: `match`, `if`, `else`, `import`, `export`, `module`, `trait`, `impl`, `external`, `opaque`, `tag`, `unit`, `true`, `false`, `let`. Everything else — most function/type declaration forms — is expressed through the uppercase/lowercase convention.
+
+## For TypeScript developers
+
+Install without .NET — the npm package bundles the TypeScript compiler:
+
+```bash
+npm install -g @neftedollar/lllc
+lllc build --target ts app.lll   # → app.ts
+lllc run   --target ts app.lll   # compile + run via tsc/bun
+```
+
+Sum types become discriminated unions, pattern matching becomes type-narrowing:
+
+```typescript
+// generated from Shape = Circle Float | Rect Float Float | Empty
+type Shape =
+  | { tag: "Circle"; _0: number }
+  | { tag: "Rect"; _0: number; _1: number }
+  | { tag: "Empty" };
+```
+
+Full npm docs: [`packages/npm/lllc`](packages/npm/lllc/README.md)
+
+## For Python developers
+
+Install without .NET — the pip package bundles the Python compiler:
+
+```bash
+pip install lllc
+lllc build --target py app.lll   # → app.py
+lllc run   --target py app.lll   # compile + run via python3
+```
+
+Sum types become `@dataclass` + `Union`, pattern match becomes `isinstance` dispatch:
+
+```python
+# generated from Shape = Circle Float | Rect Float Float | Empty
+@dataclass
+class Circle:
+    _0: float
+
+@dataclass
+class Rect:
+    _0: float
+    _1: float
+
+@dataclass
+class Empty:
+    pass
+
+Shape = Union[Circle, Rect, Empty]
+```
+
+Full pip docs: [`packages/pip`](packages/pip/README.md)
+
+## For .NET / F# developers
+
+Install as a global dotnet tool:
+
+```bash
+dotnet tool install -g lllc
+lllc build app.lll              # → app.fs + .fsproj (default)
+lllc run   app.lll              # compile + dotnet run
+```
+
+F# output uses discriminated unions, let bindings, and `LLLang.Prelude` for the runtime. Multi-file projects emit a `.fsproj` ready for `dotnet build`.
 
 ## Error Format
 

@@ -7,7 +7,18 @@
     "functional",
     "llm",
     "ll-lang",
-    "codegen"
+    "codegen",
+    "cross-compile",
+    "multi-target",
+    "transpiler",
+    "typescript",
+    "fsharp",
+    "python",
+    "java",
+    "csharp",
+    "statically-typed",
+    "language",
+    "type-inference"
   ],
   "homepage": "https://github.com/Neftedollar/ll-lang",
   "repository": {

@@ -13,7 +13,7 @@
     <Description>lllc — compiler for ll-lang, a minimal statically-typed functional language that compiles to F#, TypeScript, Python, Java, and C#. Designed for LLM-assisted code generation.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageTags>compiler;functional;llm;fsharp;typescript;codegen;dotnet-tool</PackageTags>
+    <PackageTags>compiler;functional;llm;fsharp;typescript;python;java;csharp;codegen;dotnet-tool;cross-compile;multi-target;transpiler;statically-typed;type-inference</PackageTags>
     <PackageProjectUrl>https://github.com/Neftedollar/ll-lang</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Neftedollar/ll-lang</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
