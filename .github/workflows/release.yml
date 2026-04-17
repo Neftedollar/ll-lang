@@ -217,6 +217,9 @@ jobs:
     name: Publish PyPI
     needs: [create-release, build-compiler-sources]
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -234,6 +237,9 @@ jobs:
           name: pip-compiler-py
           path: packages/pip/lllc/
 
+      - name: Copy README for pip build
+        run: cp README.md packages/pip/README.md
+
       - name: Stamp version
         working-directory: packages/pip
         run: |
@@ -245,12 +251,10 @@ jobs:
       - name: Build
         working-directory: packages/pip
         run: |
-          pip install hatchling build twine
+          pip install hatchling build
           python -m build
 
       - name: Publish to PyPI
-        working-directory: packages/pip
-        run: twine upload dist/*
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/pip/dist/
