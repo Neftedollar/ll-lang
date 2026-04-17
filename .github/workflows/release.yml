@@ -44,7 +44,7 @@ jobs:
       - name: Publish self-contained binary
         shell: bash
         run: |
-          dotnet publish src/LLLangTool/LLLangTool.fsproj \
+          dotnet publish initial-compiler/src/LLLangTool/LLLangTool.fsproj \
             -c Release \
             -r ${{ matrix.rid }} \
             --self-contained true \
@@ -84,11 +84,11 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Build lllc tool
-        run: dotnet build src/LLLangTool/LLLangTool.fsproj -c Release
+        run: dotnet build initial-compiler/src/LLLangTool/LLLangTool.fsproj -c Release
 
       - name: Compile Compiler.lll → TypeScript
         run: |
-          dotnet run --project src/LLLangTool/LLLangTool.fsproj -c Release -- \
+          dotnet run --project initial-compiler/src/LLLangTool/LLLangTool.fsproj -c Release -- \
             build --target ts stdlib/src/Compiler.lll
 
       - name: Bundle TypeScript → CJS (compiler.cjs)
@@ -106,7 +106,7 @@ jobs:
 
       - name: Compile Compiler.lll → Python
         run: |
-          dotnet run --project src/LLLangTool/LLLangTool.fsproj -c Release -- \
+          dotnet run --project initial-compiler/src/LLLangTool/LLLangTool.fsproj -c Release -- \
             build --target py stdlib/src/Compiler.lll
           cp stdlib/src/Compiler.py packages/pip/lllc/compiler.py
 
@@ -167,7 +167,7 @@ jobs:
 
       - name: Pack
         run: |
-          dotnet pack src/LLLangTool/LLLangTool.fsproj \
+          dotnet pack initial-compiler/src/LLLangTool/LLLangTool.fsproj \
             -c Release \
             -p:Version=${{ steps.ver.outputs.V }} \
             -o nuget-out/
