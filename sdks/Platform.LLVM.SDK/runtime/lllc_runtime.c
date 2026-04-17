@@ -259,6 +259,33 @@ int8_t list_is_empty(int64_t lst) {
     return (int8_t)(lst == 0);
 }
 
+/* ---- Codegen-internal field accessors (null-safe) ------------------- */
+
+/* Pattern-match lowering loads all three heap-node fields BEFORE the
+ * branch that null-guards the pointer. These helpers keep the load path
+ * well-defined when the pointer is NULL: a missing tag sorts with "not a
+ * cons tag" (so cons/ctor patterns fall through), a missing payload is
+ * zero, a missing tail is NULL. No heap access happens on the NULL path. */
+
+int64_t node_tag_safe(void* node) {
+    if (node == NULL) return 0;
+    int64_t* p = (int64_t*)node;
+    return p[0];
+}
+
+int64_t node_payload_safe(void* node) {
+    if (node == NULL) return 0;
+    int64_t* p = (int64_t*)node;
+    return p[1];
+}
+
+void* node_tail_safe(void* node) {
+    if (node == NULL) return NULL;
+    /* Layout: [tag:i64][payload:i64][tail:ptr]. Tail lives at byte offset 16. */
+    void** p = (void**)((char*)node + 16);
+    return *p;
+}
+
 /* ---- Codegen-internal allocator ------------------------------------- */
 
 /* __ll_alloc: ADT cons-style allocator used by pattern-matching codegen.
@@ -560,4 +587,90 @@ void* readLine(int64_t unit) {
         (void)c;
     }
     return NULL;
+}
+
+/* print: print string without newline. Distinct name from print_str so
+ * ll-lang's `print` FFI (declared `Str -> Unit`) links directly. Flushes
+ * stdout so interactive loops (e.g. MCP server) see output immediately. */
+void print(const char* s) {
+    if (s == NULL) return;
+    fputs(s, stdout);
+    fflush(stdout);
+}
+
+/* flushStdout: called as `flushStdout 0` from user code; the argument is
+ * a dummy (the compiler doesn't model nullary effects). */
+void flushStdout(int64_t unit) {
+    (void)unit;
+    fflush(stdout);
+}
+
+/* maybeWithDefault(dflt, m): return `m` if non-null, else `dflt`.
+ *
+ * Both are passed as i64 (ABI-uniform payload). The codegen treats any
+ * Maybe as a heap-node pointer cast to i64, with NULL (= 0) meaning None.
+ * Our Some/None tag is module-specific (see strToInt comment), so the
+ * only reliable test is null-vs-non-null — but here that's exactly what
+ * we need. */
+int64_t maybeWithDefault(int64_t dflt, int64_t m) {
+    if (m == 0) return dflt;
+    /* Non-null Maybe: payload is at slot 1 of the heap node
+     * (layout: [tag][payload][tail]). */
+    int64_t* p = (int64_t*)(intptr_t)m;
+    return p[1];
+}
+
+/* processSpawn(cmd, args): synchronously run `cmd` with `args` (a cons
+ * list of Str), inheriting stdin/stdout/stderr. Returns the exit code.
+ *
+ * Implemented via the POSIX fork/exec pair rather than `system(3)` so we
+ * can pass argv verbatim without shell quoting. Any failure (fork/exec)
+ * collapses to exit code 127, matching POSIX shell convention. */
+int64_t processSpawn(const char* cmd, ll_node_t* args) {
+    if (cmd == NULL) return 127;
+
+    /* Count args to size the argv[]. +2: argv[0]=cmd, argv[last]=NULL. */
+    int64_t n = listLen(args);
+    char** argv = (char**)malloc(sizeof(char*) * (size_t)(n + 2));
+    if (argv == NULL) return 127;
+
+    argv[0] = (char*)cmd;
+    int64_t i = 1;
+    ll_node_t* cur = args;
+    while (cur != NULL) {
+        argv[i++] = (char*)(intptr_t)cur->payload;
+        cur = cur->tail;
+    }
+    argv[i] = NULL;
+
+    extern int execvp(const char*, char* const[]);
+    extern int fork(void);
+    extern int waitpid(int, int*, int);
+
+    int pid = fork();
+    if (pid < 0) {
+        free(argv);
+        return 127;
+    }
+    if (pid == 0) {
+        /* Child: exec. On failure, exit 127 (POSIX convention). */
+        execvp(cmd, argv);
+        _exit(127);
+    }
+
+    /* Parent: wait and return exit code. */
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) {
+            free(argv);
+            return 127;
+        }
+    }
+    free(argv);
+    if ((status & 0x7F) == 0) {
+        /* Normal exit: high byte is the exit status. */
+        return (int64_t)((status >> 8) & 0xFF);
+    }
+    /* Signalled / stopped: mirror bash's 128 + signum convention. */
+    return (int64_t)(128 + (status & 0x7F));
 }

@@ -71,6 +71,10 @@ KNOWN_EXTERNALS: Dict[str, Tuple[str, List[str]]] = {
     "list_is_empty": ("i1",  ["i64"]),
     # Codegen-internal allocator
     "__ll_alloc":  ("ptr",  ["i64", "i64", "ptr"]),
+    # Codegen-internal null-safe field accessors (pattern matching)
+    "node_tag_safe":     ("i64", ["ptr"]),
+    "node_payload_safe": ("i64", ["ptr"]),
+    "node_tail_safe":    ("ptr", ["ptr"]),
     # CLI arg support (see fix_cli_args_main below)
     "ll_getArgs":  ("ptr",  []),
     # Extended runtime (used by lllcself) — see lllc_runtime.c
@@ -93,6 +97,11 @@ KNOWN_EXTERNALS: Dict[str, Tuple[str, List[str]]] = {
     "strToInt":     ("ptr", ["ptr"]),
     "readLine":     ("ptr", ["i64"]),
     "fileExists":   ("i1",  ["ptr"]),
+    # Additional helpers needed for self-hosting (lllcself)
+    "print":            ("void", ["ptr"]),
+    "flushStdout":      ("void", ["i64"]),
+    "maybeWithDefault": ("i64",  ["i64", "i64"]),
+    "processSpawn":     ("i64",  ["ptr", "ptr"]),
 }
 
 

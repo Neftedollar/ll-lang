@@ -146,6 +146,11 @@ type private EmitCtx = {
     mutable VarEnv: Map<string, string * string>
     StringLits: Map<string, string * int>
     mutable NeedsRuntime: bool
+    // Top-level nullary declarations (TDFn with no params, or TDLet).
+    // A bare TEVar referencing one of these needs to be lowered to a
+    // zero-arg call (`call <ty> @<name>()`), because the parser desugars
+    // top-level `name = expr` as `DFn name() = expr`.
+    NullaryGlobals: Set<string>
 }
 
 let private freshTmp (ctx: EmitCtx) : string =
@@ -288,25 +293,34 @@ let private emitAllocNode (ctx: EmitCtx) (tagVal: string) (payloadI64: string) (
     emitInstr ctx (tmp + " = call ptr @__ll_alloc(i64 " + tagVal + ", i64 " + payloadI64 + ", ptr " + tailPtr + ")")
     tmp
 
+// Pattern-match lowering emits all three node-field loads BEFORE the
+// conditional branch that checks `ptr != null`. This is safe only when the
+// pointer is guaranteed non-null by a prior match arm (e.g. `| [] -> ...`
+// handles the null case first). When a `PCons`/`PCon` arm is the first
+// pattern and the scrutinee may be null (as with `match getArgs`), the
+// load traps on NULL.
+//
+// Rather than refactor the match lowering into guarded blocks, we route the
+// load through a tiny runtime helper (`node_tag_safe`) that returns a safe
+// default when the pointer is NULL. The condition is still computed as
+// `(nonNil AND tag==-1)`, which is now well-defined for either branch.
+//
+// The declare for `@node_tag_safe` / `@node_payload_safe` / `@node_tail_safe`
+// is added by tools/llvm-add-declares.py (KNOWN_EXTERNALS), and the C runtime
+// provides the bodies in sdks/Platform.LLVM.SDK/runtime/lllc_runtime.c.
 let private emitLoadNodeTag (ctx: EmitCtx) (nodePtr: string) : string =
-    let p = freshTmp ctx
-    emitInstr ctx (p + " = getelementptr inbounds { i64, i64, ptr }, ptr " + nodePtr + ", i32 0, i32 0")
     let v = freshTmp ctx
-    emitInstr ctx (v + " = load i64, ptr " + p)
+    emitInstr ctx (v + " = call i64 @node_tag_safe(ptr " + nodePtr + ")")
     v
 
 let private emitLoadNodePayload (ctx: EmitCtx) (nodePtr: string) : string =
-    let p = freshTmp ctx
-    emitInstr ctx (p + " = getelementptr inbounds { i64, i64, ptr }, ptr " + nodePtr + ", i32 0, i32 1")
     let v = freshTmp ctx
-    emitInstr ctx (v + " = load i64, ptr " + p)
+    emitInstr ctx (v + " = call i64 @node_payload_safe(ptr " + nodePtr + ")")
     v
 
 let private emitLoadNodeTail (ctx: EmitCtx) (nodePtr: string) : string =
-    let p = freshTmp ctx
-    emitInstr ctx (p + " = getelementptr inbounds { i64, i64, ptr }, ptr " + nodePtr + ", i32 0, i32 2")
     let v = freshTmp ctx
-    emitInstr ctx (v + " = load ptr, ptr " + p)
+    emitInstr ctx (v + " = call ptr @node_tail_safe(ptr " + nodePtr + ")")
     v
 
 let private emitStringPtr (ctx: EmitCtx) (s: string) : string =
@@ -461,6 +475,28 @@ let rec private emitExprValue (ctx: EmitCtx) (te: TypedExpr) : string option =
                     | TyTagged(inner, _) -> isFnTy inner
                     | _ -> false
                 if isFnTy te.Type then Some ("@" + name)
+                // Special case: `getArgs` is declared as a value of type
+                // List[Str] in the elaborator, but at the LLVM level it's
+                // implemented as a zero-arg runtime call `@ll_getArgs()`.
+                // Emit the call so any `args = getArgs` or `match getArgs`
+                // expression works. The declare for `ll_getArgs` is added
+                // by the post-processor (tools/llvm-add-declares.py).
+                elif name = "getArgs" then
+                    let tmp = freshTmp ctx
+                    emitInstr ctx (tmp + " = call ptr @ll_getArgs()")
+                    Some tmp
+                // Top-level bindings of the form `name = expr` are parsed as
+                // zero-arg functions (DFn with no params) — so referencing
+                // `msg` at a use site needs to emit a call `@msg()`. The
+                // result type is whatever the function's body evaluated to;
+                // the AST gives us that type on the TEVar node.
+                // Restricted to `NullaryGlobals` to avoid lowering every
+                // unresolved name (e.g. a lambda parameter missed by the
+                // codegen, or a pattern bind) into a bogus global call.
+                elif Set.contains name ctx.NullaryGlobals then
+                    let tmp = freshTmp ctx
+                    emitInstr ctx (tmp + " = call " + wantedTy + " @" + name + "()")
+                    Some tmp
                 else None
         | TETagged(inner, _) -> emitExprValue ctx inner
         | TECon c ->
@@ -518,6 +554,30 @@ let rec private emitExprValue (ctx: EmitCtx) (te: TypedExpr) : string option =
                 let evTy = emitType e.Type
                 ctx.VarEnv <- Map.add x (evTy, ev) ctx.VarEnv
                 Some ev
+        | TELetPat(tp, e, bodyOpt) ->
+            // Elaborator maps `_ = rhs` and other pattern-LHS bindings to
+            // TELetPat. Codegen must still emit the RHS (for side effects)
+            // and recurse into the body. The minimal shape used in practice
+            // is PWild (`_ = expr`) and PVar (shouldn't normally occur —
+            // parser prefers TELet for PVar — but we handle it for safety).
+            // Complex patterns (PCons/PCon/PTuple) aren't needed by any
+            // current .lll under self-hosting; fall through to generic
+            // "emit RHS, bind nothing" which at minimum preserves side effects.
+            match emitExprValue ctx e with
+            | None -> None
+            | Some ev ->
+                let evTy = emitType e.Type
+                let old = ctx.VarEnv
+                match tp.Pat with
+                | PVar name ->
+                    ctx.VarEnv <- Map.add name (evTy, ev) old
+                | _ -> ()
+                let out =
+                    match bodyOpt with
+                    | Some body -> emitExprValue ctx body
+                    | None -> Some ev
+                ctx.VarEnv <- old
+                out
         | TEIf(c, t, e) ->
             match emitExprValue ctx c with
             | None -> None
@@ -576,12 +636,16 @@ let rec private emitExprValue (ctx: EmitCtx) (te: TypedExpr) : string option =
                     let v = coerceValue ctx valueTy "double" value
                     (emitFloatCmp ctx "oeq" v (emitFloat f), Map.empty)
                 | PLit (LStr lit) ->
+                    // Use null-safe @strEq (runtime helper) rather than
+                    // libc's @strcmp: pattern lowering may eagerly load
+                    // the scrutinee value, which can be NULL if the arm
+                    // is reached via a fall-through from a prior arm that
+                    // didn't fire. `strEq(null, _)` returns 0 (no match)
+                    // instead of trapping.
                     let v = coerceValue ctx valueTy "ptr" value
                     let litPtr = emitStringPtr ctx lit
-                    let cmp = freshTmp ctx
-                    emitInstr ctx (cmp + " = call i32 @strcmp(ptr " + v + ", ptr " + litPtr + ")")
                     let eq = freshTmp ctx
-                    emitInstr ctx (eq + " = icmp eq i32 " + cmp + ", 0")
+                    emitInstr ctx (eq + " = call i1 @strEq(ptr " + v + ", ptr " + litPtr + ")")
                     (eq, Map.empty)
                 | PCon(name, args) ->
                     let p = coerceValue ctx valueTy "ptr" value
@@ -894,7 +958,7 @@ let private emitGlobalStringPtrConst (stringPool: Map<string, string * int>) (s:
     | Some (sym, len) ->
         Some ("getelementptr inbounds ([" + string len + " x i8], ptr " + sym + ", i64 0, i64 0)")
 
-let private emitFn (stringPool: Map<string, string * int>) (sig_: TypedFnSig) (body: TypedExpr) =
+let private emitFn (stringPool: Map<string, string * int>) (nullaryGlobals: Set<string>) (sig_: TypedFnSig) (body: TypedExpr) =
     let retTy = emitType sig_.ReturnType
     let isMain = sig_.Name = "main" && List.isEmpty sig_.Params
     let name = if isMain then "main" else sig_.Name
@@ -913,6 +977,7 @@ let private emitFn (stringPool: Map<string, string * int>) (sig_: TypedFnSig) (b
         VarEnv = varEnv
         StringLits = stringPool
         NeedsRuntime = false
+        NullaryGlobals = nullaryGlobals
     }
     let bodyValue = emitExprValue ctx body
     let instrBlock =
@@ -949,11 +1014,11 @@ let private emitFn (stringPool: Map<string, string * int>) (sig_: TypedFnSig) (b
          "}",
          ctx.NeedsRuntime)
 
-let private emitImplMethod (stringPool: Map<string, string * int>) (implType: string) ((sig_, _, body): TypedFnSig * TypeScheme * TypedExpr) =
+let private emitImplMethod (stringPool: Map<string, string * int>) (nullaryGlobals: Set<string>) (implType: string) ((sig_, _, body): TypedFnSig * TypeScheme * TypedExpr) =
     let sig2 = { sig_ with Name = sig_.Name + "_" + implType }
-    emitFn stringPool sig2 body
+    emitFn stringPool nullaryGlobals sig2 body
 
-let private emitDecl (stringPool: Map<string, string * int>) (decl: TypedDecl) =
+let private emitDecl (stringPool: Map<string, string * int>) (nullaryGlobals: Set<string>) (decl: TypedDecl) =
     match decl with
     | TDOpaque(name, _) -> ("; opaque type " + name, false)
     | TDType(name, _, _) -> ("; type " + name + " (opaque in LLVM backend)", false)
@@ -961,7 +1026,7 @@ let private emitDecl (stringPool: Map<string, string * int>) (decl: TypedDecl) =
         let retTy = emitType sig_.ReturnType
         let args = sig_.Params |> List.map (snd >> emitType) |> String.concat ", "
         ("declare " + retTy + " @" + sig_.Name + "(" + args + ")", false)
-    | TDFn(sig_, _, body) -> emitFn stringPool sig_ body
+    | TDFn(sig_, _, body) -> emitFn stringPool nullaryGlobals sig_ body
     | TDLet(name, sch, e) ->
         let ty = emitType sch.Body
         let value =
@@ -982,7 +1047,7 @@ let private emitDecl (stringPool: Map<string, string * int>) (decl: TypedDecl) =
         else
             ("@" + name + " = global " + ty + " " + value, false)
     | TDImpl(_, implType, methods) ->
-        let emitted = methods |> List.map (emitImplMethod stringPool implType)
+        let emitted = methods |> List.map (emitImplMethod stringPool nullaryGlobals implType)
         let body =
             emitted
             |> List.map fst
@@ -995,13 +1060,30 @@ let private emitDecl (stringPool: Map<string, string * int>) (decl: TypedDecl) =
 let private moduleName (path: string list) =
     if List.isEmpty path then "Anonymous" else String.concat "." path
 
+// Nullary globals: top-level TDFn declarations with zero params. The parser
+// desugars `name = expr` at module level into DFn(name, [], ..., expr), so
+// a bare reference to `name` elsewhere must be lowered to `call @name()`
+// — but only when `name` is actually such a declaration (NOT when it's a
+// local let/lambda/pattern bind, which would shadow it).
+let private collectNullaryGlobals (tm: TypedModule) : Set<string> =
+    // Only collect zero-arg TDFn. TDLet is emitted as `@name = global ty v`
+    // (see emitDecl), not as a callable function, so we must NOT rewrite
+    // references to those into `call @name()` calls.
+    tm.Decls
+    |> List.choose (fun (decl, _) ->
+        match decl with
+        | TDFn(sig_, _, _) when List.isEmpty sig_.Params -> Some sig_.Name
+        | _ -> None)
+    |> Set.ofList
+
 let private emitModule (tm: TypedModule) =
     resetCtorTags ()
     let (stringPool, stringDecls) = buildStringPool tm
+    let nullaryGlobals = collectNullaryGlobals tm
     let declBodies =
         tm.Decls
         |> List.map fst
-        |> List.map (emitDecl stringPool)
+        |> List.map (emitDecl stringPool nullaryGlobals)
         |> List.filter (fun (s, _) -> not (String.IsNullOrWhiteSpace s))
     let needsRuntime = declBodies |> List.exists snd
     let body =

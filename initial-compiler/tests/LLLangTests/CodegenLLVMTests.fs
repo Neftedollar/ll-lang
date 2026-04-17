@@ -104,13 +104,17 @@ let ``LLVM: tuple literal and tuple pattern lower through runtime nodes`` () =
     Assert.Contains("phi i64", ll)
 
 [<Fact>]
-let ``LLVM: string literal pattern match lowers via strcmp`` () =
+let ``LLVM: string literal pattern match lowers via strEq`` () =
+    // Pattern lowering eagerly loads all pattern fields before branching,
+    // so strcmp(NULL, _) would trap when an arm doesn't fire but the list
+    // scrutinee is NULL. We route through the null-safe runtime helper
+    // `@strEq` (returns i1, treats NULL as not-equal) instead of libc's
+    // `@strcmp`.
     let src =
         "module M\nisOk(s Str) Bool = match s\n  | \"ok\" -> true\n  | _ -> false\nmain() Bool = isOk \"ok\""
     let ll = llSrc src
     Assert.Contains("@.str0 = private unnamed_addr constant", ll)
-    Assert.Contains("call i32 @strcmp(ptr", ll)
-    Assert.Contains("icmp eq i32", ll)
+    Assert.Contains("call i1 @strEq(ptr", ll)
 
 [<Fact>]
 let ``LLVM: string let emits global ptr to pooled literal`` () =
@@ -125,7 +129,9 @@ let ``LLVM: nested constructor string pattern lowers recursively`` () =
         "module M\nWrap = Wrap Str\nisOk(w Wrap) Bool = match w\n  | Wrap \"ok\" -> true\n  | _ -> false\nmain() Bool = isOk (Wrap \"ok\")"
     let ll = llSrc src
     Assert.Contains("inttoptr i64", ll)
-    Assert.Contains("call i32 @strcmp(ptr", ll)
+    // Uses the null-safe @strEq runtime helper (see string-literal pattern
+    // test above) instead of libc's @strcmp.
+    Assert.Contains("call i1 @strEq(ptr", ll)
 
 [<Fact>]
 let ``LLVM: nested tuple pattern lowers recursively`` () =
