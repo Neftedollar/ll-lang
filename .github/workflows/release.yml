@@ -9,9 +9,67 @@ env:
   DOTNET_NOLOGO: true
 
 jobs:
-  # ── 1. Build self-contained binaries (matrix) ──────────────────────────────
+  # ── 1. Compile .lll sources using published lllc ────────────────────────────
+  #
+  # This is the self-hosting bootstrap: the CURRENT published lllc compiles
+  # the .lll sources into F#, TypeScript, and Python. Those become the NEXT version.
+  compile:
+    name: Compile .lll → all targets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install current lllc from NuGet
+        run: dotnet tool install -g lllc
+
+      - name: Compile lllcself → F# (full CLI with compiler + MCP)
+        run: lllc build --target fs lllcself/src/Main.lll
+
+      - name: Compile Compiler.lll → TypeScript
+        run: lllc build --target ts stdlib/src/Compiler.lll
+
+      - name: Bundle TypeScript → CJS
+        run: node packages/npm/lllc/scripts/build-compiler.js
+
+      - name: Compile Compiler.lll → Python
+        run: |
+          lllc build --target py stdlib/src/Compiler.lll
+          cp stdlib/src/Compiler.py packages/pip/lllc/compiler.py
+
+      - name: Upload F# output (for NuGet + binaries)
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-fsharp
+          path: |
+            lllcself/src/*.fs
+            lllcself/src/Main.fsproj
+          retention-days: 1
+
+      - name: Upload TypeScript output (for npm)
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-typescript
+          path: |
+            packages/npm/lllc/lib/compiler.ts
+            packages/npm/lllc/lib/compiler.cjs
+          retention-days: 1
+
+      - name: Upload Python output (for PyPI)
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-python
+          path: packages/pip/lllc/compiler.py
+          retention-days: 1
+
+  # ── 2. Build self-contained binaries from compiled F# ──────────────────────
   build-binary:
     name: Build (${{ matrix.rid }})
+    needs: compile
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: true
@@ -41,15 +99,22 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - name: Download compiled F#
+        uses: actions/download-artifact@v4
+        with:
+          name: compiled-fsharp
+          path: lllcself/src/
+
       - name: Publish self-contained binary
         shell: bash
         run: |
-          dotnet publish initial-compiler/src/LLLangTool/LLLangTool.fsproj \
+          dotnet publish lllcself/src/Main.fsproj \
             -c Release \
             -r ${{ matrix.rid }} \
             --self-contained true \
             -p:PublishSingleFile=true \
             -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:AssemblyName=lllc \
             -o dist/${{ matrix.rid }}/
 
       - name: Archive (tar.gz)
@@ -71,53 +136,7 @@ jobs:
           path: lllc-${{ matrix.rid }}.${{ matrix.ext }}
           retention-days: 1
 
-  # ── 2. Compile Compiler.lll → TypeScript and Python (used by npm + PyPI) ───
-  build-compiler-sources:
-    name: Build compiler sources (TS + Py)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "10.0.x"
-
-      - name: Build lllc tool
-        run: dotnet build initial-compiler/src/LLLangTool/LLLangTool.fsproj -c Release
-
-      - name: Compile Compiler.lll → TypeScript
-        run: |
-          dotnet run --project initial-compiler/src/LLLangTool/LLLangTool.fsproj -c Release -- \
-            build --target ts stdlib/src/Compiler.lll
-
-      - name: Bundle TypeScript → CJS (compiler.cjs)
-        run: |
-          node packages/npm/lllc/scripts/build-compiler.js
-
-      - name: Upload npm compiler artifacts (TS + CJS)
-        uses: actions/upload-artifact@v4
-        with:
-          name: npm-compiler-lib
-          path: |
-            packages/npm/lllc/lib/compiler.ts
-            packages/npm/lllc/lib/compiler.cjs
-          retention-days: 1
-
-      - name: Compile Compiler.lll → Python
-        run: |
-          dotnet run --project initial-compiler/src/LLLangTool/LLLangTool.fsproj -c Release -- \
-            build --target py stdlib/src/Compiler.lll
-          cp stdlib/src/Compiler.py packages/pip/lllc/compiler.py
-
-      - name: Upload pip compiler artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pip-compiler-py
-          path: packages/pip/lllc/compiler.py
-          retention-days: 1
-
-  # ── 3. Create GitHub Release and attach binaries ───────────────────────────
+  # ── 3. Create GitHub Release and attach binaries ──────────────���────────────
   create-release:
     name: GitHub Release
     needs: build-binary
@@ -145,10 +164,10 @@ jobs:
             lllc-osx-arm64.tar.gz
             lllc-win-x64.zip
 
-  # ── 4. NuGet (OIDC trusted publishing via NuGet/login) ──────────────────────
+  # ── 4. NuGet (from compiled F#, OIDC trusted publishing) ──────────────────
   publish-nuget:
     name: Publish NuGet
-    needs: create-release
+    needs: [create-release, compile]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -161,13 +180,28 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - name: Download compiled F#
+        uses: actions/download-artifact@v4
+        with:
+          name: compiled-fsharp
+          path: lllcself/src/
+
       - name: Extract version
         id: ver
         run: echo "V=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Prepare NuGet project
+        run: |
+          # Copy generated fsproj and add NuGet metadata
+          FSPROJ=lllcself/src/Main.fsproj
+          # Inject PackAsTool + NuGet metadata into the generated fsproj
+          sed -i 's|</PropertyGroup>|    <AssemblyName>lllc</AssemblyName>\n    <PackAsTool>true</PackAsTool>\n    <ToolCommandName>lllc</ToolCommandName>\n    <PackageId>lllc</PackageId>\n    <Authors>Neftedollar</Authors>\n    <Description>lllc — compiler for ll-lang. Self-hosted: written in ll-lang, compiles to F#, TypeScript, Python, Java, C#.</Description>\n    <PackageLicenseExpression>MIT</PackageLicenseExpression>\n    <PackageReadmeFile>README.md</PackageReadmeFile>\n    <PackageTags>compiler;functional;llm;fsharp;typescript;python;java;csharp;codegen;dotnet-tool;cross-compile;multi-target;transpiler</PackageTags>\n    <PackageProjectUrl>https://github.com/Neftedollar/ll-lang</PackageProjectUrl>\n    <RepositoryUrl>https://github.com/Neftedollar/ll-lang</RepositoryUrl>\n    <RepositoryType>git</RepositoryType>\n  </PropertyGroup>|' "$FSPROJ"
+          # Add README to package
+          sed -i 's|</Project>|  <ItemGroup>\n    <None Include="../../README.md" Pack="true" PackagePath="/" />\n  </ItemGroup>\n</Project>|' "$FSPROJ"
+
       - name: Pack
         run: |
-          dotnet pack initial-compiler/src/LLLangTool/LLLangTool.fsproj \
+          dotnet pack lllcself/src/Main.fsproj \
             -c Release \
             -p:Version=${{ steps.ver.outputs.V }} \
             -o nuget-out/
@@ -185,21 +219,10 @@ jobs:
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
 
-  # ── 5. npm (OIDC trusted publishing) ─────────────────────────────────────────
-  #
-  # npm OIDC trusted publishing requires:
-  #   - Node >= 22.14.0, npm >= 11.5.1
-  #   - id-token: write permission
-  #   - NODE_AUTH_TOKEN must NOT be set (npm falls back to OIDC only when no token is present)
-  #
-  # Problem: setup-node with registry-url writes _authToken=${NODE_AUTH_TOKEN} to .npmrc
-  # AND exports NODE_AUTH_TOKEN=XXXXX-XXXXX-XXXXX-XXXXX (a dummy placeholder).
-  # npm tries to use that dummy token -> 404 from npmjs.com.
-  #
-  # Fix: unset NODE_AUTH_TOKEN and remove the _authToken line from .npmrc before publish.
+  # ── 5. npm (OIDC trusted publishing) ─────��───────────────────────────────────
   publish-npm:
     name: Publish npm
-    needs: [create-release, build-compiler-sources]
+    needs: [create-release, compile]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -216,29 +239,27 @@ jobs:
         id: ver
         run: echo "V=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Download compiled compiler (TS + CJS)
+      - name: Download compiled TypeScript
         uses: actions/download-artifact@v4
         with:
-          name: npm-compiler-lib
+          name: compiled-typescript
           path: packages/npm/lllc/lib/
 
       - name: Set package version
         working-directory: packages/npm/lllc
         run: npm version ${{ steps.ver.outputs.V }} --no-git-tag-version --allow-same-version
 
-      - name: Publish (OIDC trusted publishing via npm@latest)
+      - name: Publish (OIDC trusted publishing)
         working-directory: packages/npm/lllc
         run: |
-          # Remove _authToken line injected by setup-node so npm uses OIDC instead
           sed -i '/:_authToken/d' "$NPM_CONFIG_USERCONFIG"
           unset NODE_AUTH_TOKEN
-          # Use npx to run npm@latest (>=11.5.1 with OIDC) without breaking global install
           npx npm@latest publish --provenance --access public
 
-  # ── 6. PyPI ─────────────────────────────────────────────────────────────────
+  # ── 6. PyPI (OIDC trusted publishing) ─────────────────────────────────────
   publish-pypi:
     name: Publish PyPI
-    needs: [create-release, build-compiler-sources]
+    needs: [create-release, compile]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -254,10 +275,10 @@ jobs:
         id: ver
         run: echo "V=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Download compiled compiler (Python)
+      - name: Download compiled Python
         uses: actions/download-artifact@v4
         with:
-          name: pip-compiler-py
+          name: compiled-python
           path: packages/pip/lllc/
 
       - name: Copy README for pip build

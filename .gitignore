@@ -41,3 +41,10 @@ packages/pip/*.egg-info/
 # generated compiler sources (created by `lllc build --target ts/py`)
 stdlib/src/Compiler.ts
 stdlib/src/Compiler.py
+
+# Generated F#/TS/PY build artifacts (CI generates these from .lll sources)
+lllcself/src/*.fs
+lllcself/src/*.fsproj
+stdlib/src/Compiler.fs
+stdlib/src/Compiler.fsproj
+stdlib/src/Compiler.ts
