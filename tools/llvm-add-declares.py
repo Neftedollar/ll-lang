@@ -617,9 +617,133 @@ def fix_match_arm_str_concat(lines: List[str]) -> List[str]:
     return out_lines
 
 
+MODULE_MARKER_RE = re.compile(r"^;\s*Module:\s*(?P<name>\S+)\s*$")
+STR_GLOBAL_DEF_RE = re.compile(r"^@\.str\d+\s*=\s")
+
+
+def uniquify_module_private_strings(lines: List[str]) -> List[str]:
+    """Rename per-module `@.strN` globals so they don't collide across modules.
+
+    The frozen LLVM codegen emits `@.str0`, `@.str1`, ... inside each module
+    as `private unnamed_addr constant`s for string literals. When lllc
+    concatenates many modules into a single `.ll` (which happens for any
+    file that imports stdlib — and especially for the self-hosted compiler
+    `lllcself`, which pulls in ~20 modules), these names collide and clang
+    emits `redefinition of global '@.strN'`.
+
+    Because `private` globals are module-local in LLVM's linkage model,
+    renaming them has no cross-module semantic effect. We parse the IR
+    as a sequence of module sections delimited by `; Module: <Name>`
+    comments (which the codegen emits as section headers), and within each
+    section rewrite `@.strN` -> `@.str_<Module>_N` in both definitions
+    and references. We leave the first section (before any `; Module:`
+    marker) as-is; numbering restarts in each module so earlier sections
+    stay valid on their own.
+
+    Uses of `@.strN` outside any module section (e.g. in the final
+    section after the last module marker) are left untouched. Cross-module
+    references to `@.strN` are impossible in well-formed IR because these
+    symbols have private linkage.
+    """
+    # 1. Partition lines into sections by `; Module: <name>` markers.
+    sections: List[Tuple[Optional[str], int, int]] = []  # (module, start, end)
+    current_module: Optional[str] = None
+    section_start = 0
+    for i, line in enumerate(lines):
+        m = MODULE_MARKER_RE.match(line)
+        if m:
+            # Close previous section [section_start, i)
+            sections.append((current_module, section_start, i))
+            current_module = m.group("name")
+            section_start = i
+    # Close the trailing section.
+    sections.append((current_module, section_start, len(lines)))
+
+    # 2. For each module section, find its local `@.strN` definitions,
+    #    then rewrite those exact names in defs + all uses within the
+    #    same section. Sanitise the module name for use as an LLVM
+    #    identifier (dots -> underscores).
+    def sanitise(name: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_]", "_", name)
+
+    # Work on a mutable copy.
+    out = list(lines)
+    # Track the highest `@.strN` seen so far so the rename target never
+    # collides with some later module's `@.strK`. We use the scheme
+    # `@.str_<Module>_N` which includes the module name, so collisions
+    # require two modules with the same sanitised name (unlikely).
+    for module_name, start, end in sections:
+        if module_name is None:
+            continue  # Leave header section as-is.
+        # Find `@.strN` defined in this section.
+        local_names: List[str] = []
+        for i in range(start, end):
+            ln = out[i]
+            if STR_GLOBAL_DEF_RE.match(ln):
+                # Extract the full name up to ` = `.
+                name = ln.split(" ", 1)[0]  # "@.strN"
+                local_names.append(name)
+        if not local_names:
+            continue
+        mod_tag = sanitise(module_name)
+        # Build a renaming map: "@.strN" -> "@.str_<Mod>_<N>".
+        # Sort by descending length so "@.str10" is replaced before "@.str1".
+        rename_map: Dict[str, str] = {}
+        for name in local_names:
+            num = name[len("@.str"):]
+            rename_map[name] = f"@.str_{mod_tag}_{num}"
+        # Rewrite the section. Use word-boundary-ish regex to avoid
+        # accidentally hitting `@.str10` when replacing `@.str1`.
+        # We compile one combined pattern sorted by descending length.
+        sorted_names = sorted(rename_map.keys(), key=len, reverse=True)
+        # Escape for regex; match only when followed by a non-digit / non-word char.
+        pattern = re.compile(
+            r"(" + "|".join(re.escape(n) for n in sorted_names) + r")(?![0-9A-Za-z_])"
+        )
+        for i in range(start, end):
+            ln = out[i]
+            if "@.str" not in ln:
+                continue
+            out[i] = pattern.sub(lambda m: rename_map[m.group(1)], ln)
+    return out
+
+
+DECLARE_LINE_RE = re.compile(r"^\s*declare\s+")
+
+
+def dedupe_declares(lines: List[str]) -> List[str]:
+    """Drop duplicate `declare` lines for the same name.
+
+    When many modules are concatenated into a single `.ll` (as happens
+    for any file that imports stdlib — see `uniquify_module_private_strings`),
+    each module independently emits `declare ptr @malloc(i64)` (and
+    similar externals). LLVM's textual IR considers `declare` lines
+    redundant if they agree — but clang's parser rejects a second
+    `declare` for a name as `invalid redefinition of function`.
+
+    We keep the first `declare` for each name and drop later ones,
+    regardless of whether the signatures agree. (If signatures diverge
+    the first wins and any later mis-use would fail type-check; in
+    practice the codegen emits the same external signature every time.)
+    """
+    seen: set = set()
+    out: List[str] = []
+    for line in lines:
+        m = DECLARE_RE.match(line)
+        if m:
+            name = m.group(1)
+            if name in seen:
+                continue
+            seen.add(name)
+        out.append(line)
+    return out
+
+
 def patch(text: str) -> str:
     lines = text.splitlines()
     lines = strip_runtime_owned_defs(lines)
+    lines = uniquify_module_private_strings(lines)
+    lines = dedupe_declares(lines)
     lines = fix_instruction_geps(lines)
     lines = rename_main_to_ll_main(lines)
     lines = fix_cli_args_main(lines)

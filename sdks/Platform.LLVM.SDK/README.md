@@ -132,6 +132,20 @@ These compensate for codegen shortcuts in the frozen `CodegenLLVM.fs`. Each is i
    `null`) and inserts `%cat_<body> = call ptr @strConcat(ptr %gep, ptr %payload)` before
    the branch, then rewrites the phi entry to use `%cat_<body>`. Example 10's
    `TIdent s -> "id:" + s` / `TNum s -> "num:" + s` arms depend on this patch.
+8. **Uniquify per-module `@.strN` private globals** — the frozen codegen emits `@.str0`,
+   `@.str1`, ... inside each module as `private unnamed_addr constant`s for string literals.
+   When a `.lll` imports multiple modules (any stdlib-using program, and especially
+   `lllcself` which pulls in ~20), the concatenated `.ll` contains many `@.str0` definitions
+   and clang rejects the second with `redefinition of global '@.str0'`. Script partitions the
+   IR by `; Module: <name>` header comments and rewrites each section's `@.strN` to
+   `@.str_<Module>_N` in both definitions and references. Because the globals have private
+   linkage, renaming is semantically transparent (no cross-module references are legal).
+   Unblocks example 33 and every stdlib-heavy `.lll`.
+9. **Deduplicate `declare` lines** — each module independently declares runtime externals
+   like `declare ptr @malloc(i64)`, so a 20-module concatenation yields 17 identical
+   `declare` lines. LLVM's textual IR is nominally fine with this but clang rejects it as
+   `invalid redefinition of function`. Script keeps the first `declare` per name and drops
+   the rest. Safe because codegen emits the same signature every time.
 
 ## Stretch-tested non-LLVM examples
 
@@ -166,11 +180,62 @@ mind, so any "works" here is pure reach.
   unblock this and similar `external`-heavy examples.
 - `31-fixpoint-test.lll` — `E002 UnboundVar compileSingleFile` (imports
   not resolved).
-- `33-io-sequence.lll` — IO monad example; pulls in `Std.IO` and emits
-  duplicate `@.str0` globals (codegen bug when merging imported modules).
+- `33-io-sequence.lll` — IO monad example; pulls in `Std.IO`. The
+  `@.str0`-collision (duplicate module-local string globals) is now
+  patched by the post-processor's `uniquify_module_private_strings`
+  pass. Remaining blockers are HOF parameter drops (`_f`, `_p`) and a
+  handful of missing runtime helpers (`listMap`, `listConcat`).
 - `35-monad-module.lll` — heavy higher-order / monad code, same HOF-drop
   class as example 44 but at much larger scale; no single post-processor
   patch unlocks it.
+
+### Stretch attempt: full `lllcself` (self-hosted compiler CLI)
+
+As a maximal stress test, we tried building the entire self-hosted
+compiler (`lllcself/src/Main.lll`, 827 LOC + transitive stdlib imports —
+20+ modules concatenated into a single 34k-line `.ll`).
+
+**Progress:** the first two link-time blockers were eliminated by new
+post-processor passes (see "Known post-processor patches" #8 and #9
+below). The build now proceeds past the IR-parse and single-symbol-
+uniqueness stages. It fails at the final link step with 24 undefined
+symbols.
+
+**Remaining blockers (in order of depth):**
+
+1. **Higher-order function parameter drops** (5 symbols: `_f`, `_p`,
+   `_pred`, `_cmp`, `_isName`). The frozen codegen emits
+   `call ptr @f(...)` for callsites like `listMap(xs, f)` — treating
+   the function parameter `f` as a global. These symbols don't exist;
+   they're bound names in the caller's scope. This is the same
+   HOF-drop bug documented for example 44 / `listMap`, surfacing at
+   compiler scale. **Not fixable in runtime or post-processor** —
+   requires changes to frozen codegen.
+2. **Missing runtime helpers** (19 symbols): `charIsDigit`,
+   `charIsSpace`, `charToInt`, `intToChar`, `fileExists`, `readLine`,
+   `listAppend`, `listConcat`, `listIsEmpty`, `listLen`, `listMap`,
+   `listReverse`, `strChars`, `strContains`, `strFromChars`,
+   `strSlice`, `strSplit`, `strToInt`, `strTrim`. Each would need
+   a C implementation in `runtime/lllc_runtime.c`. Many are trivial
+   (`strTrim`, `strSlice`); `listMap` depends on resolving blocker (1)
+   first because it needs to call user-supplied `f`.
+
+**What it would take to complete the stretch:**
+
+- **Codegen fix** (blocker 1): emit a closure-calling convention that
+  threads the function pointer through the call instead of assuming
+  globals. Touches frozen `CodegenLLVM.fs` — this is a real language-
+  feature change, not a post-processor patch.
+- **Runtime expansion** (blocker 2): add 19 C functions with matching
+  ABIs. Straightforward once (1) is done; each is ~5-20 lines of C.
+- **Post-processor** (already done): `uniquify_module_private_strings`
+  renames per-module `@.strN` globals; `dedupe_declares` drops
+  duplicate `declare ptr @malloc(i64)` lines emitted by each module.
+
+**Conclusion:** self-hosted compilation is blocked on the same
+language-level feature (higher-order function parameters) as
+`35-monad-module.lll`. No amount of post-processor + runtime work
+unlocks it without touching frozen codegen.
 
 ## Running the pipeline
 
