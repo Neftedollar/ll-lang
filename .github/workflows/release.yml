@@ -145,7 +145,7 @@ jobs:
             lllc-osx-arm64.tar.gz
             lllc-win-x64.zip
 
-  # ── 4. NuGet ────────────────────────────────────────────────────────────────
+  # ── 4. NuGet (OIDC trusted publishing via NuGet/login) ──────────────────────
   publish-nuget:
     name: Publish NuGet
     needs: create-release
@@ -156,14 +156,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # setup-dotnet with source-url + GITHUB_TOKEN handles NuGet OIDC trusted publishing
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
-          source-url: https://api.nuget.org/v3/index.json
-        env:
-          NUGET_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract version
         id: ver
@@ -176,13 +172,31 @@ jobs:
             -p:Version=${{ steps.ver.outputs.V }} \
             -o nuget-out/
 
+      - name: NuGet login (OIDC trusted publishing)
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: ${{ vars.NUGET_USER }}
+
       - name: Push to NuGet.org
         run: |
           dotnet nuget push nuget-out/*.nupkg \
+            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
 
-  # ── 5. npm ──────────────────────────────────────────────────────────────────
+  # ── 5. npm (OIDC trusted publishing) ─────────────────────────────────────────
+  #
+  # npm OIDC trusted publishing requires:
+  #   - Node >= 22.14.0, npm >= 11.5.1
+  #   - id-token: write permission
+  #   - NODE_AUTH_TOKEN must NOT be set (npm falls back to OIDC only when no token is present)
+  #
+  # Problem: setup-node with registry-url writes _authToken=${NODE_AUTH_TOKEN} to .npmrc
+  # AND exports NODE_AUTH_TOKEN=XXXXX-XXXXX-XXXXX-XXXXX (a dummy placeholder).
+  # npm tries to use that dummy token -> 404 from npmjs.com.
+  #
+  # Fix: unset NODE_AUTH_TOKEN and remove the _authToken line from .npmrc before publish.
   publish-npm:
     name: Publish npm
     needs: [create-release, build-compiler-sources]
@@ -195,8 +209,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
+
+      - name: Upgrade npm to >=11.5.1 (required for OIDC)
+        run: npm install -g npm@latest
 
       - name: Extract version
         id: ver
@@ -212,10 +229,13 @@ jobs:
         working-directory: packages/npm/lllc
         run: npm version ${{ steps.ver.outputs.V }} --no-git-tag-version --allow-same-version
 
-      # setup-node with registry-url + id-token:write handles npm OIDC trusted publishing
-      - name: Publish
+      - name: Publish (OIDC trusted publishing)
         working-directory: packages/npm/lllc
-        run: npm publish --provenance --access public
+        run: |
+          # Remove _authToken line injected by setup-node so npm uses OIDC instead
+          sed -i '/:_authToken/d' "$NPM_CONFIG_USERCONFIG"
+          unset NODE_AUTH_TOKEN
+          npm publish --provenance --access public
 
   # ── 6. PyPI ─────────────────────────────────────────────────────────────────
   publish-pypi:
