@@ -175,17 +175,24 @@ jobs:
       - name: Push to NuGet.org (trusted publishing via OIDC)
         run: |
           # 1. Get GitHub OIDC token
-          OIDC_TOKEN=$(curl -s \
+          OIDC_TOKEN=$(curl -sS \
             -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" \
             | jq -r '.value')
+          [ -z "$OIDC_TOKEN" ] || [ "$OIDC_TOKEN" = "null" ] && echo "::error::Failed to obtain OIDC token" && exit 1
 
-          # 2. Exchange for short-lived NuGet API key
-          NUGET_KEY=$(curl -s -f -X POST https://api.nuget.org/v1/publishers/token \
+          # 2. Exchange OIDC token for NuGet short-lived API key
+          # NuGet trusted publishing: POST /v1/publishers/token with {"oidcToken":"..."}
+          # Returns {"apiKey":"..."}
+          EXCHANGE=$(curl -sS -X POST https://api.nuget.org/v1/publishers/token \
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
-            --data "{\"audience\":\"api://AzureADTokenExchange\",\"requestedTokenType\":\"urn:ietf:params:oauth:token-type:api_key\",\"subjectToken\":\"${OIDC_TOKEN}\",\"subjectTokenType\":\"urn:ietf:params:oauth:token-type:id_token\"}" \
-            | jq -r '.access_token')
+            --data "{\"oidcToken\":\"${OIDC_TOKEN}\"}")
+          NUGET_KEY=$(echo "$EXCHANGE" | jq -r '.apiKey // empty')
+          if [ -z "$NUGET_KEY" ]; then
+            echo "::error::NuGet token exchange failed: $EXCHANGE"
+            exit 1
+          fi
           echo "::add-mask::${NUGET_KEY}"
 
           # 3. Push
