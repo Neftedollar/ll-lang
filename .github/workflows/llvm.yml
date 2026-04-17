@@ -156,3 +156,24 @@ jobs:
           test "$OUT" = "Written by native lllc" || { echo "expected 'Written by native lllc'"; exit 1; }
           FILE_CONTENTS=$(cat /tmp/llvm-test-output.txt)
           test "$FILE_CONTENTS" = "Written by native lllc" || { echo "expected file contents 'Written by native lllc', got: $FILE_CONTENTS"; exit 1; }
+
+      - name: Build 48-llvm-cli-args
+        run: tools/lllc-native spec/examples/valid/48-llvm-cli-args.lll /tmp/cliargs
+
+      - name: Run 48-llvm-cli-args (with arg)
+        run: |
+          OUT=$(/tmp/cliargs hello)
+          echo "stdout: $OUT"
+          test "$OUT" = "hello" || { echo "expected 'hello'"; exit 1; }
+
+      - name: Run 48-llvm-cli-args (no args)
+        run: |
+          OUT=$(/tmp/cliargs)
+          echo "stdout: $OUT"
+          test "$OUT" = "no args" || { echo "expected 'no args'"; exit 1; }
+
+      - name: Run 48-llvm-cli-args (multiple args, head only)
+        run: |
+          OUT=$(/tmp/cliargs one two three)
+          echo "stdout: $OUT"
+          test "$OUT" = "one" || { echo "expected 'one' (first arg)"; exit 1; }

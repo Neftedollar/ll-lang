@@ -36,7 +36,7 @@ The wrapper performs four stages end-to-end:
 
 ## Supported features
 
-Validated against examples `spec/examples/valid/36-llvm-*.lll` through `47-llvm-*.lll`.
+Validated against examples `spec/examples/valid/36-llvm-*.lll` through `48-llvm-*.lll`.
 
 | Feature | Example | Status |
 |---|---|---|
@@ -54,6 +54,7 @@ Validated against examples `spec/examples/valid/36-llvm-*.lll` through `47-llvm-
 | `List[Maybe[Int]]` (nested ADT inside list, heterogeneous values via `ptrtoint`/`inttoptr`) | `45-llvm-list-of-maybe.lll` | works |
 | `readFile` — read entire file into string | `46-llvm-readfile.lll` | works (open/fstat/read/close, malloc'd buffer; empty string on error) |
 | `writeFile` — create/truncate file, write string | `47-llvm-writefile.lll` | works (open O_CREAT\|O_TRUNC, write, close; must use named binding `w = writeFile ...`) |
+| Command-line arguments via `getArgs` | `48-llvm-cli-args.lll` | works (C runtime captures argv; post-processor wires the `printArgs []` entry into `call @ll_getArgs()` — `getArgs` alone is silently dropped by frozen codegen, see limitation below) |
 | Higher-order `listMap` (functions as values) | — | unsupported — `ys = listMap double xs` is silently dropped by frozen codegen; use a recursive user-defined `mapList` instead (see example 44) |
 | I/O (`read_line`) | — | runtime stub only |
 | GC | — | stubbed (raw `malloc`) |
@@ -78,9 +79,11 @@ These compensate for codegen shortcuts in the frozen `CodegenLLVM.fs`. Each is i
 2. **Instruction-form GEP with extra parens** —
    `%t0 = getelementptr inbounds ([N x i8], ptr @.s, i64 0, i64 0)` is illegal as an instruction
    (only legal as a constant-expression). Script unwraps the parens.
-3. **`define void @main()`** — codegen emits `void` return but C runtime expects `int` (or the
-   process inherits garbage from the return register). Script rewrites the signature to
-   `i32 @main()` and swaps `ret void` for `ret i32 0`.
+3. **Rename `define void @main()` → `define void @ll_main()`** — the C runtime owns the real
+   `int main(int argc, char** argv)` so it can capture `argv` for `getArgs` and return a
+   proper OS exit code. Previously the script rewrote `void @main` → `i32 @main` + `ret i32 0`;
+   moving to renaming lets the runtime wrap user code cleanly. A `__attribute__((weak))`
+   fallback in C keeps linking alive if a .ll ever lacks a `main`.
 4. **Duplicate `@__ll_alloc` definition** — ADT examples trigger codegen to emit a local
    definition of `@__ll_alloc`, which collides with the C runtime's version at link time
    (`duplicate symbol '___ll_alloc'`). Script strips the generated definition; the runtime
@@ -90,6 +93,13 @@ These compensate for codegen shortcuts in the frozen `CodegenLLVM.fs`. Each is i
    predecessor is the arm's `if_end_N` block, yielding `PHI node entries do not match
    predecessors`. The script walks the CFG per function and replaces each stale entry label
    with the unique real predecessor reachable from the original body block.
+6. **`main() = printArgs []` → real argv list** — frozen codegen drops references to
+   value-shaped prelude identifiers like `getArgs` (TEVar not in VarEnv). Workaround: user
+   writes `main() = printArgs []`; the codegen emits `call void @printArgs(ptr null)` inside
+   `@ll_main`, which the script rewrites to `%x = call ptr @ll_getArgs()` + `call void
+   @printArgs(ptr %x)`. `@ll_getArgs` is provided by the C runtime and materialises a cons
+   list from `argv[1..]` using the same `{ i64 tag, i64 payload, ptr tail }` node ABI as list
+   literals. See example 48.
 
 ## Running the pipeline
 

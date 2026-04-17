@@ -1,0 +1,16 @@
+module LlvmCliArgs
+
+-- Demonstrates command-line argument handling via the LLVM SDK.
+--
+-- Convention: the user writes a helper `printArgs(args List[Str])` and
+-- bootstraps it from `main` with an empty list. The post-processor
+-- (tools/llvm-add-declares.py) detects the `call void @printArgs(ptr null)`
+-- pattern inside @ll_main and rewires the argument to a real argv list
+-- built by the C runtime's `ll_getArgs` helper.
+
+printArgs(args List[Str]) =
+  match args
+    | [] -> printfn "no args"
+    | x :: _ -> printfn x
+
+main() = printArgs []

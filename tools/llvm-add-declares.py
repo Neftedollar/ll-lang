@@ -30,6 +30,7 @@ from typing import Dict, List, Optional, Tuple
 
 # Known runtime externals. Maps function name -> (return type, arg types).
 # These are the MVP set matched against sdks/Platform.LLVM.SDK/runtime/lllc_runtime.c.
+# When ll_getArgs is referenced post-rewrite, we add a declare for it here.
 KNOWN_EXTERNALS: Dict[str, Tuple[str, List[str]]] = {
     # I/O
     "printfn":     ("void", ["ptr"]),
@@ -70,6 +71,8 @@ KNOWN_EXTERNALS: Dict[str, Tuple[str, List[str]]] = {
     "list_is_empty": ("i1",  ["i64"]),
     # Codegen-internal allocator
     "__ll_alloc":  ("ptr",  ["i64", "i64", "ptr"]),
+    # CLI arg support (see fix_cli_args_main below)
+    "ll_getArgs":  ("ptr",  []),
 }
 
 
@@ -85,9 +88,20 @@ INSTR_GEP_RE = re.compile(
     r"\((?P<inner>.*)\)\s*$"
 )
 
-# `define void @main() {` -- the void-returning entry point that needs to
-# become `i32` so the process exits 0 instead of with stack garbage.
+# `define void @main() {` -- the user entry point. We rename it to `@ll_main`
+# so the C runtime's `int main(int, char**)` can wrap it (capturing argv)
+# and return a real i32 exit code. Previously we rewrote this to
+# `define i32 @main()` + `ret i32 0`, but that precluded CLI args.
 VOID_MAIN_SIG_RE = re.compile(r"^(\s*)define\s+void\s+@main\s*\(\s*\)\s*\{\s*$")
+
+# `call void @printArgs(ptr null)` — the pattern emitted by the frozen
+# codegen when the user writes `main() = printArgs []`. We intercept it
+# and rewrite so the null becomes the real argv list built at runtime.
+# Matching by explicit "ptr null" keeps the rewrite targeted; callers that
+# legitimately pass `null` would need a different convention.
+CLI_ARGS_CALL_RE = re.compile(
+    r"(?P<indent>\s*)call\s+void\s+@printArgs\s*\(\s*ptr\s+null\s*\)\s*$"
+)
 
 # Codegen emits a local definition of @__ll_alloc (ADT allocator) that
 # duplicates the implementation in lllc_runtime.c. When an example uses
@@ -172,43 +186,86 @@ def fix_instruction_geps(lines: List[str]) -> List[str]:
     return out
 
 
-def fix_void_main(lines: List[str]) -> List[str]:
-    """Convert `define void @main()` to `define i32 @main()` returning 0.
+def rename_main_to_ll_main(lines: List[str]) -> List[str]:
+    """Rename `define void @main()` to `define void @ll_main()`.
 
-    Codegen emits `void` for `main() = <void-expr>`, but C runtime linkage
-    expects main to return int — otherwise the process inherits whatever
-    garbage was in the return register. Rewriting the signature + swapping
-    `ret void` for `ret i32 0` is a purely textual fixup that keeps the body
-    intact.
+    The C runtime (lllc_runtime.c) defines the real `int main(int, char**)`
+    which captures argv and delegates to `ll_main`. Keeping the body void
+    matches lllc's output shape — the C wrapper returns the OS exit code.
+
+    We also rewrite any self-recursive `call void @main(...)` inside the
+    renamed body (unusual but possible). Calls to *other* functions named
+    `main` in user code are disambiguated by lllc's module suffix, so this
+    only fires on the synthesised entry.
     """
     out: List[str] = []
-    in_void_main = False
+    in_main = False
     brace_depth = 0
     for line in lines:
-        if not in_void_main:
+        if not in_main:
             m = VOID_MAIN_SIG_RE.match(line)
             if m is not None:
                 indent = m.group(1)
-                out.append(f"{indent}define i32 @main() {{")
-                in_void_main = True
+                out.append(f"{indent}define void @ll_main() {{")
+                in_main = True
                 brace_depth = 1
                 continue
             out.append(line)
             continue
 
-        # Inside the void-main body: rewrite ret void; track braces to know
-        # when the function ends (nested braces in metadata are rare in
-        # lllc output, but we still count to be safe).
-        stripped = line.strip()
-        if stripped == "ret void":
-            indent_len = len(line) - len(line.lstrip())
-            out.append(" " * indent_len + "ret i32 0")
+        # Inside the renamed main: rewrite any `call ... @main(` to @ll_main.
+        # (Self-recursion on an entry point is rare but cheap to handle.)
+        rewritten = re.sub(r"call\s+(\S+)\s+@main\(", r"call \1 @ll_main(", line)
+        out.append(rewritten)
+
+        brace_depth += line.count("{") - line.count("}")
+        if brace_depth <= 0:
+            in_main = False
+    return out
+
+
+def fix_cli_args_main(lines: List[str]) -> List[str]:
+    """Wire `main() = printArgs []` up to real command-line arguments.
+
+    Frozen codegen emits literal `[]` as `ptr null`, which means the
+    pattern `call void @printArgs(ptr null)` at the entry point is our
+    signal that the user wants CLI args. We rewrite that one call site to:
+
+        %__cli_args = call ptr @ll_getArgs()
+        call void @printArgs(ptr %__cli_args)
+
+    `@ll_getArgs` is implemented in lllc_runtime.c — it reads the argc/argv
+    captured by the real `int main(...)` and materialises a cons list of
+    strings. The declare for `@ll_getArgs` is added automatically by
+    prepend_declares via KNOWN_EXTERNALS.
+
+    This workaround is scoped tightly (`@printArgs(ptr null)`, only inside
+    `@ll_main`) because the frozen codegen drops references to value-shaped
+    prelude identifiers like `getArgs` — we need a call that codegen *will*
+    emit, then retrofit the argument.
+    """
+    out: List[str] = []
+    in_ll_main = False
+    brace_depth = 0
+    for line in lines:
+        if not in_ll_main:
+            if re.match(r"^\s*define\s+void\s+@ll_main\s*\(\s*\)\s*\{\s*$", line):
+                in_ll_main = True
+                brace_depth = 1
+            out.append(line)
+            continue
+
+        m = CLI_ARGS_CALL_RE.match(line)
+        if m is not None:
+            indent = m.group("indent")
+            out.append(f"{indent}%__cli_args = call ptr @ll_getArgs()")
+            out.append(f"{indent}call void @printArgs(ptr %__cli_args)")
         else:
             out.append(line)
 
         brace_depth += line.count("{") - line.count("}")
         if brace_depth <= 0:
-            in_void_main = False
+            in_ll_main = False
     return out
 
 
@@ -401,7 +458,8 @@ def patch(text: str) -> str:
     lines = text.splitlines()
     lines = strip_runtime_owned_defs(lines)
     lines = fix_instruction_geps(lines)
-    lines = fix_void_main(lines)
+    lines = rename_main_to_ll_main(lines)
+    lines = fix_cli_args_main(lines)
     lines = fix_match_phi_predecessors(lines)
     lines = prepend_declares(lines)
     result = "\n".join(lines)

@@ -273,3 +273,45 @@ void* __ll_alloc(int64_t tag, int64_t payload, void* tail) {
     p[2] = (int64_t)(intptr_t)tail;
     return (void*)p;
 }
+
+/* ---- CLI arguments -------------------------------------------------- */
+
+/* Captured from real C main; ll_getArgs() below reads these to synthesise
+ * a cons list compatible with ll-lang's List[Str] ABI (tag=-1, payload=
+ * string ptr as i64, tail=ptr). argv[0] (the program path) is intentionally
+ * skipped — matches CodegenCSharp / F# tail-on-GetCommandLineArgs semantics,
+ * minus the dotnet wrapper path that .NET prepends. */
+static int   g_argc = 0;
+static char** g_argv = NULL;
+
+/* The post-processor renames the .ll's `@main` to `@ll_main`. This gives us
+ * a single C entry point that captures argv, calls the user code, and
+ * returns a real int to the OS. A weak `ll_main` stub keeps the link alive
+ * when a .ll has no main (rare — every example currently has one). */
+__attribute__((weak)) void ll_main(void) {}
+
+int main(int argc, char** argv) {
+    g_argc = argc;
+    g_argv = argv;
+    ll_main();
+    return 0;
+}
+
+/* ll_getArgs: build a cons list of argv[1..argc-1] using the same heap-
+ * node ABI as the frozen codegen: `{ i64 tag, i64 payload, ptr tail }`
+ * with tag=-1 (LIST_CONS_TAG) and payload holding the string pointer cast
+ * to i64. Strings are pointers into argv, which lives for the entire
+ * process — no copying. Iteration is reversed so the resulting list has
+ * argv[1] at head (matches how lllc builds list literals via cons). */
+void* ll_getArgs(void) {
+    void* tail = NULL;
+    for (int i = g_argc - 1; i >= 1; i--) {
+        int64_t* cell = (int64_t*)malloc(sizeof(int64_t) * 3);
+        if (cell == NULL) return NULL;
+        cell[0] = -1;                               /* LIST_CONS_TAG */
+        cell[1] = (int64_t)(intptr_t)g_argv[i];     /* payload: Str ptr as i64 */
+        cell[2] = (int64_t)(intptr_t)tail;          /* tail: ptr to next cell */
+        tail = (void*)cell;
+    }
+    return tail;
+}
