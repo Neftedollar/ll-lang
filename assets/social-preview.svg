@@ -218,32 +218,25 @@
   <!-- ── FOOTER ── -->
   <line x1="48" y1="574" x2="1232" y2="574" stroke="#30363d" stroke-width="1"/>
 
-  <!-- Install commands — 3 equal columns, centered, no overlap -->
-  <text x="220" y="608" text-anchor="middle"
-        font-family="'SF Mono','Fira Code','Cascadia Code',monospace"
-        font-size="15">
-    <tspan fill="#6e7681">npm install -g </tspan><tspan fill="#4ec9b0">@neftedollar/lllc</tspan>
-  </text>
+  <!-- Install commands — separate <text> per colour segment, pixel-exact positions -->
+  <!-- char width = 15px × 0.6 = 9px; layout centred in x=130..894 -->
+  <!-- Group 1: npm install -g @neftedollar/lllc (15+18 chars) -->
+  <text x="130" y="608" font-family="'SF Mono','Fira Code','Cascadia Code',monospace" font-size="15" fill="#6e7681">npm install -g </text>
+  <text x="265" y="608" font-family="'SF Mono','Fira Code','Cascadia Code',monospace" font-size="15" fill="#4ec9b0">@neftedollar/lllc</text>
 
-  <text x="395" y="608" text-anchor="middle"
-        font-family="'SF Mono','Fira Code','Cascadia Code',monospace"
-        font-size="15" fill="#4a4f55">·</text>
+  <!-- separator -->
+  <text x="447" y="608" font-family="'SF Mono','Fira Code','Cascadia Code',monospace" font-size="15" fill="#484e55">·</text>
 
-  <text x="530" y="608" text-anchor="middle"
-        font-family="'SF Mono','Fira Code','Cascadia Code',monospace"
-        font-size="15">
-    <tspan fill="#6e7681">pip install </tspan><tspan fill="#4ec9b0">lllc</tspan>
-  </text>
+  <!-- Group 2: pip install lllc (12+4 chars) -->
+  <text x="467" y="608" font-family="'SF Mono','Fira Code','Cascadia Code',monospace" font-size="15" fill="#6e7681">pip install </text>
+  <text x="575" y="608" font-family="'SF Mono','Fira Code','Cascadia Code',monospace" font-size="15" fill="#4ec9b0">lllc</text>
 
-  <text x="665" y="608" text-anchor="middle"
-        font-family="'SF Mono','Fira Code','Cascadia Code',monospace"
-        font-size="15" fill="#4a4f55">·</text>
+  <!-- separator -->
+  <text x="631" y="608" font-family="'SF Mono','Fira Code','Cascadia Code',monospace" font-size="15" fill="#484e55">·</text>
 
-  <text x="820" y="608" text-anchor="middle"
-        font-family="'SF Mono','Fira Code','Cascadia Code',monospace"
-        font-size="15">
-    <tspan fill="#6e7681">dotnet tool install -g </tspan><tspan fill="#4ec9b0">lllc</tspan>
-  </text>
+  <!-- Group 3: dotnet tool install -g lllc (23+4 chars) -->
+  <text x="651" y="608" font-family="'SF Mono','Fira Code','Cascadia Code',monospace" font-size="15" fill="#6e7681">dotnet tool install -g </text>
+  <text x="858" y="608" font-family="'SF Mono','Fira Code','Cascadia Code',monospace" font-size="15" fill="#4ec9b0">lllc</text>
 
   <!-- GitHub link -->
   <text x="1216" y="608" text-anchor="end"
