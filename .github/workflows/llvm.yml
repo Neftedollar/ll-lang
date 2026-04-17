@@ -134,3 +134,25 @@ jobs:
           OUT=$(/tmp/listmaybe)
           echo "stdout: $OUT"
           test "$OUT" = "1,X,3" || { echo "expected '1,X,3'"; exit 1; }
+
+      - name: Build 46-llvm-readfile
+        run: tools/lllc-native spec/examples/valid/46-llvm-readfile.lll /tmp/readfile
+
+      - name: Run 46-llvm-readfile
+        run: |
+          echo "Hello from file" > /tmp/llvm-test-input.txt
+          OUT=$(/tmp/readfile)
+          echo "stdout: $OUT"
+          test "$OUT" = "Hello from file" || { echo "expected 'Hello from file'"; exit 1; }
+
+      - name: Build 47-llvm-writefile
+        run: tools/lllc-native spec/examples/valid/47-llvm-writefile.lll /tmp/writefile
+
+      - name: Run 47-llvm-writefile
+        run: |
+          rm -f /tmp/llvm-test-output.txt
+          OUT=$(/tmp/writefile)
+          echo "stdout: $OUT"
+          test "$OUT" = "Written by native lllc" || { echo "expected 'Written by native lllc'"; exit 1; }
+          FILE_CONTENTS=$(cat /tmp/llvm-test-output.txt)
+          test "$FILE_CONTENTS" = "Written by native lllc" || { echo "expected file contents 'Written by native lllc', got: $FILE_CONTENTS"; exit 1; }

@@ -1,0 +1,5 @@
+module LlvmReadFile
+
+main() =
+  content = readFile "/tmp/llvm-test-input.txt"
+  printfn content

@@ -36,7 +36,7 @@ The wrapper performs four stages end-to-end:
 
 ## Supported features
 
-Validated against examples `spec/examples/valid/36-llvm-*.lll` through `45-llvm-*.lll`.
+Validated against examples `spec/examples/valid/36-llvm-*.lll` through `47-llvm-*.lll`.
 
 | Feature | Example | Status |
 |---|---|---|
@@ -52,8 +52,10 @@ Validated against examples `spec/examples/valid/36-llvm-*.lll` through `45-llvm-
 | List literal `[1; 2; 3]` + `match x :: rest` + recursion | `43-llvm-list-sum.lll` | works (cons-style ADT cell, tag `-1`, reuses `__ll_alloc`) |
 | User-defined `mapList` + `showList` over lists, nested if in match arm | `44-llvm-list-map.lll` | works (post-processor repairs stale match-end phi predecessors) |
 | `List[Maybe[Int]]` (nested ADT inside list, heterogeneous values via `ptrtoint`/`inttoptr`) | `45-llvm-list-of-maybe.lll` | works |
+| `readFile` — read entire file into string | `46-llvm-readfile.lll` | works (open/fstat/read/close, malloc'd buffer; empty string on error) |
+| `writeFile` — create/truncate file, write string | `47-llvm-writefile.lll` | works (open O_CREAT\|O_TRUNC, write, close; must use named binding `w = writeFile ...`) |
 | Higher-order `listMap` (functions as values) | — | unsupported — `ys = listMap double xs` is silently dropped by frozen codegen; use a recursive user-defined `mapList` instead (see example 44) |
-| I/O (`read_line`, `read_file`) | — | runtime stubs only |
+| I/O (`read_line`) | — | runtime stub only |
 | GC | — | stubbed (raw `malloc`) |
 
 ## Components

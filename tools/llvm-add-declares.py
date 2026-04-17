@@ -39,6 +39,8 @@ KNOWN_EXTERNALS: Dict[str, Tuple[str, List[str]]] = {
     "read_line":   ("ptr",  []),
     "read_file":   ("ptr",  ["ptr"]),
     "write_file":  ("void", ["ptr", "ptr"]),
+    "readFile":    ("ptr",  ["ptr"]),
+    "writeFile":   ("void", ["ptr", "ptr"]),
     # Strings (camelCase — matches what codegen actually emits)
     "strConcat":   ("ptr",  ["ptr", "ptr"]),
     "strLen":      ("i64",  ["ptr"]),

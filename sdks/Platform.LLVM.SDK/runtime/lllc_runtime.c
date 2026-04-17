@@ -14,6 +14,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <errno.h>
 
 /* ---- Core I/O -------------------------------------------------------- */
 
@@ -102,7 +106,7 @@ char* str_from_int(int64_t n) {
     return intToStr(n);
 }
 
-/* ---- I/O stubs (MVP: not wired, return empty) ----------------------- */
+/* ---- I/O ------------------------------------------------------------- */
 
 char* read_line(void) {
     char* empty = (char*)malloc(1);
@@ -110,16 +114,82 @@ char* read_line(void) {
     return empty;
 }
 
-char* read_file(const char* path) {
-    (void)path;
-    char* empty = (char*)malloc(1);
-    if (empty) empty[0] = '\0';
-    return empty;
+/* readFile: slurp an entire file into a freshly-malloc'd null-terminated
+ * buffer. On any error (missing file, permission denied, read failure)
+ * returns an empty string rather than crashing — matches the MVP
+ * "no exceptions" contract. Trailing newlines are preserved verbatim
+ * (callers use `printfn`, which adds its own). */
+static char* empty_string(void) {
+    char* out = (char*)malloc(1);
+    if (out) out[0] = '\0';
+    return out;
 }
 
+char* readFile(const char* path) {
+    if (path == NULL) return empty_string();
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return empty_string();
+
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+        close(fd);
+        return empty_string();
+    }
+
+    size_t size = (size_t)st.st_size;
+    char* buf = (char*)malloc(size + 1);
+    if (buf == NULL) {
+        close(fd);
+        return empty_string();
+    }
+
+    size_t total = 0;
+    while (total < size) {
+        ssize_t n = read(fd, buf + total, size - total);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            free(buf);
+            close(fd);
+            return empty_string();
+        }
+        if (n == 0) break; /* short file; treat as EOF */
+        total += (size_t)n;
+    }
+    close(fd);
+    buf[total] = '\0';
+    return buf;
+}
+
+/* read_file: snake_case alias used by the Runtime.lll FFI mapping. */
+char* read_file(const char* path) {
+    return readFile(path);
+}
+
+/* writeFile: create/truncate `path` and write `content` (null-terminated).
+ * Returns nothing useful; errors are silently swallowed to match the MVP
+ * contract. Caller can `readFile` back to verify. */
+void writeFile(const char* path, const char* content) {
+    if (path == NULL) return;
+    if (content == NULL) content = "";
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return;
+
+    size_t len = strlen(content);
+    size_t total = 0;
+    while (total < len) {
+        ssize_t n = write(fd, content + total, len - total);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        total += (size_t)n;
+    }
+    close(fd);
+}
+
+/* write_file: snake_case alias used by the Runtime.lll FFI mapping. */
 void write_file(const char* path, const char* content) {
-    (void)path;
-    (void)content;
+    writeFile(path, content);
 }
 
 /* ---- Memory management stubs ---------------------------------------- */
