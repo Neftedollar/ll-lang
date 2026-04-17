@@ -1,0 +1,68 @@
+module Platform.LLVM.Prelude
+
+-- Runtime prelude for ll-lang programs compiled to LLVM.
+-- Provides high-level wrappers around the low-level C runtime externals.
+-- ll-lang programs import this module to get the standard vocabulary:
+--   printfn, intToStr, strConcat, strLen, etc.
+
+-- ---- External runtime bindings -----------------------------------------------
+
+external print_str(s Str) Unit
+external int_to_str(n Int) Str
+external str_concat(a Str)(b Str) Str
+external str_len(s Str) Int
+external str_eq(a Str)(b Str) Bool
+external str_from_int(n Int) Str
+external print_int(n Int) Unit
+
+-- ---- Prelude functions -------------------------------------------------------
+
+-- Print a string followed by a newline.
+export printfn(s Str) =
+  _ = print_str s
+  print_str "\n"
+
+-- Convert an integer to its string representation.
+export intToStr(n Int) Str =
+  int_to_str n
+
+-- Concatenate two strings.
+export strConcat(a Str)(b Str) Str =
+  str_concat a b
+
+-- Return the length of a string.
+export strLen(s Str) Int =
+  str_len s
+
+-- Compare two strings for equality.
+export strEq(a Str)(b Str) Bool =
+  str_eq a b
+
+-- ---- Self-tests --------------------------------------------------------------
+
+check(label Str)(ok Bool) =
+  if ok
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " label)
+
+main() =
+  -- 1. strLen on empty string
+  _ = check "1 strLen empty" (strLen "" == 0)
+
+  -- 2. strLen on non-empty
+  _ = check "2 strLen hello" (strLen "hello" == 5)
+
+  -- 3. strConcat
+  _ = check "3 strConcat" (strConcat "ab" "cd" == "abcd")
+
+  -- 4. intToStr
+  _ = check "4 intToStr 42" (intToStr 42 == "42")
+
+  -- 5. strEq true
+  _ = check "5 strEq same" (strEq "abc" "abc")
+
+  -- 6. strEq false
+  _ = check "6 strEq diff" (strEq "abc" "xyz" == false)
+
+  printfn "Done"
