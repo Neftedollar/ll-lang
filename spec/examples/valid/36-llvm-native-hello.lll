@@ -1,0 +1,3 @@
+module LlvmHello
+
+main() = printfn "Hello from native binary!"
