@@ -59,36 +59,6 @@ let private fsharpExternalTargetMap : Map<string, string> =
     [
         "console_log", "System.Console.WriteLine"
         "JSON_parse", "System.Text.Json.JsonSerializer.Deserialize<obj>"
-        // String operations (LLVM runtime stubs mapped to F# builtins)
-        "str_concat", "LLLangRuntime.str_concat"
-        "str_len", "LLLangRuntime.str_len"
-        "str_eq", "LLLangRuntime.str_eq"
-        "str_from_int", "LLLangRuntime.str_from_int"
-        "int_to_str", "LLLangRuntime.int_to_str"
-        // I/O
-        "print_str", "LLLangRuntime.print_str"
-        "print_int", "LLLangRuntime.print_int"
-        "read_line", "LLLangRuntime.read_line"
-        "read_file", "LLLangRuntime.read_file"
-        "write_file", "LLLangRuntime.write_file"
-        // Memory
-        "malloc", "LLLangRuntime.malloc"
-        "free", "LLLangRuntime.free"
-        "gc_alloc", "LLLangRuntime.gc_alloc"
-        "gc_collect", "LLLangRuntime.gc_collect"
-        // ADT support
-        "adt_alloc", "LLLangRuntime.adt_alloc"
-        "adt_tag", "LLLangRuntime.adt_tag"
-        "adt_field", "LLLangRuntime.adt_field"
-        // List support
-        "list_nil", "LLLangRuntime.list_nil"
-        "list_cons", "LLLangRuntime.list_cons"
-        "list_head", "LLLangRuntime.list_head"
-        "list_tail", "LLLangRuntime.list_tail"
-        "list_is_empty", "LLLangRuntime.list_is_empty"
-        // File I/O externals (from examples)
-        "fileReadAll", "System.IO.File.ReadAllText"
-        "fileExists", "System.IO.File.Exists"
     ]
     |> Map.ofList
 
@@ -122,38 +92,8 @@ let private csharpExternalTargetMap : Map<string, string> =
 
 let private llvmExternalTargetMap : Map<string, string> =
     [
-        // LLVM backend uses direct symbol declarations — name maps 1:1.
+        // LLVM backend currently uses direct symbol declarations.
         "console_log", "console_log"
-        // String operations
-        "str_concat", "str_concat"
-        "str_len", "str_len"
-        "str_eq", "str_eq"
-        "str_from_int", "str_from_int"
-        "int_to_str", "int_to_str"
-        // I/O
-        "print_str", "print_str"
-        "print_int", "print_int"
-        "read_line", "read_line"
-        "read_file", "read_file"
-        "write_file", "write_file"
-        // Memory
-        "malloc", "malloc"
-        "free", "free"
-        "gc_alloc", "gc_alloc"
-        "gc_collect", "gc_collect"
-        // ADT support
-        "adt_alloc", "adt_alloc"
-        "adt_tag", "adt_tag"
-        "adt_field", "adt_field"
-        // List support
-        "list_nil", "list_nil"
-        "list_cons", "list_cons"
-        "list_head", "list_head"
-        "list_tail", "list_tail"
-        "list_is_empty", "list_is_empty"
-        // File I/O externals (from examples)
-        "fileReadAll", "fileReadAll"
-        "fileExists", "fileExists"
     ]
     |> Map.ofList
 
