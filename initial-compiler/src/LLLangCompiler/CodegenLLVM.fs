@@ -274,6 +274,29 @@ let private LIST_CONS_TAG = -1L
 let mutable private ctorTagMap: Map<string, int64> = Map.empty
 let mutable private nextCtorTag = 1L
 
+// Lifted-lambda accumulator. Each `TELam` node encountered during emission
+// synthesises a fresh top-level function `@__lam_N` (captureless lambda lifting)
+// and pushes its LLVM text into `liftedLambdas`; `emitModule` appends the
+// buffered definitions after the user's own decls. Module-level state mirrors
+// the same pattern used for `ctorTagMap` — simplest thing that composes with
+// the recursive expression emitter without threading through every helper.
+let mutable private liftedLambdas: ResizeArray<string> = ResizeArray<string>()
+let mutable private lambdaCounter = 0
+
+let private resetLambdas () =
+    // Only clear the per-module accumulator here; `lambdaCounter` is kept
+    // monotonic across modules so multi-module project builds never produce
+    // colliding `@__lam_N` symbols when several modules are concatenated.
+    liftedLambdas <- ResizeArray<string>()
+
+let private resetLambdaCounter () =
+    lambdaCounter <- 0
+
+let private freshLambdaName () =
+    let n = lambdaCounter
+    lambdaCounter <- n + 1
+    "__lam_" + string n
+
 let private resetCtorTags () =
     ctorTagMap <- Map.empty
     nextCtorTag <- 1L
@@ -322,6 +345,65 @@ let private emitLoadNodeTail (ctx: EmitCtx) (nodePtr: string) : string =
     let v = freshTmp ctx
     emitInstr ctx (v + " = call ptr @node_tail_safe(ptr " + nodePtr + ")")
     v
+
+/// Collect all names bound by a pattern. Used by free-var analysis to
+/// subtract pattern-introduced locals from the lambda's "outside" refs.
+let rec private patternBinds (p: Pattern) : Set<string> =
+    match p with
+    | PVar x -> Set.singleton x
+    | PWild -> Set.empty
+    | PLit _ -> Set.empty
+    | PCon(_, args) -> args |> List.fold (fun acc a -> Set.union acc (patternBinds a)) Set.empty
+    | PCons(h, t) -> Set.union (patternBinds h) (patternBinds t)
+    | PTuple items -> items |> List.fold (fun acc a -> Set.union acc (patternBinds a)) Set.empty
+
+/// Collect all `TEVar` names referenced in `te` that are NOT shadowed by an
+/// intervening binder inside the expression. The result is the set of names
+/// the lambda body needs from its enclosing scope (locals + globals).
+let private freeVars (te: TypedExpr) : Set<string> =
+    let rec loop (bound: Set<string>) (e: TypedExpr) : Set<string> =
+        match e.Expr with
+        | TELit _ -> Set.empty
+        | TECon _ -> Set.empty
+        | TEVar x ->
+            if Set.contains x bound then Set.empty
+            else Set.singleton x
+        | TEApp(f, a)
+        | TEPipe(f, a)
+        | TECons(f, a) -> Set.union (loop bound f) (loop bound a)
+        | TELam(ps, body) ->
+            let bound2 = ps |> List.fold (fun acc (n, _) -> Set.add n acc) bound
+            loop bound2 body
+        | TELet(x, _, e1, e2opt) ->
+            let s1 = loop bound e1
+            let bound2 = Set.add x bound
+            let s2 =
+                match e2opt with
+                | Some e2 -> loop bound2 e2
+                | None -> Set.empty
+            Set.union s1 s2
+        | TELetPat(tp, e1, e2opt) ->
+            let s1 = loop bound e1
+            let bound2 = Set.union bound (patternBinds tp.Pat)
+            let s2 =
+                match e2opt with
+                | Some e2 -> loop bound2 e2
+                | None -> Set.empty
+            Set.union s1 s2
+        | TEIf(c, t, el) ->
+            Set.unionMany [ loop bound c; loop bound t; loop bound el ]
+        | TEMatch(scrut, branches)
+        | TEMatchOf(scrut, branches) ->
+            let s0 = loop bound scrut
+            branches
+            |> List.fold (fun acc (tp, body) ->
+                let bound2 = Set.union bound (patternBinds tp.Pat)
+                Set.union acc (loop bound2 body)) s0
+        | TETagged(inner, _) -> loop bound inner
+        | TEList items
+        | TETuple items ->
+            items |> List.fold (fun acc a -> Set.union acc (loop bound a)) Set.empty
+    loop Set.empty te
 
 let private emitStringPtr (ctx: EmitCtx) (s: string) : string =
     match Map.tryFind s ctx.StringLits with
@@ -824,6 +906,78 @@ let rec private emitExprValue (ctx: EmitCtx) (te: TypedExpr) : string option =
                     let argTys = args |> List.map (fun a -> emitType a.Type)
                     emitCall ctx wantedTy fnName argTys vals
             | _ -> None
+        | TELam(lamParams, body) ->
+            // Captureless lambda lifting (Strategy A): synthesise a fresh
+            // top-level LLVM function `@__lam_N` and evaluate to its address
+            // as a function pointer (ptr). Works as long as the lambda body
+            // does not reference any SSA-local binding from the enclosing
+            // scope (globals and lambda's own params are fine).
+            //
+            // When a true capture is detected, we currently emit a null
+            // pointer and record a comment — good enough to keep codegen
+            // progressing; call sites of such lambdas will trap at runtime.
+            // Full closure support (Strategy B: struct { fn_ptr, env }) is
+            // future work.
+            let paramNames = lamParams |> List.map fst |> Set.ofList
+            let bodyFree = freeVars body
+            let outsideRefs = Set.difference bodyFree paramNames
+            let captures =
+                outsideRefs
+                |> Set.filter (fun n -> Map.containsKey n ctx.VarEnv)
+            if not (Set.isEmpty captures) then
+                // Document the capture-miss inline so the .ll output is
+                // self-describing during this bring-up.
+                let capList = captures |> Set.toList |> String.concat ","
+                emitInstr ctx ("; NOTE: captureful lambda skipped (free: " + capList + ")")
+                Some "null"
+            else
+                let lamName = freshLambdaName ()
+                let retTy =
+                    match te.Type with
+                    | TyFn(_, r) -> emitType r
+                    | _ -> emitType body.Type
+                let argsSig =
+                    lamParams
+                    |> List.mapi emitParam
+                    |> String.concat ", "
+                let lamVarEnv =
+                    lamParams
+                    |> List.mapi (fun i (n, t) -> (n, (emitType t, "%arg" + string i)))
+                    |> Map.ofList
+                let lamCtx = {
+                    TempCounter = 0
+                    LabelCounter = 0
+                    Instructions = ResizeArray<string>()
+                    VarEnv = lamVarEnv
+                    StringLits = ctx.StringLits
+                    NeedsRuntime = false
+                    NullaryGlobals = ctx.NullaryGlobals
+                }
+                let bodyVal = emitExprValue lamCtx body
+                let instrBlock =
+                    if lamCtx.Instructions.Count = 0 then ""
+                    else "\n" + String.concat "\n" lamCtx.Instructions
+                let defText =
+                    if retTy = "void" then
+                        "define void @" + lamName + "(" + argsSig + ") {\n" +
+                        "entry:" + instrBlock + "\n" +
+                        "  ret void\n" +
+                        "}"
+                    else
+                        let retValue =
+                            match bodyVal with
+                            | Some v -> coerceValue lamCtx (emitType body.Type) retTy v
+                            | None -> defaultValue body.Type
+                        let instrBlock2 =
+                            if lamCtx.Instructions.Count = 0 then ""
+                            else "\n" + String.concat "\n" lamCtx.Instructions
+                        "define " + retTy + " @" + lamName + "(" + argsSig + ") {\n" +
+                        "entry:" + instrBlock2 + "\n" +
+                        "  ret " + retTy + " " + retValue + "\n" +
+                        "}"
+                liftedLambdas.Add(defText)
+                if lamCtx.NeedsRuntime then ctx.NeedsRuntime <- true
+                Some ("@" + lamName)
         | _ -> None
 
 let private emitCastToMainI32 (ctx: EmitCtx) (bodyTy: string) (value: string) : string =
@@ -1078,6 +1232,7 @@ let private collectNullaryGlobals (tm: TypedModule) : Set<string> =
 
 let private emitModule (tm: TypedModule) =
     resetCtorTags ()
+    resetLambdas ()
     let (stringPool, stringDecls) = buildStringPool tm
     let nullaryGlobals = collectNullaryGlobals tm
     let declBodies =
@@ -1096,11 +1251,17 @@ let private emitModule (tm: TypedModule) =
     let runtime =
         if needsRuntime then emitRuntimeBlock () + "\n"
         else ""
+    // Lifted lambdas are defined after the user decls — they may reference
+    // globals declared above, and callers above them reach them by symbol.
+    let lambdaBlock =
+        if liftedLambdas.Count = 0 then ""
+        else "\n\n" + String.concat "\n\n" (Seq.toList liftedLambdas)
     "; Generated by lllc (ll-lang LLVM backend)\n" +
     "; Module: " + moduleName tm.Path + "\n\n" +
-    stringBlock + runtime + body + "\n"
+    stringBlock + runtime + body + lambdaBlock + "\n"
 
 let emit (tm: TypedModule) : string =
+    resetLambdaCounter ()
     emitModule tm
 
 let private isMainFn (sig_: TypedFnSig) =
@@ -1161,6 +1322,28 @@ let private parseArgTypes (args: string) : string =
         |> Array.filter (fun x -> x <> "")
         |> String.concat ", "
 
+// Canonical runtime-primitive signatures. When the emitted .ll uses one of
+// these names, prependExternalDecls forces the declare to match the runtime's
+// C ABI, ignoring what the call-site types look like. This is required for
+// higher-order primitives whose call sites vary by lambda signature (e.g.
+// listFold is called as `i1 @listFold(ptr, i1, ptr)` in one place and
+// `ptr @listFold(ptr, ptr, ptr)` in another — the linker sees only ONE
+// C symbol, so the declare must match that C function's actual signature
+// or else clang rejects the redefinition/LTO breaks at runtime ABI).
+let private runtimeExternalSigs : Map<string, string * string> =
+    Map.ofList [
+        "listFold",   ("i64", "ptr, i64, ptr")
+        "listFilter", ("ptr", "ptr, ptr")
+        "listMap",    ("ptr", "ptr, ptr")
+        "listHead",   ("ptr", "ptr")
+        "listTail",   ("ptr", "ptr")
+        "listReverse",("ptr", "ptr")
+        "listAppend", ("ptr", "ptr, ptr")
+        "listConcat", ("ptr", "ptr")
+        "listLen",    ("i64", "ptr")
+        "listIsEmpty",("i1",  "ptr")
+    ]
+
 let private prependExternalDecls (llvmText: string) : string =
     let lines = llvmText.Split('\n')
     let known =
@@ -1196,11 +1379,15 @@ let private prependExternalDecls (llvmText: string) : string =
             calls
             |> Map.toList
             |> List.map (fun (name, (retTy, argTys)) ->
-                "declare " + retTy + " @" + name + "(" + argTys + ")")
+                // Override with canonical ABI if this name is a runtime primitive.
+                match Map.tryFind name runtimeExternalSigs with
+                | Some (r, a) -> "declare " + r + " @" + name + "(" + a + ")"
+                | None -> "declare " + retTy + " @" + name + "(" + argTys + ")")
             |> String.concat "\n"
         decls + "\n\n" + llvmText
 
 let emitProjectModules (tms: TypedModule list) : string =
+    resetLambdaCounter ()
     match tms with
     | [] -> ""
     | [_] -> tms |> List.map emitModule |> String.concat "\n"

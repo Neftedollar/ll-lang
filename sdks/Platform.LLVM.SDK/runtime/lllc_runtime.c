@@ -454,6 +454,52 @@ ll_node_t* listMap(int64_t (*fn)(int64_t), ll_node_t* lst) {
     return listReverse(acc);
 }
 
+/* listFold: left fold. fn :: (acc, elem) -> acc.
+ * Called as `listFold fn initial list`. We pass acc and payload both as
+ * i64 (pointer-pun via listFold's caller contract).
+ *
+ * NB: This signature assumes `fn` has direct two-arg uncurried calling
+ * convention. The frozen F# codegen (Codegen.fs) is currently curried,
+ * but the LLVM codegen uncurries fully, so `(\acc x. ...)` becomes
+ * `i64 (int64_t, int64_t)`. Runtime treats the fn_ptr as opaque and
+ * trusts the caller's signature. */
+int64_t listFold(int64_t (*fn)(int64_t, int64_t), int64_t z, ll_node_t* lst) {
+    int64_t acc = z;
+    while (lst != NULL) {
+        acc = fn(acc, lst->payload);
+        lst = lst->tail;
+    }
+    return acc;
+}
+
+/* listFilter: keep elements where `fn` returns non-zero.
+ * fn :: elem -> Bool (i1 returned as int8_t for ABI clarity). */
+ll_node_t* listFilter(int8_t (*fn)(int64_t), ll_node_t* lst) {
+    ll_node_t* acc = NULL;
+    while (lst != NULL) {
+        if (fn(lst->payload)) {
+            acc = ll_cons(lst->payload, acc);
+        }
+        lst = lst->tail;
+    }
+    return listReverse(acc);
+}
+
+/* listHead: unchecked — return payload of first node as i64. On null list
+ * returns 0 to avoid segfault; callers should guard with a match first.
+ * Result type is ptr in LLVM (caller bitcasts as needed); we use i64 in
+ * the declaration for the payload universal type. */
+int64_t listHead(ll_node_t* lst) {
+    if (lst == NULL) return 0;
+    return lst->payload;
+}
+
+/* listTail: unchecked — return tail pointer. On null returns null. */
+ll_node_t* listTail(ll_node_t* lst) {
+    if (lst == NULL) return NULL;
+    return lst->tail;
+}
+
 /* String helpers --------------------------------------------------------- */
 
 /* strChars: string -> List[Char]. Each char zext to i64 as payload. */
