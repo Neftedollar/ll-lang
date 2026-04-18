@@ -2,11 +2,18 @@ module Std.CodegenLLVM
 
 import Std.Parser
 import Std.Maybe
+import Std.CompilerTypes
+import Std.CompilerTyped
 
 -- LLVM IR code emitter written in ll-lang.
 -- Takes the AST produced by Std.Parser and emits LLVM IR text format (.ll).
 -- Uses SSA numbering for unique register names.
--- Each emit family (Instrs/Reg/NextCtr/NextSidx/Globs) threads state explicitly.
+--
+-- Phase 1 refactor (#149):
+--   - Single EmitState record threads temp counter + string index
+--   - Single emitExpr(state)(expr) walk replaces 4-way duplicated Instrs/Reg/NextCtr/NextSidx walks
+--   - TypedExpr dispatch via emitTypedExpr coexists with the untyped Expr path
+--   - emitType extended for TyApp List/Maybe and TyFn -> ptr
 
 -- ---- String helpers --------------------------------------------------------
 
@@ -24,7 +31,62 @@ strJoin2(a Str)(b Str) =
       a
     else strConcat a (strConcat "\n" b)
 
+-- ---- EmitState -------------------------------------------------------------
+-- Phase 1 shape: just temp counter and string-literal index. Future phases
+-- extend with: env, lambda counter, lambda defs, declared externs, etc.
+
+EmitState = MkEmitState Int Int   -- tempCtr, strIdx
+
+esTempCtr(st EmitState) =
+  match st
+    | MkEmitState c _ -> c
+
+esStrIdx(st EmitState) =
+  match st
+    | MkEmitState _ s -> s
+
+-- Allocate a fresh SSA register: bumps tempCtr and returns (regName, newState).
+esFresh(st EmitState) =
+  match st
+    | MkEmitState c s ->
+      let reg = strConcat "%t" (intToStr (c + 1))
+      (reg, MkEmitState (c + 1) s)
+
+-- Allocate the next string-literal index: returns (idx, newState) where idx
+-- is the current index before allocation.
+esNextStr(st EmitState) =
+  match st
+    | MkEmitState c s -> (s, MkEmitState c (s + 1))
+
+-- Build a fresh initial state.
+emitStateInit = MkEmitState 0 0
+
+-- ---- Emit result -----------------------------------------------------------
+-- The canonical return shape for emitExpr / emitTypedExpr. Carries:
+--   - the updated EmitState (so callers thread it forward),
+--   - the instruction block for the expression (may be empty),
+--   - the register / value string that holds the expression's result.
+
+EmitExprResult = MkEER EmitState Str Str
+
+eerState(r EmitExprResult) =
+  match r
+    | MkEER s _ _ -> s
+
+eerInstrs(r EmitExprResult) =
+  match r
+    | MkEER _ i _ -> i
+
+eerReg(r EmitExprResult) =
+  match r
+    | MkEER _ _ v -> v
+
 -- ---- Type emission ---------------------------------------------------------
+-- Phase 1 extensions:
+--   - TyApp (TyName "List") _  -> "ptr"
+--   - TyApp (TyName "Maybe") _ -> "ptr"
+--   - TyFn _ _                 -> "ptr"
+--   - TyName "Str"             -> "ptr"  (was "i8*")
 
 emitLLVMType(t TypeExpr) =
   match t
@@ -32,11 +94,13 @@ emitLLVMType(t TypeExpr) =
     | TyName "Float" -> "double"
     | TyName "Bool"  -> "i1"
     | TyName "Char"  -> "i8"
-    | TyName "Str"   -> "i8*"
+    | TyName "Str"   -> "ptr"
     | TyName "Unit"  -> "void"
     | TyName _       -> "i64"
-    | TyApp _ _      -> "%struct.List*"
-    | TyFn _ _       -> "i8*"
+    | TyApp (TyName "List") _  -> "ptr"
+    | TyApp (TyName "Maybe") _ -> "ptr"
+    | TyApp _ _                -> "ptr"
+    | TyFn _ _                 -> "ptr"
 
 -- ---- SSA name helper -------------------------------------------------------
 
@@ -62,6 +126,13 @@ strGlobalDecl(idx Int)(s Str) =
   len = intToStr (strLen s + 1)
   idxStr = intToStr idx
   strConcat "@.str." (strConcat idxStr (strConcat " = private unnamed_addr constant [" (strConcat len (strConcat " x i8] c\"" (strConcat encoded "\\00\"")))))
+
+-- Materialize a getelementptr expression for string literal @.str.<idx>
+-- given its total byte length (strLen s + 1 for the trailing NUL).
+strGepExpr(idx Int)(totalLen Int) =
+  idxStr = intToStr idx
+  lenStr = intToStr totalLen
+  strConcat "getelementptr inbounds ([" (strConcat lenStr (strConcat " x i8], [" (strConcat lenStr (strConcat " x i8]* @.str." (strConcat idxStr ", i64 0, i64 0")))))
 
 -- ---- Binary op helpers -----------------------------------------------------
 
@@ -135,256 +206,259 @@ extractFnName(e Expr) =
     | EApp f _ -> extractFnName f
     | _ -> "unknown"
 
--- ---- emitExprInstrs --------------------------------------------------------
--- Returns the LLVM IR instructions (not including final ret) for expression e.
+extractTypedFnName(te TypedExpr) =
+  match te
+    | TEVar n _ -> n
+    | TECon n _ -> n
+    | TEApp f _ _ -> extractTypedFnName f
+    | _ -> "unknown"
 
-emitExprInstrs(e Expr)(ctr Int)(sidx Int) =
+-- ---- emitExpr --------------------------------------------------------------
+-- Phase 1: single threaded walk, returns EmitExprResult (state, instrs, reg).
+-- Replaces the 4-way duplicated POC walks
+-- (emitExprInstrs / emitExprReg / emitExprNextCtr / emitExprNextSidx).
+--
+-- Not yet supported (remain in Phase 2+): ELam, EMatch, EList, ETuple, ECons.
+
+emitExpr(state EmitState)(e Expr) =
   match e
-    | EInt _  -> ""
-    | EFloat _ -> ""
-    | EBool _ -> ""
-    | EChar _ -> ""
-    | EStr s  -> strGlobalDecl sidx s
-    | EVar _  -> ""
-    | ECon _  -> ""
-    | ENil    -> ""
+    | EInt n  -> MkEER state "" (intToStr n)
+    | EFloat s -> MkEER state "" s
+    | EBool b ->
+      reg =
+        if b
+          "1"
+        else "0"
+      MkEER state "" reg
+    | EChar c -> MkEER state "" (intToStr (charToInt c))
+    | EStr s ->
+      let (idx, st2) = esNextStr state
+      totalLen = strLen s + 1
+      decl = strGlobalDecl idx s
+      gep = strGepExpr idx totalLen
+      MkEER st2 decl gep
+    | EVar n  -> MkEER state "" (strConcat "%" n)
+    | ECon _  -> MkEER state "" "0"
+    | ENil    -> MkEER state "" "null"
     | EBinOp op l r ->
-      li = emitExprInstrs l ctr sidx
-      lc = emitExprNextCtr l ctr sidx
-      ls = emitExprNextSidx l ctr sidx
-      ri = emitExprInstrs r lc ls
-      rc = emitExprNextCtr r lc ls
-      lreg = emitExprReg l ctr sidx
-      rreg = emitExprReg r lc ls
-      dst = ssaName rc
+      lr = emitExpr state l
+      rr = emitExpr (eerState lr) r
+      let (dst, st2) = esFresh (eerState rr)
+      lreg = eerReg lr
+      rreg = eerReg rr
       instrBody =
         if isCmpOp op
           strConcat (llvmCmpOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
         else
           strConcat (llvmIntOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
       instr = strConcat "  " (strConcat dst (strConcat " = " instrBody))
-      prefix = strJoin2 li ri
-      if strLen prefix == 0
-        instr
-      else strConcat prefix (strConcat "\n" instr)
+      prefix = strJoin2 (eerInstrs lr) (eerInstrs rr)
+      all =
+        if strLen prefix == 0
+          instr
+        else strConcat prefix (strConcat "\n" instr)
+      MkEER st2 all dst
     | EIf cond thenE elseE ->
-      ci = emitExprInstrs cond ctr sidx
-      cc = emitExprNextCtr cond ctr sidx
-      cs = emitExprNextSidx cond ctr sidx
-      creg = emitExprReg cond ctr sidx
-      thenLbl = strConcat "then" (intToStr cc)
-      elseLbl = strConcat "else" (intToStr cc)
-      mergeLbl = strConcat "merge" (intToStr cc)
+      cr = emitExpr state cond
+      -- Labels use the temp counter at the branch point for uniqueness.
+      labelN = esTempCtr (eerState cr)
+      thenLbl = strConcat "then" (intToStr labelN)
+      elseLbl = strConcat "else" (intToStr labelN)
+      mergeLbl = strConcat "merge" (intToStr labelN)
+      creg = eerReg cr
       brInstr = strConcat "  br i1 " (strConcat creg (strConcat ", label %" (strConcat thenLbl (strConcat ", label %" elseLbl))))
-      tc1 = cc + 1
-      ti = emitExprInstrs thenE tc1 cs
-      tc = emitExprNextCtr thenE tc1 cs
-      ts = emitExprNextSidx thenE tc1 cs
-      treg = emitExprReg thenE tc1 cs
+      -- Bump counter once before descending into the branches so the phi
+      -- destination doesn't collide with intermediate regs.
+      let (_, stAfterBr) = esFresh (eerState cr)
+      tr = emitExpr stAfterBr thenE
       thenBodyPre =
-        if strLen ti == 0
+        if strLen (eerInstrs tr) == 0
           ""
-        else strConcat ti "\n"
+        else strConcat (eerInstrs tr) "\n"
       thenBlock = strConcat thenLbl (strConcat ":\n" (strConcat thenBodyPre (strConcat "  br label %" mergeLbl)))
-      ec1 = tc + 1
-      ei = emitExprInstrs elseE ec1 ts
-      ec = emitExprNextCtr elseE ec1 ts
-      ereg = emitExprReg elseE ec1 ts
+      let (_, stAfterThen) = esFresh (eerState tr)
+      er = emitExpr stAfterThen elseE
       elseBodyPre =
-        if strLen ei == 0
+        if strLen (eerInstrs er) == 0
           ""
-        else strConcat ei "\n"
+        else strConcat (eerInstrs er) "\n"
       elseBlock = strConcat elseLbl (strConcat ":\n" (strConcat elseBodyPre (strConcat "  br label %" mergeLbl)))
-      dst = ssaName ec
+      let (dst, stPhi) = esFresh (eerState er)
+      treg = eerReg tr
+      ereg = eerReg er
       phiParts = strConcat treg (strConcat ", %" (strConcat thenLbl (strConcat "], [" (strConcat ereg (strConcat ", %" (strConcat elseLbl "]"))))))
       phiInstr = strConcat "  " (strConcat dst (strConcat " = phi i64 [" phiParts))
       mergeBlock = strConcat mergeLbl (strConcat ":\n" phiInstr)
       condPart =
-        if strLen ci == 0
+        if strLen (eerInstrs cr) == 0
           brInstr
-        else strConcat ci (strConcat "\n" brInstr)
-      strConcat condPart (strConcat "\n" (strConcat thenBlock (strConcat "\n" (strConcat elseBlock (strConcat "\n" mergeBlock)))))
-    | ELet name valE bodyE ->
-      vi = emitExprInstrs valE ctr sidx
-      vc = emitExprNextCtr valE ctr sidx
-      vs = emitExprNextSidx valE ctr sidx
-      vreg = emitExprReg valE ctr sidx
-      dst = ssaName vc
-      aliasInstr = strConcat "  " (strConcat dst (strConcat " = add i64 " (strConcat vreg ", 0")))
-      bi = emitExprInstrs bodyE (vc + 1) vs
+        else strConcat (eerInstrs cr) (strConcat "\n" brInstr)
+      all = strConcat condPart (strConcat "\n" (strConcat thenBlock (strConcat "\n" (strConcat elseBlock (strConcat "\n" mergeBlock)))))
+      MkEER stPhi all dst
+    | ELet _ valE bodyE ->
+      vr = emitExpr state valE
+      let (dst, st2) = esFresh (eerState vr)
+      aliasInstr = strConcat "  " (strConcat dst (strConcat " = add i64 " (strConcat (eerReg vr) ", 0")))
+      br = emitExpr st2 bodyE
       viAlias =
-        if strLen vi == 0
+        if strLen (eerInstrs vr) == 0
           aliasInstr
-        else strConcat vi (strConcat "\n" aliasInstr)
-      if strLen bi == 0
-        viAlias
-      else strConcat viAlias (strConcat "\n" bi)
+        else strConcat (eerInstrs vr) (strConcat "\n" aliasInstr)
+      all =
+        if strLen (eerInstrs br) == 0
+          viAlias
+        else strConcat viAlias (strConcat "\n" (eerInstrs br))
+      MkEER (eerState br) all (eerReg br)
     | EApp f a ->
-      fi = emitExprInstrs f ctr sidx
-      fc = emitExprNextCtr f ctr sidx
-      fs = emitExprNextSidx f ctr sidx
-      ai = emitExprInstrs a fc fs
-      ac = emitExprNextCtr a fc fs
-      areg = emitExprReg a fc fs
+      fr = emitExpr state f
+      ar = emitExpr (eerState fr) a
+      let (dst, st2) = esFresh (eerState ar)
       fnName = extractFnName f
-      dst = ssaName ac
+      areg = eerReg ar
       callInstr = strConcat "  " (strConcat dst (strConcat " = call i64 @" (strConcat fnName (strConcat "(i64 " (strConcat areg ")")))))
-      prefix = strJoin2 fi ai
-      if strLen prefix == 0
-        callInstr
-      else strConcat prefix (strConcat "\n" callInstr)
-    | _ -> ""
+      prefix = strJoin2 (eerInstrs fr) (eerInstrs ar)
+      all =
+        if strLen prefix == 0
+          callInstr
+        else strConcat prefix (strConcat "\n" callInstr)
+      MkEER st2 all dst
+    | _ -> MkEER state "" "0"
 
--- ---- emitExprReg -----------------------------------------------------------
--- Returns the LLVM register or value that holds the result of expression e.
+-- ---- emitTypedExpr ---------------------------------------------------------
+-- Mirrors emitExpr but consumes typed IR from Compiler.Infer. Phase 1 scope:
+-- literals, vars, cons, if, let, binop, app — same subset as emitExpr.
+-- Lambdas / match / list / tuple / cons will be handled in Phase 2+.
 
-emitExprReg(e Expr)(ctr Int)(sidx Int) =
-  match e
-    | EInt n  -> intToStr n
-    | EFloat s -> s
-    | EBool b ->
-      if b
-        "1"
-      else "0"
-    | EChar c -> intToStr (charToInt c)
-    | EStr _  ->
-      idxStr = intToStr sidx
-      sv = getStrVal e
-      lenStr = intToStr (strLen sv + 1)
-      strConcat "getelementptr inbounds ([" (strConcat lenStr (strConcat " x i8], [" (strConcat lenStr (strConcat " x i8]* @.str." (strConcat idxStr ", i64 0, i64 0")))))
-    | EVar n  -> strConcat "%" n
-    | ECon _  -> "0"
-    | ENil    -> "null"
-    | EBinOp op l r ->
-      lc = emitExprNextCtr l ctr sidx
-      ls = emitExprNextSidx l ctr sidx
-      rc = emitExprNextCtr r lc ls
-      ssaName rc
-    | EIf cond thenE elseE ->
-      cc = emitExprNextCtr cond ctr sidx
-      cs = emitExprNextSidx cond ctr sidx
-      tc1 = cc + 1
-      tc = emitExprNextCtr thenE tc1 cs
-      ts = emitExprNextSidx thenE tc1 cs
-      ec1 = tc + 1
-      ec = emitExprNextCtr elseE ec1 ts
-      ssaName ec
-    | ELet name valE bodyE ->
-      vc = emitExprNextCtr valE ctr sidx
-      vs = emitExprNextSidx valE ctr sidx
-      emitExprReg bodyE (vc + 1) vs
-    | EApp f a ->
-      fc = emitExprNextCtr f ctr sidx
-      fs = emitExprNextSidx f ctr sidx
-      ac = emitExprNextCtr a fc fs
-      ssaName ac
-    | _ -> "0"
-
--- ---- emitExprNextCtr -------------------------------------------------------
-
-emitExprNextCtr(e Expr)(ctr Int)(sidx Int) =
-  match e
-    | EInt _  -> ctr
-    | EFloat _ -> ctr
-    | EBool _ -> ctr
-    | EChar _ -> ctr
-    | EStr _  -> ctr
-    | EVar _  -> ctr
-    | ECon _  -> ctr
-    | ENil    -> ctr
-    | EBinOp op l r ->
-      lc = emitExprNextCtr l ctr sidx
-      ls = emitExprNextSidx l ctr sidx
-      rc = emitExprNextCtr r lc ls
-      rc + 1
-    | EIf cond thenE elseE ->
-      cc = emitExprNextCtr cond ctr sidx
-      cs = emitExprNextSidx cond ctr sidx
-      tc1 = cc + 1
-      tc = emitExprNextCtr thenE tc1 cs
-      ts = emitExprNextSidx thenE tc1 cs
-      ec1 = tc + 1
-      ec = emitExprNextCtr elseE ec1 ts
-      ec + 1
-    | ELet name valE bodyE ->
-      vc = emitExprNextCtr valE ctr sidx
-      vs = emitExprNextSidx valE ctr sidx
-      emitExprNextCtr bodyE (vc + 1) vs
-    | EApp f a ->
-      fc = emitExprNextCtr f ctr sidx
-      fs = emitExprNextSidx f ctr sidx
-      ac = emitExprNextCtr a fc fs
-      ac + 1
-    | _ -> ctr
-
--- ---- emitExprNextSidx ------------------------------------------------------
-
-emitExprNextSidx(e Expr)(ctr Int)(sidx Int) =
-  match e
-    | EInt _  -> sidx
-    | EFloat _ -> sidx
-    | EBool _ -> sidx
-    | EChar _ -> sidx
-    | EStr _  -> sidx + 1
-    | EVar _  -> sidx
-    | ECon _  -> sidx
-    | ENil    -> sidx
-    | EBinOp op l r ->
-      lc = emitExprNextCtr l ctr sidx
-      ls = emitExprNextSidx l ctr sidx
-      emitExprNextSidx r lc ls
-    | EIf cond thenE elseE ->
-      cc = emitExprNextCtr cond ctr sidx
-      cs = emitExprNextSidx cond ctr sidx
-      tc1 = cc + 1
-      tc = emitExprNextCtr thenE tc1 cs
-      ts = emitExprNextSidx thenE tc1 cs
-      ec1 = tc + 1
-      emitExprNextSidx elseE ec1 ts
-    | ELet name valE bodyE ->
-      vc = emitExprNextCtr valE ctr sidx
-      vs = emitExprNextSidx valE ctr sidx
-      emitExprNextSidx bodyE (vc + 1) vs
-    | EApp f a ->
-      fc = emitExprNextCtr f ctr sidx
-      fs = emitExprNextSidx f ctr sidx
-      emitExprNextSidx a fc fs
-    | _ -> sidx
+emitTypedExpr(state EmitState)(te TypedExpr) =
+  match te
+    | TEInt n _  -> MkEER state "" (intToStr n)
+    | TEFloat s _ -> MkEER state "" s
+    | TEBool b _ ->
+      reg =
+        if b
+          "1"
+        else "0"
+      MkEER state "" reg
+    | TEChar c _ -> MkEER state "" (intToStr (charToInt c))
+    | TEStr s _ ->
+      let (idx, st2) = esNextStr state
+      totalLen = strLen s + 1
+      decl = strGlobalDecl idx s
+      gep = strGepExpr idx totalLen
+      MkEER st2 decl gep
+    | TEVar n _ -> MkEER state "" (strConcat "%" n)
+    | TECon _ _ -> MkEER state "" "0"
+    | TENil _   -> MkEER state "" "null"
+    | TEUnit _  -> MkEER state "" "void"
+    | TEBinOp op l r _ ->
+      lr = emitTypedExpr state l
+      rr = emitTypedExpr (eerState lr) r
+      let (dst, st2) = esFresh (eerState rr)
+      lreg = eerReg lr
+      rreg = eerReg rr
+      instrBody =
+        if isCmpOp op
+          strConcat (llvmCmpOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+        else
+          strConcat (llvmIntOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+      instr = strConcat "  " (strConcat dst (strConcat " = " instrBody))
+      prefix = strJoin2 (eerInstrs lr) (eerInstrs rr)
+      all =
+        if strLen prefix == 0
+          instr
+        else strConcat prefix (strConcat "\n" instr)
+      MkEER st2 all dst
+    | TEIf cond thenE elseE _ ->
+      cr = emitTypedExpr state cond
+      labelN = esTempCtr (eerState cr)
+      thenLbl = strConcat "then" (intToStr labelN)
+      elseLbl = strConcat "else" (intToStr labelN)
+      mergeLbl = strConcat "merge" (intToStr labelN)
+      creg = eerReg cr
+      brInstr = strConcat "  br i1 " (strConcat creg (strConcat ", label %" (strConcat thenLbl (strConcat ", label %" elseLbl))))
+      let (_, stAfterBr) = esFresh (eerState cr)
+      tr = emitTypedExpr stAfterBr thenE
+      thenBodyPre =
+        if strLen (eerInstrs tr) == 0
+          ""
+        else strConcat (eerInstrs tr) "\n"
+      thenBlock = strConcat thenLbl (strConcat ":\n" (strConcat thenBodyPre (strConcat "  br label %" mergeLbl)))
+      let (_, stAfterThen) = esFresh (eerState tr)
+      er = emitTypedExpr stAfterThen elseE
+      elseBodyPre =
+        if strLen (eerInstrs er) == 0
+          ""
+        else strConcat (eerInstrs er) "\n"
+      elseBlock = strConcat elseLbl (strConcat ":\n" (strConcat elseBodyPre (strConcat "  br label %" mergeLbl)))
+      let (dst, stPhi) = esFresh (eerState er)
+      treg = eerReg tr
+      ereg = eerReg er
+      phiParts = strConcat treg (strConcat ", %" (strConcat thenLbl (strConcat "], [" (strConcat ereg (strConcat ", %" (strConcat elseLbl "]"))))))
+      phiInstr = strConcat "  " (strConcat dst (strConcat " = phi i64 [" phiParts))
+      mergeBlock = strConcat mergeLbl (strConcat ":\n" phiInstr)
+      condPart =
+        if strLen (eerInstrs cr) == 0
+          brInstr
+        else strConcat (eerInstrs cr) (strConcat "\n" brInstr)
+      all = strConcat condPart (strConcat "\n" (strConcat thenBlock (strConcat "\n" (strConcat elseBlock (strConcat "\n" mergeBlock)))))
+      MkEER stPhi all dst
+    | TeLet _ valE bodyE _ ->
+      vr = emitTypedExpr state valE
+      let (dst, st2) = esFresh (eerState vr)
+      aliasInstr = strConcat "  " (strConcat dst (strConcat " = add i64 " (strConcat (eerReg vr) ", 0")))
+      br = emitTypedExpr st2 bodyE
+      viAlias =
+        if strLen (eerInstrs vr) == 0
+          aliasInstr
+        else strConcat (eerInstrs vr) (strConcat "\n" aliasInstr)
+      all =
+        if strLen (eerInstrs br) == 0
+          viAlias
+        else strConcat viAlias (strConcat "\n" (eerInstrs br))
+      MkEER (eerState br) all (eerReg br)
+    | TEApp f a _ ->
+      fr = emitTypedExpr state f
+      ar = emitTypedExpr (eerState fr) a
+      let (dst, st2) = esFresh (eerState ar)
+      fnName = extractTypedFnName f
+      areg = eerReg ar
+      callInstr = strConcat "  " (strConcat dst (strConcat " = call i64 @" (strConcat fnName (strConcat "(i64 " (strConcat areg ")")))))
+      prefix = strJoin2 (eerInstrs fr) (eerInstrs ar)
+      all =
+        if strLen prefix == 0
+          callInstr
+        else strConcat prefix (strConcat "\n" callInstr)
+      MkEER st2 all dst
+    | _ -> MkEER state "" "0"
 
 -- ---- emitExprGlobs ---------------------------------------------------------
--- Returns all string global declarations needed for expression e.
+-- Walks the expression and accumulates every string-literal global declaration
+-- (@.str.<n> = private unnamed_addr constant [...]). Threads the same
+-- EmitState so indices line up with what emitExpr produced.
 
-emitExprGlobs(e Expr)(ctr Int)(sidx Int) =
+emitExprGlobs(state EmitState)(e Expr) =
   match e
-    | EStr s  -> strGlobalDecl sidx s
-    | EBinOp op l r ->
-      lg = emitExprGlobs l ctr sidx
-      lc = emitExprNextCtr l ctr sidx
-      ls = emitExprNextSidx l ctr sidx
-      rg = emitExprGlobs r lc ls
-      strJoin2 lg rg
+    | EStr s ->
+      let (idx, st2) = esNextStr state
+      (strGlobalDecl idx s, st2)
+    | EBinOp _ l r ->
+      let (lg, st2) = emitExprGlobs state l
+      let (rg, st3) = emitExprGlobs st2 r
+      (strJoin2 lg rg, st3)
     | EIf cond thenE elseE ->
-      cg = emitExprGlobs cond ctr sidx
-      cc = emitExprNextCtr cond ctr sidx
-      cs = emitExprNextSidx cond ctr sidx
-      tg = emitExprGlobs thenE (cc + 1) cs
-      tc = emitExprNextCtr thenE (cc + 1) cs
-      ts = emitExprNextSidx thenE (cc + 1) cs
-      eg = emitExprGlobs elseE (tc + 1) ts
-      strJoin2 cg (strJoin2 tg eg)
-    | ELet name valE bodyE ->
-      vg = emitExprGlobs valE ctr sidx
-      vc = emitExprNextCtr valE ctr sidx
-      vs = emitExprNextSidx valE ctr sidx
-      bg = emitExprGlobs bodyE (vc + 1) vs
-      strJoin2 vg bg
+      let (cg, st2) = emitExprGlobs state cond
+      let (tg, st3) = emitExprGlobs st2 thenE
+      let (eg, st4) = emitExprGlobs st3 elseE
+      (strJoin2 cg (strJoin2 tg eg), st4)
+    | ELet _ valE bodyE ->
+      let (vg, st2) = emitExprGlobs state valE
+      let (bg, st3) = emitExprGlobs st2 bodyE
+      (strJoin2 vg bg, st3)
     | EApp f a ->
-      fg = emitExprGlobs f ctr sidx
-      fc = emitExprNextCtr f ctr sidx
-      fs = emitExprNextSidx f ctr sidx
-      ag = emitExprGlobs a fc fs
-      strJoin2 fg ag
-    | _ -> ""
+      let (fg, st2) = emitExprGlobs state f
+      let (ag, st3) = emitExprGlobs st2 a
+      (strJoin2 fg ag, st3)
+    | _ -> ("", state)
 
 -- ---- Param helpers ---------------------------------------------------------
 
@@ -407,9 +481,11 @@ emitDecl(d Decl)(strIdx Int) =
     | DFn name params retTy body ->
       retType = paramReturnType retTy
       paramStr = emitParams params
-      bodyInstrs = emitExprInstrs body 0 strIdx
-      retReg = emitExprReg body 0 strIdx
-      globs = emitExprGlobs body 0 strIdx
+      initSt = MkEmitState 0 strIdx
+      res = emitExpr initSt body
+      bodyInstrs = eerInstrs res
+      retReg = eerReg res
+      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx) body
       globSection =
         if strLen globs == 0
           ""
@@ -424,9 +500,10 @@ emitDecl(d Decl)(strIdx Int) =
     | DImport parts ->
       strConcat "; import " (joinWith "." parts)
     | DLet name body ->
-      bodyInstrs = emitExprInstrs body 0 strIdx
-      reg = emitExprReg body 0 strIdx
-      globs = emitExprGlobs body 0 strIdx
+      initSt = MkEmitState 0 strIdx
+      res = emitExpr initSt body
+      reg = eerReg res
+      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx) body
       globSection =
         if strLen globs == 0
           ""
@@ -475,4 +552,3 @@ checkContains(label Str)(got Str)(needle Str) =
     printfn (strConcat "FAIL " (strConcat label (strConcat "\n  missing: " (strConcat needle (strConcat "\n  in: " got)))))
 
 -- ---- Tests -----------------------------------------------------------------
-
