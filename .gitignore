@@ -52,3 +52,7 @@ stdlib/src/Compiler.fs
 stdlib/src/Compiler.fsproj
 stdlib/src/Compiler.ts
 stdlib/src/Result.fs
+
+# LLVM SDK build artifacts (produced by tools/lllc-native)
+lllcself/src/*.ll
+lllcself/src/*.patched.ll
