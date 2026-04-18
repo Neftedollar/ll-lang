@@ -269,17 +269,6 @@ let rec private coerceValue (ctx: EmitCtx) (fromTy: string) (toTy: string) (valu
             coerceValue ctx "i64" "double" i64v
         | _, _ -> value
 
-// Runtime higher-order helpers whose first argument is a Closure*. When a
-// caller passes a bare global fn like `listMap emitParam xs`, we wrap
-// `emitParam` into a closure via `@make_closure` before the call site.
-// Captureful lambdas (via TELam) already evaluate to a Closure*.
-let private runtimeHOFNames : Set<string> =
-    Set.ofList [
-        "listFold"; "listMap"; "listFilter"
-        "listAny"; "listAll"; "listFind"
-        "listFindIndex"; "listFindIndexFrom"; "listPartition"
-    ]
-
 // Wrap a function-typed SSA value in a closure struct if it isn't already
 // one. The heuristic: a raw global fn reference looks like `@name`; any
 // other value (e.g. `%t3`) is assumed to already be a Closure* — that is
@@ -1115,16 +1104,18 @@ let rec private emitExprValue (ctx: EmitCtx) (te: TypedExpr) : string option =
                         emitClosureCall ctx wantedTy closurePtr argTys vals
                     | None ->
                         // Before emitting the plain call, wrap any function-
-                        // typed argument in a closure if it isn't already.
-                        // Call convention for HOF runtime helpers: the fn
-                        // argument is a Closure*. If we're passing a top-level
-                        // fn ref like `emitParam`, wrap with `make_closure`.
-                        let isRuntimeHOF = Set.contains fnName runtimeHOFNames
+                        // typed argument that is still a raw global fn ref
+                        // (`@name`) in a Closure struct via `@make_closure`.
+                        // This covers both runtime HOF helpers (listFold/map/…)
+                        // and user-defined HOFs like `apply(f)(x) = f x` —
+                        // the callee always sees a Closure* for fn-typed
+                        // params, so the call-site inside the callee can use
+                        // the uniform `emitClosureCall` dispatch. SSA values
+                        // already holding a Closure* pass through unchanged
+                        // (heuristic: only values starting with `@` get wrapped).
                         let wrappedVals =
-                            if isRuntimeHOF then
-                                List.zip args vals
-                                |> List.map (fun (a, v) -> wrapIfFnRef ctx a v)
-                            else vals
+                            List.zip args vals
+                            |> List.map (fun (a, v) -> wrapIfFnRef ctx a v)
                         emitCall ctx wantedTy fnName argTys wrappedVals
             | _ -> None
         | TELam(lamParams, body) ->
