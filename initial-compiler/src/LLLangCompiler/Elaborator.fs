@@ -154,6 +154,8 @@ let private builtinEnv : TypeEnv =
         // readLine: returns None on EOF, Some line otherwise.
         "readLine",    TyFn(tInt, maybeOf tStr)
         "flushStdout", TyFn(tInt, TyName "Unit")
+        // timeMs: dummy Int arg; returns unix epoch ms. Used by Std.Test timings.
+        "timeMs",      TyFn(tInt, tInt)
     ]
     // Process
     let proc = [

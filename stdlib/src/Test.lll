@@ -154,7 +154,11 @@ assertResultErr(label Str)(r Result[Int][Str]) =
 -- LazyLeaf carries a label and a thunk so that side effects (setup/teardown,
 -- IO-driven assertions) run only when the runner walks the tree. Leaf is
 -- retained for compatibility with any caller that hand-built test results.
-TestNode = Leaf TestResult | Group Str (List[TestNode]) | LazyLeaf Str (Int -> TestResult)
+-- Phase 3:
+--   Skipped — from xtest; reported as SKIP, not counted as pass/fail.
+--   Focused — from ftest; when ANY Focused node exists in the tree, only
+--   Focused nodes run; non-focused LazyLeafs turn into implicit skips.
+TestNode = Leaf TestResult | Group Str (List[TestNode]) | LazyLeaf Str (Int -> TestResult) | Skipped Str | Focused Str (Int -> TestResult)
 
 -- Deferred test. Thunk takes a dummy Int so the body runs only under runAll.
 -- Phase 2: returns LazyLeaf, making the thunk genuinely lazy (the body no
@@ -166,6 +170,18 @@ test(label Str)(thunk Int -> TestResult) =
 
 describe(name Str)(children List[TestNode]) =
   Group name children
+
+-- Phase 3: explicit skip. Body is never run; runner prints SKIP <label> and
+-- the leaf is excluded from pass/fail counts.
+xtest(label Str)(thunk Int -> TestResult) =
+  Skipped label
+
+-- Phase 3: focus this test. If any Focused node exists anywhere in the
+-- suites list passed to runAll, non-focused LazyLeafs are silently skipped
+-- (treated like Skipped in output). If no Focused nodes exist, ftest behaves
+-- just like test.
+ftest(label Str)(thunk Int -> TestResult) =
+  Focused label thunk
 
 -- ---- Phase 2: setup / teardown --------------------------------------------
 --
@@ -203,10 +219,14 @@ afterThunkLazy(action Int -> Int)(thunk Int -> TestResult) =
     result
 
 -- Wrap a single TestNode so `action` runs before its (lazy) body.
+-- Skipped nodes pass through untouched (the action would be misleading since
+-- the body never runs). Focused nodes get the same treatment as LazyLeaf.
 wrapBefore(action Int -> Int)(node TestNode) =
   match node
     | Leaf r -> LazyLeaf "(before+leaf)" (beforeThunkLeaf action r)
     | LazyLeaf label thunk -> LazyLeaf label (beforeThunkLazy action thunk)
+    | Skipped label -> Skipped label
+    | Focused label thunk -> Focused label (beforeThunkLazy action thunk)
     | Group name children -> Group name (listMap (wrapBefore action) children)
 
 -- Wrap a single TestNode so `action` runs after its (lazy) body.
@@ -214,6 +234,8 @@ wrapAfter(action Int -> Int)(node TestNode) =
   match node
     | Leaf r -> LazyLeaf "(leaf+after)" (afterThunkLeaf action r)
     | LazyLeaf label thunk -> LazyLeaf label (afterThunkLazy action thunk)
+    | Skipped label -> Skipped label
+    | Focused label thunk -> Focused label (afterThunkLazy action thunk)
     | Group name children -> Group name (listMap (wrapAfter action) children)
 
 -- Public helpers that operate on a list of TestNodes (the typical argument
@@ -282,47 +304,129 @@ indentStr(depth Int) =
   else
     strConcat "  " (indentStr (depth - 1))
 
--- Render a TestResult with indent; return the new fail count.
-renderResultAt(pad Str)(fails Int)(r TestResult) =
+-- Result of rendering a single leaf. Threading three counters through the
+-- tree is clearer than an Int-triple here.
+-- fails, skips, durationMs (sum); duration is 0 when timeMs unused.
+RunCounts = RunCounts Int Int Int
+
+addFail(c RunCounts) =
+  match c
+    | RunCounts f s d -> RunCounts (f + 1) s d
+
+addSkip(c RunCounts) =
+  match c
+    | RunCounts f s d -> RunCounts f (s + 1) d
+
+-- Render a TestResult with indent; return the new counts.
+renderResultAt(pad Str)(counts RunCounts)(r TestResult) =
   match r
     | Pass label ->
       _ = printfn (strConcat pad (strConcat "OK " label))
-      fails
+      counts
     | Fail msg ->
       _ = printfn (strConcat pad (strConcat "FAIL " msg))
-      fails + 1
+      addFail counts
 
--- Walk a node, printing with depth indentation; return fails-so-far + depth.
--- We thread the running fail count through listFold. LazyLeaf forces its
--- thunk here — this is where beforeEach/afterEach action effects actually
--- fire, in left-to-right test order.
-renderNode(depth Int)(fails Int)(node TestNode) =
+-- Render with a [Xms] timing suffix. Used by focus + lazy paths.
+renderResultTimed(pad Str)(counts RunCounts)(elapsed Int)(r TestResult) =
+  suffix = strConcat " [" (strConcat (intToStr elapsed) "ms]")
+  match r
+    | Pass label ->
+      _ = printfn (strConcat pad (strConcat "OK " (strConcat label suffix)))
+      counts
+    | Fail msg ->
+      _ = printfn (strConcat pad (strConcat "FAIL " (strConcat msg suffix)))
+      addFail counts
+
+-- Detect whether any Focused node exists anywhere in a forest. Used by the
+-- runner to decide whether to activate focus-mode (silently skip everything
+-- that isn't Focused or Skipped).
+hasFocusInNode(node TestNode) =
+  match node
+    | Leaf _ -> false
+    | LazyLeaf _ _ -> false
+    | Skipped _ -> false
+    | Focused _ _ -> true
+    | Group _ children -> hasFocusList children
+
+hasFocusList(nodes List[TestNode]) =
+  listFold
+    (\acc n.
+      if acc
+        true
+      else
+        hasFocusInNode n
+    )
+    false
+    nodes
+
+-- Execute a single thunk, measuring wall time. Returns a pair (elapsedMs, result).
+runTimed(thunk Int -> TestResult) =
+  t0 = timeMs 0
+  r = thunk 0
+  t1 = timeMs 0
+  ((t1 - t0), r)
+
+-- Walk a node, printing with depth indentation; return updated RunCounts.
+-- focusMode: if true, LazyLeafs are silently skipped (they aren't ftest'd);
+-- Focused thunks always run; Skipped always prints SKIP.
+renderNode(focusMode Bool)(depth Int)(counts RunCounts)(node TestNode) =
   pad = indentStr depth
   match node
-    | Leaf r -> renderResultAt pad fails r
-    | LazyLeaf _ thunk -> renderResultAt pad fails (thunk 0)
+    | Leaf r -> renderResultAt pad counts r
+    | LazyLeaf label thunk ->
+      if focusMode
+        -- Non-focused test under focus-mode: skip silently with SKIP line.
+        _ = printfn (strConcat pad (strConcat "SKIP " label))
+        addSkip counts
+      else
+        timed = runTimed thunk
+        match timed
+          | (elapsed, r) -> renderResultTimed pad counts elapsed r
+    | Skipped label ->
+      _ = printfn (strConcat pad (strConcat "SKIP " label))
+      addSkip counts
+    | Focused label thunk ->
+      timed = runTimed thunk
+      match timed
+        | (elapsed, r) ->
+          suffix = strConcat " [" (strConcat (intToStr elapsed) "ms]")
+          match r
+            | Pass _ ->
+              _ = printfn (strConcat pad (strConcat "FOCUS " (strConcat label suffix)))
+              counts
+            | Fail msg ->
+              _ = printfn (strConcat pad (strConcat "FOCUS-FAIL " (strConcat msg suffix)))
+              addFail counts
     | Group name children ->
       _ = printfn (strConcat pad (strConcat "describe \"" (strConcat name "\"")))
       listFold
-        (\f child. renderNode (depth + 1) f child)
-        fails
+        (\c child. renderNode focusMode (depth + 1) c child)
+        counts
         children
 
 runAll(suites List[TestNode]) =
-  failCount = listFold (\f node. renderNode 0 f node) 0 suites
+  focusMode = hasFocusList suites
+  zero = RunCounts 0 0 0
+  finalCounts = listFold (\c node. renderNode focusMode 0 c node) zero suites
   total = countLeaves suites 0
-  passCount = total - failCount
-  summary = strConcat "Total: " (strConcat (intToStr passCount) (strConcat " passed, " (strConcat (intToStr failCount) " failed")))
-  _ = printfn summary
-  failCount
+  match finalCounts
+    | RunCounts failCount skipCount _ ->
+      passCount = total - failCount - skipCount
+      summary = strConcat "Total: " (strConcat (intToStr passCount) (strConcat " passed, " (strConcat (intToStr failCount) (strConcat " failed, " (strConcat (intToStr skipCount) " skipped")))))
+      _ = printfn summary
+      failCount
 
--- Count Leaf + LazyLeaf nodes across the forest (for the summary line).
+-- Count all leaf-like nodes across the forest (for the summary line).
+-- Leaf + LazyLeaf + Skipped + Focused each count as one test.
 countLeaves(nodes List[TestNode])(acc Int) =
   listFold
     (\a node.
       match node
         | Leaf _ -> a + 1
         | LazyLeaf _ _ -> a + 1
+        | Skipped _ -> a + 1
+        | Focused _ _ -> a + 1
         | Group _ children -> countLeaves children a
     )
     acc
@@ -331,6 +435,184 @@ countLeaves(nodes List[TestNode])(acc Int) =
 runAllExit(suites List[TestNode]) =
   failCount = runAll suites
   exit failCount
+
+-- ---- Phase 3: JUnit XML output --------------------------------------------
+--
+-- runAllJunit walks the test tree, executes every test (not honouring focus
+-- mode here — the XML is meant to report the full suite) and emits a JUnit
+-- XML file to the requested path. Each top-level `describe` becomes a single
+-- `<testsuite>`; nested describes are flattened into dotted classnames.
+
+-- XML entity escaping for a single character.
+xmlEscapeChar(c Char) =
+  if c == '<'
+    "&lt;"
+  else if c == '>'
+    "&gt;"
+  else if c == '&'
+    "&amp;"
+  else if c == '"'
+    "&quot;"
+  else if c == '\''
+    "&apos;"
+  else strFromChars [c]
+
+xmlEscapeChars(cs List[Char])(acc Str) =
+  match cs
+    | c :: rest -> xmlEscapeChars rest (strConcat acc (xmlEscapeChar c))
+    | _ -> acc
+
+xmlEscape(s Str) =
+  xmlEscapeChars (strChars s) ""
+
+-- A JUnit-ready record per test case. `kind` is "pass" | "fail" | "skip".
+-- `msg` carries the Fail body (empty for pass/skip). `timeMs` is wall time.
+JunitCase = JunitCase Str Str Str Int
+
+caseKind(jc JunitCase) =
+  match jc
+    | JunitCase _ k _ _ -> k
+
+-- Execute a LazyLeaf/Focused thunk and return a JunitCase. Errors/skips map
+-- to the appropriate kind. We run every thunk once here — independently of
+-- the text runner — so runAllJunit doesn't depend on runAll's ordering.
+nodeToCase(node TestNode) =
+  match node
+    | Leaf r ->
+      match r
+        | Pass label -> JunitCase label "pass" "" 0
+        | Fail msg -> JunitCase msg "fail" msg 0
+    | LazyLeaf label thunk ->
+      timed = runTimed thunk
+      match timed
+        | (elapsed, r) ->
+          match r
+            | Pass _ -> JunitCase label "pass" "" elapsed
+            | Fail msg -> JunitCase label "fail" msg elapsed
+    | Focused label thunk ->
+      timed = runTimed thunk
+      match timed
+        | (elapsed, r) ->
+          match r
+            | Pass _ -> JunitCase label "pass" "" elapsed
+            | Fail msg -> JunitCase label "fail" msg elapsed
+    | Skipped label -> JunitCase label "skip" "" 0
+    | Group _ _ -> JunitCase "(group)" "skip" "" 0
+
+-- Flatten a group-or-leaf to a list of JunitCase, preserving left-to-right
+-- order. The recursion goes through flattenCasesOfList to keep each
+-- function monomorphic — HM struggled when flattenCases was passed as a
+-- first-class value to listMap.
+flattenCasesOfList(nodes List[TestNode]) =
+  match nodes
+    | [] -> []
+    | n :: rest ->
+      match n
+        | Group _ children -> listAppend (flattenCasesOfList children) (flattenCasesOfList rest)
+        | Leaf _ -> (nodeToCase n) :: (flattenCasesOfList rest)
+        | LazyLeaf _ _ -> (nodeToCase n) :: (flattenCasesOfList rest)
+        | Skipped _ -> (nodeToCase n) :: (flattenCasesOfList rest)
+        | Focused _ _ -> (nodeToCase n) :: (flattenCasesOfList rest)
+
+-- Build an ms-as-seconds string "0.004" for JUnit's time="" attribute. No
+-- floatToStr gymnastics — JUnit accepts integer-looking "0" fine too, but
+-- consumers prefer 3-decimal seconds.
+padRemStr(rem Int) =
+  if rem < 10
+    strConcat "00" (intToStr rem)
+  else
+    if rem < 100
+      strConcat "0" (intToStr rem)
+    else
+      intToStr rem
+
+msToSecStr(ms Int) =
+  whole = ms / 1000
+  rem = ms - (whole * 1000)
+  strConcat (intToStr whole) (strConcat "." (padRemStr rem))
+
+-- Build the opening `<testcase ...` fragment (no closing `>` or ` />`).
+-- Kept monolithic on a single line — ll-lang's indentation-sensitive parser
+-- dislikes multi-line strConcat continuations inside nested match arms.
+caseOpenTag(suiteName Str)(label Str)(elapsed Int) =
+  strConcat "    <testcase name=\"" (strConcat (xmlEscape label) (strConcat "\" classname=\"" (strConcat (xmlEscape suiteName) (strConcat "\" time=\"" (strConcat (msToSecStr elapsed) "\"")))))
+
+renderCaseXml(suiteName Str)(jc JunitCase) =
+  match jc
+    | JunitCase label kind msg elapsed ->
+      openTag = caseOpenTag suiteName label elapsed
+      if kind == "pass"
+        strConcat openTag " />\n"
+      else
+        if kind == "skip"
+          strConcat openTag ">\n      <skipped />\n    </testcase>\n"
+        else
+          strConcat openTag (strConcat ">\n      <failure message=\"" (strConcat (xmlEscape msg) "\" />\n    </testcase>\n"))
+
+-- Count cases of a given kind in a list.
+countKind(cases List[JunitCase])(kind Str) =
+  listFold
+    (\acc jc.
+      if caseKind jc == kind
+        acc + 1
+      else
+        acc
+    )
+    0
+    cases
+
+-- Build the `<testsuite ...>` opening tag with all attributes. Kept on one
+-- line so the parser's indentation tracker doesn't trip.
+suiteOpenTag(name Str)(total Int)(failures Int)(skipped Int) =
+  strConcat "  <testsuite name=\"" (strConcat (xmlEscape name) (strConcat "\" tests=\"" (strConcat (intToStr total) (strConcat "\" failures=\"" (strConcat (intToStr failures) (strConcat "\" skipped=\"" (strConcat (intToStr skipped) "\">\n")))))))
+
+renderSuiteXml(node TestNode) =
+  match node
+    | Group name children ->
+      cases = flattenCasesOfList children
+      total = listLen cases
+      failures = countKind cases "fail"
+      skipped = countKind cases "skip"
+      casesXml = listFold (\acc jc. strConcat acc (renderCaseXml name jc)) "" cases
+      header = suiteOpenTag name total failures skipped
+      (cases, strConcat header (strConcat casesXml "  </testsuite>\n"))
+    | _ ->
+      -- Top-level bare leaf: synthesize a one-suite "ungrouped".
+      jc = nodeToCase node
+      casesXml = renderCaseXml "ungrouped" jc
+      failures =
+        if caseKind jc == "fail"
+          1
+        else
+          0
+      skipped =
+        if caseKind jc == "skip"
+          1
+        else
+          0
+      header = suiteOpenTag "ungrouped" 1 failures skipped
+      ([jc], strConcat header (strConcat casesXml "  </testsuite>\n"))
+
+-- Concat the XML fragments produced by rendering each top-level suite.
+-- (The allCases list is built separately via listConcat.)
+buildSuitesXml(suites List[TestNode]) =
+  match suites
+    | [] -> ""
+    | s :: rest ->
+      pair = renderSuiteXml s
+      match pair
+        | (_, xml) -> strConcat xml (buildSuitesXml rest)
+
+runAllJunit(suites List[TestNode])(outputPath Str) =
+  allCases = flattenCasesOfList suites
+  body = buildSuitesXml suites
+  total = listLen allCases
+  failures = countKind allCases "fail"
+  skipped = countKind allCases "skip"
+  header = strConcat "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites tests=\"" (strConcat (intToStr total) (strConcat "\" failures=\"" (strConcat (intToStr failures) (strConcat "\" skipped=\"" (strConcat (intToStr skipped) "\">\n")))))
+  xml = strConcat header (strConcat body "</testsuites>\n")
+  _ = writeFile outputPath xml
+  total
 
 -- ============================================================================
 -- Self-tests
@@ -451,9 +733,47 @@ main =
   phase2Fails = runAll phase2Suites
   _ = printfn (strConcat "Phase 2 failCount=" (intToStr phase2Fails))
 
-  -- Timing status: ll-lang has no time primitive (no timeMs in Elaborator
-  -- builtins) and adding one would touch initial-compiler/. Deferred to
-  -- Phase 3 per issue #150 constraints.
-  _ = printfn "Timing: deferred (no time primitive in runtime)"
+  -- ---- Phase 3: skip / focus demo ------------------------------------
+  -- When no ftest is present in the forest, xtest still marks SKIP and
+  -- normal tests run as usual.
+  skipOnlyChildren =
+    [ test  "s1 runs normally" (constResult (assertTrue "s1 runs normally" true))
+    ; xtest "s2 pending feature" (constResult (assertTrue "s2 pending" true))
+    ; test  "s3 also runs"      (constResult (assertTrue "s3 also runs" true))
+    ]
+  skipOnlySuite = describe "Skip demo (no focus)" skipOnlyChildren
+  _ = runAll [skipOnlySuite]
+
+  -- When an ftest is present: only ftest + xtest execute; non-focused
+  -- LazyLeafs are reported as SKIP and not counted as passes.
+  focusChildren =
+    [ test  "f1 should be silenced"   (constResult (assertTrue "f1 silenced" true))
+    ; xtest "f2 explicit skip"        (constResult (assertTrue "f2" true))
+    ; ftest "f3 focus me"             (constResult (assertTrue "f3 focus me" true))
+    ; test  "f4 should also be silenced" (constResult (assertTrue "f4 silenced" true))
+    ]
+  focusSuite = describe "Focus demo" focusChildren
+  _ = runAll [focusSuite]
+
+  -- ---- Phase 3: JUnit XML output -------------------------------------
+  -- Mixed pass/fail/skip so the generated XML exercises every branch.
+  junitChildren =
+    [ test  "j1 add works"    (constResult (assertEqInt "j1 add works" 4 (2 + 2)))
+    ; test  "j2 sub fails"    (constResult (assertEqInt "j2 sub fails" 3 (5 - 1)))
+    ; xtest "j3 pending"      (constResult (assertTrue "j3 pending" true))
+    ; test  "j4 <xml> & \"quotes\"" (constResult (assertTrue "j4 xml-escape" true))
+    ]
+  junitSuite = describe "Math & \"core\"" junitChildren
+  junitPath = "/tmp/ll-lang-test-results.xml"
+  junitTotal = runAllJunit [junitSuite] junitPath
+  _ = printfn (strConcat "JUnit wrote " (strConcat (intToStr junitTotal) (strConcat " tests to " junitPath)))
+  junitXml = readFile junitPath
+  _ = printfn "---- JUnit XML ----"
+  _ = printfn junitXml
+  _ = printfn "---- end XML ----"
+
+  -- ---- Phase 3: timing ------------------------------------------------
+  -- Exercised implicitly by every LazyLeaf above; demonstrate explicitly.
+  _ = printfn (strConcat "timeMs baseline: " (intToStr (timeMs 0)))
 
   printfn "Done"
