@@ -1,0 +1,43 @@
+module ExpressTodo.Main
+
+-- ---------------------------------------------------------------------------
+-- Express-style TODO API, written in ll-lang.
+--
+-- FFI boundary note
+-- =================
+-- ll-lang 1.x ships a small whitelist of `external` names that can be mapped
+-- to each target platform (see initial-compiler/src/LLLangCompiler/Platform.fs).
+-- For TypeScript the whitelist is exactly: `console_log`, `JSON_parse`, `fetch`.
+-- Any other `external` declaration fails with `E026 UnknownExternalMapping`.
+--
+-- To let this example drive Express routes from ll-lang without patching the
+-- compiler, we tunnel a tiny command DSL through `fetch`, which codegen emits
+-- as `(globalThis as any).fetch(url)`. A hand-written `runtime.ts` shim
+-- replaces `globalThis.fetch` before the generated Main.ts runs; it parses
+-- the URLs below and wires them up to a real Express app.
+--
+-- Command DSL
+--   route://GET/<path>/<body>    -- register a GET route returning <body>
+--   listen://<port>              -- call app.listen(<port>)
+-- ---------------------------------------------------------------------------
+
+external console_log(msg Str) Unit
+external fetch(url Str) Str
+
+-- Register a GET route that returns a static body. The shim in runtime.ts
+-- parses the URL, extracts the path segment and the response body, and calls
+-- app.get(path, (_req, res) => res.send(body)).
+registerGet(path Str)(body Str) =
+  fetch ("route://GET" + path + "/" + body)
+
+-- Ask the shim to start the Express server on the given port.
+startServer(port Int) =
+  fetch ("listen://" + intToStr port)
+
+main() =
+  _ = console_log "starting ll-lang Express server..."
+  _ = registerGet "/hello" "Hello from ll-lang"
+  _ = registerGet "/todos" "[{\"id\":1,\"text\":\"write ll-lang\"},{\"id\":2,\"text\":\"ship demo\"}]"
+  _ = registerGet "/health" "ok"
+  _ = startServer 3000
+  0

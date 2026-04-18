@@ -1,0 +1,4 @@
+[project]
+name = "ExpressTodo"
+version = "0.1.0"
+entry = "src/Main.lll"
