@@ -151,15 +151,127 @@ assertResultErr(label Str)(r Result[Int][Str]) =
 
 -- ---- Structured tree ------------------------------------------------------
 
-TestNode = Leaf TestResult | Group Str (List[TestNode])
+-- LazyLeaf carries a label and a thunk so that side effects (setup/teardown,
+-- IO-driven assertions) run only when the runner walks the tree. Leaf is
+-- retained for compatibility with any caller that hand-built test results.
+TestNode = Leaf TestResult | Group Str (List[TestNode]) | LazyLeaf Str (Int -> TestResult)
 
 -- Deferred test. Thunk takes a dummy Int so the body runs only under runAll.
+-- Phase 2: returns LazyLeaf, making the thunk genuinely lazy (the body no
+-- longer fires at construction time). For legacy callers that pass
+-- `constResult r`, r is still computed eagerly inside constResult — so
+-- observable output is unchanged.
 test(label Str)(thunk Int -> TestResult) =
-  _ = label
-  Leaf (thunk 0)
+  LazyLeaf label thunk
 
 describe(name Str)(children List[TestNode]) =
   Group name children
+
+-- ---- Phase 2: setup / teardown --------------------------------------------
+--
+-- beforeEach and afterEach transform a list of TestNodes so that an action
+-- runs before (or after) each contained *leaf* test, recursively. The action
+-- is `Int -> Int`; its return value is ignored. Group structure is preserved
+-- so nesting and depth-based indentation still work under the runner.
+--
+-- Typical usage:
+--   describe "File ops" (afterEach cleanup tests)
+--
+-- where cleanup is `\_. deleteFile "/tmp/x"; 0`.
+
+-- Thunk constructors for setup/teardown. Extracted so the `match` arms
+-- stay single-expression and the parser is happy with indentation.
+beforeThunkLeaf(action Int -> Int)(r TestResult) =
+  \d.
+    _ = action d
+    r
+
+beforeThunkLazy(action Int -> Int)(thunk Int -> TestResult) =
+  \d.
+    _ = action d
+    thunk d
+
+afterThunkLeaf(action Int -> Int)(r TestResult) =
+  \d.
+    _ = action d
+    r
+
+afterThunkLazy(action Int -> Int)(thunk Int -> TestResult) =
+  \d.
+    result = thunk d
+    _ = action d
+    result
+
+-- Wrap a single TestNode so `action` runs before its (lazy) body.
+wrapBefore(action Int -> Int)(node TestNode) =
+  match node
+    | Leaf r -> LazyLeaf "(before+leaf)" (beforeThunkLeaf action r)
+    | LazyLeaf label thunk -> LazyLeaf label (beforeThunkLazy action thunk)
+    | Group name children -> Group name (listMap (wrapBefore action) children)
+
+-- Wrap a single TestNode so `action` runs after its (lazy) body.
+wrapAfter(action Int -> Int)(node TestNode) =
+  match node
+    | Leaf r -> LazyLeaf "(leaf+after)" (afterThunkLeaf action r)
+    | LazyLeaf label thunk -> LazyLeaf label (afterThunkLazy action thunk)
+    | Group name children -> Group name (listMap (wrapAfter action) children)
+
+-- Public helpers that operate on a list of TestNodes (the typical argument
+-- to `describe`). Returns a new list with the action threaded in.
+beforeEach(action Int -> Int)(tests List[TestNode]) =
+  listMap (wrapBefore action) tests
+
+afterEach(action Int -> Int)(tests List[TestNode]) =
+  listMap (wrapAfter action) tests
+
+-- ---- Phase 2: parameterized tests ------------------------------------------
+--
+-- Table-driven tests. One body function runs against many tuple inputs; the
+-- result is a `List[TestNode]` that can be spliced into `describe`.
+--
+-- Monomorphic helpers are provided for the common tuple shapes — the type
+-- system currently struggles with fully-polymorphic parameterization, so we
+-- offer (Int, Int) and (Str, Int) out of the box. Extend as new shapes come
+-- up.
+
+-- Label suffix "#<idx>" appended to the base name so each case has a unique
+-- identifier in the output.
+caseLabel(baseName Str)(idx Int) =
+  strConcat baseName (strConcat " #" (intToStr idx))
+
+-- Build LazyLeaf nodes from indexed cases. We use a fold that threads an
+-- index counter and accumulates nodes in reverse, then reverses once at the
+-- end to preserve input order.
+--
+-- Note: ll-lang type signatures don't (yet) accept tuple types like
+-- `List[(Int, Int)]`, so we use a polymorphic type variable `C` for the
+-- case element. The runtime value is a tuple; the body deconstructs it.
+-- Use the concrete helpers `parameterizedIntInt` / `parameterizedStrInt`
+-- defined below — they are just monomorphic aliases for call-site clarity.
+
+parameterized(baseName Str)(cases List[C])(body C -> TestResult) =
+  pair =
+    listFold
+      (\acc c.
+        match acc
+          | (idx, nodes) ->
+            label = caseLabel baseName idx
+            node = LazyLeaf label (\d. body c)
+            ((idx + 1), (node :: nodes))
+      )
+      (0, [])
+      cases
+  match pair
+    | (_, nodes) -> listReverse nodes
+
+-- Monomorphic aliases over `parameterized` — purely for call-site
+-- documentation of the expected tuple shape. The underlying generic
+-- implementation does all the work.
+parameterizedIntInt(baseName Str)(cases List[C])(body C -> TestResult) =
+  parameterized baseName cases body
+
+parameterizedStrInt(baseName Str)(cases List[C])(body C -> TestResult) =
+  parameterized baseName cases body
 
 -- ---- Runner ---------------------------------------------------------------
 
@@ -170,19 +282,25 @@ indentStr(depth Int) =
   else
     strConcat "  " (indentStr (depth - 1))
 
+-- Render a TestResult with indent; return the new fail count.
+renderResultAt(pad Str)(fails Int)(r TestResult) =
+  match r
+    | Pass label ->
+      _ = printfn (strConcat pad (strConcat "OK " label))
+      fails
+    | Fail msg ->
+      _ = printfn (strConcat pad (strConcat "FAIL " msg))
+      fails + 1
+
 -- Walk a node, printing with depth indentation; return fails-so-far + depth.
--- We thread the running fail count through listFold.
+-- We thread the running fail count through listFold. LazyLeaf forces its
+-- thunk here — this is where beforeEach/afterEach action effects actually
+-- fire, in left-to-right test order.
 renderNode(depth Int)(fails Int)(node TestNode) =
   pad = indentStr depth
   match node
-    | Leaf r ->
-      match r
-        | Pass label ->
-          _ = printfn (strConcat pad (strConcat "OK " label))
-          fails
-        | Fail msg ->
-          _ = printfn (strConcat pad (strConcat "FAIL " msg))
-          fails + 1
+    | Leaf r -> renderResultAt pad fails r
+    | LazyLeaf _ thunk -> renderResultAt pad fails (thunk 0)
     | Group name children ->
       _ = printfn (strConcat pad (strConcat "describe \"" (strConcat name "\"")))
       listFold
@@ -198,12 +316,13 @@ runAll(suites List[TestNode]) =
   _ = printfn summary
   failCount
 
--- Count Leaf nodes across the forest (for the summary line).
+-- Count Leaf + LazyLeaf nodes across the forest (for the summary line).
 countLeaves(nodes List[TestNode])(acc Int) =
   listFold
     (\a node.
       match node
         | Leaf _ -> a + 1
+        | LazyLeaf _ _ -> a + 1
         | Group _ children -> countLeaves children a
     )
     acc
@@ -288,4 +407,53 @@ main =
   allSuites = [mathSuite; strSuite; maybeResSuite; nested]
   newFails = runAll allSuites
   _ = printfn (strConcat "New API failCount=" (intToStr newFails))
+
+  -- ---- Phase 2: parameterized tests -----------------------------------
+  -- Table-driven: one body runs across all cases; labels auto-numbered.
+  squareCases = [(1, 1); (2, 4); (3, 9); (4, 15)]  -- last one fails on purpose
+  squareBody = \pair.
+    match pair
+      | (n, expected) ->
+        label = strConcat "square n=" (intToStr n)
+        assertEqInt label expected (n * n)
+  squareChildren = parameterizedIntInt "square" squareCases squareBody
+  squareSuite = describe "Parameterized squares" squareChildren
+
+  -- Str, Int parameterized variant: length-of-string check.
+  lenCases = [("", 0); ("a", 1); ("hello", 5)]
+  lenBody = \pair.
+    match pair
+      | (s, expected) ->
+        label = strConcat "strLen s=" s
+        assertEqInt label expected (strLen s)
+  lenChildren = parameterizedStrInt "len" lenCases lenBody
+  lenSuite = describe "Parameterized strLen" lenChildren
+
+  -- ---- Phase 2: beforeEach / afterEach --------------------------------
+  -- Mock setup/teardown: since we have no mutable state in the harness,
+  -- verify ordering by printing markers. Real callers would do IO like
+  -- creating and deleting temp files.
+  setupAction = \d.
+    _ = printfn "  [setup]"
+    0
+  teardownAction = \d.
+    _ = printfn "  [teardown]"
+    0
+
+  fileOpsChildren =
+    [ test "f1 open"  (constResult (assertTrue "f1 open"  true))
+    ; test "f2 write" (constResult (assertTrue "f2 write" true))
+    ]
+  fileOpsWrapped = afterEach teardownAction (beforeEach setupAction fileOpsChildren)
+  fileOpsSuite = describe "File ops (setup+teardown)" fileOpsWrapped
+
+  phase2Suites = [squareSuite; lenSuite; fileOpsSuite]
+  phase2Fails = runAll phase2Suites
+  _ = printfn (strConcat "Phase 2 failCount=" (intToStr phase2Fails))
+
+  -- Timing status: ll-lang has no time primitive (no timeMs in Elaborator
+  -- builtins) and adding one would touch initial-compiler/. Deferred to
+  -- Phase 3 per issue #150 constraints.
+  _ = printfn "Timing: deferred (no time primitive in runtime)"
+
   printfn "Done"
