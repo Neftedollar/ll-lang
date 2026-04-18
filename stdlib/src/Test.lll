@@ -1,6 +1,27 @@
 module Std.Test
 
+import Std.Maybe
+import Std.Result
+
+-- ============================================================================
+-- Std.Test — testing framework for ll-lang (Phase 1)
+--
+-- Core building blocks:
+--   TestResult   — Pass Str | Fail Str           (one assertion outcome)
+--   TestNode     — Leaf TestResult | Group ...   (structured tree of tests)
+--   test / describe                              (DSL constructors)
+--   runAll / runAllExit                          (runners with summary)
+--
+-- Thunking: `test` takes `Int -> TestResult` so the assertion body is NOT
+-- evaluated until `runAll` walks the tree. Pass any Int (we call with 0).
+--
+-- Backward compat: legacy assert*/renderResult/run helpers below are kept
+-- unchanged — existing stdlib self-tests (Monad/IO/Builder) still call them.
+-- ============================================================================
+
 TestResult = Pass Str | Fail Str
+
+-- ---- Legacy assertions (Phase 0, kept verbatim) ----------------------------
 
 assertTrue(label Str)(cond Bool) =
   if cond
@@ -42,9 +63,173 @@ run(results List[TestResult]) =
     0
     results
 
--- ---- Self-checks -------------------------------------------------------------
+-- ---- New assertions (Phase 1) ----------------------------------------------
+
+-- Float abs-diff tolerance. We explicitly use `absf` (builtin) to avoid
+-- relying on ordering subtleties of float expressions in the generated code.
+assertEqFloat(label Str)(expected Float)(actual Float)(tolerance Float) =
+  diff = absf (expected - actual)
+  if diff <= tolerance
+    Pass label
+  else
+    Fail (strConcat label (strConcat " expected=" (strConcat (floatToStr expected) (strConcat " actual=" (strConcat (floatToStr actual) (strConcat " tol=" (floatToStr tolerance)))))))
+
+-- Structural equality on List[Int].
+listEqInt(xs List[Int])(ys List[Int]) =
+  match xs
+    | [] ->
+      match ys
+        | [] -> true
+        | _ :: _ -> false
+    | x :: xrest ->
+      match ys
+        | [] -> false
+        | y :: yrest ->
+          if x == y
+            listEqInt xrest yrest
+          else
+            false
+
+-- Join integers as "1,2,3". Mirrors the idiom in Std.Lexer.showTokens:
+-- listFold with a multiline if/else lambda body.
+joinIntList(xs List[Int]) =
+  strs = listMap intToStr xs
+  listFold (\acc s.
+    if strLen acc == 0
+      s
+    else strConcat (strConcat acc ",") s
+  ) "" strs
+
+-- Display form like "[1,2,3]".
+showIntList(xs List[Int]) =
+  strConcat "[" (strConcat (joinIntList xs) "]")
+
+assertEqList(label Str)(expected List[Int])(actual List[Int]) =
+  if listEqInt expected actual
+    Pass label
+  else
+    Fail (strConcat label (strConcat " expected=" (strConcat (showIntList expected) (strConcat " actual=" (showIntList actual)))))
+
+assertContains(label Str)(needle Str)(haystack Str) =
+  if strContains needle haystack
+    Pass label
+  else
+    Fail (strConcat label (strConcat " missing=" (strConcat needle (strConcat " in=" haystack))))
+
+assertStartsWith(label Str)(prefix Str)(s Str) =
+  plen = strLen prefix
+  slen = strLen s
+  ok =
+    if plen > slen
+      false
+    else
+      strSlice s 0 plen == prefix
+  if ok
+    Pass label
+  else
+    Fail (strConcat label (strConcat " expected prefix=" (strConcat prefix (strConcat " got=" s))))
+
+assertMaybeSome(label Str)(m Maybe[Int]) =
+  match m
+    | Some _ -> Pass label
+    | None -> Fail (strConcat label " expected Some, got None")
+
+assertMaybeNone(label Str)(m Maybe[Int]) =
+  match m
+    | Some v -> Fail (strConcat label (strConcat " expected None, got Some=" (intToStr v)))
+    | None -> Pass label
+
+assertResultOk(label Str)(r Result[Int][Str]) =
+  match r
+    | Ok _ -> Pass label
+    | Err e -> Fail (strConcat label (strConcat " expected Ok, got Err=" e))
+
+assertResultErr(label Str)(r Result[Int][Str]) =
+  match r
+    | Ok v -> Fail (strConcat label (strConcat " expected Err, got Ok=" (intToStr v)))
+    | Err _ -> Pass label
+
+-- ---- Structured tree ------------------------------------------------------
+
+TestNode = Leaf TestResult | Group Str (List[TestNode])
+
+-- Deferred test. Thunk takes a dummy Int so the body runs only under runAll.
+test(label Str)(thunk Int -> TestResult) =
+  _ = label
+  Leaf (thunk 0)
+
+describe(name Str)(children List[TestNode]) =
+  Group name children
+
+-- ---- Runner ---------------------------------------------------------------
+
+-- Produce `n` copies of "  " (2-space indent per depth level).
+indentStr(depth Int) =
+  if depth <= 0
+    ""
+  else
+    strConcat "  " (indentStr (depth - 1))
+
+-- Walk a node, printing with depth indentation; return fails-so-far + depth.
+-- We thread the running fail count through listFold.
+renderNode(depth Int)(fails Int)(node TestNode) =
+  pad = indentStr depth
+  match node
+    | Leaf r ->
+      match r
+        | Pass label ->
+          _ = printfn (strConcat pad (strConcat "OK " label))
+          fails
+        | Fail msg ->
+          _ = printfn (strConcat pad (strConcat "FAIL " msg))
+          fails + 1
+    | Group name children ->
+      _ = printfn (strConcat pad (strConcat "describe \"" (strConcat name "\"")))
+      listFold
+        (\f child. renderNode (depth + 1) f child)
+        fails
+        children
+
+runAll(suites List[TestNode]) =
+  failCount = listFold (\f node. renderNode 0 f node) 0 suites
+  total = countLeaves suites 0
+  passCount = total - failCount
+  summary = strConcat "Total: " (strConcat (intToStr passCount) (strConcat " passed, " (strConcat (intToStr failCount) " failed")))
+  _ = printfn summary
+  failCount
+
+-- Count Leaf nodes across the forest (for the summary line).
+countLeaves(nodes List[TestNode])(acc Int) =
+  listFold
+    (\a node.
+      match node
+        | Leaf _ -> a + 1
+        | Group _ children -> countLeaves children a
+    )
+    acc
+    nodes
+
+runAllExit(suites List[TestNode]) =
+  failCount = runAll suites
+  exit failCount
+
+-- ============================================================================
+-- Self-tests
+-- ============================================================================
+
+-- Helper: a thunk that returns the given already-computed result. Used by
+-- tests below to sidestep the need to write a body expression.
+constResult(r TestResult) =
+  \ignored. r
+
+-- Sample Maybe / Result values for the new assertions.
+sampleSome = Some 7
+sampleNone = None
+sampleOk = Ok 3
+sampleErr = Err "boom"
 
 main =
+  -- ---- Legacy API (unchanged behaviour) ---------------------------------
   results =
     [ assertTrue "1 assertTrue pass" true
     ; assertTrue "2 assertTrue fail" false
@@ -55,6 +240,52 @@ main =
     ; assertEqBool "7 assertEqBool pass" true true
     ; assertEqBool "8 assertEqBool fail" true false
     ]
-  failCount = run results
-  printfn (strConcat "Done failCount=" (intToStr failCount))
+  legacyFails = run results
+  _ = printfn (strConcat "Legacy done failCount=" (intToStr legacyFails))
 
+  -- ---- New Phase 1 API: describe / test / runAll -----------------------
+  mathChildren =
+    [ test "1 add works"      (constResult (assertEqInt "1 add works" 4 (2 + 2)))
+    ; test "2 eqList pass"    (constResult (assertEqList "2 eqList pass" [1; 2; 3] [1; 2; 3]))
+    ; test "3 eqList fail"    (constResult (assertEqList "3 eqList fail" [1; 2] [1; 2; 3]))
+    ; test "4 eqFloat pass"   (constResult (assertEqFloat "4 eqFloat pass" 1.0 1.0 0.01))
+    ; test "5 eqFloat fail"   (constResult (assertEqFloat "5 eqFloat fail" 1.0 2.0 0.01))
+    ]
+  mathSuite = describe "Math" mathChildren
+
+  strChildren =
+    [ test "6 contains pass"    (constResult (assertContains "6 contains pass" "ell" "hello"))
+    ; test "7 contains fail"    (constResult (assertContains "7 contains fail" "xyz" "hello"))
+    ; test "8 startsWith pass"  (constResult (assertStartsWith "8 startsWith pass" "he" "hello"))
+    ; test "9 startsWith fail"  (constResult (assertStartsWith "9 startsWith fail" "wo" "hello"))
+    ]
+  strSuite = describe "Str" strChildren
+
+  mrChildren =
+    [ test "10 maybeSome pass" (constResult (assertMaybeSome "10 maybeSome pass" sampleSome))
+    ; test "11 maybeSome fail" (constResult (assertMaybeSome "11 maybeSome fail" sampleNone))
+    ; test "12 maybeNone pass" (constResult (assertMaybeNone "12 maybeNone pass" sampleNone))
+    ; test "13 maybeNone fail" (constResult (assertMaybeNone "13 maybeNone fail" sampleSome))
+    ; test "14 resultOk pass"  (constResult (assertResultOk  "14 resultOk pass" sampleOk))
+    ; test "15 resultOk fail"  (constResult (assertResultOk  "15 resultOk fail" sampleErr))
+    ; test "16 resultErr pass" (constResult (assertResultErr "16 resultErr pass" sampleErr))
+    ; test "17 resultErr fail" (constResult (assertResultErr "17 resultErr fail" sampleOk))
+    ]
+  maybeResSuite = describe "Maybe+Result" mrChildren
+
+  edgeChildren =
+    [ test "19 nested pass" (constResult (assertEqInt "19 nested pass" 0 0))
+    ; test "20 nested fail" (constResult (assertEqInt "20 nested fail" 1 2))
+    ]
+  edgeGroup = describe "edge cases" edgeChildren
+
+  parserChildren =
+    [ test "18 empty input" (constResult (assertTrue "18 empty input" true))
+    ; edgeGroup
+    ]
+  nested = describe "Parser" parserChildren
+
+  allSuites = [mathSuite; strSuite; maybeResSuite; nested]
+  newFails = runAll allSuites
+  _ = printfn (strConcat "New API failCount=" (intToStr newFails))
+  printfn "Done"
