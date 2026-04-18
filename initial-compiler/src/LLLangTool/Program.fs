@@ -417,6 +417,7 @@ let private cmdBuildProject (rootDir: string) (targetOverride: Target option) : 
         match loadProject rootDir with
         | Error es -> printErrors es; 1
         | Ok proj ->
+            LLLang.Platform.setExternalOverlay (LLLang.Platform.overlayFromManifest proj.Manifest.Externals)
             let isExecutableProject = not (String.IsNullOrWhiteSpace proj.Manifest.Entry)
             let compileForTarget (target: Target) =
                 match LLLang.Compiler.compileProjectToModulesForTarget target proj with
@@ -488,6 +489,7 @@ let private cmdCheckProject (rootDir: string) (targetOverride: Target option) : 
             printErrors es
             1
         | Ok proj ->
+            LLLang.Platform.setExternalOverlay (LLLang.Platform.overlayFromManifest proj.Manifest.Externals)
             let targetsResult =
                 match targetOverride with
                 | Some target -> Ok [target]
@@ -718,7 +720,8 @@ let private cmdBuildFile (path: string) (targetOverride: Target option) : int =
                   Version = "0.0.0"
                   Entry = ""
                   Deps = Map.empty
-                  Platform = [] }
+                  Platform = []
+                  Externals = Map.empty }
             let proj : LLProject = { Manifest = fakeManifest; RootDir = rootDir; Files = files }
             match LLLang.Compiler.compileProjectToModulesForTarget target proj with
             | Error es ->
@@ -920,7 +923,8 @@ let private cmdRun (path: string) (targetOverride: Target option) : int =
                       Version = "0.0.0"
                       Entry = ""
                       Deps = Map.empty
-                      Platform = ["fsharp"] }
+                      Platform = ["fsharp"]
+                      Externals = Map.empty }
                 let proj : LLProject =
                     { Manifest = fakeManifest
                       RootDir = directoryNameOrCurrent absPath
@@ -1008,7 +1012,7 @@ let private cmdRunSelf (toolArgs: string list) : int =
                 Console.Error.WriteLine("lllc: import resolution error: " + msg)
                 1
             | Ok files ->
-                let fakeManifest : LLManifest = { Name = "lllcself"; Version = "0.0.0"; Entry = ""; Deps = Map.empty; Platform = ["fsharp"] }
+                let fakeManifest : LLManifest = { Name = "lllcself"; Version = "0.0.0"; Entry = ""; Deps = Map.empty; Platform = ["fsharp"]; Externals = Map.empty }
                 let proj : LLProject = { Manifest = fakeManifest; RootDir = directoryNameOrCurrent absPath; Files = files }
                 match LLLang.Compiler.compileProjectToModules proj with
                 | Error es ->

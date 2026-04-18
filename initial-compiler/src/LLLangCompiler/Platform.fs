@@ -108,11 +108,43 @@ let private externalTargetMap : Map<Target, Map<string, string>> =
     ]
     |> Map.ofList
 
+// Per-project overlay populated from manifest's [platform.<target>.externals]
+// tables. Consulted as a fallback when the hardcoded table has no mapping,
+// so existing externals (console_log, JSON_parse, fetch) keep working.
+let mutable private externalOverlay : Map<Target, Map<string, string>> = Map.empty
+
+let setExternalOverlay (overlay: Map<Target, Map<string, string>>) : unit =
+    externalOverlay <- overlay
+
+let clearExternalOverlay () : unit =
+    externalOverlay <- Map.empty
+
 let tryGetExternalTarget (target: Target) (externalName: string) : string option =
-    externalTargetMap |> Map.tryFind target |> Option.bind (Map.tryFind externalName)
+    match externalTargetMap |> Map.tryFind target |> Option.bind (Map.tryFind externalName) with
+    | Some v -> Some v
+    | None -> externalOverlay |> Map.tryFind target |> Option.bind (Map.tryFind externalName)
+
+/// Returns Some when the external is provided by the per-project manifest
+/// overlay (spliced raw into target code) rather than by the hardcoded
+/// per-target whitelist (wrapped in a curried call).
+let tryGetManifestExternal (target: Target) (externalName: string) : string option =
+    externalOverlay |> Map.tryFind target |> Option.bind (Map.tryFind externalName)
 
 let hasExternalTarget (target: Target) (externalName: string) : bool =
-    externalTargetMap |> Map.tryFind target |> Option.exists (fun m -> Map.containsKey externalName m)
+    (externalTargetMap |> Map.tryFind target |> Option.exists (fun m -> Map.containsKey externalName m))
+    || (externalOverlay |> Map.tryFind target |> Option.exists (fun m -> Map.containsKey externalName m))
+
+/// Convert a manifest-style `<target-name> -> name -> code` map (where
+/// target-name is a string alias like "typescript" / "ts") into the
+/// Target-keyed overlay consumed by setExternalOverlay.
+let overlayFromManifest (raw: Map<string, Map<string, string>>) : Map<Target, Map<string, string>> =
+    raw
+    |> Map.toList
+    |> List.choose (fun (k, v) ->
+        match tryParseCanonicalTarget k with
+        | Some t -> Some (t, v)
+        | None -> None)
+    |> Map.ofList
 
 let private fallbackSdks : PlatformSdk list =
     [

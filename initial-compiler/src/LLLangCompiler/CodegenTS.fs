@@ -592,21 +592,27 @@ let private emitCurriedValue (ps: (string * TypeExpr) list) (body: TypedExpr) : 
         lambdas + emitExprTS body
 
 let private emitExternalDecl (sig_: TypedFnSig) : string =
-    match tryGetExternalTarget TypeScript sig_.Name with
-    | None -> ""
-    | Some target ->
-        let pname (n, _) = safeIdent n
-        let ptype (_, t) = emitType t
-        let rec emitCurriedCall (ps: (string * TypeExpr) list) (args: string list) : string =
-            match ps with
-            | [] ->
-                target + "(" + (String.concat ", " args) + ")"
-            | p :: rest ->
-                let n = pname p
-                let t = ptype p
-                "(" + n + ": " + t + ") => " + emitCurriedCall rest (args @ [n])
-        let rhs = emitCurriedCall sig_.Params []
-        "const " + safeIdent sig_.Name + " = " + rhs + ";"
+    match tryGetManifestExternal TypeScript sig_.Name with
+    | Some raw ->
+        // Per-project manifest externals are assumed to be complete curried
+        // JS expressions (or zero-arg arrows for nullary externs); splice raw.
+        "const " + safeIdent sig_.Name + ": any = " + raw + ";"
+    | None ->
+        match tryGetExternalTarget TypeScript sig_.Name with
+        | None -> ""
+        | Some target ->
+            let pname (n, _) = safeIdent n
+            let ptype (_, t) = emitType t
+            let rec emitCurriedCall (ps: (string * TypeExpr) list) (args: string list) : string =
+                match ps with
+                | [] ->
+                    target + "(" + (String.concat ", " args) + ")"
+                | p :: rest ->
+                    let n = pname p
+                    let t = ptype p
+                    "(" + n + ": " + t + ") => " + emitCurriedCall rest (args @ [n])
+            let rhs = emitCurriedCall sig_.Params []
+            "const " + safeIdent sig_.Name + " = " + rhs + ";"
 
 let private emitOpaqueType (name: TypeIdent) (ps: TypeParam list) : string =
     let typeParams =

@@ -2,3 +2,9 @@
 name = "ExpressTodo"
 version = "0.1.0"
 entry = "src/Main.lll"
+
+[platform.typescript.externals]
+"expressApp" = "require('express')()"
+"appGet" = "(app) => (path) => (handler) => { app.get(path, (req, res) => handler(req)(res)); return 0; }"
+"resSend" = "(res) => (body) => { res.send(body); return 0; }"
+"appListen" = "(app) => (port) => { app.listen(port); return 0; }"

@@ -15,6 +15,8 @@ type LLManifest = {
     Entry    : string                  // project.entry — default "src/Main.lll"
     Deps     : Map<string, DepSource>  // [deps] name → source
     Platform : string list             // [platform] use = [...]
+    // [platform.<target>.externals] name = "target-code" → target → (name → code)
+    Externals : Map<string, Map<string, string>>
 }
 
 // ---- Tokeniser helpers ---------------------------------------------------------
@@ -138,7 +140,12 @@ let private parseDepSource (valueRaw: string) : DepSource option =
                 Some (GitDep (url, "main"))
     else None
 
-type private Section = Project | Deps | Platform | Other
+type private Section =
+    | Project
+    | Deps
+    | Platform
+    | Externals of target: string  // [platform.<target>.externals]
+    | Other
 
 /// Parse a TOML-subset manifest string.
 let parseManifest (src: string) : Result<LLManifest, string> =
@@ -149,6 +156,7 @@ let parseManifest (src: string) : Result<LLManifest, string> =
     let mutable projectEntry = "src/Main.lll"
     let mutable deps: (string * DepSource) list = []
     let mutable platform: string list = []
+    let mutable externals: Map<string, Map<string, string>> = Map.empty
     let mutable error: string option = None
     let mutable lineNum = 0
 
@@ -170,7 +178,13 @@ let parseManifest (src: string) : Result<LLManifest, string> =
                         | "project"  -> Project
                         | "deps"     -> Deps
                         | "platform" -> Platform
-                        | _          -> Other
+                        | s ->
+                            // [platform.<target>.externals]
+                            let parts = s.Split('.')
+                            if parts.Length = 3 && parts.[0] = "platform" && parts.[2] = "externals" then
+                                Externals parts.[1]
+                            else
+                                Other
             elif line.Contains("=") then
                 let eqIdx = line.IndexOf('=')
                 let key = line.[..eqIdx - 1].Trim()
@@ -208,6 +222,21 @@ let parseManifest (src: string) : Result<LLManifest, string> =
                         | Ok (items, _) -> platform <- items
                     else
                         () // ignore unknown platform keys
+                | Externals target ->
+                    // key may be quoted (e.g. "express" = "...")
+                    let parsedKey =
+                        if key.StartsWith("\"") then
+                            match parseQuotedString key 0 with
+                            | Ok (v, _) -> Some v
+                            | Error _ -> None
+                        else Some key
+                    if valueRaw.StartsWith("\"") then
+                        match parsedKey, parseQuotedString valueRaw 0 with
+                        | Some k, Ok (v, _) ->
+                            let prev = externals |> Map.tryFind target |> Option.defaultValue Map.empty
+                            externals <- Map.add target (Map.add k v prev) externals
+                        | _ -> ()
+                    else ()
                 | Other -> () // ignore unknown sections
             else
                 () // ignore lines that aren't key=value or section headers
@@ -219,9 +248,10 @@ let parseManifest (src: string) : Result<LLManifest, string> =
         | None -> Error "Missing required key: [project] name"
         | Some name ->
             Ok {
-                Name     = name
-                Version  = projectVersion
-                Entry    = projectEntry
-                Deps     = Map.ofList deps
-                Platform = platform
+                Name      = name
+                Version   = projectVersion
+                Entry     = projectEntry
+                Deps      = Map.ofList deps
+                Platform  = platform
+                Externals = externals
             }
