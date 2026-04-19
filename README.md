@@ -116,6 +116,12 @@ LLLC_BOOTSTRAP_SELF_PRESET=all
 LLLC_BOOTSTRAP_SELF_COMMANDS=compile,check
 ```
 
+Parity gate helper (stage0 `check` vs `self check` on corpus):
+
+```bash
+./tools/check-stage0-self-parity.sh
+```
+
 ### Run your first program
 
 ```bash
