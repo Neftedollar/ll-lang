@@ -40,7 +40,7 @@ lllcself/src/Mcp.lll handles JSON-RPC over stdio
 
 ## Tool contract (current)
 
-`tools/list` currently returns **28** tools.
+`tools/list` currently returns **30** tools.
 
 ### Core compile/check
 
@@ -77,6 +77,10 @@ lllcself/src/Mcp.lll handles JSON-RPC over stdio
 - both tools accept runtime mode controls:
   - `process_spawn` (bool, default `true`)
   - `execution_mode` (`"process"` default, `"host_runner"` / `"no_spawn"` for no-spawn requests)
+
+### FFI helpers
+
+- `ffi_inspect`, `ffi_validate`
 
 ### Existing utility surface
 

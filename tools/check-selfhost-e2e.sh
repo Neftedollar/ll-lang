@@ -106,7 +106,7 @@ LLL
   [[ -f "$project_dir/bin/fsharp/sampleapp.fsproj" || -f "$project_dir/bin/fsharp/sample.fsproj" || -f "$project_dir/bin/fsharp/sampleapp.fs" || -f "$project_dir/bin/fsharp/sample.fs" ]] || fail "project build artifacts missing"
 )
 
-python3 - "$LLLC" "$SELF_MAIN" <<'PY'
+python3 - "$LLLC" "$SELF_MAIN" "$ROOT_DIR" <<'PY'
 import json
 import os
 import subprocess
@@ -114,6 +114,7 @@ import sys
 
 lllc = sys.argv[1]
 self_main = sys.argv[2]
+root_dir = sys.argv[3]
 env = os.environ.copy()
 env["LLLC_SELF_MAIN"] = self_main
 p = subprocess.Popen(
@@ -130,6 +131,7 @@ wire = "\n".join(
         json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "ci", "version": "1"}}}),
         json.dumps({"jsonrpc": "2.0", "method": "initialized", "params": {}}),
         json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}),
+        json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "ffi_inspect", "arguments": {"path": os.path.join(root_dir, "spec/examples/valid/23-external-opaque.lll")}}}),
     ]
 ) + "\n"
 
@@ -145,6 +147,7 @@ except subprocess.TimeoutExpired as ex:
 
 ok_init = False
 ok_tools = False
+ok_ffi = False
 for line in stdout.splitlines():
     line = line.strip()
     if not line:
@@ -157,10 +160,19 @@ for line in stdout.splitlines():
         ok_init = True
     if obj.get("id") == 2 and "result" in obj and isinstance(obj["result"].get("tools"), list):
         ok_tools = True
-if not (ok_init and ok_tools):
+    if obj.get("id") == 3 and "result" in obj:
+        res = obj["result"]
+        if (
+            isinstance(res, dict)
+            and res.get("ok") is True
+            and isinstance(res.get("ffi_decls"), list)
+            and int(res.get("external_count", 0)) >= 1
+        ):
+            ok_ffi = True
+if not (ok_init and ok_tools and ok_ffi):
     if stderr.strip():
         print(stderr, file=sys.stderr)
-    raise SystemExit("MCP handshake/tools-list failed")
+    raise SystemExit("MCP handshake/tools-list/ffi-inspect failed")
 PY
 
 echo "check-selfhost-e2e: OK"

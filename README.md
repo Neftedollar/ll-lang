@@ -56,7 +56,7 @@ Current release line: **1.0.0**.
 | 6 | Stdlib (~50 builtins) | ✅ |
 | **7** | **Bootstrap fixpoint** — ll-lang compiles itself (`compiler₁.fs == compiler₂.fs`) | ✅ |
 | **8** | **Module system** — `lll.toml`, multi-file builds, `lllc new`, topo-sort, E020/E024 | ✅ |
-| **9** | **MCP server** — `lllc mcp` stdio server (self-hosted `lllcself`) with 28 tools for Claude Code / Cursor / Zed | ✅ |
+| **9** | **MCP server** — `lllc mcp` stdio server (self-hosted `lllcself`) with 30 tools for Claude Code / Cursor / Zed | ✅ |
 | **10** | **Multi-platform codegen** — `lllc build --target ts\|py\|java\|cs\|llvm`; TypeScript DU + Python @dataclass + Java sealed interfaces + C# records + LLVM IR (`llvm` is experimental subset in 1.0) | ✅ |
 
 ## Getting Started
@@ -193,7 +193,7 @@ ll-lang ships a built-in MCP server. Wire it to Claude Code, Cursor, or Zed — 
 }
 ```
 
-Available MCP tools (28):
+Available MCP tools (30):
 - Core compile/check: `compile_source`, `check_source`, `compile_file`, `check_file`
 - Diagnostics & repair: `diagnose_source`, `diagnose_file`, `explain_error`, `fix_suggest`, `apply_fix_preview`
 - Formatting & AST: `format_source`, `format_file`, `parse_source`, `typed_ast`
@@ -201,6 +201,7 @@ Available MCP tools (28):
 - Symbol navigation: `symbols`, `definition`, `references`
 - Dependency helpers: `mod_add`, `mod_tidy`, `mod_why`
 - Test helpers: `test_list`, `test_run` (structured self-host suite over `tools/check-selfhost-ci.sh`)
+- FFI helpers: `ffi_inspect`, `ffi_validate`
 - Catalog/meta: `stdlib_search`, `list_errors`, `lookup_error`, `list_targets`
 
 The agent can ask "does this compile?" and get a structured JSON response with error codes, line numbers, and fix hints — no scraping required.
@@ -388,7 +389,7 @@ spec/                      — formal grammar (EBNF), type rules, example corpus
   examples/valid/          — working .lll programs (hello, basics, ADTs, ...)
   examples/invalid/        — programs annotated with expected error codes
 lllcself/src/              — self-hosted ll-lang implementation of CLI subcommands
-  Mcp.lll                  — MCP server (28 tools for LLM clients)
+  Mcp.lll                  — MCP server (30 tools for LLM clients)
 stdlib/                    — self-hosted stdlib (10 modules, 5857 LOC ll-lang)
 obsolete/stage0/           — archived stage0 (.NET) compiler/tool/tests (manual use only)
 docs/user-guide/           — user documentation
