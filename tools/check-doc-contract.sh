@@ -12,13 +12,24 @@ check_pattern() {
   local tmp
   tmp="$(mktemp)"
 
-  if rg -n --no-heading --color=never \
-    --glob '!docs/superpowers/specs/**' \
-    --glob '!docs/compiler-dev/fixpoint-snapshots/**' \
-    --glob '!**/bin/**' \
-    --glob '!**/obj/**' \
-    -e "${pattern}" \
-    README.md docs spec >"${tmp}"; then
+  if command -v rg >/dev/null 2>&1; then
+    rg -n --no-heading --color=never \
+      --glob '!docs/superpowers/specs/**' \
+      --glob '!docs/compiler-dev/fixpoint-snapshots/**' \
+      --glob '!**/bin/**' \
+      --glob '!**/obj/**' \
+      -e "${pattern}" \
+      README.md docs spec >"${tmp}" || true
+  else
+    find README.md docs spec -type f \
+      ! -path 'docs/superpowers/specs/*' \
+      ! -path 'docs/compiler-dev/fixpoint-snapshots/*' \
+      ! -path '*/bin/*' \
+      ! -path '*/obj/*' \
+      -print0 | xargs -0 grep -nP -H -e "${pattern}" >"${tmp}" || true
+  fi
+
+  if [[ -s "${tmp}" ]]; then
     echo "DOC CONTRACT VIOLATION: ${label}"
     cat "${tmp}"
     echo
