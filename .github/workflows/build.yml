@@ -1,4 +1,4 @@
-name: Build & Test
+name: Self-host CI
 
 on:
   push:
@@ -7,43 +7,17 @@ on:
     branches: [ main ]
 
 jobs:
-  release-core:
+  selfhost:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - name: Bootstrap Installer Smoke
+      - name: Bootstrap Self-host Check Suite
         run: |
-          LLLC_BOOTSTRAP_REINSTALL=1 ./tools/lllc-bootstrap.sh check "${{ github.workspace }}/lllcself/src/Main.lll"
+          LLLC_BOOTSTRAP_REINSTALL=1 ./tools/check-selfhost-ci.sh
         working-directory: .
       - name: Doc Contract Check
         run: ./tools/check-doc-contract.sh
         working-directory: .
       - name: Nullability Suppression Guard
         run: ./tools/check-no-fs3261-suppression.sh
-        working-directory: .
-      - name: Build
-        run: dotnet clean --nologo && dotnet build --nologo -warnaserror
-        working-directory: .
-      - name: Test (release-core)
-        run: dotnet test --no-build --verbosity normal --filter "FullyQualifiedName!~ReverseTranspilerTests&FullyQualifiedName!~CodegenLLVMTests"
-        working-directory: .
-
-  experimental:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - name: Build
-        run: dotnet clean --nologo && dotnet build --nologo -warnaserror
-        working-directory: .
-      - name: Test (reverse + llvm experimental)
-        run: dotnet test --no-build --verbosity normal --filter "FullyQualifiedName~ReverseTranspilerTests|FullyQualifiedName~CodegenLLVMTests"
         working-directory: .

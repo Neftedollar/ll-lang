@@ -1,6 +1,6 @@
 # ll-lang
 
-[![Build & Test](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml/badge.svg)](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml)
+[![Self-host CI](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml/badge.svg)](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml)
 
 > **A statically-typed functional language designed for LLM code generation.** Token-efficient syntax, compiled = works, errors formatted for LLMs to read directly.
 
@@ -19,7 +19,7 @@ Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting 
 
 ## Status
 
-Working end-to-end compiler with a large automated xUnit suite (see CI badge), written in F# / .NET 10. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib → module system → MCP server → TypeScript + Python + Java + C# + LLVM codegen.
+Working end-to-end compiler with self-host CI (bootstrap `lllc` artifact + corpus checks) and a legacy stage0 .NET regression workflow. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib → module system → MCP server → TypeScript + Python + Java + C# + LLVM codegen.
 Current release line: **1.0.0**.
 
 **Release contract (1.0):**
@@ -61,13 +61,20 @@ Current release line: **1.0.0**.
 
 ## Getting Started
 
-Requires [.NET 10](https://dotnet.microsoft.com/download).
+Bootstrap path (default) does not require .NET.  
+Optional: install [.NET 10](https://dotnet.microsoft.com/download) only for legacy stage0 build/tests.
 
 ```bash
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
+LLLC_BOOTSTRAP_REINSTALL=1 ./tools/check-selfhost-ci.sh
+```
+
+Legacy stage0 verification (optional):
+
+```bash
 dotnet build
-dotnet test    # run full test suite (current count in CI)
+dotnet test
 ```
 
 ### Bootstrap installer (pinned release artifact)
@@ -102,36 +109,26 @@ module Hello
 Hello = printfn "Hello, ll-lang!"
 EOF
 
-lllc run hello.lll
+./tools/lllc-bootstrap.sh run hello.lll
 # → Hello, ll-lang!
 ```
 
 ### CLI
 
 ```
-lllc build <file.lll>               # compile → <file>.fs  (F# default)
-lllc build --target ts <file.lll>   # compile → <file>.ts  (TypeScript)
-lllc build --target py <file.lll>   # compile → <file>.py  (Python)
-lllc build --target java <file.lll> # compile → <file>.java (Java 21)
-lllc build --target cs <file.lll>   # compile → <file>.cs  (C#)
-lllc build --target llvm <file.lll> # compile → <file>.ll  (LLVM IR)
-lllc build [dir]                    # compile project (reads lll.toml)
-lllc check [dir]                    # type-check project (no codegen)
-lllc self check <file.lll>          # canonical single-file type-check (LLL path)
-lllc check <file.lll>               # legacy stage0 single-file check (compatibility path)
-lllc run   <file.lll>               # compile and run via temporary F# project
-lllc new   <name>                   # scaffold new project
-lllc install                        # resolve direct+transitive deps into vendor/ + rewrite ll.sum
-lllc mod tidy                       # same as install (canonical dependency sync)
-lllc mod add dep=https://repo#ref   # add dependency and sync
-lllc mod why dep                    # explain dependency chain + local direct importers
-lllc mcp                            # run MCP server (stdio, for Claude/Cursor)
+./tools/lllc-bootstrap.sh compile <file.lll>               # compile (bootstrap path)
+./tools/lllc-bootstrap.sh run <file.lll>                   # compile + run
+./tools/lllc-bootstrap.sh check <file.lll>                 # canonical single-file check
+./tools/lllc-bootstrap.sh mcp                              # run MCP server (stdio)
+
+# legacy stage0 CLI (optional)
+lllc build/check/run/new/install/mod/mcp ...
 ```
 
 ### Create a multi-file project
 
 ```bash
-lllc new myapp          # creates myapp/lll.toml + myapp/src/Main.lll
+lllc new myapp          # (stage0 helper) creates myapp/lll.toml + myapp/src/Main.lll
 cd myapp
 # edit src/Main.lll, add more .lll files to src/
 lllc build              # → bin/fsharp/myapp.fsproj (+ Prelude.fs + module .fs files)
@@ -378,12 +375,12 @@ src/LLLangCompiler/        — compiler library (F#)
   CodegenPy.fs             — Python source emitter
   CodegenJava.fs           — Java 21 source emitter
   Compiler.fs              — end-to-end pipeline + Target dispatch
-src/LLLangTool/            — `lllc` CLI (build / run / self / new / install / mcp + experimental reverse)
+src/LLLangTool/            — legacy stage0 `lllc` CLI bridge (.NET)
   Program.fs               — entry point
 lllcself/src/              — self-hosted ll-lang implementation of CLI subcommands
   Mcp.lll                  — MCP server (28 tools for LLM clients)
 stdlib/                    — self-hosted stdlib (10 modules, 5857 LOC ll-lang)
-tests/LLLangTests/         — xUnit test suite (see CI for current count)
+tests/LLLangTests/         — legacy stage0 xUnit regression suite
 docs/user-guide/           — user documentation
 docs/compiler-dev/         — compiler developer documentation
 ```

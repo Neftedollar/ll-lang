@@ -6,11 +6,10 @@ ll-lang is a statically-typed functional language designed for LLM code generati
 
 ## Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download)
-
-```bash
-dotnet --version   # must report 10.x
-```
+- A POSIX or Windows shell.
+- No .NET required for bootstrap execution.
+- Optional: [.NET 10 SDK](https://dotnet.microsoft.com/download) for legacy
+  stage0 build/test workflows.
 
 ---
 
@@ -19,11 +18,10 @@ dotnet --version   # must report 10.x
 ```bash
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
-dotnet build
-dotnet test        # run full test suite (current count in CI)
+LLLC_BOOTSTRAP_REINSTALL=1 ./tools/check-selfhost-ci.sh
 ```
 
-### Set up the `lllc` alias
+### Optional legacy `lllc` alias (stage0)
 
 ```bash
 alias lllc='dotnet run --project /path/to/ll-lang/src/LLLangTool --'
@@ -42,7 +40,7 @@ module Hello
 Hello = printfn "Hello, ll-lang!"
 EOF
 
-lllc run hello.lll
+./tools/lllc-bootstrap.sh run hello.lll
 # Hello, ll-lang!
 ```
 
@@ -56,10 +54,10 @@ Key rules:
 ## Run and build
 
 ```bash
-lllc run hello.lll          # compile + execute via temporary F# project
-lllc build hello.lll        # compile → hello.fs
-lllc self check hello.lll   # canonical single-file type-check (LLL path)
-lllc check .                # project type-check (reads lll.toml)
+./tools/lllc-bootstrap.sh run hello.lll    # compile + execute
+./tools/lllc-bootstrap.sh check hello.lll  # canonical single-file type-check
+lllc build hello.lll                        # legacy stage0 compile → hello.fs
+lllc check .                                # legacy stage0 project check
 ```
 
 ---

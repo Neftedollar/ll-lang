@@ -2,33 +2,29 @@
 
 ## Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download) (the compiler targets
-  `net10.0` and uses `LangVersion=preview`).
 - A POSIX or Windows shell. Examples in this guide assume bash.
+- No .NET required for bootstrap execution.
+- Optional: [.NET 10 SDK](https://dotnet.microsoft.com/download) only for
+  legacy stage0 build/test workflows.
 
-Verify:
-
-```bash
-dotnet --version
-# must report 10.x
-```
-
-## Build from source
+## Bootstrap-first setup
 
 ```bash
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
-dotnet build
+LLLC_BOOTSTRAP_REINSTALL=1 ./tools/check-selfhost-ci.sh
 ```
 
-Optional: run the test suite.
+## Optional legacy stage0 verification
 
 ```bash
+dotnet --version   # must report 10.x
+dotnet build
 dotnet test
 ```
 
-All tests should pass. The suite grows with each phase; a clean build on
-main should report zero failures.
+This path is not required for bootstrap usage; it remains for stage0 regression
+coverage.
 
 ## Hello, ll-lang
 
@@ -43,7 +39,7 @@ main() = printfn "Hello, ll-lang!"
 Run it:
 
 ```bash
-dotnet run --project src/LLLangTool -- run hello.lll
+./tools/lllc-bootstrap.sh run hello.lll
 ```
 
 Expected output:
@@ -52,15 +48,15 @@ Expected output:
 Hello, ll-lang!
 ```
 
-## The `lllc` alias
+## Optional legacy `lllc` alias (stage0)
 
-The project does not install `lllc` to PATH. For convenience, alias it:
+If you still need stage0 CLI commands (`new`, project `check`, etc.), alias:
 
 ```bash
 alias lllc='dotnet run --project /path/to/ll-lang/src/LLLangTool --'
 ```
 
-Then the rest of this guide can be followed literally:
+Then you can run legacy commands:
 
 ```bash
 lllc run hello.lll

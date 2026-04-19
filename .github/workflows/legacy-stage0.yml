@@ -1,0 +1,38 @@
+name: Legacy Stage0 (.NET)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * 1'
+
+jobs:
+  release-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build
+        run: dotnet clean --nologo && dotnet build --nologo -warnaserror
+        working-directory: .
+      - name: Test (release-core)
+        run: dotnet test --no-build --verbosity normal --filter "FullyQualifiedName!~ReverseTranspilerTests&FullyQualifiedName!~CodegenLLVMTests"
+        working-directory: .
+
+  experimental:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build
+        run: dotnet clean --nologo && dotnet build --nologo -warnaserror
+        working-directory: .
+      - name: Test (reverse + llvm experimental)
+        run: dotnet test --no-build --verbosity normal --filter "FullyQualifiedName~ReverseTranspilerTests|FullyQualifiedName~CodegenLLVMTests"
+        working-directory: .
