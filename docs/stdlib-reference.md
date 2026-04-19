@@ -18,12 +18,15 @@ These are general-purpose library modules. Import them in any ll-lang program.
 | `Std.List` | `import Std.List` | list operations |
 | `Std.Maybe` | `import Std.Maybe` | optional values |
 | `Std.Result` | `import Std.Result` | error-or-value |
+| `Std.Monad` | `import Std.Monad` | monad trait + adapters |
 | `Std.Map` | `import Std.Map` | Okasaki RB-tree map |
 | `Std.Str` | `import Std.Str` | string utilities |
 | `Std.State` | `import Std.State` | stateful computation |
 | `Std.Parsec` | `import Std.Parsec` | parser combinators |
 | `Std.Lazy` | `import Std.Lazy` | explicit laziness |
 | `Std.Json` | `import Std.Json` | JSON codec |
+| `Std.McpProtocol` | `import Std.McpProtocol` | JSON-RPC/MCP envelope helpers |
+| `Std.Reverse` | `import Std.Reverse` | self-host reverse foundation |
 | `Std.Toml` | `import Std.Toml` | TOML subset parser |
 | `Std.Test` | `import Std.Test` | unit test harness |
 
@@ -257,6 +260,38 @@ pipeline(s Str) =
 
 ---
 
+### `Std.Monad` — compact monadic adapters
+
+**Import:** `import Std.Monad`  
+**Self-tests:** covered via host smoke (`StdlibStateParsecTests`)  
+**Description:** Canonical compact monadic surface for `Maybe`, `Result`, and `State`. Keeps parser/compiler-heavy code short without adding new language features.
+
+**Functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `maybePure` | `A -> Maybe[A]` | Maybe constructor via trait |
+| `maybeBindM` | `Maybe[A] -> (A -> Maybe[B]) -> Maybe[B]` | Maybe bind adapter |
+| `maybeMapM` | `Maybe[A] -> (A -> B) -> Maybe[B]` | Maybe map adapter |
+| `maybeJoinM` | `Maybe[Maybe[A]] -> Maybe[A]` | Flatten nested Maybe |
+| `maybeThenM` | `Maybe[A] -> Maybe[B] -> Maybe[B]` | Sequence and keep RHS |
+| `resultPure` | `A -> Result[A][E]` | Result constructor adapter |
+| `resultBindM` | `Result[A][E] -> (A -> Result[B][E]) -> Result[B][E]` | Result bind adapter |
+| `resultMapM` | `Result[A][E] -> (A -> B) -> Result[B][E]` | Result map adapter |
+| `resultJoinM` | `Result[Result[A][E]][E] -> Result[A][E]` | Flatten nested Result |
+| `resultThenM` | `Result[A][E] -> Result[B][E] -> Result[B][E]` | Sequence and keep RHS |
+| `statePureM` | `A -> State[S][A]` | State constructor adapter |
+| `stateBindM` | `State[S][A] -> (A -> State[S][B]) -> State[S][B]` | State bind adapter |
+| `stateMapM` | `State[S][A] -> (A -> B) -> State[S][B]` | State map adapter |
+| `stateJoinM` | `State[S][State[S][A]] -> State[S][A]` | Flatten nested State |
+| `stateThenM` | `State[S][A] -> State[S][B] -> State[S][B]` | Sequence and keep RHS |
+
+**Note:**
+
+`Std.Monad` is intentionally adapter-first for current self-hosted typing/runtime stability. Trait-based generic `pure`/`bind` dispatch remains tracked in `TODO(selfhost:typing)` and can be layered back without API break in call sites using these adapters.
+
+---
+
 ### `Std.List` — Extended list operations
 
 **Import:** `import Std.List`  
@@ -457,6 +492,59 @@ validateAndRoundtrip(src Str) =
             "OK"
           else "MISMATCH"
 ```
+
+---
+
+### `Std.McpProtocol` — JSON-RPC / MCP envelope helpers
+
+**Import:** `import Std.McpProtocol`  
+**Self-tests:** covered via host smoke (`StdlibStateParsecTests`)  
+**Description:** Pure ll-lang encode/decode helpers for MCP/JSON-RPC request, notification, success-response, and error-response envelopes. Built on `Std.Json`.
+
+**Key types:**
+
+```lll
+McpId = McpIdStr Str | McpIdInt Int | McpIdNull
+McpRequest = MkMcpRequest Str McpId JsonValue
+McpNotification = MkMcpNotification Str JsonValue
+McpSuccessResponse = MkMcpSuccessResponse McpId JsonValue
+McpErrorObject = MkMcpErrorObject Int Str Maybe[JsonValue]
+McpErrorResponse = MkMcpErrorResponse McpId McpErrorObject
+```
+
+**Key functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `parseRequestJson` | `Str -> Result[McpRequest][Str]` | Parse+decode request envelope |
+| `parseNotificationJson` | `Str -> Result[McpNotification][Str]` | Parse+decode notification envelope |
+| `encodeRequest` | `McpRequest -> Str` | Serialize request envelope |
+| `encodeNotification` | `McpNotification -> Str` | Serialize notification envelope |
+| `encodeSuccess` | `McpSuccessResponse -> Str` | Serialize success response |
+| `encodeError` | `McpErrorResponse -> Str` | Serialize error response |
+
+`Std.McpProtocol` is intentionally transport-agnostic; stdio process lifecycle and tool dispatch remain in host tooling.
+
+---
+
+### `Std.Reverse` — self-host reverse foundation
+
+**Import:** `import Std.Reverse`  
+**Self-tests:** covered via host smoke (`StdlibStateParsecTests`)  
+**Description:** Minimal reverse-transpiling substrate implemented in ll-lang. Current stable slice recovers module/`let` declarations from F# output; other targets return explicit upgrade marker.
+
+**Key functions:**
+
+| Function | Type | Description |
+|----------|------|-------------|
+| `reverseToLll` | `Str -> Str -> Str` | Reverse source for target alias (`fs`, `fsharp`, `f#`) |
+
+**Behavior:**
+
+- For `fs`/`fsharp`/`f#`: extracts `module ...` and simple `let`/`let rec` declarations.
+- For non-F# targets: returns a deterministic placeholder with `TODO(selfhost:backend)` marker.
+
+This module is intentionally foundation-only in this pass; broader target parity remains tracked under `selfhost:backend`.
 
 ---
 
@@ -1016,9 +1104,12 @@ buildFile(path Str) =
 | Category | Module | Purpose |
 |----------|--------|---------|
 | Core types | `Std.Maybe` | Maybe helpers and tests |
+| Core types | `Std.Monad` | Compact monadic adapters (`Maybe`/`Result`/`State`) |
 | Data structures | `Std.Map` | Ordered map, O(log n) |
 | Config | `Std.Toml` | TOML manifest parser |
 | Parsing | `Std.Json` | JSON parse + stringify + roundtrip helpers |
+| Parsing | `Std.McpProtocol` | JSON-RPC/MCP envelope encode/decode helpers |
+| Parsing | `Std.Reverse` | Self-host reverse foundation (`fs` stable slice) |
 | Parsing | `Std.Parsec` | Parser combinator substrate |
 | Runtime | `Std.Lazy` | Explicit delayed evaluation |
 | Parsing | `Std.Lexer` | ll-lang tokenizer |

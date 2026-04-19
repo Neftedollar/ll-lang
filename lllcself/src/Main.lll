@@ -1,6 +1,7 @@
 module Lllcself.Main
 
 import Std.Compiler
+import Std.Reverse
 
 -- Self-hosted ll-lang CLI.
 -- Commands:
@@ -10,11 +11,12 @@ import Std.Compiler
 --   render  <file>  -> emit canonical ll-lang source
 --   tokens  <file>  -> emit token estimate JSON
 --   symbol  <file> <name> -> lookup top-level symbol kind JSON
+--   reverse <target> <file> -> reverse target source into ll-lang (foundation slice)
 --
 -- With a single bare path argument, defaults to `compile <file>`.
 
 usageText =
-  "usage: lllcself <command> <file> [arg]\ncommands: compile | check | next | render | tokens | symbol"
+  "usage: lllcself <command> <file> [arg]\ncommands: compile | check | next | render | tokens | symbol | reverse"
 
 encodeJsonEscape(c Char) =
   match c
@@ -90,6 +92,15 @@ runSymbol(path Str)(name Str) =
     _ = print (ioError (strConcat "File not found: " path))
     1
 
+runReverse(target Str)(path Str) =
+  if fileExists path
+    src = readFile path
+    _ = print (reverseToLll target src)
+    0
+  else
+    _ = print (ioError (strConcat "File not found: " path))
+    1
+
 runArgs(args List[Str]) =
   match args
     | "check" :: path :: [] -> runCheck path
@@ -98,6 +109,7 @@ runArgs(args List[Str]) =
     | "render" :: path :: [] -> runRender path
     | "tokens" :: path :: [] -> runTokens path
     | "symbol" :: path :: name :: [] -> runSymbol path name
+    | "reverse" :: target :: path :: [] -> runReverse target path
     | path :: [] -> runCompile path
     | _ ->
       _ = printfn usageText

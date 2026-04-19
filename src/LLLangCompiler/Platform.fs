@@ -55,7 +55,7 @@ let private tryParseCanonicalTarget (raw: string) : Target option =
     | "llvm" | "ll" | "platform.llvm.sdk" -> Some LLVM
     | _ -> None
 
-let private fsharpExternalTargetMap : Map<string, string> =
+let private fallbackFSharpExternalTargetMap : Map<string, string> =
     [
         "console_log", "System.Console.WriteLine"
         "JSON_parse", "System.Text.Json.JsonSerializer.Deserialize<obj>"
@@ -68,7 +68,7 @@ let private fsharpExternalTargetMap : Map<string, string> =
     ]
     |> Map.ofList
 
-let private typeScriptExternalTargetMap : Map<string, string> =
+let private fallbackTypeScriptExternalTargetMap : Map<string, string> =
     [
         "console_log", "console.log"
         "JSON_parse", "JSON.parse"
@@ -76,49 +76,43 @@ let private typeScriptExternalTargetMap : Map<string, string> =
     ]
     |> Map.ofList
 
-let private pythonExternalTargetMap : Map<string, string> =
+let private fallbackPythonExternalTargetMap : Map<string, string> =
     [
         "console_log", "print"
         "JSON_parse", "json.loads"
     ]
     |> Map.ofList
 
-let private javaExternalTargetMap : Map<string, string> =
+let private fallbackJavaExternalTargetMap : Map<string, string> =
     [
         "console_log", "System.out.println"
     ]
     |> Map.ofList
 
-let private csharpExternalTargetMap : Map<string, string> =
+let private fallbackCSharpExternalTargetMap : Map<string, string> =
     [
         "console_log", "Console.WriteLine"
         "JSON_parse", "System.Text.Json.JsonSerializer.Deserialize<object>"
     ]
     |> Map.ofList
 
-let private llvmExternalTargetMap : Map<string, string> =
+let private fallbackLlvmExternalTargetMap : Map<string, string> =
     [
         // LLVM backend currently uses direct symbol declarations.
         "console_log", "console_log"
     ]
     |> Map.ofList
 
-let private externalTargetMap : Map<Target, Map<string, string>> =
+let private fallbackExternalTargetMap : Map<Target, Map<string, string>> =
     [
-        (FSharp, fsharpExternalTargetMap)
-        (TypeScript, typeScriptExternalTargetMap)
-        (Python, pythonExternalTargetMap)
-        (Java, javaExternalTargetMap)
-        (CSharp, csharpExternalTargetMap)
-        (LLVM, llvmExternalTargetMap)
+        (FSharp, fallbackFSharpExternalTargetMap)
+        (TypeScript, fallbackTypeScriptExternalTargetMap)
+        (Python, fallbackPythonExternalTargetMap)
+        (Java, fallbackJavaExternalTargetMap)
+        (CSharp, fallbackCSharpExternalTargetMap)
+        (LLVM, fallbackLlvmExternalTargetMap)
     ]
     |> Map.ofList
-
-let tryGetExternalTarget (target: Target) (externalName: string) : string option =
-    externalTargetMap |> Map.tryFind target |> Option.bind (Map.tryFind externalName)
-
-let hasExternalTarget (target: Target) (externalName: string) : bool =
-    externalTargetMap |> Map.tryFind target |> Option.exists (fun m -> Map.containsKey externalName m)
 
 let private fallbackSdks : PlatformSdk list =
     [
@@ -202,6 +196,7 @@ type private TomlValue =
 
 type private RegistryState = {
     Sdks : PlatformSdk list
+    ExternalMappings : Map<Target, Map<string, string>>
     Errors : string list
 }
 
@@ -450,6 +445,136 @@ let private sdkSearchRoots () : string list =
     ]
     |> distinctPreservingOrder
 
+type private FfiMapBlock = {
+    Target : Target
+    Entries : (string * string) list
+    Source : string
+}
+
+let private ffiMapBlockRegex =
+    Regex(@"(?ms)^\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<body>.*?)(?=^\s*[A-Za-z_][A-Za-z0-9_]*(?:\([^\n=]*\))?\s*=|\z)")
+
+let private ffiPairRegex =
+    Regex(@"\(\s*""(?<name>(?:\\.|[^""\\])*)""\s*,\s*""(?<target>(?:\\.|[^""\\])*)""\s*\)\s*::")
+
+let private allTargets : Target list =
+    [ FSharp; TypeScript; Python; Java; CSharp; LLVM ]
+
+let private tryGetPackageNameFromFfiPath (ffiPath: string) : string option =
+    match Directory.GetParent(ffiPath) with
+    | null -> None
+    | srcDir ->
+        match srcDir.Parent with
+        | null -> None
+        | pkgDir -> Some pkgDir.Name
+
+let private ffiSidecarFiles () : string list =
+    let candidates = ResizeArray<string>()
+    let addIfFile (path: string) =
+        if File.Exists(path) then
+            candidates.Add(Path.GetFullPath(path))
+
+    for root in sdkSearchRoots () do
+        let sdkRoot = Path.Combine(root, "sdks")
+        if Directory.Exists(sdkRoot) then
+            for dir in Directory.EnumerateDirectories(sdkRoot) do
+                addIfFile (Path.Combine(dir, "src", "FFI.lll"))
+
+        let vendorRoot = Path.Combine(root, "vendor")
+        if Directory.Exists(vendorRoot) then
+            for dir in Directory.EnumerateDirectories(vendorRoot) do
+                addIfFile (Path.Combine(dir, "src", "FFI.lll"))
+
+        let projectManifest = Path.Combine(root, "lll.toml")
+        let legacyManifest = Path.Combine(root, "ll.toml")
+        if File.Exists(projectManifest) || File.Exists(legacyManifest) then
+            addIfFile (Path.Combine(root, "src", "FFI.lll"))
+
+    candidates
+    |> List.ofSeq
+    |> distinctPreservingOrder
+
+let private parseFfiSidecar (ffiPath: string) : Result<FfiMapBlock list, string list> =
+    try
+        let src = File.ReadAllText(ffiPath)
+        let packageTarget =
+            tryGetPackageNameFromFfiPath ffiPath
+            |> Option.bind tryParseCanonicalTarget
+
+        let blocks =
+            [ for m in (ffiMapBlockRegex.Matches(src) |> Seq.cast<Match>) do
+                let mapName = m.Groups.["name"].Value
+                if mapName.EndsWith("ExternalMap", StringComparison.Ordinal) then
+                    let prefix = mapName.Substring(0, mapName.Length - "ExternalMap".Length)
+                    let targetOpt =
+                        match tryParseCanonicalTarget prefix with
+                        | Some t -> Some t
+                        | None -> packageTarget
+                    match targetOpt with
+                    | None -> ()
+                    | Some target ->
+                        let body = m.Groups.["body"].Value
+                        let entries =
+                            [ for pair in (ffiPairRegex.Matches(body) |> Seq.cast<Match>) do
+                                let name = Regex.Unescape(pair.Groups.["name"].Value)
+                                let symbol = Regex.Unescape(pair.Groups.["target"].Value)
+                                yield (name, symbol) ]
+                        yield { Target = target; Entries = entries; Source = ffiPath } ]
+        Ok blocks
+    with ex ->
+        Error [$"{ffiPath}: failed to read/parse FFI sidecar: {ex.Message}"]
+
+let private mergeExternalEntry
+    (target: Target)
+    (externalName: string)
+    (symbol: string)
+    (source: string)
+    (current: Map<Target, Map<string, string>>)
+    (errors: ResizeArray<string>)
+    : Map<Target, Map<string, string>> =
+    let mapForTarget = current |> Map.tryFind target |> Option.defaultValue Map.empty
+    match mapForTarget |> Map.tryFind externalName with
+    | None ->
+        current |> Map.add target (mapForTarget |> Map.add externalName symbol)
+    | Some existing when StringComparer.Ordinal.Equals(existing, symbol) ->
+        current
+    | Some existing ->
+        errors.Add(
+            $"FFI mapping collision target:{canonicalPlatformName target} name:{externalName} existing:'{existing}' incoming:'{symbol}' source:{source}")
+        current
+
+let private loadExternalMappings () : Map<Target, Map<string, string>> * string list =
+    let errors = ResizeArray<string>()
+    let mutable merged =
+        allTargets
+        |> List.map (fun target -> target, Map.empty<string, string>)
+        |> Map.ofList
+
+    let mutable seenTargets = Set.empty<Target>
+    for ffiPath in ffiSidecarFiles () do
+        match parseFfiSidecar ffiPath with
+        | Error es ->
+            for e in es do
+                errors.Add(e)
+        | Ok blocks ->
+            for block in blocks do
+                seenTargets <- Set.add block.Target seenTargets
+                for (externalName, symbol) in block.Entries do
+                    merged <- mergeExternalEntry block.Target externalName symbol block.Source merged errors
+
+    // TODO(selfhost:bootstrap): remove bootstrap fallback once sidecar discovery
+    // is mandatory in all supported workflows.
+    // Bootstrapping fallback for environments where sidecars are not discoverable.
+    for target in allTargets do
+        if not (Set.contains target seenTargets) then
+            match fallbackExternalTargetMap |> Map.tryFind target with
+            | None -> ()
+            | Some fallback ->
+                for KeyValue(externalName, symbol) in fallback do
+                    merged <- mergeExternalEntry target externalName symbol "bootstrap-fallback" merged errors
+
+    (merged, List.ofSeq errors)
+
 let private loadRegistry () : RegistryState =
     let errors = ResizeArray<string>()
     let sdks =
@@ -474,8 +599,12 @@ let private loadRegistry () : RegistryState =
                         fallback)
     for e in validateAliasCollisions sdks do
         errors.Add(e)
+    let (externalMappings, externalErrors) = loadExternalMappings ()
+    for e in externalErrors do
+        errors.Add(e)
     {
         Sdks = sdks
+        ExternalMappings = externalMappings
         Errors = List.ofSeq errors
     }
 
@@ -491,6 +620,19 @@ let builtInSdks : PlatformSdk list = registry().Sdks
 
 let sdkRegistryErrors () : string list =
     registry().Errors
+
+let externalRegistryErrors () : string list =
+    registry().Errors
+
+let tryGetExternalTarget (target: Target) (externalName: string) : string option =
+    registry().ExternalMappings
+    |> Map.tryFind target
+    |> Option.bind (Map.tryFind externalName)
+
+let hasExternalTarget (target: Target) (externalName: string) : bool =
+    registry().ExternalMappings
+    |> Map.tryFind target
+    |> Option.exists (fun m -> Map.containsKey externalName m)
 
 let sdkForTarget (target: Target) : PlatformSdk =
     match builtInSdks |> List.tryFind (fun s -> s.Target = target) with

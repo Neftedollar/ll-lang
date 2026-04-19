@@ -189,25 +189,25 @@ parseJsonBool =
 parseJsonString =
   parseMap (\s. JStr s) (jsonLexemeStr parseQuotedString)
 
-parseJsonField() =
+parseJsonField(dummy Int) =
   parseBind (jsonLexemeStr parseQuotedString) \k.
     parseBind (jsonSym ':') \ignoredColon.
-      parseBind (parseJsonValue()) \v.
+      parseBind (parseJsonValue 0) \v.
         parsePure (JField k v)
 
-parseJsonArray() =
+parseJsonArray(dummy Int) =
   parseBind (jsonSym '[') \ignoredLBrack.
-    parseBind (parseSepBy (parseJsonValue()) (jsonSym ',')) \items.
+    parseBind (parseSepBy (parseJsonValue 0) (jsonSym ',')) \items.
       parseBind (jsonSym ']') \ignoredRBrack.
         parsePure (JArr items)
 
-parseJsonObject() =
+parseJsonObject(dummy Int) =
   parseBind (jsonSym '{') \ignoredLBrace.
-    parseBind (parseSepBy (parseJsonField()) (jsonSym ',')) \fields.
+    parseBind (parseSepBy (parseJsonField 0) (jsonSym ',')) \fields.
       parseBind (jsonSym '}') \ignoredRBrace.
         parsePure (JObj fields)
 
-parseJsonValue() =
+parseJsonValue(dummy Int) =
   parseOrElse
     (parseTry parseJsonNull)
     (parseOrElse
@@ -216,20 +216,20 @@ parseJsonValue() =
         (parseTry parseJsonNumber)
         (parseOrElse
           (parseTry parseJsonString)
-          (parseOrElse (parseTry (parseJsonArray())) (parseJsonObject()))
+          (parseOrElse (parseTry (parseJsonArray 0)) (parseJsonObject 0))
         )
       )
     )
 
-parseJsonDocument() =
+parseJsonDocument(dummy Int) =
   parseBind parseSpaces \ignoredDocLeftWs.
-    parseBind (parseJsonValue()) \v.
+    parseBind (parseJsonValue 0) \v.
       parseBind parseSpaces \ignoredDocRightWs.
         parseBind parseEof \ignoredEof.
           parsePure v
 
 export parseJson(src Str) =
-  match runParser (parseJsonDocument()) src
+  match runParser (parseJsonDocument 0) src
     | Ok (v, _) -> ParseOk v []
     | Err e -> ParseErr (showParseError e)
 

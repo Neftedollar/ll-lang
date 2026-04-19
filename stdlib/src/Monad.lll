@@ -1,0 +1,30 @@
+module Std.Monad
+
+import Std.Maybe
+import Std.Result
+import Std.State
+
+-- Compact monadic adapters for compiler-heavy code.
+-- TODO(selfhost:typing): re-introduce a canonical trait-based Monad surface
+-- once method dispatch for `pure`/`bind` is stabilized in self-hosted mode.
+
+-- Maybe adapters.
+export maybePure(a A) Maybe[A] = Some a
+export maybeBindM(fa Maybe[A])(f A -> Maybe[B]) Maybe[B] = maybeBind fa f
+export maybeMapM(fa Maybe[A])(f A -> B) Maybe[B] = maybeMap f fa
+export maybeJoinM(ffa Maybe[Maybe[A]]) Maybe[A] = maybeBind ffa (\fa. fa)
+export maybeThenM(fa Maybe[A])(fb Maybe[B]) Maybe[B] = maybeBind fa (\ignored. fb)
+
+-- Result adapters (E fixed by surrounding type usage).
+export resultPure(a A) Result[A][E] = Ok a
+export resultBindM(fa Result[A][E])(f A -> Result[B][E]) Result[B][E] = resultBind fa f
+export resultMapM(fa Result[A][E])(f A -> B) Result[B][E] = resultMap f fa
+export resultJoinM(ffa Result[Result[A][E]][E]) Result[A][E] = resultBind ffa (\fa. fa)
+export resultThenM(fa Result[A][E])(fb Result[B][E]) Result[B][E] = resultBind fa (\ignored. fb)
+
+-- State adapters (S fixed by surrounding type usage).
+export statePureM(a A) State[S][A] = statePure a
+export stateBindM(fa State[S][A])(f A -> State[S][B]) State[S][B] = stateBind fa f
+export stateMapM(fa State[S][A])(f A -> B) State[S][B] = stateMap f fa
+export stateJoinM(ffa State[S][State[S][A]]) State[S][A] = stateBind ffa (\fa. fa)
+export stateThenM(fa State[S][A])(fb State[S][B]) State[S][B] = stateBind fa (\ignored. fb)

@@ -151,3 +151,134 @@ main() =
     Assert.Equal(0, exitCode)
     Assert.Contains("OK lazy-force", stdout)
     Assert.DoesNotContain("FAIL ", stdout)
+
+[<Fact>]
+let ``Std.Monad: trait + Maybe/Result/State adapters smoke`` () =
+    let src = """
+module Tmp.MonadSmoke
+
+import Std.Monad
+
+inc(n Int) = n + 1
+
+main() =
+  m1 = maybeBindM (maybePure 41) (\n. maybePure (inc n))
+  _ = match m1
+    | Some n ->
+      if n == 42
+        printfn "OK maybe"
+      else
+        printfn "FAIL maybe"
+    | None -> printfn "FAIL maybe"
+
+  r1 = resultBindM (resultPure 2) (\n. Ok (n * 3))
+  _ = match r1
+    | Ok n ->
+      if n == 6
+        printfn "OK result"
+      else
+        printfn "FAIL result"
+    | Err _ -> printfn "FAIL result"
+
+  s1 = stateBindM (statePureM 5) (\n. statePureM (n + 1))
+  _ = if stateEval s1 1 == 6
+    printfn "OK state"
+  else
+    printfn "FAIL state"
+  0
+"""
+    let (exitCode, stdout, stderr) = runSource "monad-smoke" src
+    Assert.Equal(0, exitCode)
+    Assert.Contains("OK maybe", stdout)
+    Assert.Contains("OK result", stdout)
+    Assert.Contains("OK state", stdout)
+    Assert.DoesNotContain("FAIL ", stdout)
+
+[<Fact>]
+let ``Std.McpProtocol: JSON-RPC envelope roundtrip smoke`` () =
+    let src = """
+module Tmp.McpProtocolSmoke
+
+import Std.Json
+import Std.McpProtocol
+
+main() =
+  req = MkMcpRequest "tools/list" (McpIdInt 7) (JObj [])
+  reqTxt = encodeRequest req
+  _ = match parseRequestJson reqTxt
+    | Ok r ->
+      match r
+        | MkMcpRequest method id params ->
+          if method == "tools/list"
+            match id
+              | McpIdInt n ->
+                if n == 7
+                  printfn "OK request"
+                else
+                  printfn "FAIL request"
+              | _ -> printfn "FAIL request"
+          else
+            printfn "FAIL request"
+    | Err _ -> printfn "FAIL request"
+
+  notif = MkMcpNotification "notifications/progress" (JObj [JField "done" (JBool true)])
+  notifTxt = encodeNotification notif
+  _ = match parseNotificationJson notifTxt
+    | Ok n ->
+      match n
+        | MkMcpNotification method _ ->
+          if method == "notifications/progress"
+            printfn "OK notification"
+          else
+            printfn "FAIL notification"
+    | Err _ -> printfn "FAIL notification"
+
+  errTxt = encodeError (MkMcpErrorResponse McpIdNull (MkMcpErrorObject 32601 "method not found" (Some JNull)))
+  _ = match parseJson errTxt
+    | ParseOk _ _ -> printfn "OK error-envelope"
+    | ParseErr _ -> printfn "FAIL error-envelope"
+  0
+"""
+    let (exitCode, stdout, stderr) = runSource "mcp-protocol-smoke" src
+    Assert.Equal(0, exitCode)
+    Assert.Contains("OK request", stdout)
+    Assert.Contains("OK notification", stdout)
+    Assert.Contains("OK error-envelope", stdout)
+    Assert.DoesNotContain("FAIL ", stdout)
+
+[<Fact>]
+let ``Std.Reverse: self-hosted minimal F# recovery smoke`` () =
+    let src = """
+module Tmp.ReverseSmoke
+
+import Std.Reverse
+
+main() =
+  fsSrc = "module Demo.Core\n\nlet answer = 42\nlet rec inc x = x + 1\nlet title = \"hello\""
+  recovered = reverseToLll "fs" fsSrc
+  _ = if strContains "module Demo.Core" recovered
+    printfn "OK module"
+  else
+    printfn "FAIL module"
+  _ = if strContains "answer = 42" recovered
+    printfn "OK answer"
+  else
+    printfn "FAIL answer"
+  _ = if strContains "inc x = x + 1" recovered
+    printfn "OK inc"
+  else
+    printfn "FAIL inc"
+  fallback = reverseToLll "ts" "const x = 1;"
+  _ = if strContains "TODO(selfhost:backend)" fallback
+    printfn "OK fallback"
+  else
+    printfn "FAIL fallback"
+  0
+"""
+    let (exitCode, stdout, stderr) = runSource "reverse-smoke" src
+    Assert.Equal(0, exitCode)
+    Assert.Contains("OK module", stdout)
+    Assert.Contains("OK answer", stdout)
+    Assert.Contains("OK inc", stdout)
+    Assert.Contains("OK fallback", stdout)
+    Assert.DoesNotContain("FAIL ", stdout)

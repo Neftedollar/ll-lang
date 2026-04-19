@@ -1437,7 +1437,8 @@ let ``20-bootstrap-compiler.lll resolves strToInt via stdlibNames (Phase 7.10c)`
     // Fixture `20t-bootstrap-input-strtoint.lll` calls `strToInt` from
     // a user fn body. Pre-fix, the elaborator emits
     // `E002 UnboundVar strToInt`; post-fix, the elaborator accepts the
-    // name and codegen emits a `let useIt` plus the `[<EntryPoint>]`
+    // name and codegen emits user function from fixture (`parseOrZero`)
+    // plus the `[<EntryPoint>]` main wrapper.
     // main wrapper.
     let inputPath =
         Path.Combine(repoRoot, "spec/examples/valid/20a-bootstrap-input.lll")
@@ -1455,8 +1456,8 @@ let ``20-bootstrap-compiler.lll resolves strToInt via stdlibNames (Phase 7.10c)`
             combined.Contains "E002 UnboundVar strToInt",
             $"expected NO E002 UnboundVar strToInt; combined:\n{combined}")
         Assert.True(
-            stdout.Contains "let rec useIt" || stdout.Contains "let useIt",
-            $"expected emitted F# to contain `let useIt` or `let rec useIt`; stdout:\n{combined}")
+            stdout.Contains "let rec parseOrZero" || stdout.Contains "let parseOrZero",
+            $"expected emitted F# to contain `let parseOrZero` or `let rec parseOrZero`; stdout:\n{combined}")
         Assert.True(
             stdout.Contains "[<EntryPoint>]",
             $"expected emitted F# to contain `[<EntryPoint>]`; stdout:\n{combined}")

@@ -1655,7 +1655,7 @@ let private cmdNew (name: string) : int =
 [<EntryPoint>]
 let main (argv: string[]) : int =
     for e in sdkRegistryErrors () do
-        Console.Error.WriteLine("lllc: sdk metadata warning: " + e)
+        Console.Error.WriteLine("lllc: platform registry warning: " + e)
     let args = List.ofArray argv
     match args with
     | "build" :: rest ->

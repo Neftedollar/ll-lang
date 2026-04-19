@@ -47,6 +47,7 @@ let rec private collectTyApp (t: TypeExpr) : TypeExpr * TypeExpr list =
 
 let rec private emitTypeBoxed (t: TypeExpr) : string =
     match t with
+    | TyName "object" -> "object"
     | TyName "Int" -> "long"
     | TyName "Float" -> "double"
     | TyName "Str" -> "string"
@@ -391,39 +392,42 @@ let private tryStdlibGenericHead (name: string) (args: TypedExpr list) (retTy: T
     | "mapInsert", a0 :: _ ->
         match tryKFromCmp a0.Type with
         | Some k when not (containsFlexVar k) ->
-            let v =
+            let vOpt =
                 match collectTyApp retTy with
-                | TyName "RBMap", [_; v] when not (containsFlexVar v) -> v
+                | TyName "RBMap", [_; v] when not (containsFlexVar v) -> Some v
                 | _ ->
                     match args with
-                    | _ :: _ :: a2 :: _ when not (containsFlexVar a2.Type) -> a2.Type
-                    | _ -> TyName "object"
-            if containsFlexVar v then None  // let C# try
-            else Some ("mapInsert" + mk2 k v)
+                    | _ :: _ :: a2 :: _ when not (containsFlexVar a2.Type) -> Some a2.Type
+                    | _ -> None
+            match vOpt with
+            | Some v -> Some ("mapInsert" + mk2 k v)
+            | None -> None
         | _ -> None
     | "mapLookup", a0 :: _ ->
         // C# signature is mapLookup<V, K> (V first)
         match tryKFromCmp a0.Type with
         | Some k when not (containsFlexVar k) ->
-            let v =
+            let vOpt =
                 match retTy with
-                | TyApp(TyName "Maybe", v) when not (containsFlexVar v) -> v
-                | _ -> TyName "object"
-            if containsFlexVar v then None
-            else Some ("mapLookup<" + emitTypeBoxed v + "," + emitTypeBoxed k + ">")
+                | TyApp(TyName "Maybe", v) when not (containsFlexVar v) -> Some v
+                | _ -> None
+            match vOpt with
+            | Some v -> Some ("mapLookup<" + emitTypeBoxed v + "," + emitTypeBoxed k + ">")
+            | None -> None
         | _ -> None
     | "mapContains", a0 :: _ ->
         match tryKFromCmp a0.Type with
         | Some k when not (containsFlexVar k) ->
-            let v =
+            let vOpt =
                 match args with
-                | _ :: _ :: a2 :: _ ->
-                    match tryKVFromRBMap a2.Type with
-                    | Some (_, v) when not (containsFlexVar v) -> v
-                    | _ -> TyName "object"
-                | _ -> TyName "object"
-            if containsFlexVar v then None
-            else Some ("mapContains" + mk2 k v)
+                    | _ :: _ :: a2 :: _ ->
+                        match tryKVFromRBMap a2.Type with
+                        | Some (_, v) when not (containsFlexVar v) -> Some v
+                        | _ -> None
+                    | _ -> None
+            match vOpt with
+            | Some v -> Some ("mapContains" + mk2 k v)
+            | None -> None
         | _ -> None
     | "mapFold", a0 :: _ ->
         // signature: mapFold<B, K, V>(Func<B, Func<K, Func<V, B>>> f)

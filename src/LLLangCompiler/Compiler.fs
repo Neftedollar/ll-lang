@@ -69,6 +69,11 @@ let private externalMappingError (target: Target) (pm: PosMap) (sigRecord: FnSig
     mkLLError E026 pos.Line pos.Col
         (sprintf "UnknownExternalMapping target:%s name:%s" (targetPlatformName target) sigRecord.Name)
 
+let private platformRegistryErrors () : LLError list =
+    externalRegistryErrors ()
+    |> List.map (fun msg ->
+        mkLLError E001 0 0 (sprintf "PlatformRegistryError %s" msg))
+
 let private validateExternalMappingsForTarget (target: Target) (pm: PosMap) (m: LLModule) : LLError list =
     m.Decls
     |> List.choose (fun (decl, _isExported) ->
@@ -83,12 +88,16 @@ let private inferModuleForTarget
     (m: LLModule)
     (env0: Elaborator.TypeEnv)
     : Result<TypedModule, LLError list> =
-    match infer pm m env0 with
-    | Error es -> Error es
-    | Ok tm ->
-        let externalErrors = validateExternalMappingsForTarget target pm m
-        if List.isEmpty externalErrors then Ok tm
-        else Error externalErrors
+    let registryErrors = platformRegistryErrors ()
+    if not (List.isEmpty registryErrors) then
+        Error registryErrors
+    else
+        match infer pm m env0 with
+        | Error es -> Error es
+        | Ok tm ->
+            let externalErrors = validateExternalMappingsForTarget target pm m
+            if List.isEmpty externalErrors then Ok tm
+            else Error externalErrors
 
 /// Check a ll-lang source string for a specific target:
 /// lex → parse → elaborate → infer, skip codegen.

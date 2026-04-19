@@ -199,6 +199,65 @@ let ``lllc check validates externals for selected target`` () =
     )
 
 [<Fact>]
+let ``lllc check resolves externals from vendor FFI sidecar`` () =
+    withTempDir (fun root ->
+        Assert.True(File.Exists(lllcDll), $"missing lllc tool at {lllcDll}")
+
+        let srcPath = Path.Combine(root, "CheckVendorExternal.lll")
+        File.WriteAllText(
+            srcPath,
+            "module Demo.CheckVendorExternal\n" +
+            "external host_log(msg Str) Unit\n" +
+            "main() Int = 0\n")
+
+        let vendorDir = Path.Combine(root, "vendor", "Acme.Host.SDK", "src")
+        Directory.CreateDirectory(vendorDir) |> ignore
+        File.WriteAllText(
+            Path.Combine(vendorDir, "FFI.lll"),
+            "module Acme.Host.FFI\n" +
+            "fsharpExternalMap =\n" +
+            "  (\"host_log\", \"System.Console.WriteLine\") ::\n" +
+            "  []\n")
+
+        let (code, stdout, stderr) = runLllc root ["check"; "--target"; "fs"; srcPath]
+        Assert.True((code = 0), $"check should resolve vendor-provided FFI mapping\nstdout:\n{stdout}\nstderr:\n{stderr}")
+    )
+
+[<Fact>]
+let ``lllc check fails on conflicting FFI sidecar mappings`` () =
+    withTempDir (fun root ->
+        Assert.True(File.Exists(lllcDll), $"missing lllc tool at {lllcDll}")
+
+        let srcPath = Path.Combine(root, "CheckFfiCollision.lll")
+        File.WriteAllText(
+            srcPath,
+            "module Demo.CheckFfiCollision\n\nmain() Int = 1\n")
+
+        let vendorOne = Path.Combine(root, "vendor", "Acme.First.SDK", "src")
+        let vendorTwo = Path.Combine(root, "vendor", "Acme.Second.SDK", "src")
+        Directory.CreateDirectory(vendorOne) |> ignore
+        Directory.CreateDirectory(vendorTwo) |> ignore
+        File.WriteAllText(
+            Path.Combine(vendorOne, "FFI.lll"),
+            "module Acme.First.FFI\n" +
+            "fsharpExternalMap =\n" +
+            "  (\"host_log\", \"System.Console.WriteLine\") ::\n" +
+            "  []\n")
+        File.WriteAllText(
+            Path.Combine(vendorTwo, "FFI.lll"),
+            "module Acme.Second.FFI\n" +
+            "fsharpExternalMap =\n" +
+            "  (\"host_log\", \"System.Console.Error.WriteLine\") ::\n" +
+            "  []\n")
+
+        let (code, stdout, stderr) = runLllc root ["check"; "--target"; "fs"; srcPath]
+        Assert.True((code <> 0), $"check should fail on conflicting FFI mappings\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        Assert.Contains("E001", stderr)
+        Assert.Contains("PlatformRegistryError", stderr)
+        Assert.Contains("FFI mapping collision", stderr)
+    )
+
+[<Fact>]
 let ``lllc build fails hard on unknown manifest platform (no skip)`` () =
     withTempDir (fun root ->
         Assert.True(File.Exists(lllcDll), $"missing lllc tool at {lllcDll}")
