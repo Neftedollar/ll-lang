@@ -55,13 +55,13 @@ run_self_capture() {
 }
 
 run_self_capture "check single file" check "$main_file"
-rg -q '"ok":true' "$tmp_root/cmd.out" || fail "single-file check output mismatch"
+grep -Eq '"ok":true' "$tmp_root/cmd.out" || fail "single-file check output mismatch"
 
 run_self_capture "compile fs (single file)" compile --target fs "$main_file"
-rg -q 'module Smoke|let add' "$tmp_root/cmd.out" || fail "single-file fs compile output mismatch"
+grep -Eq 'module Smoke|let add' "$tmp_root/cmd.out" || fail "single-file fs compile output mismatch"
 
 run_self_capture "compile ts (single file)" compile --target ts "$main_file"
-rg -q 'function|const|type' "$tmp_root/cmd.out" || fail "single-file ts compile output mismatch"
+grep -Eq 'function|const|type' "$tmp_root/cmd.out" || fail "single-file ts compile output mismatch"
 
 project_name="sampleapp"
 (
@@ -87,22 +87,22 @@ val() = 1
 LLL
 
   run_capture "mod add" "$LLLC" mod add dep=path:../dep
-  rg -q 'Installed [0-9]+ dependencies into vendor/|\"ok\":true' "$tmp_root/cmd.out" || fail "mod add output mismatch"
+  grep -Eq 'Installed [0-9]+ dependencies into vendor/|\"ok\":true' "$tmp_root/cmd.out" || fail "mod add output mismatch"
 
   run_capture "mod why" "$LLLC" mod why dep
-  rg -q 'dependency chain:|\"ok\":true|\"dep\"' "$tmp_root/cmd.out" || fail "mod why output mismatch"
+  grep -Eq 'dependency chain:|\"ok\":true|\"dep\"' "$tmp_root/cmd.out" || fail "mod why output mismatch"
 
   run_capture "mod tidy" "$LLLC" mod tidy
-  rg -q 'Installed [0-9]+ dependencies into vendor/|\"ok\":true' "$tmp_root/cmd.out" || fail "mod tidy output mismatch"
+  grep -Eq 'Installed [0-9]+ dependencies into vendor/|\"ok\":true' "$tmp_root/cmd.out" || fail "mod tidy output mismatch"
 
   run_capture "install" "$LLLC" install
-  rg -q 'Installed [0-9]+ dependencies into vendor/|\"ok\":true' "$tmp_root/cmd.out" || fail "install output mismatch"
+  grep -Eq 'Installed [0-9]+ dependencies into vendor/|\"ok\":true' "$tmp_root/cmd.out" || fail "install output mismatch"
 
   run_capture "check project" "$LLLC" check .
-  rg -q 'Checked project|\"ok\":true|\"stage\":\"ok\"' "$tmp_root/cmd.out" || fail "project check output mismatch"
+  grep -Eq 'Checked project|\"ok\":true|\"stage\":\"ok\"' "$tmp_root/cmd.out" || fail "project check output mismatch"
 
   run_capture "build project fs" "$LLLC" build --target fs .
-  rg -q 'Built project|\"ok\":true' "$tmp_root/cmd.out" || fail "project build output mismatch"
+  grep -Eq 'Built project|\"ok\":true' "$tmp_root/cmd.out" || fail "project build output mismatch"
   [[ -f "$project_dir/bin/fsharp/sampleapp.fsproj" || -f "$project_dir/bin/fsharp/sample.fsproj" || -f "$project_dir/bin/fsharp/sampleapp.fs" || -f "$project_dir/bin/fsharp/sample.fs" ]] || fail "project build artifacts missing"
 )
 
