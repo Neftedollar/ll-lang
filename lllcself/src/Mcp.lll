@@ -78,7 +78,7 @@ parseNullVal(cs List[Char]) =
     | _ -> MkJVal MJNull cs
 
 negateIf(n Int)(val Int) =
-  if n == 0
+  if n == 1
     0 - val
   else
     val
@@ -96,14 +96,17 @@ parseNumber(cs List[Char]) =
     match cs
       | '-' :: _ -> 1
       | _ -> 0
-  cs1 = maybeWithDefault cs (listTail cs)
+  cs1 =
+    match cs
+      | '-' :: rest -> rest
+      | _ -> cs
   parseResult = collectDigits cs1 []
   digits = crDigits parseResult
   rest = crRest parseResult
   if listIsEmpty digits
     MkJVal (MJNum 0) cs
   else
-    numStr = strFromChars (listReverse digits)
+    numStr = strFromChars digits
     val = strToIntWithDefault numStr
     MkJVal (MJNum (negateIf isNeg val)) rest
 
@@ -125,7 +128,7 @@ parseStringVal(cs List[Char]) =
   match cs
     | '"' :: rest ->
       let (chars, remaining) = parseStringChars rest []
-      MkJVal (MJStr (strFromChars (listReverse chars))) remaining
+      MkJVal (MJStr (strFromChars chars)) remaining
     | _ -> MkJVal MJNull cs
 
 parseStringChars(cs List[Char])(acc List[Char]) =
@@ -155,12 +158,14 @@ parseArrayItems(cs List[Char])(acc List[JsonVal]) =
   match skipSpace cs
     | ']' :: rest -> (acc, rest)
     | ';' :: rest -> parseArrayItems (skipSpace rest) acc
+    | ',' :: rest -> parseArrayItems (skipSpace rest) acc
     | _ ->
       jval = parseValue (skipSpace cs)
       val = match jval | MkJVal v _ -> v
       rest1 = match jval | MkJVal _ r -> r
       match skipSpace rest1
         | ';' :: rest2 -> parseArrayItems (skipSpace rest2) (val :: acc)
+        | ',' :: rest2 -> parseArrayItems (skipSpace rest2) (val :: acc)
         | ']' :: rest3 -> (val :: acc, rest3)
         | _ -> (val :: acc, rest1)
 
@@ -176,6 +181,7 @@ parseObjectPairs(cs List[Char])(acc List[JsonVal]) =
   match cs1
     | '}' :: rest -> (acc, rest)
     | ';' :: rest -> parseObjectPairs (skipSpace rest) acc
+    | ',' :: rest -> parseObjectPairs (skipSpace rest) acc
     | '"' :: _ ->
       let (key, rest1) = parseKeyString cs1
       rest2 = skipSpace rest1
@@ -187,16 +193,17 @@ parseObjectPairs(cs List[Char])(acc List[JsonVal]) =
       val = match jval | MkJVal v _ -> v
       rest4 = match jval | MkJVal _ r -> r
       match skipSpace rest4
-        | ';' :: rest5 -> parseObjectPairs (skipSpace rest5) (MJStr key :: val :: acc)
-        | '}' :: rest6 -> (MJStr key :: val :: acc, rest6)
-        | _ -> (MJStr key :: val :: acc, rest4)
+        | ';' :: rest5 -> parseObjectPairs (skipSpace rest5) (val :: MJStr key :: acc)
+        | ',' :: rest5 -> parseObjectPairs (skipSpace rest5) (val :: MJStr key :: acc)
+        | '}' :: rest6 -> (val :: MJStr key :: acc, rest6)
+        | _ -> (val :: MJStr key :: acc, rest4)
     | _ -> (acc, cs)
 
 parseKeyString(cs List[Char]) =
   match cs
     | '"' :: rest ->
       let (chars, remaining) = parseStringChars rest []
-      (strFromChars (listReverse chars), remaining)
+      (strFromChars chars, remaining)
     | _ -> ("", cs)
 
 -- ---- JSON helpers ----
@@ -209,6 +216,11 @@ jsonGetPairs(pairs List[JsonVal])(key Str) =
   match pairs
     | [] -> MJNull
     | MJStr k :: v :: rest ->
+      if k == key
+        v
+      else
+        jsonGetPairs rest key
+    | v :: MJStr k :: rest ->
       if k == key
         v
       else
@@ -258,7 +270,7 @@ jsonEsc(s Str) =
       strConcat esc (jsonEsc (strFromChars rest))
 
 jsonEncArr(xs List[JsonVal]) =
-  strConcat "[" (strConcat (jsonJoin (listMap jsonSerialize xs) ";") "]")
+  strConcat "[" (strConcat (jsonJoin (listMap jsonSerialize xs) ",") "]")
 
 jsonEncObj(pairs List[JsonVal]) =
   strConcat "{" (strConcat (jsonJoinObj pairs) "}")
@@ -465,17 +477,14 @@ handleListTargets(params JsonVal) =
   MJArr (listMap targetToJson knownTargets)
 
 -- ---- Main MCP loop ----
-mcpLoop() =
+mcpLoop(dummy Int) =
   input = readStdin
   lines = splitLines input
   responses = processAllLines lines []
   print (joinResponses responses)
 
 readStdin() =
-  if fileExists "/dev/stdin"
-    readFile "/dev/stdin"
-  else
-    ""
+  readFile "/dev/stdin"
 
 splitLines(s Str) =
   strSplit "\n" s

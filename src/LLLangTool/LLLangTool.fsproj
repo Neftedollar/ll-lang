@@ -7,12 +7,7 @@
     <AssemblyName>lllc</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Mcp.fs" />
     <Compile Include="Program.fs" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="FsMcp.Core" Version="1.0.0" />
-    <PackageReference Include="FsMcp.Server" Version="1.0.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LLLangCompiler\LLLangCompiler.fsproj" />

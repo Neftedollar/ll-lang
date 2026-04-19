@@ -2,6 +2,7 @@ module Lllcself.Main
 
 import Std.Compiler
 import Std.Reverse
+import Lllcself.Mcp
 
 -- Self-hosted ll-lang CLI.
 -- Commands:
@@ -12,11 +13,12 @@ import Std.Reverse
 --   tokens  <file>  -> emit token estimate JSON
 --   symbol  <file> <name> -> lookup top-level symbol kind JSON
 --   reverse <target> <file> -> reverse target source into ll-lang (foundation slice)
+--   mcp             -> run MCP stdio server loop
 --
 -- With a single bare path argument, defaults to `compile <file>`.
 
 usageText =
-  "usage: lllcself <command> <file> [arg]\ncommands: compile | check | next | render | tokens | symbol | reverse"
+  "usage: lllcself <command> <file> [arg]\ncommands: compile | check | next | render | tokens | symbol | reverse | mcp"
 
 encodeJsonEscape(c Char) =
   match c
@@ -101,6 +103,10 @@ runReverse(target Str)(path Str) =
     _ = print (ioError (strConcat "File not found: " path))
     1
 
+runMcp(dummy Int) =
+  _ = mcpLoop 0
+  0
+
 runArgs(args List[Str]) =
   match args
     | "check" :: path :: [] -> runCheck path
@@ -110,6 +116,7 @@ runArgs(args List[Str]) =
     | "tokens" :: path :: [] -> runTokens path
     | "symbol" :: path :: name :: [] -> runSymbol path name
     | "reverse" :: target :: path :: [] -> runReverse target path
+    | "mcp" :: [] -> runMcp 0
     | path :: [] -> runCompile path
     | _ ->
       _ = printfn usageText

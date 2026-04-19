@@ -861,6 +861,9 @@ let private runDotnetProject (projectPath: string) (workingDir: string option) (
     buildPsi.ArgumentList.Add("q")
     buildPsi.ArgumentList.Add("--nologo")
     buildPsi.ArgumentList.Add(projectPath)
+    // Prevent build subprocess from consuming parent stdin (important for
+    // streamed commands like `lllc mcp` that need stdin for the run phase).
+    buildPsi.RedirectStandardInput <- true
     buildPsi.RedirectStandardOutput <- true
     buildPsi.RedirectStandardError <- true
     buildPsi.UseShellExecute <- false
@@ -1723,7 +1726,7 @@ let main (argv: string[]) : int =
             | Some r -> r
             | None -> Directory.GetCurrentDirectory()
         cmdInstall root
-    | ["mcp"] -> Mcp.runServer (); 0
+    | ["mcp"] -> cmdRunSelf ["mcp"]
     | _ ->
         Console.Error.WriteLine("Usage:")
         Console.Error.WriteLine("  lllc build [--target fs|ts|py|java|cs|llvm] <file.lll>  compile single file")
