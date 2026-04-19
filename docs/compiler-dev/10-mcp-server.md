@@ -74,6 +74,9 @@ lllcself/src/Mcp.lll handles JSON-RPC over stdio
 ### Test helpers
 
 - `test_list`, `test_run` (execute `dotnet test` with structured JSON output)
+- both tools accept runtime mode controls:
+  - `process_spawn` (bool, default `true`)
+  - `execution_mode` (`"process"` default, `"host_runner"` / `"no_spawn"` for no-spawn requests)
 
 ### Existing utility surface
 
@@ -91,6 +94,7 @@ lllcself/src/Mcp.lll handles JSON-RPC over stdio
 - file paths should be absolute for stable behavior (self-host runs in temp dir).
 - `test_list` / `test_run` run through a controlled process shim (`dotnet test`).
 - responses include `exit_code`, `timed_out`, counters, and per-test entries.
+- in no-spawn mode responses remain structured and include `execution_mode` + `degraded_reason`.
 
 ## Main loop shape
 

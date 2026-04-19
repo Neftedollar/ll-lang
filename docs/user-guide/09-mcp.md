@@ -321,6 +321,29 @@ and return path-aware locations.
 }
 ```
 
+Both tools also support a no-spawn fallback request shape:
+
+```json
+{
+  "process_spawn": false,
+  "execution_mode": "host_runner"
+}
+```
+
+In that mode the response remains structured, but reports degraded execution:
+
+```json
+{
+  "ok": false,
+  "supported": false,
+  "execution_mode": "host_runner",
+  "degraded_reason": "Requested host_runner mode but no host runner is configured in self-hosted runtime.",
+  "exit_code": -1,
+  "timed_out": false,
+  "total": 0
+}
+```
+
 ---
 
 ## Smoke test

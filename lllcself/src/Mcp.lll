@@ -792,6 +792,81 @@ normalizeTimeoutSec(raw Int)(defaultSec Int) =
   else
     clampInt raw 1 3600
 
+paramBoolOr(params JsonVal)(key Str)(fallback Bool) =
+  v = jsonGet params key
+  match v
+    | MJBool b -> b
+    | _ -> fallback
+
+resolveTestExecutionMode(params JsonVal) =
+  mode = strTrim (jsonGetStr (jsonGet params "execution_mode"))
+  if mode == "host_runner"
+    "host_runner"
+  else
+    if mode == "no_spawn"
+      "host_runner"
+    else
+      "process"
+
+resolveProcessSpawnAllowed(params JsonVal) =
+  mode = resolveTestExecutionMode params
+  processSpawn = paramBoolOr params "process_spawn" true
+  if mode == "process"
+    processSpawn
+  else
+    false
+
+testNoSpawnReason(params JsonVal) =
+  rawMode = strTrim (jsonGetStr (jsonGet params "execution_mode"))
+  processSpawn = paramBoolOr params "process_spawn" true
+  if rawMode == "host_runner"
+    "Requested host_runner mode but no host runner is configured in self-hosted runtime."
+  else
+    if rawMode == "no_spawn"
+      "Requested no_spawn mode but no host runner is configured in self-hosted runtime."
+    else
+      if processSpawn
+        "Process runner unavailable and no host runner is configured in self-hosted runtime."
+      else
+        "Process spawn is disabled and no host runner is configured in self-hosted runtime."
+
+testListNoSpawn(cwd Str)(projectArg Str)(filter Str)(reason Str) =
+  MJObj [
+    MJStr "ok"; MJBool false;
+    MJStr "supported"; MJBool false;
+    MJStr "execution_mode"; MJStr "host_runner";
+    MJStr "degraded_reason"; MJStr reason;
+    MJStr "cwd"; MJStr cwd;
+    MJStr "project"; MJStr projectArg;
+    MJStr "timed_out"; MJBool false;
+    MJStr "exit_code"; MJNum (0 - 1);
+    MJStr "filter"; MJStr filter;
+    MJStr "total"; MJNum 0;
+    MJStr "tests"; MJArr [];
+    MJStr "stderr_summary"; MJStr reason
+  ]
+
+testRunNoSpawn(cwd Str)(projectArg Str)(filter Str)(reason Str) =
+  MJObj [
+    MJStr "ok"; MJBool false;
+    MJStr "supported"; MJBool false;
+    MJStr "execution_mode"; MJStr "host_runner";
+    MJStr "degraded_reason"; MJStr reason;
+    MJStr "cwd"; MJStr cwd;
+    MJStr "project"; MJStr projectArg;
+    MJStr "timed_out"; MJBool false;
+    MJStr "exit_code"; MJNum (0 - 1);
+    MJStr "filter"; MJStr filter;
+    MJStr "total"; MJNum 0;
+    MJStr "passed"; MJNum 0;
+    MJStr "failed"; MJNum 0;
+    MJStr "skipped"; MJNum 0;
+    MJStr "tests"; MJArr [];
+    MJStr "stdout"; MJStr "";
+    MJStr "stderr"; MJStr "";
+    MJStr "stderr_summary"; MJStr reason
+  ]
+
 resolveTestCwd(params JsonVal) =
   project = jsonGetStr (jsonGet params "project")
   if strLen project > 0
@@ -962,8 +1037,8 @@ handleToolsList(params JsonVal) =
     (toolSchema "apply_fix_preview" "Preview source after applying fix candidate." [MJStr "fix_id"; MJObj [MJStr "type"; MJStr "string"]; MJStr "source"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "fix_id"]);
     (toolSchema "check_project" "Project-level check summary (self-hosted baseline)." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] []);
     (toolSchema "build_project" "Project-level build summary (self-hosted baseline)." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] []);
-    (toolSchema "test_list" "List tests via dotnet test --list-tests." [MJStr "filter"; MJObj [MJStr "type"; MJStr "string"]; MJStr "project"; MJObj [MJStr "type"; MJStr "string"]; MJStr "timeout_sec"; MJObj [MJStr "type"; MJStr "integer"]] []);
-    (toolSchema "test_run" "Run tests via dotnet test and return structured summary." [MJStr "filter"; MJObj [MJStr "type"; MJStr "string"]; MJStr "project"; MJObj [MJStr "type"; MJStr "string"]; MJStr "timeout_sec"; MJObj [MJStr "type"; MJStr "integer"]; MJStr "collect_output"; MJObj [MJStr "type"; MJStr "boolean"]] []);
+    (toolSchema "test_list" "List tests via dotnet test --list-tests (or structured no-spawn fallback)." [MJStr "filter"; MJObj [MJStr "type"; MJStr "string"]; MJStr "project"; MJObj [MJStr "type"; MJStr "string"]; MJStr "timeout_sec"; MJObj [MJStr "type"; MJStr "integer"]; MJStr "process_spawn"; MJObj [MJStr "type"; MJStr "boolean"]; MJStr "execution_mode"; MJObj [MJStr "type"; MJStr "string"]] []);
+    (toolSchema "test_run" "Run tests via dotnet test (or structured no-spawn fallback)." [MJStr "filter"; MJObj [MJStr "type"; MJStr "string"]; MJStr "project"; MJObj [MJStr "type"; MJStr "string"]; MJStr "timeout_sec"; MJObj [MJStr "type"; MJStr "integer"]; MJStr "collect_output"; MJObj [MJStr "type"; MJStr "boolean"]; MJStr "process_spawn"; MJObj [MJStr "type"; MJStr "boolean"]; MJStr "execution_mode"; MJObj [MJStr "type"; MJStr "string"]] []);
     (toolSchema "mod_add" "Add dependency in lll.toml." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "name"; MJObj [MJStr "type"; MJStr "string"]; MJStr "source"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "root"; MJStr "name"; MJStr "source"]);
     (toolSchema "mod_tidy" "Tidy dependencies (self-hosted baseline)." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "root"]);
     (toolSchema "mod_why" "Explain why dependency appears." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "dep"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "root"; MJStr "dep"]);
@@ -1320,38 +1395,44 @@ handleTestList(params JsonVal) =
   cwd = resolveTestCwd params
   projectArg = resolveTestProjectArg params
   timeoutSec = normalizeTimeoutSec (jsonGetInt (jsonGet params "timeout_sec")) 120
-  args0 = ["test"; "--nologo"; "--list-tests"]
-  args1 =
-    if strLen projectArg > 0
-      ["test"; projectArg; "--nologo"; "--list-tests"]
-    else
-      args0
-  args2 = withFilterArg args1 filter
-  run = runDotnet args2 cwd timeoutSec
-  stdout = jsonGetStr (jsonGet run "stdout")
-  stderr = jsonGetStr (jsonGet run "stderr")
-  exitCode = jsonGetInt (jsonGet run "exit_code")
-  timedOut = jsonGetBool (jsonGet run "timed_out")
-  started = findListTestsStart (strSplit "\n" stdout)
-  tests = collectListedTests started []
-  notTimedOut = not(timedOut)
-  ok =
-    if notTimedOut
-      exitCode == 0
-    else
-      false
-  MJObj [
-    MJStr "ok"; MJBool ok;
-    MJStr "supported"; MJBool true;
-    MJStr "cwd"; MJStr cwd;
-    MJStr "project"; MJStr projectArg;
-    MJStr "timed_out"; MJBool timedOut;
-    MJStr "exit_code"; MJNum exitCode;
-    MJStr "filter"; MJStr filter;
-    MJStr "total"; MJNum (listLen tests);
-    MJStr "tests"; MJArr tests;
-    MJStr "stderr_summary"; MJStr (truncateStr stderr 1200)
-  ]
+  allowProcessSpawn = resolveProcessSpawnAllowed params
+  if allowProcessSpawn
+    args0 = ["test"; "--nologo"; "--list-tests"]
+    args1 =
+      if strLen projectArg > 0
+        ["test"; projectArg; "--nologo"; "--list-tests"]
+      else
+        args0
+    args2 = withFilterArg args1 filter
+    run = runDotnet args2 cwd timeoutSec
+    stdout = jsonGetStr (jsonGet run "stdout")
+    stderr = jsonGetStr (jsonGet run "stderr")
+    exitCode = jsonGetInt (jsonGet run "exit_code")
+    timedOut = jsonGetBool (jsonGet run "timed_out")
+    started = findListTestsStart (strSplit "\n" stdout)
+    tests = collectListedTests started []
+    notTimedOut = not(timedOut)
+    ok =
+      if notTimedOut
+        exitCode == 0
+      else
+        false
+    MJObj [
+      MJStr "ok"; MJBool ok;
+      MJStr "supported"; MJBool true;
+      MJStr "execution_mode"; MJStr "process";
+      MJStr "degraded_reason"; MJStr "";
+      MJStr "cwd"; MJStr cwd;
+      MJStr "project"; MJStr projectArg;
+      MJStr "timed_out"; MJBool timedOut;
+      MJStr "exit_code"; MJNum exitCode;
+      MJStr "filter"; MJStr filter;
+      MJStr "total"; MJNum (listLen tests);
+      MJStr "tests"; MJArr tests;
+      MJStr "stderr_summary"; MJStr (truncateStr stderr 1200)
+    ]
+  else
+    testListNoSpawn cwd projectArg filter (testNoSpawnReason params)
 
 handleTestRun(params JsonVal) =
   filter = jsonGetStr (jsonGet params "filter")
@@ -1359,57 +1440,63 @@ handleTestRun(params JsonVal) =
   cwd = resolveTestCwd params
   projectArg = resolveTestProjectArg params
   timeoutSec = normalizeTimeoutSec (jsonGetInt (jsonGet params "timeout_sec")) 600
-  args0 = ["test"; "--nologo"; "--logger"; "console;verbosity=detailed"]
-  args1 =
-    if strLen projectArg > 0
-      ["test"; projectArg; "--nologo"; "--logger"; "console;verbosity=detailed"]
-    else
-      args0
-  args2 = withFilterArg args1 filter
-  run = runDotnet args2 cwd timeoutSec
-  stdout = jsonGetStr (jsonGet run "stdout")
-  stderr = jsonGetStr (jsonGet run "stderr")
-  exitCode = jsonGetInt (jsonGet run "exit_code")
-  timedOut = jsonGetBool (jsonGet run "timed_out")
-  lines = strSplit "\n" stdout
-  tests = collectRunCases lines []
-  total = intAfter "Total tests:" stdout
-  passed = intAfter "Passed:" stdout
-  failed = intAfter "Failed:" stdout
-  skipped = intAfter "Skipped:" stdout
-  notTimedOut = not(timedOut)
-  ok =
-    if notTimedOut
-      exitCode == 0
-    else
-      false
-  stdoutOut =
-    if collectOutput
-      stdout
-    else
-      ""
-  stderrOut =
-    if collectOutput
-      stderr
-    else
-      ""
-  MJObj [
-    MJStr "ok"; MJBool ok;
-    MJStr "supported"; MJBool true;
-    MJStr "cwd"; MJStr cwd;
-    MJStr "project"; MJStr projectArg;
-    MJStr "timed_out"; MJBool timedOut;
-    MJStr "exit_code"; MJNum exitCode;
-    MJStr "filter"; MJStr filter;
-    MJStr "total"; MJNum total;
-    MJStr "passed"; MJNum passed;
-    MJStr "failed"; MJNum failed;
-    MJStr "skipped"; MJNum skipped;
-    MJStr "tests"; MJArr tests;
-    MJStr "stdout"; MJStr stdoutOut;
-    MJStr "stderr"; MJStr stderrOut;
-    MJStr "stderr_summary"; MJStr (truncateStr stderr 1200)
-  ]
+  allowProcessSpawn = resolveProcessSpawnAllowed params
+  if allowProcessSpawn
+    args0 = ["test"; "--nologo"; "--logger"; "console;verbosity=detailed"]
+    args1 =
+      if strLen projectArg > 0
+        ["test"; projectArg; "--nologo"; "--logger"; "console;verbosity=detailed"]
+      else
+        args0
+    args2 = withFilterArg args1 filter
+    run = runDotnet args2 cwd timeoutSec
+    stdout = jsonGetStr (jsonGet run "stdout")
+    stderr = jsonGetStr (jsonGet run "stderr")
+    exitCode = jsonGetInt (jsonGet run "exit_code")
+    timedOut = jsonGetBool (jsonGet run "timed_out")
+    lines = strSplit "\n" stdout
+    tests = collectRunCases lines []
+    total = intAfter "Total tests:" stdout
+    passed = intAfter "Passed:" stdout
+    failed = intAfter "Failed:" stdout
+    skipped = intAfter "Skipped:" stdout
+    notTimedOut = not(timedOut)
+    ok =
+      if notTimedOut
+        exitCode == 0
+      else
+        false
+    stdoutOut =
+      if collectOutput
+        stdout
+      else
+        ""
+    stderrOut =
+      if collectOutput
+        stderr
+      else
+        ""
+    MJObj [
+      MJStr "ok"; MJBool ok;
+      MJStr "supported"; MJBool true;
+      MJStr "execution_mode"; MJStr "process";
+      MJStr "degraded_reason"; MJStr "";
+      MJStr "cwd"; MJStr cwd;
+      MJStr "project"; MJStr projectArg;
+      MJStr "timed_out"; MJBool timedOut;
+      MJStr "exit_code"; MJNum exitCode;
+      MJStr "filter"; MJStr filter;
+      MJStr "total"; MJNum total;
+      MJStr "passed"; MJNum passed;
+      MJStr "failed"; MJNum failed;
+      MJStr "skipped"; MJNum skipped;
+      MJStr "tests"; MJArr tests;
+      MJStr "stdout"; MJStr stdoutOut;
+      MJStr "stderr"; MJStr stderrOut;
+      MJStr "stderr_summary"; MJStr (truncateStr stderr 1200)
+    ]
+  else
+    testRunNoSpawn cwd projectArg filter (testNoSpawnReason params)
 
 handleModAdd(params JsonVal) =
   root = jsonGetStr (jsonGet params "root")
