@@ -801,7 +801,7 @@ and private emitMatchExprCSharp (scrut: TypedExpr) (branches: (TypedPattern * Ty
         | PWild
         | PLit _ -> true
         | PCon(c, args) when isNominalCtor c ->
-            args |> List.forall (function PVar _ -> true | _ -> false)
+            args |> List.forall (function | PVar _ | PWild -> true | _ -> false)
         | _ -> false
 
     if not (isSimpleMatchReturnType retTy) then
