@@ -1,0 +1,36 @@
+# NEXT_STEPS
+
+## MCP (LLL-first) stabilization
+- [ ] Sync docs with real MCP surface (`lllc mcp` now served by `lllcself`):
+  - [ ] `README.md` (tool inventory + architecture note)
+  - [ ] `docs/user-guide/09-mcp.md`
+  - [ ] `docs/compiler-dev/10-mcp-server.md`
+- [ ] Add MCP contract tests for the current self-hosted tool set:
+  - [ ] `initialize`
+  - [ ] `tools/list`
+  - [ ] `tools/call` smoke (`check_source`, `compile_source`, `lookup_error`)
+- [ ] Remove stale references to deleted `src/LLLangTool/Mcp.fs`.
+
+## Self-hosting path (toward full LLL toolchain)
+- [ ] Define canonical plan to switch default compile/check/run path from stage0 F# to self-hosted pipeline.
+- [ ] Add parity gate: same diagnostics and output between stage0 and self-hosted for corpus.
+- [ ] Introduce rollout flag strategy (safe cutover, fallback only for blockers).
+
+## FFI and MCP roadmap coupling
+- [ ] Finish FFI evolution in `.lll`-owned flow (no new feature logic in F#).
+- [ ] Expose FFI inspection/debug helpers via MCP tools for LLM workflows.
+- [ ] Add docs section: “FFI on LLL path only”.
+
+## Language ergonomics for compiler-writing
+- [ ] Evaluate built-in operator set (`|>`, `>>=`, `<|>`, `>>`) and lock precedence/associativity.
+- [ ] Add parser parity tests for new surface syntax.
+- [ ] Add TODO markers with fixed categories where blocked:
+  - [ ] `TODO(selfhost:operators)`
+  - [ ] `TODO(selfhost:typing)`
+  - [ ] `TODO(selfhost:resolver)`
+  - [ ] `TODO(selfhost:backend)`
+
+## Release readiness checkpoints
+- [ ] Full test suite green (no ignored critical paths except explicitly documented reverse tests).
+- [ ] Self-hosted compiler builds at least one real multi-module project with dependencies.
+- [ ] Update release docs with a factual “what is still stage0-only” matrix.

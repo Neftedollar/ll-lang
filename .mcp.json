@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "ll-lang": {
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangTool",
+        "--",
+        "mcp"
+      ]
+    }
+  }
+}
