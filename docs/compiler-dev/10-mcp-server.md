@@ -73,7 +73,7 @@ lllcself/src/Mcp.lll handles JSON-RPC over stdio
 
 ### Test helpers
 
-- `test_list`, `test_run`
+- `test_list`, `test_run` (execute `dotnet test` with structured JSON output)
 
 ### Existing utility surface
 
@@ -89,8 +89,8 @@ lllcself/src/Mcp.lll handles JSON-RPC over stdio
   - `{"ok": true, "result": "<json-string-from-checkCompact>"}`
 - file tools emit `E000` if path is missing.
 - file paths should be absolute for stable behavior (self-host runs in temp dir).
-- `test_list` / `test_run` currently return a structured `supported=false` baseline
-  in self-hosted runtime (no process spawn).
+- `test_list` / `test_run` run through a controlled process shim (`dotnet test`).
+- responses include `exit_code`, `timed_out`, counters, and per-test entries.
 
 ## Main loop shape
 

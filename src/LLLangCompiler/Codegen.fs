@@ -676,7 +676,7 @@ let listConcat (xss: 'a list list) = List.concat xss
 let listIsEmpty (xs: 'a list) = List.isEmpty xs
 let getArgs : string list = System.Environment.GetCommandLineArgs() |> Array.toList |> List.tail
 let ll_dirList (path: string) = System.IO.Directory.GetFiles(path) |> Array.toList
-let ll_processRun (cmd: string) (args: string list) =
+let ll_processRun (cmd: string, args: string list) =
     let psi = System.Diagnostics.ProcessStartInfo(cmd)
     for a in args do psi.ArgumentList.Add(a)
     psi.RedirectStandardOutput <- true
@@ -684,7 +684,51 @@ let ll_processRun (cmd: string) (args: string list) =
     let proc = System.Diagnostics.Process.Start(psi)
     let output = proc.StandardOutput.ReadToEnd()
     proc.WaitForExit()
-    output"""
+    output
+let ll_processRunEx (cmd: string, args: string list, cwd: string, timeoutSec: int64) =
+    let jsonQ (s: string) = System.Text.Json.JsonSerializer.Serialize(s)
+    let mk (ok: bool) (exitCode: int) (timedOut: bool) (stdout: string) (stderr: string) =
+        "{"
+        + "\"ok\":" + (if ok then "true" else "false")
+        + ",\"exit_code\":" + string exitCode
+        + ",\"timed_out\":" + (if timedOut then "true" else "false")
+        + ",\"stdout\":" + jsonQ stdout
+        + ",\"stderr\":" + jsonQ stderr
+        + "}"
+    try
+        let psi = System.Diagnostics.ProcessStartInfo(cmd)
+        for a in args do psi.ArgumentList.Add(a)
+        psi.WorkingDirectory <-
+            if System.String.IsNullOrWhiteSpace(cwd) then
+                System.Environment.CurrentDirectory
+            else
+                cwd
+        psi.RedirectStandardOutput <- true
+        psi.RedirectStandardError <- true
+        psi.UseShellExecute <- false
+        let proc = new System.Diagnostics.Process()
+        proc.StartInfo <- psi
+        let started = proc.Start()
+        if not started then
+            mk false -1 false "" ("Failed to start process: " + cmd)
+        else
+            let stdoutTask = proc.StandardOutput.ReadToEndAsync()
+            let stderrTask = proc.StandardError.ReadToEndAsync()
+            let timeoutMs =
+                if timeoutSec <= 0L then 600_000
+                elif timeoutSec > 3_600L then 3_600_000
+                else int timeoutSec * 1000
+            let exited = proc.WaitForExit(timeoutMs)
+            if not exited then
+                try proc.Kill(true) with _ -> ()
+            let _ = proc.WaitForExit()
+            let stdout = stdoutTask.Result
+            let stderr = stderrTask.Result
+            let timedOut = not exited
+            let exitCode = if timedOut then -1 else proc.ExitCode
+            mk (not timedOut) exitCode timedOut stdout stderr
+    with ex ->
+        mk false -1 false "" ex.Message"""
 
 /// Maybe-dependent prelude block — emitted only when user declares `type Maybe`
 /// and at least one Maybe helper is referenced.
@@ -723,7 +767,7 @@ let private fsharpPreludeCoreNames : Set<string> =
         "charIsDigit"; "charIsAlpha"; "charIsSpace"
         "readFile"; "writeFile"; "fileExists"; "exit"
         "listConcat"; "listIsEmpty"; "getArgs"
-        "ll_dirList"; "ll_processRun"
+        "ll_dirList"; "ll_processRun"; "ll_processRunEx"
     ]
 
 let private fsharpPreludeMaybeNames : Set<string> =

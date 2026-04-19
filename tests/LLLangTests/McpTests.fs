@@ -163,6 +163,8 @@ let ``mcp new tools smoke for issues 159 to 168`` () =
     let srcWithError = "module M\nmain() Int = undefined"
     let validSrc = "module M\nfoo(x Int) Int = x\nbar = foo 1"
     let projectRoot = Path.Combine(repoRoot, "lllcself")
+    let testsProject = Path.Combine(repoRoot, "tests", "LLLangTests", "LLLangTests.fsproj")
+    let testsFilter = "FullyQualifiedName~LLLangTests.McpTests.mcp initialize returns self-hosted metadata"
 
     let responses =
         runMcp
@@ -180,8 +182,8 @@ let ``mcp new tools smoke for issues 159 to 168`` () =
                 toolCallRequest 11 "apply_fix_preview" (sprintf """{"fix_id":"insert_stub_binding","source":%s}""" (jsonString srcWithError))
                 toolCallRequest 12 "check_project" (sprintf """{"root":%s}""" (jsonString projectRoot))
                 toolCallRequest 13 "build_project" (sprintf """{"root":%s}""" (jsonString projectRoot))
-                toolCallRequest 14 "test_list" "{}"
-                toolCallRequest 15 "test_run" "{}"
+                toolCallRequest 14 "test_list" (sprintf """{"project":%s,"filter":%s}""" (jsonString testsProject) (jsonString testsFilter))
+                toolCallRequest 15 "test_run" (sprintf """{"project":%s,"filter":%s,"timeout_sec":300}""" (jsonString testsProject) (jsonString testsFilter))
                 toolCallRequest 16 "mod_tidy" (sprintf """{"root":%s}""" (jsonString projectRoot))
                 toolCallRequest 17 "mod_why" (sprintf """{"root":%s,"dep":"Std.List"}""" (jsonString projectRoot))
             ]
@@ -217,8 +219,11 @@ let ``mcp new tools smoke for issues 159 to 168`` () =
     Assert.True((prop "applied" preview).GetBoolean())
     Assert.True((prop "ok" checkProject).GetBoolean())
     Assert.True((prop "ok" buildProject).GetBoolean())
-    Assert.False((prop "supported" testList).GetBoolean())
-    Assert.False((prop "supported" testRun).GetBoolean())
+    Assert.True((prop "supported" testList).GetBoolean())
+    Assert.True((prop "ok" testList).GetBoolean())
+    Assert.True((prop "total" testList).GetInt32() >= 1)
+    Assert.True((prop "supported" testRun).GetBoolean())
+    Assert.True((prop "total" testRun).GetInt32() >= 1)
     Assert.True((prop "ok" modTidy).GetBoolean())
     Assert.True((prop "ok" modWhy).GetBoolean())
 
@@ -404,6 +409,30 @@ let ``mcp mod_add mod_why mod_tidy roundtrip works in temp project`` () =
     finally
         if Directory.Exists(tmpRoot) then
             Directory.Delete(tmpRoot, true)
+
+[<Fact>]
+let ``mcp test_run reports timeout and explicit project failure`` () =
+    let testsProject = Path.Combine(repoRoot, "tests", "LLLangTests", "LLLangTests.fsproj")
+    let testsFilter = "FullyQualifiedName~LLLangTests.McpTests.mcp initialize returns self-hosted metadata"
+    let missingProject = Path.Combine(Path.GetTempPath(), "lllang-missing", "Missing.fsproj")
+
+    let responses =
+        runMcp
+            [
+                toolCallRequest 1 "test_run" (sprintf """{"project":%s,"filter":%s,"timeout_sec":1}""" (jsonString testsProject) (jsonString testsFilter))
+                toolCallRequest 2 "test_run" (sprintf """{"project":%s,"timeout_sec":30}""" (jsonString missingProject))
+            ]
+
+    let timeoutRun = prop "result" responses[0]
+    let missingProjectRun = prop "result" responses[1]
+
+    Assert.False((prop "ok" timeoutRun).GetBoolean())
+    Assert.True((prop "timed_out" timeoutRun).GetBoolean())
+    Assert.Equal(-1, (prop "exit_code" timeoutRun).GetInt32())
+
+    Assert.False((prop "ok" missingProjectRun).GetBoolean())
+    Assert.False((prop "timed_out" missingProjectRun).GetBoolean())
+    Assert.NotEqual<int>(0, (prop "exit_code" missingProjectRun).GetInt32())
 
 [<Fact>]
 let ``mcp file tools work with absolute paths`` () =

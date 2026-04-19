@@ -14,6 +14,7 @@ fsharpExternalMap =
   ("dirList", "ll_dirList") ::
   ("dirExists", "System.IO.Directory.Exists") ::
   ("processRun", "ll_processRun") ::
+  ("processRunEx", "ll_processRunEx") ::
   []
 
 -- Look up the F# implementation for an ll-lang external name.

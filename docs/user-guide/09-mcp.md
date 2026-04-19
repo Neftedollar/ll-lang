@@ -75,7 +75,7 @@ Dependency helpers:
 - `mod_add`, `mod_tidy`, `mod_why`
 
 Test helpers:
-- `test_list`, `test_run` (self-hosted baseline currently returns a structured not-supported result)
+- `test_list`, `test_run` (structured test discovery/run over `dotnet test`)
 
 Catalog/meta:
 - `stdlib_search`, `list_errors`, `lookup_error`, `list_targets`
@@ -288,13 +288,36 @@ and return path-aware locations.
 
 ### `test_list` / `test_run`
 
-Self-hosted baseline returns:
+`test_list` returns discovered tests:
 
 ```json
 {
-  "ok": false,
-  "supported": false,
-  "reason": "Process execution is unavailable in self-hosted MCP runtime."
+  "ok": true,
+  "supported": true,
+  "total": 12,
+  "tests": [
+    { "name": "LLLangTests.McpTests.mcp initialize returns self-hosted metadata" }
+  ],
+  "timed_out": false,
+  "exit_code": 0
+}
+```
+
+`test_run` returns structured run summary:
+
+```json
+{
+  "ok": true,
+  "supported": true,
+  "total": 1,
+  "passed": 1,
+  "failed": 0,
+  "skipped": 0,
+  "tests": [
+    { "name": "LLLangTests.McpTests.mcp initialize returns self-hosted metadata", "status": "passed", "duration_ms": 7000, "message": "" }
+  ],
+  "timed_out": false,
+  "exit_code": 0
 }
 ```
 

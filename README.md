@@ -154,7 +154,7 @@ Available MCP tools (28):
 - Project graph/build: `project_graph`, `check_project`, `build_project`
 - Symbol navigation: `symbols`, `definition`, `references`
 - Dependency helpers: `mod_add`, `mod_tidy`, `mod_why`
-- Test helpers: `test_list`, `test_run` (self-hosted baseline returns structured not-supported response)
+- Test helpers: `test_list`, `test_run` (structured `dotnet test` discovery/run output)
 - Catalog/meta: `stdlib_search`, `list_errors`, `lookup_error`, `list_targets`
 
 The agent can ask "does this compile?" and get a structured JSON response with error codes, line numbers, and fix hints — no scraping required.
