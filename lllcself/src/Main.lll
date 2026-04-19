@@ -15,6 +15,7 @@ import Std.CodegenLLVM
 import Lllcself.Mcp
 
 external dirList(path Str) List[Str]
+external processRun(cmd Str)(args List[Str]) Str
 external processRunEx(cmd Str)(args List[Str])(cwd Str)(timeoutSec Int) Str
 
 -- Self-hosted ll-lang CLI.
@@ -460,6 +461,49 @@ runCompile(target Str)(path Str) =
     _ = print (ioError (strConcat "File not found: " path))
     1
 
+runTempPath(path Str)(ext Str) =
+  plen = strLen path
+  if strEndsWith ".lll" path
+    base = strSlice path 0 (plen - 4)
+    strConcat base ext
+  else
+    strConcat path ext
+
+runExecute(target Str)(path Str) =
+  if fileExists path
+    src = readFile path
+    out = compileSourceForTarget target src
+    if strStartsWith "{\"ok\":false" out
+      _ = print out
+      1
+    else
+      t = normalizeTarget target
+      if t == "py"
+        pyPath = runTempPath path ".lllc.run.py"
+        _ = writeFile pyPath out
+        marker = "__LLLC_EXIT__"
+        cmd = "python3 \"$1\" 2>&1; printf \"\\n__LLLC_EXIT__%s\" \"$?\""
+        raw = processRun "sh" ("-lc" :: cmd :: "lllcself-run" :: pyPath :: [])
+        idx = strIndexOf marker raw
+        if idx < 0
+          _ = print raw
+          1
+        else
+          body = strSlice raw 0 idx
+          codeRaw = strSlice raw (idx + strLen marker) (strLen raw - idx - strLen marker)
+          code = strTrim codeRaw
+          _ = print body
+          if code == "0"
+            0
+          else
+            1
+      else
+        _ = print (ioError (strConcat "self run currently supports only --target py (requested: " (strConcat target ")")))
+        1
+  else
+    _ = print (ioError (strConcat "File not found: " path))
+    1
+
 runBuild(target Str)(path Str) =
   if dirExists path
     files = loadProjectFiles path
@@ -612,8 +656,8 @@ runArgs(args List[Str]) =
     | "check" :: path :: [] -> runCheck "fs" path
     | "compile" :: "--target" :: target :: path :: [] -> runCompile target path
     | "compile" :: path :: [] -> runCompile "fs" path
-    | "run" :: "--target" :: target :: path :: [] -> runCompile target path
-    | "run" :: path :: [] -> runCompile "fs" path
+    | "run" :: "--target" :: target :: path :: [] -> runExecute target path
+    | "run" :: path :: [] -> runExecute "py" path
     | "new" :: name :: [] -> runNew name
     | "install" :: [] -> runInstall "."
     | "mod" :: "tidy" :: [] -> runInstall "."
