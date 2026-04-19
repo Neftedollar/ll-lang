@@ -81,6 +81,20 @@ llvmIntOp(op Str) =
           "sdiv i64"
         else "add i64"
 
+llvmFloatOp(op Str) =
+  if op == "+"
+    "fadd double"
+  else
+    if op == "-"
+      "fsub double"
+    else
+      if op == "*"
+        "fmul double"
+      else
+        if op == "/"
+          "fdiv double"
+        else "fadd double"
+
 llvmCmpOp(op Str) =
   if op == "=="
     "icmp eq i64"
@@ -101,6 +115,26 @@ llvmCmpOp(op Str) =
               "icmp sge i64"
             else "icmp eq i64"
 
+llvmFloatCmpOp(op Str) =
+  if op == "=="
+    "fcmp oeq double"
+  else
+    if op == "!="
+      "fcmp one double"
+    else
+      if op == "<"
+        "fcmp olt double"
+      else
+        if op == ">"
+          "fcmp ogt double"
+        else
+          if op == "<="
+            "fcmp ole double"
+          else
+            if op == ">="
+              "fcmp oge double"
+            else "fcmp oeq double"
+
 isCmpOp(op Str) =
   if op == "=="
     true
@@ -120,6 +154,22 @@ isCmpOp(op Str) =
             if op == ">="
               true
             else false
+
+isFloatExpr(e Expr) =
+  match e
+    | EFloat _ -> true
+    | EBinOp _ l r ->
+      if isFloatExpr l
+        isFloatExpr r
+      else
+        false
+    | _ -> false
+
+isFloatBinOp(l Expr)(r Expr) =
+  if isFloatExpr l
+    isFloatExpr r
+  else
+    false
 
 -- ---- getStrVal helper ------------------------------------------------------
 
@@ -159,11 +209,18 @@ emitExprInstrs(e Expr)(ctr Int)(sidx Int) =
       lreg = emitExprReg l ctr sidx
       rreg = emitExprReg r lc ls
       dst = ssaName rc
+      floatOp = isFloatBinOp l r
       instrBody =
         if isCmpOp op
-          strConcat (llvmCmpOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+          if floatOp
+            strConcat (llvmFloatCmpOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+          else
+            strConcat (llvmCmpOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
         else
-          strConcat (llvmIntOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+          if floatOp
+            strConcat (llvmFloatOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+          else
+            strConcat (llvmIntOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
       instr = strConcat "  " (strConcat dst (strConcat " = " instrBody))
       prefix = strJoin2 li ri
       if strLen prefix == 0
@@ -566,5 +623,13 @@ main =
   -- 19. DImportUrl comment emission
   importUrlOut = emitDecl (DImportUrl "https://example.com/mod.lll") 0
   _ = codegenLLVMCheck "19 DImportUrl comment" importUrlOut "; import-url https://example.com/mod.lll"
+
+  -- 20. float arithmetic uses fadd double
+  faddInstrs = emitExprInstrs (EBinOp "+" (EFloat "1.5") (EFloat "2.5")) 0 0
+  _ = checkContains "20 float add instrs" faddInstrs "fadd double"
+
+  -- 21. float comparison uses fcmp predicate
+  fcmpInstrs = emitExprInstrs (EBinOp "==" (EFloat "1.0") (EFloat "1.0")) 0 0
+  _ = checkContains "21 float cmp instrs" fcmpInstrs "fcmp oeq double"
 
   0
