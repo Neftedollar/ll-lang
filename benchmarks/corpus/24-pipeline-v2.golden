@@ -1,12 +1,3 @@
-OK 1 valid program
-OK 2 unbound variable
-OK 3 duplicate function
-OK 4 valid match with constructors
-OK 5 unbound constructor
-OK 6 let binding scoping
-OK 7 external decl registers name
-OK 8 opaque type and external
-OK 9 non-exhaustive match
 OK 1 isFlex $0=true
 OK 2 isFlex Int=false
 OK 3 isFlex a=false
