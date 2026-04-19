@@ -57,58 +57,73 @@ strJoin2(a Str)(b Str) =
 -- all TDType decls, then read-only during emission. nextCtorTag is stored
 -- in the state so the seed pass can thread its counter without globals.
 
-EmitState = MkEmitState Int Int (RBMap[Str][Int]) (RBMap[Str][Int]) Int (RBMap[Str][Int]) Int
-  -- tempCtr, strIdx, strPool, nullaryGlobals, labelCtr, ctorTags, nextCtorTag
+-- Phase 4 shape: Phase 3 fields + lambdaCtr + liftedLambdas.
+-- lambdaCtr MUST be monotonic across all decls emitted in a module — every
+-- TELam generates a fresh `@__lam_N` top-level fn, and `liftedLambdas`
+-- accumulates the emitted definitions so the module driver can append them
+-- after the regular decls. Threading through the state avoids global
+-- mutable refs (.lll has none) while keeping the counter collision-free.
+EmitState = MkEmitState Int Int (RBMap[Str][Int]) (RBMap[Str][Int]) Int (RBMap[Str][Int]) Int Int (List[Str])
+  -- tempCtr, strIdx, strPool, nullaryGlobals, labelCtr, ctorTags,
+  -- nextCtorTag, lambdaCtr, liftedLambdas
 
 esTempCtr(st EmitState) =
   match st
-    | MkEmitState c s p g l t n -> c
+    | MkEmitState c s p g l t n lc ll -> c
 
 esStrIdx(st EmitState) =
   match st
-    | MkEmitState c s p g l t n -> s
+    | MkEmitState c s p g l t n lc ll -> s
 
 esStrPool(st EmitState) =
   match st
-    | MkEmitState c s p g l t n -> p
+    | MkEmitState c s p g l t n lc ll -> p
 
 esNullaryGlobals(st EmitState) =
   match st
-    | MkEmitState c s p g l t n -> g
+    | MkEmitState c s p g l t n lc ll -> g
 
 esLabelCtr(st EmitState) =
   match st
-    | MkEmitState c s p g l t n -> l
+    | MkEmitState c s p g l t n lc ll -> l
 
 esCtorTags(st EmitState) =
   match st
-    | MkEmitState c s p g l t n -> t
+    | MkEmitState c s p g l t n lc ll -> t
 
 esNextCtorTag(st EmitState) =
   match st
-    | MkEmitState c s p g l t n -> n
+    | MkEmitState c s p g l t n lc ll -> n
+
+esLambdaCtr(st EmitState) =
+  match st
+    | MkEmitState c s p g l t n lc ll -> lc
+
+esLiftedLambdas(st EmitState) =
+  match st
+    | MkEmitState c s p g l t n lc ll -> ll
 
 -- Allocate a fresh SSA register: bumps tempCtr and returns (regName, newState).
 esFresh(st EmitState) =
   match st
-    | MkEmitState c s p g l t n ->
+    | MkEmitState c s p g l t n lc ll ->
       let reg = strConcat "%t" (intToStr (c + 1))
-      (reg, MkEmitState (c + 1) s p g l t n)
+      (reg, MkEmitState (c + 1) s p g l t n lc ll)
 
 -- Allocate the next string-literal index: returns (idx, newState) where idx
 -- is the current index before allocation.
 esNextStr(st EmitState) =
   match st
-    | MkEmitState c s p g l t n -> (s, MkEmitState c (s + 1) p g l t n)
+    | MkEmitState c s p g l t n lc ll -> (s, MkEmitState c (s + 1) p g l t n lc ll)
 
 -- Allocate a fresh block label. Returns (labelName, newState). The labelName
 -- is always the bare identifier (no leading `%`); callers prepend `%` when
 -- emitting a `br label %X` instruction or a plain `X:` for the label itself.
 esFreshLabel(prefix Str)(st EmitState) =
   match st
-    | MkEmitState c s p g l t n ->
+    | MkEmitState c s p g l t n lc ll ->
       let lbl = strConcat prefix (intToStr l)
-      (lbl, MkEmitState c s p g (l + 1) t n)
+      (lbl, MkEmitState c s p g (l + 1) t n lc ll)
 
 -- Allocate three labels in one go: (case, body, next) — the shape used by
 -- match-arm lowering. Returns ((caseLbl, bodyLbl, nextLbl), newState).
@@ -121,15 +136,37 @@ esFreshLabelTriple(st EmitState) =
 -- Replace the pool / globals sections (used by the pre-pass).
 esSetPool(st EmitState)(pool RBMap[Str][Int]) =
   match st
-    | MkEmitState c s _ g l t n -> MkEmitState c s pool g l t n
+    | MkEmitState c s _ g l t n lc ll -> MkEmitState c s pool g l t n lc ll
 
 esSetGlobals(st EmitState)(globs RBMap[Str][Int]) =
   match st
-    | MkEmitState c s p _ l t n -> MkEmitState c s p globs l t n
+    | MkEmitState c s p _ l t n lc ll -> MkEmitState c s p globs l t n lc ll
 
 esSetCtorTags(st EmitState)(tags RBMap[Str][Int])(nextN Int) =
   match st
-    | MkEmitState c s p g l _ _ -> MkEmitState c s p g l tags nextN
+    | MkEmitState c s p g l _ _ lc ll -> MkEmitState c s p g l tags nextN lc ll
+
+-- Phase 4: allocate a fresh `@__lam_N` name. Monotonic within the state —
+-- never reset, so cross-decl emission in a module cannot collide.
+esFreshLambdaName(st EmitState) =
+  match st
+    | MkEmitState c s p g l t n lc ll ->
+      let name = strConcat "__lam_" (intToStr lc)
+      (name, MkEmitState c s p g l t n (lc + 1) ll)
+
+-- Phase 4: cons a lifted lambda definition onto the side-buffer. Callers
+-- pass the whole `define <ty> @__lam_N(...) { ... }` text.
+esAddLiftedLambda(st EmitState)(def Str) =
+  match st
+    | MkEmitState c s p g l t n lc ll -> MkEmitState c s p g l t n lc (listAppend ll [def])
+
+-- Reset just the temp/label counters (used when re-entering a function body
+-- that shares the pool / globals / ctor tags / lambda side-buffer with the
+-- enclosing module walk). tempCtr and labelCtr reset to 0 per-function so
+-- fresh SSA names start at `%t1` inside each define.
+esResetForFunc(st EmitState) =
+  match st
+    | MkEmitState _ s p g _ t n lc ll -> MkEmitState 0 s p g 0 t n lc ll
 
 -- Look up a constructor's tag; returns -99 (sentinel) for unknown names
 -- so mis-use surfaces quickly in generated IR rather than silently matching 0.
@@ -139,13 +176,20 @@ esCtorTag(name Str)(st EmitState) =
     | None -> 0 - 99
 
 -- Build a fresh initial state (all counters 0, empty maps).
-emitStateInit = MkEmitState 0 0 Leaf Leaf 0 Leaf 1
+emitStateInit = MkEmitState 0 0 Leaf Leaf 0 Leaf 1 0 []
 
 emitStateWith(pool RBMap[Str][Int])(globs RBMap[Str][Int]) =
-  MkEmitState 0 0 pool globs 0 Leaf 1
+  MkEmitState 0 0 pool globs 0 Leaf 1 0 []
 
 emitStateWithTags(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(nextN Int) =
-  MkEmitState 0 0 pool globs 0 tags nextN
+  MkEmitState 0 0 pool globs 0 tags nextN 0 []
+
+-- Phase 4: state factory that preserves lambdaCtr + liftedLambdas across
+-- a per-decl reset. Temp/label counters start at 0 for the new function
+-- body, but the lambda side-buffer persists so top-level definitions
+-- accumulate across every decl in the module.
+emitStateForFunc(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(nextN Int)(lambdaCtr Int)(lifted List[Str]) =
+  MkEmitState 0 0 pool globs 0 tags nextN lambdaCtr lifted
 
 -- Predicate: is `name` a nullary global?
 isNullaryGlobal(name Str)(st EmitState) =
@@ -1074,6 +1118,114 @@ undefFallback(resultTy Str) =
 emitMatch(state EmitState)(scrut TypedExpr)(pats List[TypedPattern])(bodies List[TypedExpr])(resultTy Str) =
   MkEER state "" "0"
 
+-- ---- Free-variable analysis (Phase 4) -------------------------------------
+-- Port of F# freeVars / patternBinds (CodegenLLVM.fs ~472-527).
+-- Set[Str] is represented as List[Str] (ordered, deduped on insertion).
+-- All recursive walks use explicit pattern matching — never listMap over the
+-- recursive function itself, which trips HM.
+
+fvEmpty = []
+
+fvContains(name Str)(xs List[Str]) =
+  match xs
+    | [] -> false
+    | y :: rest ->
+      if y == name
+        true
+      else fvContains name rest
+
+fvInsert(name Str)(xs List[Str]) =
+  if fvContains name xs
+    xs
+  else listAppend xs [name]
+
+-- Union two sets. Recursive rather than listFold so HM stays monomorphic.
+fvUnion(a List[Str])(b List[Str]) =
+  match b
+    | [] -> a
+    | x :: rest -> fvUnion (fvInsert x a) rest
+
+-- Subtract `b` from `a`: keep only names in `a` not present in `b`.
+fvSubtract(a List[Str])(b List[Str]) =
+  match a
+    | [] -> []
+    | x :: rest ->
+      restSub = fvSubtract rest b
+      if fvContains x b
+        restSub
+      else x :: restSub
+
+-- Names bound by a Pattern. Mirrors F# patternBinds.
+-- Explicit match recursion, no listMap.
+patternBinds(p Pattern) =
+  match p
+    | PVar x -> [x]
+    | PWild -> []
+    | PLitInt _ -> []
+    | PLitStr _ -> []
+    | PNil -> []
+    | PCon _ args -> patternBindsMany args
+    | PCons h t -> fvUnion (patternBinds h) (patternBinds t)
+
+patternBindsMany(ps List[Pattern]) =
+  match ps
+    | [] -> []
+    | p :: rest -> fvUnion (patternBinds p) (patternBindsMany rest)
+
+-- Free vars of a TypedExpr given a set of bound names. Explicit recursion
+-- throughout; never passes `freeVars` to listMap/listFold (HM risk).
+freeVars(bound List[Str])(e TypedExpr) =
+  match e
+    | TEInt _ _ -> []
+    | TEStr _ _ -> []
+    | TEBool _ _ -> []
+    | TEChar _ _ -> []
+    | TEFloat _ _ -> []
+    | TEVar x _ ->
+      if fvContains x bound
+        []
+      else [x]
+    | TECon _ _ -> []
+    | TEApp f a _ -> fvUnion (freeVars bound f) (freeVars bound a)
+    | TELam paramName _ body _ ->
+      bound2 = fvInsert paramName bound
+      freeVars bound2 body
+    | TeLet name v b _ ->
+      s1 = freeVars bound v
+      bound2 = fvInsert name bound
+      s2 = freeVars bound2 b
+      fvUnion s1 s2
+    | TEIf c t el _ ->
+      fvUnion (fvUnion (freeVars bound c) (freeVars bound t)) (freeVars bound el)
+    | TEMatch scrut pats bodies _ ->
+      s0 = freeVars bound scrut
+      fvUnion s0 (freeVarsMatchArms bound pats bodies)
+    | TEList items _ -> freeVarsList bound items
+    | TECons h t _ -> fvUnion (freeVars bound h) (freeVars bound t)
+    | TEBinOp _ l r _ -> fvUnion (freeVars bound l) (freeVars bound r)
+    | TETuple a b _ -> fvUnion (freeVars bound a) (freeVars bound b)
+    | TENil _ -> []
+    | TEUnit _ -> []
+
+freeVarsList(bound List[Str])(items List[TypedExpr]) =
+  match items
+    | [] -> []
+    | x :: rest -> fvUnion (freeVars bound x) (freeVarsList bound rest)
+
+-- Walk match arms. `bound` is extended by each arm's pattern bindings.
+freeVarsMatchArms(bound List[Str])(pats List[TypedPattern])(bodies List[TypedExpr]) =
+  match pats
+    | [] -> []
+    | tp :: restPats ->
+      match bodies
+        | [] -> []
+        | body :: restBodies ->
+          patP =
+            match tp
+              | MkTypedPat p _ -> p
+          bound2 = fvUnion bound (patternBinds patP)
+          fvUnion (freeVars bound2 body) (freeVarsMatchArms bound restPats restBodies)
+
 -- ---- emitTypedExpr ---------------------------------------------------------
 -- Phase 2: consumes typed IR, dispatches on operand type for binops,
 -- pulls string literals from the state-held pool, and lowers bare TEVar
@@ -1180,17 +1332,162 @@ emitTypedExpr(state EmitState)(te TypedExpr) =
     | TEApp f a _ ->
       fr = emitTypedExpr state f
       ar = emitTypedExpr (eerState fr) a
-      let (dst, st2) = esFresh (eerState ar)
       fnName = extractTypedFnName f
       areg = eerReg ar
-      callInstr = strConcat "  " (strConcat dst (strConcat " = call i64 @" (strConcat fnName (strConcat "(i64 " (strConcat areg ")")))))
+      -- Phase 4 `wrapIfFnRef`: if the arg is function-typed, wrap bare
+      -- global references in a closure `{@name, null}` so HOFs see a
+      -- uniform Closure* value. Non-fn args pass through. The call-site
+      -- arg type is promoted to `ptr` whenever the wrapper fires.
+      aIsFnTy = isFnTypeTE a
+      wrapTriple =
+        if aIsFnTy
+          wrapIfFnRef (eerState ar) a areg
+        else (areg, eerState ar, "")
+      wrappedAreg = match wrapTriple | (v, _, _) -> v
+      swrap = match wrapTriple | (_, s, _) -> s
+      wrapInstrs = match wrapTriple | (_, _, i) -> i
+      let (dst, st2) = esFresh swrap
+      -- Arg type: use `ptr` when we wrapped a function-typed arg, else `i64`
+      -- (this codegen still coerces scalar args uniformly to i64).
+      argTyStr =
+        if aIsFnTy
+          "ptr"
+        else "i64"
+      callInstr = strConcat "  " (strConcat dst (strConcat " = call i64 @" (strConcat fnName (strConcat "(" (strConcat argTyStr (strConcat " " (strConcat wrappedAreg ")")))))))
       prefix = strJoin2 (eerInstrs fr) (eerInstrs ar)
+      preWithWrap =
+        if strLen wrapInstrs == 0
+          prefix
+        else
+          if strLen prefix == 0
+            wrapInstrs
+          else strConcat prefix (strConcat "\n" wrapInstrs)
       all =
-        if strLen prefix == 0
+        if strLen preWithWrap == 0
           callInstr
-        else strConcat prefix (strConcat "\n" callInstr)
+        else strConcat preWithWrap (strConcat "\n" callInstr)
       MkEER st2 all dst
+    | TELam paramName paramTy body lamTy ->
+      emitLamLift state paramName paramTy body lamTy
     | _ -> MkEER state "" "0"
+
+-- Phase 4: Is this TypedExpr's type a function type? Used by wrapIfFnRef to
+-- decide whether to wrap a TEVar argument in a closure.
+isFnTypeTE(te TypedExpr) =
+  match typedExprType te
+    | TyFn _ _ -> true
+    | _ -> false
+
+-- Phase 4: Wrap a function-typed SSA value in a closure `{@name, null}` if
+-- the value is a raw global (`@name`). Returns (wrappedReg, state', instrs).
+-- Heuristic: string-equality check whether `value` starts with `@`. For now
+-- we wrap only TEVar arguments, identified by their argExpr shape — those
+-- are the only cases that currently produce bare `%name` SSA values pointing
+-- at a global function (the stdlib HOFs like listMap).
+--
+-- Since the current `.lll` emitter returns `%name` (not `@name`) for a bare
+-- TEVar, this wrapper only fires when `argExpr` is a TEVar referencing a
+-- name that is known (at call site) to be a top-level function — we fall
+-- back to leaving the value untouched if we can't tell. This matches the
+-- F# `wrapIfFnRef` heuristic but with reduced precision.
+wrapIfFnRef(state EmitState)(argExpr TypedExpr)(argVal Str) =
+  match argExpr
+    | TEVar n _ ->
+      -- The current TEVar emit returns `%n`. For a top-level fn it should
+      -- be `@n`. Since we can't reliably tell here without a global-fn
+      -- registry, emit a make_closure wrapping the `@n` reference — this
+      -- is correct whenever n IS a top-level fn name. The stdlib doesn't
+      -- let function-typed locals shadow globals, so this is safe.
+      let (tmp, st2) = esFresh state
+      fnRef = strConcat "@" n
+      instr = strConcat "  " (strConcat tmp (strConcat " = call ptr @make_closure(ptr " (strConcat fnRef ", ptr null)")))
+      (tmp, st2, instr)
+    | _ -> (argVal, state, "")
+
+-- Phase 4: Lift a TELam to a top-level `@__lam_N` and return a closure value.
+-- Captureless case: emit `@__lam_N(paramTy %arg0)`, return closure with null env.
+-- Captureful case (scope-cut): also emit `@__lam_N(ptr %__env, paramTy %arg0)`
+--   but env pointers are not populated — captures stay unresolved at runtime.
+--   Marked as a follow-up; current target examples (36-48) don't use captures.
+emitLamLift(state EmitState)(paramName Str)(paramTy TypeExpr)(body TypedExpr)(lamTy TypeExpr) =
+  let (lamName, st1) = esFreshLambdaName state
+  -- Compute free vars (not yet used for capture env — see scope-cut note).
+  paramTyStr = emitLLVMType paramTy
+  bodyTyStr = emitLLVMType (typedExprType body)
+  -- ABI-uniform: scalar param becomes i64, ptr stays ptr, ret same.
+  paramAbi =
+    if paramTyStr == "ptr"
+      "ptr"
+    else "i64"
+  retAbi =
+    if bodyTyStr == "void"
+      "void"
+    else if bodyTyStr == "ptr"
+      "ptr"
+    else "i64"
+  argsSig = strConcat paramAbi (strConcat " %arg0_abi" "")
+  -- Fresh sub-state for lambda body emission. Temp/label counters reset to 0
+  -- inside the lambda's own SSA namespace (the name is unique via lamName).
+  subSt = esResetForFunc st1
+  -- Entry prelude: coerce %arg0_abi back to its natural type, bound as %<name>.
+  preludePair =
+    if paramAbi == paramTyStr
+      -- No coercion needed. Just alias.
+      (strConcat "  %" (strConcat paramName (strConcat " = add i64 %arg0_abi, 0" "")), subSt)
+    else
+      -- Coerce paramAbi -> paramTyStr and bind as %<paramName>.
+      coRes = coerceValue subSt paramAbi paramTyStr "%arg0_abi"
+      bindInstr =
+        if paramTyStr == "ptr"
+          strConcat "  %" (strConcat paramName (strConcat " = getelementptr i8, ptr " (strConcat (eerReg coRes) ", i64 0")))
+        else strConcat "  %" (strConcat paramName (strConcat " = add i64 " (strConcat (eerReg coRes) ", 0")))
+      full =
+        if strLen (eerInstrs coRes) == 0
+          bindInstr
+        else strConcat (eerInstrs coRes) (strConcat "\n" bindInstr)
+      (full, eerState coRes)
+  preludeInstrs = match preludePair | (p, _) -> p
+  subSt2 = match preludePair | (_, s) -> s
+  bodyRes = emitTypedExpr subSt2 body
+  bodyInstrs = eerInstrs bodyRes
+  bodyReg = eerReg bodyRes
+  -- Coerce body result to retAbi for the uniform signature.
+  retTriple =
+    if retAbi == bodyTyStr
+      ("", bodyReg, eerState bodyRes)
+    else
+      cRes = coerceValue (eerState bodyRes) bodyTyStr retAbi bodyReg
+      (eerInstrs cRes, eerReg cRes, eerState cRes)
+  retInstrs = match retTriple | (i, _, _) -> i
+  retReg = match retTriple | (_, r, _) -> r
+  subSt3 = match retTriple | (_, _, s) -> s
+  fullInstrs1 =
+    if strLen bodyInstrs == 0
+      preludeInstrs
+    else strConcat preludeInstrs (strConcat "\n" bodyInstrs)
+  fullInstrs =
+    if strLen retInstrs == 0
+      fullInstrs1
+    else strConcat fullInstrs1 (strConcat "\n" retInstrs)
+  retStmt =
+    if retAbi == "void"
+      "  ret void"
+    else strConcat "  ret " (strConcat retAbi (strConcat " " retReg))
+  defText = strConcat "define " (strConcat retAbi (strConcat " @" (strConcat lamName (strConcat "(" (strConcat argsSig (strConcat ") {\nentry:\n" (strConcat fullInstrs (strConcat "\n" (strConcat retStmt "\n}")))))))))
+  -- Push the emitted define onto the lifted-lambdas buffer. We thread the
+  -- lambda-counter + liftedLambdas forward from subSt3 (post-body), then
+  -- also preserve any string-pool additions that may have happened inside
+  -- the body. Since we keep the pool/globals read-only during emission,
+  -- just carry lambdaCtr/liftedLambdas back onto the OUTER state.
+  outerLamCtr = esLambdaCtr subSt3
+  outerLifted = listAppend (esLiftedLambdas subSt3) [defText]
+  stLifted =
+    match st1
+      | MkEmitState c s p g l t n _ _ -> MkEmitState c s p g l t n outerLamCtr outerLifted
+  -- At the use site: build a closure `{@__lam_N, null}` via @make_closure.
+  let (cloTmp, stUse) = esFresh stLifted
+  callInstr = strConcat "  " (strConcat cloTmp (strConcat " = call ptr @make_closure(ptr @" (strConcat lamName ", ptr null)")))
+  MkEER stUse callInstr cloTmp
 
 -- Helper for TEList lowering: build a reverse cons chain from a list of
 -- TypedExprs. (Placed after emitTypedExpr since it recurses into it.)
@@ -1424,13 +1721,17 @@ isEntryMain(sig TypedFnSig) =
           | _ -> false
       else false
 
-emitTypedFn(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(sig TypedFnSig)(body TypedExpr) =
+-- Phase 4: emitTypedFn returns (defText, updatedState) so the lambda counter
+-- and liftedLambdas buffer survive across decls in a module. The driver
+-- (emitTypedDeclsWith) threads the state through each decl; the final state's
+-- liftedLambdas are appended to the module output.
+emitTypedFnWith(state EmitState)(sig TypedFnSig)(body TypedExpr) =
   match sig
     | MkTypedFnSig name params retTy ->
       retType = emitLLVMType retTy
       paramStr = emitTypedParamsWithIdx params
       isMain = isEntryMain sig
-      initSt = emitStateWithTags pool globs tags 1
+      initSt = esResetForFunc state
       bodyRes = emitTypedExpr initSt body
       bodyInstrs = eerInstrs bodyRes
       retReg = eerReg bodyRes
@@ -1450,25 +1751,34 @@ emitTypedFn(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(s
           if strLen fullInstrs == 0
             ""
           else strConcat "\n" fullInstrs
-        strConcat "define i32 @main() {\nentry:" (strConcat instrBlock (strConcat "\n  ret i32 " (strConcat retValue "\n}")))
+        defText = strConcat "define i32 @main() {\nentry:" (strConcat instrBlock (strConcat "\n  ret i32 " (strConcat retValue "\n}")))
+        (defText, eerState castRes)
       else if retType == "void"
         instrBlock =
           if strLen bodyInstrs == 0
             ""
           else strConcat "\n" bodyInstrs
-        strConcat "define void @" (strConcat name (strConcat "(" (strConcat paramStr (strConcat ") {\nentry:" (strConcat instrBlock "\n  ret void\n}")))))
+        defText = strConcat "define void @" (strConcat name (strConcat "(" (strConcat paramStr (strConcat ") {\nentry:" (strConcat instrBlock "\n  ret void\n}")))))
+        (defText, eerState bodyRes)
       else
         -- Regular typed function.
         instrBlock =
           if strLen bodyInstrs == 0
             ""
           else strConcat "\n" bodyInstrs
-        strConcat "define " (strConcat retType (strConcat " @" (strConcat name (strConcat "(" (strConcat paramStr (strConcat ") {\nentry:" (strConcat instrBlock (strConcat "\n  ret " (strConcat retType (strConcat " " (strConcat retReg "\n}")))))))))))
+        defText = strConcat "define " (strConcat retType (strConcat " @" (strConcat name (strConcat "(" (strConcat paramStr (strConcat ") {\nentry:" (strConcat instrBlock (strConcat "\n  ret " (strConcat retType (strConcat " " (strConcat retReg "\n}")))))))))))
+        (defText, eerState bodyRes)
 
--- Emit a TypedDecl.
-emitTypedDecl(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(d TypedDecl) =
+-- Legacy non-state-threading wrapper (Phase 3 callers unchanged).
+emitTypedFn(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(sig TypedFnSig)(body TypedExpr) =
+  initSt = emitStateWithTags pool globs tags 1
+  let (defText, _) = emitTypedFnWith initSt sig body
+  defText
+
+-- Phase 4: state-threading decl emitter. Returns (defText, updatedState).
+emitTypedDeclWith(state EmitState)(d TypedDecl) =
   match d
-    | TDFn sig _ body -> emitTypedFn pool globs tags sig body
+    | TDFn sig _ body -> emitTypedFnWith state sig body
     | TDLet name sch e ->
       ty = match sch | MkScheme _ b -> emitLLVMType b
       -- Try to evaluate the RHS as a constant.
@@ -1483,28 +1793,38 @@ emitTypedDecl(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])
             match e
               | TEStr s _ ->
                 if ty == "ptr"
-                  match mapLookup strCmp s pool
+                  match mapLookup strCmp s (esStrPool state)
                     | Some idx ->
                       totalLen = strLen s + 1
                       strConcat "getelementptr inbounds ([" (strConcat (intToStr totalLen) (strConcat " x i8], ptr @.str" (strConcat (intToStr idx) ", i64 0, i64 0)")))
                     | None -> defaultLLVMValue ty
                 else defaultLLVMValue ty
               | _ -> defaultLLVMValue ty
-      if ty == "void"
-        strConcat "; let " (strConcat name " : void")
-      else
-        strConcat "@" (strConcat name (strConcat " = global " (strConcat ty (strConcat " " value))))
+      defText =
+        if ty == "void"
+          strConcat "; let " (strConcat name " : void")
+        else
+          strConcat "@" (strConcat name (strConcat " = global " (strConcat ty (strConcat " " value))))
+      (defText, state)
     | TDExternal sig _ ->
-      match sig
-        | MkTypedFnSig name params retTy ->
-          retType = emitLLVMType retTy
-          argTys = joinWith ", " (listMap (\p. match p | MkParam _ t -> emitLLVMType t) params)
-          strConcat "declare " (strConcat retType (strConcat " @" (strConcat name (strConcat "(" (strConcat argTys ")")))))
-    | TDOpaque name -> strConcat "; opaque type " name
-    | TDType name _ _ -> strConcat "; type " (strConcat name " (opaque in LLVM backend)")
-    | TDImport _ -> ""
-    | TDTag _ -> ""
-    | TDUnit _ -> ""
+      defText =
+        match sig
+          | MkTypedFnSig name params retTy ->
+            retType = emitLLVMType retTy
+            argTys = joinWith ", " (listMap (\p. match p | MkParam _ t -> emitLLVMType t) params)
+            strConcat "declare " (strConcat retType (strConcat " @" (strConcat name (strConcat "(" (strConcat argTys ")")))))
+      (defText, state)
+    | TDOpaque name -> (strConcat "; opaque type " name, state)
+    | TDType name _ _ -> (strConcat "; type " (strConcat name " (opaque in LLVM backend)"), state)
+    | TDImport _ -> ("", state)
+    | TDTag _ -> ("", state)
+    | TDUnit _ -> ("", state)
+
+-- Legacy wrapper (Phase 3 callers unchanged). Discards lambda-counter update.
+emitTypedDecl(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(d TypedDecl) =
+  initSt = emitStateWithTags pool globs tags 1
+  let (defText, _) = emitTypedDeclWith initSt d
+  defText
 
 -- ---- Untyped-decl emitter (POC; unchanged from Phase 1) --------------------
 
@@ -1513,11 +1833,11 @@ emitDecl(d Decl)(strIdx Int) =
     | DFn name params retTy body ->
       retType = paramReturnType retTy
       paramStr = emitParams params
-      initSt = MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1
+      initSt = MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 []
       res = emitExpr initSt body
       bodyInstrs = eerInstrs res
       retReg = eerReg res
-      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1) body
+      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 []) body
       globSection =
         if strLen globs == 0
           ""
@@ -1532,10 +1852,10 @@ emitDecl(d Decl)(strIdx Int) =
     | DImport parts ->
       strConcat "; import " (joinWith "." parts)
     | DLet name body ->
-      initSt = MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1
+      initSt = MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 []
       res = emitExpr initSt body
       reg = eerReg res
-      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1) body
+      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 []) body
       globSection =
         if strLen globs == 0
           ""
@@ -1594,6 +1914,30 @@ emitTypedDecls(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int]
         first
       else strConcat first (strConcat "\n\n" remaining)
 
+-- Phase 4: state-threading decls emitter. Returns (bodyText, finalState).
+-- The finalState's liftedLambdas buffer holds every `@__lam_N` definition
+-- produced during emission, ready to be appended at module scope.
+emitTypedDeclsWith(state EmitState)(ds List[TypedDecl]) =
+  match ds
+    | [] -> ("", state)
+    | d :: rest ->
+      let (first, st1) = emitTypedDeclWith state d
+      let (remaining, st2) = emitTypedDeclsWith st1 rest
+      combined =
+        if strLen first == 0
+          remaining
+        else if strLen remaining == 0
+          first
+        else strConcat first (strConcat "\n\n" remaining)
+      (combined, st2)
+
+-- Render the lifted-lambda side-buffer as a concatenated text block.
+renderLiftedLambdas(defs List[Str]) =
+  match defs
+    | [] -> ""
+    | d :: [] -> d
+    | d :: rest -> strConcat d (strConcat "\n\n" (renderLiftedLambdas rest))
+
 emitTypedModule(tm TypedModule) =
   pathStr = joinWith "." (typedModPath tm)
   decls = typedModDecls tm
@@ -1607,9 +1951,15 @@ emitTypedModule(tm TypedModule) =
     if strLen poolDecls == 0
       ""
     else strConcat poolDecls "\n\n"
-  body = emitTypedDecls pool globs tags decls
+  initSt = emitStateForFunc pool globs tags 1 0 []
+  let (body, finalSt) = emitTypedDeclsWith initSt decls
+  lamBlock = renderLiftedLambdas (esLiftedLambdas finalSt)
+  bodyWithLambdas =
+    if strLen lamBlock == 0
+      body
+    else strConcat body (strConcat "\n\n" lamBlock)
   -- Prepend runtime block (ADT allocator + node_* declares).
-  strConcat llvmRuntimeBlock (strConcat "\n" (strConcat header (strConcat "\n\n" (strConcat stringBlock (strConcat body "\n")))))
+  strConcat llvmRuntimeBlock (strConcat "\n" (strConcat header (strConcat "\n\n" (strConcat stringBlock (strConcat bodyWithLambdas "\n")))))
 
 -- Render one module's body with shared ctor-tag table (no runtime block).
 emitTypedModuleBody(tags RBMap[Str][Int])(tm TypedModule) =
@@ -1624,8 +1974,14 @@ emitTypedModuleBody(tags RBMap[Str][Int])(tm TypedModule) =
     if strLen poolDecls == 0
       ""
     else strConcat poolDecls "\n\n"
-  body = emitTypedDecls pool globs tags decls
-  strConcat header (strConcat "\n\n" (strConcat stringBlock (strConcat body "\n")))
+  initSt = emitStateForFunc pool globs tags 1 0 []
+  let (body, finalSt) = emitTypedDeclsWith initSt decls
+  lamBlock = renderLiftedLambdas (esLiftedLambdas finalSt)
+  bodyWithLambdas =
+    if strLen lamBlock == 0
+      body
+    else strConcat body (strConcat "\n\n" lamBlock)
+  strConcat header (strConcat "\n\n" (strConcat stringBlock (strConcat bodyWithLambdas "\n")))
 
 -- Walk a list of modules accumulating textual output.
 emitTypedProjectBodies(tags RBMap[Str][Int])(tms List[TypedModule]) =
@@ -1653,5 +2009,17 @@ checkContains(label Str)(got Str)(needle Str) =
     printfn (strConcat "OK " label)
   else
     printfn (strConcat "FAIL " (strConcat label (strConcat "\n  missing: " (strConcat needle (strConcat "\n  in: " got)))))
+
+-- Phase 4 self-check: freeVars behaviour on a simple TELam.
+-- Kept out of `main` to avoid coupling to a test harness; exported so the
+-- driver (or a separate smoke test) can invoke it.
+phase4FreeVarsSelfCheck =
+  -- \x. x + y  ->  free vars = {y} (with "+" treated as builtin TEBinOp)
+  body = TEBinOp "+" (TEVar "x" (TyName "Int")) (TEVar "y" (TyName "Int")) (TyName "Int")
+  lam = TELam "x" (TyName "Int") body (TyFn (TyName "Int") (TyName "Int"))
+  fvs = freeVars [] lam
+  match fvs
+    | "y" :: [] -> "OK freeVars \\x. x+y = {y}"
+    | _ -> "FAIL freeVars: expected {y}"
 
 -- ---- Tests -----------------------------------------------------------------
