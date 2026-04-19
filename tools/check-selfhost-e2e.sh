@@ -55,13 +55,13 @@ run_self_capture() {
 }
 
 run_self_capture "check single file" check "$main_file"
-rg -q '"ok":true' "$tmp_root/cmd.out" || fail "single-file check output mismatch"
+grep -Eq '"ok":true' "$tmp_root/cmd.out" || fail "single-file check output mismatch"
 
 run_self_capture "compile fs (single file)" compile --target fs "$main_file"
-rg -q 'module Smoke|let add' "$tmp_root/cmd.out" || fail "single-file fs compile output mismatch"
+grep -Eq 'module Smoke|let add' "$tmp_root/cmd.out" || fail "single-file fs compile output mismatch"
 
 run_self_capture "compile ts (single file)" compile --target ts "$main_file"
-rg -q 'function|const|type' "$tmp_root/cmd.out" || fail "single-file ts compile output mismatch"
+grep -Eq 'function|const|type' "$tmp_root/cmd.out" || fail "single-file ts compile output mismatch"
 
 project_name="sampleapp"
 (
@@ -87,26 +87,26 @@ val() = 1
 LLL
 
   run_capture "mod add" "$LLLC" mod add dep=path:../dep
-  rg -q 'Installed [0-9]+ dependencies into vendor/|\"ok\":true' "$tmp_root/cmd.out" || fail "mod add output mismatch"
+  grep -Eq 'Installed [0-9]+ dependencies into vendor/|\"ok\":true' "$tmp_root/cmd.out" || fail "mod add output mismatch"
 
   run_capture "mod why" "$LLLC" mod why dep
-  rg -q 'dependency chain:|\"ok\":true|\"dep\"' "$tmp_root/cmd.out" || fail "mod why output mismatch"
+  grep -Eq 'dependency chain:|\"ok\":true|\"dep\"' "$tmp_root/cmd.out" || fail "mod why output mismatch"
 
   run_capture "mod tidy" "$LLLC" mod tidy
-  rg -q 'Installed [0-9]+ dependencies into vendor/|\"ok\":true' "$tmp_root/cmd.out" || fail "mod tidy output mismatch"
+  grep -Eq 'Installed [0-9]+ dependencies into vendor/|\"ok\":true' "$tmp_root/cmd.out" || fail "mod tidy output mismatch"
 
   run_capture "install" "$LLLC" install
-  rg -q 'Installed [0-9]+ dependencies into vendor/|\"ok\":true' "$tmp_root/cmd.out" || fail "install output mismatch"
+  grep -Eq 'Installed [0-9]+ dependencies into vendor/|\"ok\":true' "$tmp_root/cmd.out" || fail "install output mismatch"
 
   run_capture "check project" "$LLLC" check .
-  rg -q 'Checked project|\"ok\":true|\"stage\":\"ok\"' "$tmp_root/cmd.out" || fail "project check output mismatch"
+  grep -Eq 'Checked project|\"ok\":true|\"stage\":\"ok\"' "$tmp_root/cmd.out" || fail "project check output mismatch"
 
   run_capture "build project fs" "$LLLC" build --target fs .
-  rg -q 'Built project|\"ok\":true' "$tmp_root/cmd.out" || fail "project build output mismatch"
+  grep -Eq 'Built project|\"ok\":true' "$tmp_root/cmd.out" || fail "project build output mismatch"
   [[ -f "$project_dir/bin/fsharp/sampleapp.fsproj" || -f "$project_dir/bin/fsharp/sample.fsproj" || -f "$project_dir/bin/fsharp/sampleapp.fs" || -f "$project_dir/bin/fsharp/sample.fs" ]] || fail "project build artifacts missing"
 )
 
-python3 - "$LLLC" "$SELF_MAIN" <<'PY'
+python3 - "$LLLC" "$SELF_MAIN" "$ROOT_DIR" <<'PY'
 import json
 import os
 import subprocess
@@ -114,6 +114,7 @@ import sys
 
 lllc = sys.argv[1]
 self_main = sys.argv[2]
+root_dir = sys.argv[3]
 env = os.environ.copy()
 env["LLLC_SELF_MAIN"] = self_main
 p = subprocess.Popen(
@@ -130,6 +131,7 @@ wire = "\n".join(
         json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "ci", "version": "1"}}}),
         json.dumps({"jsonrpc": "2.0", "method": "initialized", "params": {}}),
         json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}),
+        json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "ffi_inspect", "arguments": {"path": os.path.join(root_dir, "spec/examples/valid/23-external-opaque.lll")}}}),
     ]
 ) + "\n"
 
@@ -145,6 +147,7 @@ except subprocess.TimeoutExpired as ex:
 
 ok_init = False
 ok_tools = False
+ok_ffi = False
 for line in stdout.splitlines():
     line = line.strip()
     if not line:
@@ -157,10 +160,19 @@ for line in stdout.splitlines():
         ok_init = True
     if obj.get("id") == 2 and "result" in obj and isinstance(obj["result"].get("tools"), list):
         ok_tools = True
-if not (ok_init and ok_tools):
+    if obj.get("id") == 3 and "result" in obj:
+        res = obj["result"]
+        if (
+            isinstance(res, dict)
+            and res.get("ok") is True
+            and isinstance(res.get("ffi_decls"), list)
+            and int(res.get("external_count", 0)) >= 1
+        ):
+            ok_ffi = True
+if not (ok_init and ok_tools and ok_ffi):
     if stderr.strip():
         print(stderr, file=sys.stderr)
-    raise SystemExit("MCP handshake/tools-list failed")
+    raise SystemExit("MCP handshake/tools-list/ffi-inspect failed")
 PY
 
 echo "check-selfhost-e2e: OK"

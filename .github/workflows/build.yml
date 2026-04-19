@@ -26,8 +26,8 @@ jobs:
 
           main() = printfn "smoke"
           SRC
-          LLLC_BOOTSTRAP_SELF_PRESET=safe ./tools/lllc-bootstrap.sh check "$tmp_dir/Smoke.lll" | rg '"ok":true'
-          LLLC_BOOTSTRAP_SELF_PRESET=safe ./tools/lllc-bootstrap.sh compile "$tmp_dir/Smoke.lll" | rg 'module Smoke'
+          LLLC_BOOTSTRAP_SELF_PRESET=safe ./tools/lllc-bootstrap.sh check "$tmp_dir/Smoke.lll" | grep '"ok":true'
+          LLLC_BOOTSTRAP_SELF_PRESET=safe ./tools/lllc-bootstrap.sh compile "$tmp_dir/Smoke.lll" | grep 'module Smoke'
         working-directory: .
       - name: Stage0 vs Self Parity Gate
         run: ./tools/check-stage0-self-parity.sh

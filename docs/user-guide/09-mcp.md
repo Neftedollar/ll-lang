@@ -54,7 +54,7 @@ The server handles these JSON-RPC methods:
 
 ---
 
-## Available tools (28)
+## Available tools (30)
 
 Core compile/check:
 - `compile_source`, `check_source`, `compile_file`, `check_file`
@@ -73,6 +73,9 @@ Symbol navigation:
 
 Dependency helpers:
 - `mod_add`, `mod_tidy`, `mod_why`
+
+FFI helpers:
+- `ffi_inspect`, `ffi_validate`
 
 Test helpers:
 - `test_list`, `test_run` (structured self-host suite over `tools/check-selfhost-ci.sh`)
@@ -285,6 +288,38 @@ and return path-aware locations.
 - `mod_add`: writes dependency line into `lll.toml`.
 - `mod_tidy`: self-hosted baseline no-op (structured response).
 - `mod_why`: reports manifest presence + direct importers.
+
+### `ffi_inspect` / `ffi_validate`
+
+`ffi_inspect` returns current FFI surface (`external` / `opaque`) for source,
+file, or project root.
+
+`ffi_validate` runs FFI-focused checks and returns:
+
+- `compiler_diagnostics` (from `checkCompact`)
+- `ffi_diagnostics` (FFI-only warnings like duplicates/unused externals)
+
+Example call:
+
+```json
+{
+  "name": "ffi_inspect",
+  "arguments": {
+    "path": "/abs/path/spec/examples/valid/23-external-opaque.lll"
+  }
+}
+```
+
+---
+
+## FFI on LLL path only
+
+Canonical policy:
+
+- FFI feature logic must live in `.lll` modules (`stdlib/`, `lllcself/`).
+- Archived stage0 under `obsolete/stage0` is bootstrap-diagnostics-only.
+- New FFI behavior should be exposed/verified through self-hosted MCP and
+  self-hosted CLI flows.
 
 ### `test_list` / `test_run`
 

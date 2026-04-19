@@ -762,6 +762,247 @@ normalizeTimeoutSec(raw Int)(defaultSec Int) =
   else
     clampInt raw 1 3600
 
+-- ---- FFI helpers ----
+
+typeExprToStr(t TypeExpr) =
+  match t
+    | TyName n -> n
+    | TyApp a b ->
+      strConcat (typeExprToStr a) (strConcat "[" (strConcat (typeExprToStr b) "]"))
+    | TyFn a b ->
+      strConcat (typeExprToStr a) (strConcat " -> " (typeExprToStr b))
+
+paramJson(p Param) =
+  match p
+    | MkParam name ty ->
+      MJObj [MJStr "name"; MJStr name; MJStr "type"; MJStr (typeExprToStr ty)]
+
+ffiDeclEntryFromDecl(path Str)(moduleName Str)(src Str)(d Decl) =
+  match d
+    | DExternal name prms retTy ->
+      pos = findLineCol name src
+      [MJObj [
+        MJStr "kind"; MJStr "external";
+        MJStr "name"; MJStr name;
+        MJStr "module"; MJStr moduleName;
+        MJStr "path"; MJStr path;
+        MJStr "line"; MJNum (pairLine pos);
+        MJStr "col"; MJNum (pairCol pos);
+        MJStr "param_count"; MJNum (listLen prms);
+        MJStr "params"; MJArr (listMap paramJson prms);
+        MJStr "return_type"; MJStr (typeExprToStr retTy)
+      ]]
+    | DOpaque name ->
+      pos = findLineCol name src
+      [MJObj [
+        MJStr "kind"; MJStr "opaque";
+        MJStr "name"; MJStr name;
+        MJStr "module"; MJStr moduleName;
+        MJStr "path"; MJStr path;
+        MJStr "line"; MJNum (pairLine pos);
+        MJStr "col"; MJNum (pairCol pos)
+      ]]
+    | DExport inner ->
+      ffiDeclEntryFromDecl path moduleName src inner
+    | _ -> []
+
+collectFfiDeclEntries(path Str)(moduleName Str)(src Str)(decls List[Decl]) =
+  match decls
+    | [] -> []
+    | d :: rest ->
+      appendJsonLists (ffiDeclEntryFromDecl path moduleName src d) (collectFfiDeclEntries path moduleName src rest)
+
+countFfiKind(entries List[JsonVal])(kind Str) =
+  match entries
+    | [] -> 0
+    | e :: rest ->
+      n =
+        if jsonGetStr (jsonGet e "kind") == kind
+          1
+        else
+          0
+      n + countFfiKind rest kind
+
+externalNamesFromDecl(d Decl) =
+  match d
+    | DExternal name _ _ -> [name]
+    | DExport inner -> externalNamesFromDecl inner
+    | _ -> []
+
+collectExternalNames(decls List[Decl]) =
+  match decls
+    | [] -> []
+    | d :: rest ->
+      appendStrLists (externalNamesFromDecl d) (collectExternalNames rest)
+
+uniqueStrs(xs List[Str]) =
+  match xs
+    | [] -> []
+    | x :: rest ->
+      tail = uniqueStrs rest
+      if listAny (\v. v == x) tail
+        tail
+      else
+        x :: tail
+
+countStr(name Str)(xs List[Str]) =
+  match xs
+    | [] -> 0
+    | x :: rest ->
+      if x == name
+        1 + countStr name rest
+      else
+        countStr name rest
+
+refsCountByName(src Str)(name Str) =
+  refs = refsInLines name (strSplit "\n" src) 1
+  listLen refs
+
+mkFfiDiag(code Str)(msg Str)(line Int)(col Int)(hint Str) =
+  MJObj [
+    MJStr "code"; MJStr code;
+    MJStr "message"; MJStr msg;
+    MJStr "line"; MJNum line;
+    MJStr "col"; MJNum col;
+    MJStr "endLine"; MJNum line;
+    MJStr "endCol"; MJNum (col + 1);
+    MJStr "severity"; MJStr "warning";
+    MJStr "hint"; MJStr hint
+  ]
+
+duplicateExternalDiagsFromUnique(src Str)(uniq List[Str])(allNames List[Str]) =
+  match uniq
+    | [] -> []
+    | name :: rest ->
+      tail = duplicateExternalDiagsFromUnique src rest allNames
+      if countStr name allNames > 1
+        pos = findLineCol name src
+        diag =
+          mkFfiDiag
+            "FFI001_DUPLICATE_EXTERNAL"
+            (strConcat "Duplicate external declaration: " name)
+            (pairLine pos)
+            (pairCol pos)
+            "Keep one declaration per module and remove duplicates."
+        diag :: tail
+      else
+        tail
+
+unusedExternalDiagsFromUnique(src Str)(uniq List[Str]) =
+  match uniq
+    | [] -> []
+    | name :: rest ->
+      tail = unusedExternalDiagsFromUnique src rest
+      refs = refsCountByName src name
+      if refs <= 1
+        pos = findLineCol name src
+        diag =
+          mkFfiDiag
+            "FFI002_UNUSED_EXTERNAL"
+            (strConcat "External appears unused in source: " name)
+            (pairLine pos)
+            (pairCol pos)
+            "Use the external symbol or remove the declaration."
+        diag :: tail
+      else
+        tail
+
+ffiInspectFromSource(path Str)(src Str) =
+  m = parseModule (tokenize src)
+  match m
+    | MkModule modPath decls ->
+      moduleName = joinDot modPath
+      entries = collectFfiDeclEntries path moduleName src decls
+      scopeVal =
+        if strLen path > 0
+          "file"
+        else
+          "source"
+      MJObj [
+        MJStr "ok"; MJBool true;
+        MJStr "scope"; MJStr scopeVal;
+        MJStr "module"; MJStr moduleName;
+        MJStr "path"; MJStr path;
+        MJStr "external_count"; MJNum (countFfiKind entries "external");
+        MJStr "opaque_count"; MJNum (countFfiKind entries "opaque");
+        MJStr "ffi_decls"; MJArr entries
+      ]
+
+ffiValidateFromSource(path Str)(src Str) =
+  m = parseModule (tokenize src)
+  match m
+    | MkModule modPath decls ->
+      moduleName = joinDot modPath
+      entries = collectFfiDeclEntries path moduleName src decls
+      scopeVal =
+        if strLen path > 0
+          "file"
+        else
+          "source"
+      extNames = collectExternalNames decls
+      uniq = uniqueStrs extNames
+      dupDiags = duplicateExternalDiagsFromUnique src uniq extNames
+      unusedDiags = unusedExternalDiagsFromUnique src uniq
+      ffiDiags = appendJsonLists dupDiags unusedDiags
+      compileDiag = diagnoseFromCompact (checkCompact src)
+      compileOk = jsonGetBool (jsonGet compileDiag "ok")
+      ok =
+        if compileOk
+          listIsEmpty ffiDiags
+        else
+          false
+      MJObj [
+        MJStr "ok"; MJBool ok;
+        MJStr "scope"; MJStr scopeVal;
+        MJStr "module"; MJStr moduleName;
+        MJStr "path"; MJStr path;
+        MJStr "external_count"; MJNum (countFfiKind entries "external");
+        MJStr "opaque_count"; MJNum (countFfiKind entries "opaque");
+        MJStr "compiler_stage"; MJStr (jsonGetStr (jsonGet compileDiag "stage"));
+        MJStr "compiler_diagnostics"; jsonGet compileDiag "diagnostics";
+        MJStr "ffi_diagnostics"; MJArr ffiDiags;
+        MJStr "ffi_decls"; MJArr entries
+      ]
+
+allModuleOk(items List[JsonVal]) =
+  match items
+    | [] -> true
+    | x :: rest ->
+      if jsonGetBool (jsonGet x "ok")
+        allModuleOk rest
+      else
+        false
+
+handleFfiInspect(params JsonVal) =
+  src = selectSource params
+  path = selectPath params
+  if strLen src > 0
+    ffiInspectFromSource path src
+  else
+    root = resolveRoot params
+    mods = loadGraphModules root
+    moduleItems =
+      listMap (\gm.
+        srcM = fileReadAll (gmPath gm)
+        ffiInspectFromSource (gmPath gm) srcM
+      ) mods
+    MJObj [MJStr "ok"; MJBool true; MJStr "scope"; MJStr "project"; MJStr "root"; MJStr root; MJStr "modules"; MJArr moduleItems]
+
+handleFfiValidate(params JsonVal) =
+  src = selectSource params
+  path = selectPath params
+  if strLen src > 0
+    ffiValidateFromSource path src
+  else
+    root = resolveRoot params
+    mods = loadGraphModules root
+    moduleItems =
+      listMap (\gm.
+        srcM = fileReadAll (gmPath gm)
+        ffiValidateFromSource (gmPath gm) srcM
+      ) mods
+    MJObj [MJStr "ok"; MJBool (allModuleOk moduleItems); MJStr "scope"; MJStr "project"; MJStr "root"; MJStr root; MJStr "modules"; MJArr moduleItems]
+
 -- ---- MCP handlers ----
 
 -- Tool schema helpers
@@ -797,6 +1038,8 @@ handleToolsList(params JsonVal) =
     (toolSchema "mod_add" "Add dependency in lll.toml." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "name"; MJObj [MJStr "type"; MJStr "string"]; MJStr "source"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "root"; MJStr "name"; MJStr "source"]);
     (toolSchema "mod_tidy" "Tidy dependencies (self-hosted baseline)." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "root"]);
     (toolSchema "mod_why" "Explain why dependency appears." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "dep"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "root"; MJStr "dep"]);
+    (toolSchema "ffi_inspect" "Inspect FFI surface: external/opaque declarations." [MJStr "source"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]; MJStr "root"; MJObj [MJStr "type"; MJStr "string"]] []);
+    (toolSchema "ffi_validate" "Validate FFI declarations and report FFI diagnostics." [MJStr "source"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]; MJStr "root"; MJObj [MJStr "type"; MJStr "string"]] []);
     (toolSchema "stdlib_search" "Search stdlib by name or signature." [MJStr "query"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Search query"]] [MJStr "query"]);
     (toolSchema "list_errors" "List all error codes." [] []);
     (toolSchema "lookup_error" "Get error details for E001 etc." [MJStr "code"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Error code"]] [MJStr "code"]);
@@ -830,6 +1073,8 @@ dispatchTool(method Str)(params JsonVal) =
     | "mod_add" -> handleModAdd params
     | "mod_tidy" -> handleModTidy params
     | "mod_why" -> handleModWhy params
+    | "ffi_inspect" -> handleFfiInspect params
+    | "ffi_validate" -> handleFfiValidate params
     | "stdlib_search" -> handleStdlibSearch params
     | "list_errors" -> handleListErrors params
     | "lookup_error" -> handleLookupError params

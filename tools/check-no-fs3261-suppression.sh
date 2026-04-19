@@ -4,7 +4,13 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-if rg -n "FS3261" src tests >/tmp/lllang-fs3261-check.out 2>/dev/null; then
+if command -v rg >/dev/null 2>&1; then
+  rg -n "FS3261" src tests >/tmp/lllang-fs3261-check.out 2>/dev/null || true
+else
+  grep -R -n "FS3261" src tests >/tmp/lllang-fs3261-check.out 2>/dev/null || true
+fi
+
+if [[ -s /tmp/lllang-fs3261-check.out ]]; then
   echo "FS3261 suppression/usage detected; keep nullable warnings fixed instead of suppressing."
   cat /tmp/lllang-fs3261-check.out
   exit 1

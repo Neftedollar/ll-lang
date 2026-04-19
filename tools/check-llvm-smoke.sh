@@ -37,7 +37,7 @@ else
   fail "llvm build command failed"
 fi
 
-rg -q '^; ll-lang LLVM IR output|^define ' "$out_file" || fail "llvm output does not look like IR"
+grep -Eq '^; ll-lang LLVM IR output|^define ' "$out_file" || fail "llvm output does not look like IR"
 
 if command -v llc >/dev/null 2>&1; then
   echo "==> llc smoke"
