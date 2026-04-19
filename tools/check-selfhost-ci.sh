@@ -30,7 +30,7 @@ check_file() {
   output="$(LLLC_SELF_MAIN="$SELF_MAIN" "$BOOTSTRAP_BIN" self check "$file" 2>&1 || true)"
   printf '%s\n' "$output"
 
-  if ! printf '%s' "$output" | rg -q '"ok":true'; then
+  if ! printf '%s' "$output" | grep -q '"ok":true'; then
     fail "compiler reported non-ok result for $file"
   fi
 }
