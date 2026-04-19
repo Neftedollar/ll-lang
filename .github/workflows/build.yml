@@ -17,10 +17,7 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Bootstrap Installer Smoke
         run: |
-          ./tools/bootstrap-self.sh install --reinstall
-          ./tools/bootstrap-self.sh verify
-          BOOTSTRAP_BIN="$(./tools/bootstrap-self.sh path)"
-          "$BOOTSTRAP_BIN" check "${{ github.workspace }}/lllcself/src/Main.lll"
+          LLLC_BOOTSTRAP_REINSTALL=1 ./tools/lllc-bootstrap.sh check "${{ github.workspace }}/lllcself/src/Main.lll"
         working-directory: .
       - name: Doc Contract Check
         run: ./tools/check-doc-contract.sh
@@ -30,9 +27,6 @@ jobs:
         working-directory: .
       - name: Build
         run: dotnet clean --nologo && dotnet build --nologo -warnaserror
-        working-directory: .
-      - name: Self-hosted Check Smoke (single-file)
-        run: dotnet run --project src/LLLangTool -- self check "${{ github.workspace }}/lllcself/src/Main.lll"
         working-directory: .
       - name: Test (release-core)
         run: dotnet test --no-build --verbosity normal --filter "FullyQualifiedName!~ReverseTranspilerTests&FullyQualifiedName!~CodegenLLVMTests"

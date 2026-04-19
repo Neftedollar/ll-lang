@@ -84,6 +84,15 @@ BOOTSTRAP_BIN="$(./tools/bootstrap-self.sh path)"
 [`bootstrap/lllc-bootstrap.lock.json`](bootstrap/lllc-bootstrap.lock.json)
 before extraction. Use `--reinstall` to force refresh.
 
+Strict no-fallback launcher:
+
+```bash
+./tools/lllc-bootstrap.sh check "$PWD/lllcself/src/Main.lll"
+```
+
+`tools/lllc-bootstrap.sh` always executes the pinned bootstrap binary and does
+not fall back to stage0 / `dotnet run` bridge paths.
+
 ### Run your first program
 
 ```bash

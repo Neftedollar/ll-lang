@@ -82,3 +82,14 @@ Notes:
 - Artifact metadata is pinned in `bootstrap/lllc-bootstrap.lock.json`.
 - Integrity is enforced via `sha256` verification before extraction.
 - Use `./tools/bootstrap-self.sh install --reinstall` to refresh cache.
+
+### Strict no-fallback launcher
+
+Use the launcher for deterministic bootstrap-only execution:
+
+```bash
+./tools/lllc-bootstrap.sh check "$PWD/lllcself/src/Main.lll"
+```
+
+This path never falls back to stage0. If bootstrap install/resolve fails, the
+command fails hard.
