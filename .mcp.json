@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "ll-lang": {
-      "command": "/Users/roman/Documents/dev/tens/code/ll-lang/tools/lllc-bootstrap.sh",
+      "command": "tools/lllc-bootstrap.sh",
       "args": ["mcp"]
     }
   }

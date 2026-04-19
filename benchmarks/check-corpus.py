@@ -20,14 +20,13 @@ Usage:
   python3 benchmarks/check-corpus.py list
 """
 
-import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
-LLLC_DLL = REPO_ROOT / "src/LLLangTool/bin/Debug/net10.0/lllc.dll"
+LLLC_BOOTSTRAP = REPO_ROOT / "tools/lllc-bootstrap.sh"
 CORPUS_DIR = REPO_ROOT / "benchmarks/corpus"
 
 # Curated corpus: (label, relative-path, expected-exit-code)
@@ -50,12 +49,16 @@ def run_lll(rel_path: str) -> tuple[int, str]:
     """Run a .lll file via lllc run. Returns (exit_code, stdout)."""
     src_path = str(REPO_ROOT / rel_path)
     try:
+        if not LLLC_BOOTSTRAP.exists():
+            return -1, f"ERROR: missing bootstrap launcher: {LLLC_BOOTSTRAP}"
+        env = dict(os.environ)
         result = subprocess.run(
-            ["dotnet", str(LLLC_DLL), "run", src_path],
+            [str(LLLC_BOOTSTRAP), "run", src_path],
             capture_output=True,
             text=True,
             timeout=120,
             cwd=str(REPO_ROOT),
+            env=env,
         )
         return result.returncode, result.stdout
     except subprocess.TimeoutExpired:
