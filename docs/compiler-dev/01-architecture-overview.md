@@ -268,26 +268,29 @@ Two entry points:
 - `compileProjectToModulesForTarget : Target -> LLProject -> Result<TypedModule list, LLError list>` — multi-file front-end pass for a specific target, used for target-specific external validation.
 - `compileProject : LLProject -> Result<string, LLError list>` — multi-file pipeline.
 
-### `src/LLLangTool/Mcp.fs` — MCP server (Phase 9)
+### `lllcself/src/Mcp.lll` — self-hosted MCP server (Phase 9)
 
-An in-process Model Context Protocol server that exposes the ll-lang
-compiler to LLM clients (Claude Code, Cursor, Zed) via 8 structured
-tools over stdio:
+The current MCP server is implemented in ll-lang, not in F#:
 
-| Tool | What it does |
-|------|-------------|
-| `compile_file` | Full pipeline → `{ok, errors[], fsharp?}` |
-| `check_file` | Lex→parse→elaborate→infer (no codegen) → `{ok, errors[]}` |
-| `run_file` | Compile + temp-project `dotnet run` → `{exit_code, stdout, stderr, errors[]}` |
-| `list_errors` | All E001–E025 codes with names and descriptions |
-| `lookup_error` | One code → description + minimal repro from `spec/examples/invalid/` |
-| `stdlib_search` | Substring search over ~50 stdlib entries → `[{name, signature, module, scope}]` |
-| `grammar_lookup` | Rule name → EBNF production from `spec/grammar.ebnf` |
-| `project_info` | Walk to `lll.toml` → `{root, manifest, modules[], deps[], platform_use[]}` |
+- `lllcself/src/Mcp.lll` implements JSON-RPC parsing/dispatch.
+- `lllcself/src/Main.lll` routes the `mcp` subcommand.
+- `src/LLLangTool/Program.fs` forwards `lllc mcp` through `cmdRunSelf ["mcp"]`.
 
-Uses `FsMcp.Core` + `FsMcp.Server` (same packages as the `age-mcp` server
-in this repo). Entry: `Mcp.runServer ()` blocks on stdio until the client
-disconnects.
+Current tool inventory (28), grouped:
+
+| Group | Tools |
+|------|------|
+| Core compile/check | `compile_source`, `check_source`, `compile_file`, `check_file` |
+| Diagnostics & repair | `diagnose_source`, `diagnose_file`, `explain_error`, `fix_suggest`, `apply_fix_preview` |
+| Formatting & AST | `format_source`, `format_file`, `parse_source`, `typed_ast` |
+| Project graph/build | `project_graph`, `check_project`, `build_project` |
+| Symbol navigation | `symbols`, `definition`, `references` |
+| Dependency helpers | `mod_add`, `mod_tidy`, `mod_why` |
+| Test helpers | `test_list`, `test_run` |
+| Utility surface | `stdlib_search`, `list_errors`, `lookup_error`, `list_targets` |
+
+For implementation details and contract examples, see
+`docs/compiler-dev/10-mcp-server.md`.
 
 **Client config** (add to `~/.config/claude/mcp.json` or Cursor settings):
 ```json

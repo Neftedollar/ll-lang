@@ -1,15 +1,15 @@
 # NEXT_STEPS
 
 ## MCP (LLL-first) stabilization
-- [ ] Sync docs with real MCP surface (`lllc mcp` now served by `lllcself`):
-  - [ ] `README.md` (tool inventory + architecture note)
-  - [ ] `docs/user-guide/09-mcp.md`
-  - [ ] `docs/compiler-dev/10-mcp-server.md`
-- [ ] Add MCP contract tests for the current self-hosted tool set:
-  - [ ] `initialize`
-  - [ ] `tools/list`
-  - [ ] `tools/call` smoke (`check_source`, `compile_source`, `lookup_error`)
-- [ ] Remove stale references to deleted `src/LLLangTool/Mcp.fs`.
+- [x] Sync docs with real MCP surface (`lllc mcp` now served by `lllcself`):
+  - [x] `README.md` (tool inventory + architecture note)
+  - [x] `docs/user-guide/09-mcp.md`
+  - [x] `docs/compiler-dev/10-mcp-server.md`
+- [x] Add MCP contract tests for the current self-hosted tool set:
+  - [x] `initialize`
+  - [x] `tools/list`
+  - [x] `tools/call` smoke for `#159..#168` additions (`diagnose_*`, `format_*`, `parse_source`, `typed_ast`, `project_graph`, `symbols/definition/references`, `explain_error`, `fix_*`, `check_project/build_project`, `test_*`, `mod_*`)
+- [x] Remove stale references to deleted `src/LLLangTool/Mcp.fs`.
 
 ## Self-hosting path (toward full LLL toolchain)
 - [ ] Define canonical plan to switch default compile/check/run path from stage0 F# to self-hosted pipeline.

@@ -64,13 +64,13 @@ Current benchmark results: see `benchmarks/results/token-benchmark.md`.
 | G6.2 | `docs/llm-best-practices.md` uses only v2 syntax | PASS | audit |
 | G6.3 | `docs/prompt-packs/v2-minimal.md` exists | PASS | `ls docs/prompt-packs/` |
 | G6.4 | `spec/error-codes.md` lists all codes with `EXXX line:col Name` format | BLOCK | `cat spec/error-codes.md` |
-| G6.5 | `docs/user-guide/09-mcp.md` matches actual MCP tool inventory | PASS | compare with `src/LLLangTool/Mcp.fs` |
+| G6.5 | `docs/user-guide/09-mcp.md` matches actual MCP tool inventory | PASS | compare with `lllcself/src/Mcp.lll` |
 
 ## G7 — MCP contract
 
 | # | Gate | Status | How to verify |
 |---|------|--------|---------------|
-| G7.1 | All 11 MCP tools respond to valid input | BLOCK | `lllc mcp` smoke test |
+| G7.1 | All 28 MCP tools respond to valid input | BLOCK | `lllc mcp` integration contract |
 | G7.2 | `check_source` returns `{"ok":true}` on valid ll-lang | BLOCK | MCP test |
 | G7.3 | `lookup_error` for each registered code returns `"found":true` | BLOCK | MCP test |
 

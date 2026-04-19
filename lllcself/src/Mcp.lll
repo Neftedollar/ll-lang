@@ -2,6 +2,12 @@ module Lllcself.Mcp
 
 import Std.Maybe
 import Std.Compiler
+import Std.Parser
+import Std.CompilerLoader
+
+external fileReadAll(path Str) Str
+external dirList(path Str) List[Str]
+external dirExists(path Str) Bool
 
 -- JSON-RPC 2.0 MCP server over stdio.
 
@@ -306,6 +312,433 @@ makeError(id Int)(message Str) =
 makeMethodError(id Int)(message Str) =
   MJObj [MJStr "jsonrpc"; MJStr "2.0"; MJStr "id"; MJNum id; MJStr "error"; MJObj [MJStr "message"; MJStr message; MJStr "code"; MJNum m32601]]
 
+PairInt = MkPairInt Int Int
+GraphModule = MkGraphModule Str Str (List[Str])  -- filePath, moduleName, imports
+
+pairLine(p PairInt) =
+  match p
+    | MkPairInt l _ -> l
+
+pairCol(p PairInt) =
+  match p
+    | MkPairInt _ c -> c
+
+gmPath(m GraphModule) =
+  match m
+    | MkGraphModule p _ _ -> p
+
+gmName(m GraphModule) =
+  match m
+    | MkGraphModule _ n _ -> n
+
+gmImports(m GraphModule) =
+  match m
+    | MkGraphModule _ _ i -> i
+
+strStartsWith(prefix Str)(s Str) =
+  plen = strLen prefix
+  slen = strLen s
+  if plen > slen
+    false
+  else
+    strSlice s 0 plen == prefix
+
+strEndsWith(suffix Str)(s Str) =
+  slen = strLen s
+  tlen = strLen suffix
+  if tlen > slen
+    false
+  else
+    strSlice s (slen - tlen) tlen == suffix
+
+joinStrs(items List[Str])(sep Str) =
+  match items
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat sep (joinStrs rest sep))
+
+joinDot(segs List[Str]) =
+  joinStrs segs "."
+
+pathJoin(base Str)(name Str) =
+  blen = strLen base
+  if blen == 0
+    name
+  else
+    last = strSlice base (blen - 1) 1
+    if last == "/"
+      strConcat base name
+    else
+      strConcat base (strConcat "/" name)
+
+normalizeListedPath(base Str)(f Str) =
+  if strStartsWith "/" f
+    f
+  else
+    pathJoin base f
+
+lastSlashChars(cs List[Char])(idx Int)(last Int) =
+  match cs
+    | [] -> last
+    | c :: rest ->
+      if c == '/'
+        lastSlashChars rest (idx + 1) idx
+      else
+        lastSlashChars rest (idx + 1) last
+
+pathDir(path Str) =
+  idx = lastSlashChars (strChars path) 0 (0 - 1)
+  if idx < 0
+    "."
+  else
+    strSlice path 0 idx
+
+trimRightRev(cs List[Char]) =
+  match cs
+    | [] -> []
+    | c :: rest ->
+      if c == ' '
+        trimRightRev rest
+      else
+        if c == '\t'
+          trimRightRev rest
+        else
+          cs
+
+trimRightLine(s Str) =
+  rev = listReverse (strChars s)
+  trimmedRev = trimRightRev rev
+  strFromChars (listReverse trimmedRev)
+
+normalizeNewlinesChars(cs List[Char]) =
+  match cs
+    | [] -> []
+    | '\r' :: '\n' :: rest ->
+      '\n' :: normalizeNewlinesChars rest
+    | '\r' :: rest ->
+      '\n' :: normalizeNewlinesChars rest
+    | c :: rest ->
+      c :: normalizeNewlinesChars rest
+
+canonicalFormat(src Str) =
+  normalized = strFromChars (normalizeNewlinesChars (strChars src))
+  lines = strSplit "\n" normalized
+  trimmed = listMap trimRightLine lines
+  joinStrs trimmed "\n"
+
+jsonParse(text Str) =
+  parsed = parseValue (strChars text)
+  match parsed
+    | MkJVal v _ -> v
+
+guessCode(msg Str) =
+  if strStartsWith "E001" msg
+    "E001"
+  else if strStartsWith "E002" msg
+    "E002"
+  else if strStartsWith "E003" msg
+    "E003"
+  else if strStartsWith "E004" msg
+    "E004"
+  else if strStartsWith "E005" msg
+    "E005"
+  else if strStartsWith "E006" msg
+    "E006"
+  else if strStartsWith "E007" msg
+    "E007"
+  else if strStartsWith "E008" msg
+    "E008"
+  else if strContains "Unbound" msg
+    "E002"
+  else if strContains "Pattern match" msg
+    "E003"
+  else
+    "E000"
+
+mkDiag(msg Str) =
+  MJObj [MJStr "code"; MJStr (guessCode msg); MJStr "message"; MJStr msg; MJStr "line"; MJNum 0; MJStr "col"; MJNum 0; MJStr "endLine"; MJNum 0; MJStr "endCol"; MJNum 0; MJStr "severity"; MJStr "error"; MJStr "hint"; MJStr ""]
+
+diagnoseFromCompact(checkJson Str) =
+  parsed = jsonParse checkJson
+  ok = jsonGetBool (jsonGet parsed "ok")
+  stage = jsonGetStr (jsonGet parsed "stage")
+  if ok
+    MJObj [MJStr "ok"; MJBool true; MJStr "stage"; MJStr stage; MJStr "diagnostics"; MJArr []]
+  else
+    primary = jsonGetStr (jsonGet parsed "primary_error")
+    MJObj [MJStr "ok"; MJBool false; MJStr "stage"; MJStr stage; MJStr "diagnostics"; MJArr [(mkDiag primary)]]
+
+notSupported(tool Str)(reason Str) =
+  MJObj [MJStr "ok"; MJBool false; MJStr "tool"; MJStr tool; MJStr "supported"; MJBool false; MJStr "reason"; MJStr reason]
+
+selectSource(params JsonVal) =
+  inlineSrc = jsonGetStr (jsonGet params "source")
+  path = jsonGetStr (jsonGet params "path")
+  if strLen inlineSrc > 0
+    inlineSrc
+  else
+    if fileExists path
+      readFile path
+    else
+      ""
+
+selectPath(params JsonVal) =
+  jsonGetStr (jsonGet params "path")
+
+resolveRoot(params JsonVal) =
+  root0 = jsonGetStr (jsonGet params "root")
+  path0 = jsonGetStr (jsonGet params "path")
+  if strLen root0 > 0
+    root0
+  else
+    if strLen path0 == 0
+      "."
+    else
+      if fileExists path0
+        pathDir path0
+      else path0
+
+declKind(d Decl) =
+  match d
+    | DFn _ _ _ _ -> "fn"
+    | DType _ _ _ -> "type"
+    | DImport _ -> "import"
+    | DImportUrl _ -> "import_url"
+    | DExport _ -> "export"
+    | DLet _ _ -> "let"
+    | DExternal _ _ _ -> "external"
+    | DOpaque _ -> "opaque"
+
+declName(d Decl) =
+  match d
+    | DFn n _ _ _ -> n
+    | DType n _ _ -> n
+    | DImport segs -> joinDot segs
+    | DImportUrl url -> url
+    | DExport inner -> declName inner
+    | DLet n _ -> n
+    | DExternal n _ _ -> n
+    | DOpaque n -> n
+
+declImports(decls List[Decl]) =
+  match decls
+    | [] -> []
+    | d :: rest ->
+      tail = declImports rest
+      match d
+        | DImport segs -> joinDot segs :: tail
+        | DExport inner ->
+          match inner
+            | DImport segs -> joinDot segs :: tail
+            | _ -> tail
+        | _ -> tail
+
+mkGraphModule(path Str)(src Str) =
+  m = parseModule (tokenize src)
+  match m
+    | MkModule modPath decls ->
+      MkGraphModule path (joinDot modPath) (declImports decls)
+
+graphModuleJson(m GraphModule) =
+  MJObj [MJStr "path"; MJStr (gmPath m); MJStr "module"; MJStr (gmName m); MJStr "imports"; MJArr (listMap (\x. MJStr x) (gmImports m))]
+
+collectProjectFiles(root Str) =
+  srcDir = pathJoin root "src"
+  if dirExists srcDir
+    collectLllFiles srcDir
+  else
+    []
+
+collectLllFiles(dir Str) =
+  entries = dirList dir
+  full = listMap (normalizeListedPath dir) entries
+  collectLllFilesRec full
+
+collectLllFilesRec(paths List[Str]) =
+  match paths
+    | [] -> []
+    | p :: rest ->
+      tail = collectLllFilesRec rest
+      if dirExists p
+        appendStrLists (collectLllFiles p) tail
+      else
+        if strEndsWith ".lll" p
+          p :: tail
+        else
+          tail
+
+loadGraphModules(root Str) =
+  files = collectProjectFiles root
+  listMap (\p. mkGraphModule p (fileReadAll p)) files
+
+toLoadedFile(m GraphModule) =
+  MkLoadedFile (gmPath m) (strSplit "." (gmName m)) (gmImports m)
+
+findModuleByName(mods List[GraphModule])(name Str) =
+  match mods
+    | [] -> None
+    | m :: rest ->
+      if gmName m == name
+        Some m
+      else
+        findModuleByName rest name
+
+edgesForModule(m GraphModule) =
+  fromName = gmName m
+  listMap (\toName. MJObj [MJStr "from"; MJStr fromName; MJStr "to"; MJStr toName]) (gmImports m)
+
+appendJsonLists(a List[JsonVal])(b List[JsonVal]) =
+  match a
+    | [] -> b
+    | x :: rest -> x :: appendJsonLists rest b
+
+appendStrLists(a List[Str])(b List[Str]) =
+  match a
+    | [] -> b
+    | x :: rest -> x :: appendStrLists rest b
+
+collectEdges(mods List[GraphModule]) =
+  match mods
+    | [] -> []
+    | m :: rest ->
+      appendJsonLists (edgesForModule m) (collectEdges rest)
+
+findLineCol(name Str)(src Str) =
+  lines = strSplit "\n" src
+  findLineColRec name lines 1
+
+findLineColRec(name Str)(lines List[Str])(lineNo Int) =
+  match lines
+    | [] -> MkPairInt 0 0
+    | ln :: rest ->
+      idx = strIndexOf name ln
+      if idx < 0
+        findLineColRec name rest (lineNo + 1)
+      else
+        MkPairInt lineNo (idx + 1)
+
+symbolJson(src Str)(d Decl) =
+  name = declName d
+  pos = findLineCol name src
+  MJObj [MJStr "name"; MJStr name; MJStr "kind"; MJStr (declKind d); MJStr "line"; MJNum (pairLine pos); MJStr "col"; MJNum (pairCol pos)]
+
+symbolJsonWithPath(path Str)(src Str)(d Decl) =
+  name = declName d
+  pos = findLineCol name src
+  MJObj [MJStr "name"; MJStr name; MJStr "kind"; MJStr (declKind d); MJStr "line"; MJNum (pairLine pos); MJStr "col"; MJNum (pairCol pos); MJStr "path"; MJStr path]
+
+collectSymbols(src Str)(decls List[Decl]) =
+  listMap (\d. symbolJson src d) decls
+
+collectSymbolsWithPath(path Str)(src Str)(decls List[Decl]) =
+  listMap (\d. symbolJsonWithPath path src d) decls
+
+findByNameInJsons(items List[JsonVal])(name Str) =
+  match items
+    | [] -> None
+    | it :: rest ->
+      if jsonGetStr (jsonGet it "name") == name
+        Some it
+      else
+        findByNameInJsons rest name
+
+findAllCols(name Str)(line Str)(offset Int) =
+  idx = strIndexOf name line
+  if idx < 0
+    []
+  else
+    col = offset + idx + 1
+    start = idx + strLen name
+    remLen = strLen line - start
+    restLine =
+      if remLen <= 0
+        ""
+      else
+        strSlice line start remLen
+    col :: findAllCols name restLine (offset + start)
+
+refsInLines(name Str)(lines List[Str])(lineNo Int) =
+  match lines
+    | [] -> []
+    | ln :: rest ->
+      cols = findAllCols name ln 0
+      thisRefs = listMap (\c. MJObj [MJStr "line"; MJNum lineNo; MJStr "col"; MJNum c; MJStr "endCol"; MJNum (c + strLen name); MJStr "context"; MJStr ln]) cols
+      appendJsonLists thisRefs (refsInLines name rest (lineNo + 1))
+
+addPathToRef(path Str)(r JsonVal) =
+  MJObj [
+    MJStr "path"; MJStr path;
+    MJStr "line"; MJNum (jsonGetInt (jsonGet r "line"));
+    MJStr "col"; MJNum (jsonGetInt (jsonGet r "col"));
+    MJStr "endCol"; MJNum (jsonGetInt (jsonGet r "endCol"));
+    MJStr "context"; MJStr (jsonGetStr (jsonGet r "context"))
+  ]
+
+refsInModules(name Str)(mods List[GraphModule]) =
+  match mods
+    | [] -> []
+    | m :: rest ->
+      src = fileReadAll (gmPath m)
+      local = refsInLines name (strSplit "\n" src) 1
+      localWithPath = listMap (\r. addPathToRef (gmPath m) r) local
+      appendJsonLists localWithPath (refsInModules name rest)
+
+findSymbolInModules(name Str)(mods List[GraphModule]) =
+  match mods
+    | [] -> None
+    | m :: rest ->
+      src = fileReadAll (gmPath m)
+      pm = parseModule (tokenize src)
+      match pm
+        | MkModule _ decls ->
+          syms = collectSymbolsWithPath (gmPath m) src decls
+          match findByNameInJsons syms name
+            | Some s -> Some s
+            | None -> findSymbolInModules name rest
+
+hintsFor(code Str) =
+  if code == "E001"
+    [MJStr "Check function parameter and return types."; MJStr "Align both branches/types in expressions."]
+  else if code == "E002"
+    [MJStr "Declare the missing symbol before use."; MJStr "Check import/module names for typos."]
+  else if code == "E003"
+    [MJStr "Cover all constructors in match."; MJStr "Add a wildcard arm if appropriate."]
+  else
+    [MJStr "Run diagnose_source and inspect primary_error."; MJStr "Minimize the snippet and re-check."]
+
+extractAfterColon(msg Str) =
+  idx = strIndexOf ":" msg
+  if idx < 0
+    ""
+  else
+    start = idx + 1
+    remLen = strLen msg - start
+    if remLen <= 0
+      ""
+    else
+      strTrim (strSlice msg start remLen)
+
+insertStubBinding(src Str)(name Str) =
+  stubName =
+    if strLen name == 0
+      "missingSymbol"
+    else name
+  stub = strConcat "-- TODO(auto-fix): define missing symbol\n" (strConcat stubName " = 0\n")
+  lines = strSplit "\n" src
+  match lines
+    | first :: rest ->
+      if strStartsWith "module " first
+        tail = joinStrs rest "\n"
+        strConcat first (strConcat "\n\n" (strConcat stub tail))
+      else
+        strConcat stub src
+    | [] -> stub
+
+minInt(a Int)(b Int) =
+  if a < b
+    a
+  else b
+
 -- ---- MCP handlers ----
 
 -- Tool schema helpers
@@ -321,6 +754,26 @@ handleToolsList(params JsonVal) =
     (toolSchema "check_source" "Type-check ll-lang source." [MJStr "source"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "ll-lang source code"]] [MJStr "source"]);
     (toolSchema "compile_file" "Compile a .lll file." [MJStr "path"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Path to .lll file"]] [MJStr "path"]);
     (toolSchema "check_file" "Type-check a .lll file." [MJStr "path"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Path to .lll file"]] [MJStr "path"]);
+    (toolSchema "diagnose_source" "Return structured diagnostics for source." [MJStr "source"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "source"]);
+    (toolSchema "diagnose_file" "Return structured diagnostics for file." [MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "path"]);
+    (toolSchema "format_source" "Canonicalize source formatting." [MJStr "source"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Source text"]; MJStr "check_only"; MJObj [MJStr "type"; MJStr "boolean"]] [MJStr "source"]);
+    (toolSchema "format_file" "Canonicalize file formatting." [MJStr "path"; MJObj [MJStr "type"; MJStr "string"]; MJStr "check_only"; MJObj [MJStr "type"; MJStr "boolean"]] [MJStr "path"]);
+    (toolSchema "parse_source" "Parse source and return AST summary." [MJStr "source"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "source"]);
+    (toolSchema "typed_ast" "Return typed summary/inference output." [MJStr "source"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] []);
+    (toolSchema "project_graph" "Return project module/import graph." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] []);
+    (toolSchema "symbols" "List top-level symbols from source/file/project root." [MJStr "source"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]; MJStr "root"; MJObj [MJStr "type"; MJStr "string"]] []);
+    (toolSchema "definition" "Find top-level definition by symbol." [MJStr "symbol"; MJObj [MJStr "type"; MJStr "string"]; MJStr "source"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]; MJStr "root"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "symbol"]);
+    (toolSchema "references" "Find textual references for a symbol." [MJStr "symbol"; MJObj [MJStr "type"; MJStr "string"]; MJStr "source"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]; MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "include_declaration"; MJObj [MJStr "type"; MJStr "boolean"]] [MJStr "symbol"]);
+    (toolSchema "explain_error" "Contextual error explanation and hints." [MJStr "code"; MJObj [MJStr "type"; MJStr "string"]; MJStr "source"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] []);
+    (toolSchema "fix_suggest" "Suggest candidate fixes from diagnostics." [MJStr "source"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] []);
+    (toolSchema "apply_fix_preview" "Preview source after applying fix candidate." [MJStr "fix_id"; MJObj [MJStr "type"; MJStr "string"]; MJStr "source"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "fix_id"]);
+    (toolSchema "check_project" "Project-level check summary (self-hosted baseline)." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] []);
+    (toolSchema "build_project" "Project-level build summary (self-hosted baseline)." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] []);
+    (toolSchema "test_list" "List tests (not supported in self-hosted MCP runtime)." [MJStr "filter"; MJObj [MJStr "type"; MJStr "string"]] []);
+    (toolSchema "test_run" "Run tests (not supported in self-hosted MCP runtime)." [MJStr "filter"; MJObj [MJStr "type"; MJStr "string"]] []);
+    (toolSchema "mod_add" "Add dependency in lll.toml." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "name"; MJObj [MJStr "type"; MJStr "string"]; MJStr "source"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "root"; MJStr "name"; MJStr "source"]);
+    (toolSchema "mod_tidy" "Tidy dependencies (self-hosted baseline)." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "root"]);
+    (toolSchema "mod_why" "Explain why dependency appears." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "dep"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "root"; MJStr "dep"]);
     (toolSchema "stdlib_search" "Search stdlib by name or signature." [MJStr "query"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Search query"]] [MJStr "query"]);
     (toolSchema "list_errors" "List all error codes." [] []);
     (toolSchema "lookup_error" "Get error details for E001 etc." [MJStr "code"; MJObj [MJStr "type"; MJStr "string"; MJStr "description"; MJStr "Error code"]] [MJStr "code"]);
@@ -334,6 +787,26 @@ dispatchTool(method Str)(params JsonVal) =
     | "check_source" -> handleCheckSource params
     | "compile_file" -> handleCompileFile params
     | "check_file" -> handleCheckFile params
+    | "diagnose_source" -> handleDiagnoseSource params
+    | "diagnose_file" -> handleDiagnoseFile params
+    | "format_source" -> handleFormatSource params
+    | "format_file" -> handleFormatFile params
+    | "parse_source" -> handleParseSource params
+    | "typed_ast" -> handleTypedAst params
+    | "project_graph" -> handleProjectGraph params
+    | "symbols" -> handleSymbols params
+    | "definition" -> handleDefinition params
+    | "references" -> handleReferences params
+    | "explain_error" -> handleExplainError params
+    | "fix_suggest" -> handleFixSuggest params
+    | "apply_fix_preview" -> handleApplyFixPreview params
+    | "check_project" -> handleCheckProject params
+    | "build_project" -> handleBuildProject params
+    | "test_list" -> handleTestList params
+    | "test_run" -> handleTestRun params
+    | "mod_add" -> handleModAdd params
+    | "mod_tidy" -> handleModTidy params
+    | "mod_why" -> handleModWhy params
     | "stdlib_search" -> handleStdlibSearch params
     | "list_errors" -> handleListErrors params
     | "lookup_error" -> handleLookupError params
@@ -369,6 +842,340 @@ handleCheckFile(params JsonVal) =
   path = jsonGetStr (jsonGet params "path")
   exists = fileExists path
   match exists | true -> MJObj [MJStr "ok"; MJBool true; MJStr "result"; MJStr (checkExistsCheck path)] | false -> notFoundErr path
+
+handleDiagnoseSource(params JsonVal) =
+  source = jsonGetStr (jsonGet params "source")
+  diagnoseFromCompact (checkCompact source)
+
+handleDiagnoseFile(params JsonVal) =
+  path = jsonGetStr (jsonGet params "path")
+  if fileExists path
+    diagnoseFromCompact (checkCompact (readFile path))
+  else
+    MJObj [MJStr "ok"; MJBool false; MJStr "stage"; MJStr "io"; MJStr "diagnostics"; MJArr [(mkDiag (strConcat "File not found: " path))]]
+
+handleFormatSource(params JsonVal) =
+  source = jsonGetStr (jsonGet params "source")
+  checkOnly = jsonGetBool (jsonGet params "check_only")
+  formatted = canonicalFormat source
+  changed = formatted != source
+  MJObj [MJStr "ok"; MJBool true; MJStr "changed"; MJBool changed; MJStr "check_only"; MJBool checkOnly; MJStr "formatted"; MJStr formatted]
+
+handleFormatFile(params JsonVal) =
+  path = jsonGetStr (jsonGet params "path")
+  checkOnly = jsonGetBool (jsonGet params "check_only")
+  if fileExists path
+    src = readFile path
+    formatted = canonicalFormat src
+    changed = formatted != src
+    wrote =
+      if changed
+        if checkOnly
+          false
+        else
+          _ = writeFile path formatted
+          true
+      else false
+    MJObj [MJStr "ok"; MJBool true; MJStr "changed"; MJBool changed; MJStr "wrote"; MJBool wrote; MJStr "path"; MJStr path; MJStr "formatted"; MJStr formatted]
+  else
+    MJObj [MJStr "ok"; MJBool false; MJStr "path"; MJStr path; MJStr "error"; MJStr "File not found"]
+
+declToJson(d Decl) =
+  MJObj [MJStr "kind"; MJStr (declKind d); MJStr "name"; MJStr (declName d)]
+
+handleParseSource(params JsonVal) =
+  source = jsonGetStr (jsonGet params "source")
+  m = parseModule (tokenize source)
+  match m
+    | MkModule modPath decls ->
+      MJObj [MJStr "ok"; MJBool true; MJStr "module"; MJStr (joinDot modPath); MJStr "decl_count"; MJNum (listLen decls); MJStr "decls"; MJArr (listMap declToJson decls)]
+
+typedDeclJson(d Decl) =
+  n = declName d
+  k = declKind d
+  MJObj [MJStr "name"; MJStr n; MJStr "kind"; MJStr k; MJStr "type"; MJStr ""]
+
+handleTypedAst(params JsonVal) =
+  source = selectSource params
+  if strLen source == 0
+    MJObj [MJStr "ok"; MJBool false; MJStr "stage"; MJStr "io"; MJStr "error"; MJStr "Missing source/path"]
+  else
+    m = parseModule (tokenize source)
+    match m
+      | MkModule modPath decls ->
+        d = diagnoseFromCompact (checkCompact source)
+        ok = jsonGetBool (jsonGet d "ok")
+        stageStr = jsonGetStr (jsonGet d "stage")
+        MJObj [
+          MJStr "ok"; MJBool ok;
+          MJStr "stage"; MJStr stageStr;
+          MJStr "module"; MJStr (joinDot modPath);
+          MJStr "typed_decls"; MJArr (listMap typedDeclJson decls);
+          MJStr "diagnostics"; jsonGet d "diagnostics"
+        ]
+
+handleProjectGraph(params JsonVal) =
+  root = resolveRoot params
+  mods = loadGraphModules root
+  loaded = listMap toLoadedFile mods
+  loadRes = loadProject loaded
+  topoPaths =
+    match loadRes
+      | LoaderOk ordered -> listMap lfPath ordered
+      | LoaderErr _ -> []
+  errs =
+    match loadRes
+      | LoaderOk _ -> []
+      | LoaderErr es -> listMap (\e. MJStr (renderLoaderError e)) es
+  MJObj [
+    MJStr "ok"; MJBool (listIsEmpty errs);
+    MJStr "root"; MJStr root;
+    MJStr "modules"; MJArr (listMap graphModuleJson mods);
+    MJStr "edges"; MJArr (collectEdges mods);
+    MJStr "topo_order"; MJArr (listMap (\p. MJStr p) topoPaths);
+    MJStr "errors"; MJArr errs
+  ]
+
+collectFileCheck(path Str) =
+  src = readFile path
+  compact = checkCompact src
+  d = diagnoseFromCompact compact
+  ok = jsonGetBool (jsonGet d "ok")
+  MJObj [MJStr "path"; MJStr path; MJStr "ok"; MJBool ok; MJStr "diagnostics"; jsonGet d "diagnostics"; MJStr "stage"; MJStr (jsonGetStr (jsonGet d "stage"))]
+
+collectFileBuild(path Str) =
+  src = readFile path
+  compact = checkCompact src
+  d = diagnoseFromCompact compact
+  ok = jsonGetBool (jsonGet d "ok")
+  out = compile src
+  previewLen = minInt (strLen out) 200
+  preview = strSlice out 0 previewLen
+  MJObj [MJStr "path"; MJStr path; MJStr "ok"; MJBool ok; MJStr "target"; MJStr "fsharp"; MJStr "output_preview"; MJStr preview; MJStr "diagnostics"; jsonGet d "diagnostics"]
+
+allOkChecks(items List[JsonVal]) =
+  match items
+    | [] -> true
+    | it :: rest ->
+      ok = jsonGetBool (jsonGet it "ok")
+      if ok
+        allOkChecks rest
+      else false
+
+handleCheckProject(params JsonVal) =
+  root = resolveRoot params
+  mods = loadGraphModules root
+  checks = listMap (\m. collectFileCheck (gmPath m)) mods
+  MJObj [MJStr "ok"; MJBool (allOkChecks checks); MJStr "root"; MJStr root; MJStr "files"; MJArr checks]
+
+handleBuildProject(params JsonVal) =
+  root = resolveRoot params
+  mods = loadGraphModules root
+  builds = listMap (\m. collectFileBuild (gmPath m)) mods
+  MJObj [MJStr "ok"; MJBool (allOkChecks builds); MJStr "root"; MJStr root; MJStr "artifacts"; MJArr builds]
+
+handleSymbols(params JsonVal) =
+  src = selectSource params
+  path = selectPath params
+  if strLen src > 0
+    m = parseModule (tokenize src)
+    match m
+      | MkModule _ decls ->
+        MJObj [MJStr "ok"; MJBool true; MJStr "symbols"; MJArr (collectSymbols src decls)]
+  else
+    if strLen path > 0
+      m = parseModule (tokenize (readFile path))
+      match m
+        | MkModule _ decls ->
+          MJObj [MJStr "ok"; MJBool true; MJStr "symbols"; MJArr (collectSymbolsWithPath path (readFile path) decls)]
+    else
+      root = resolveRoot params
+      mods = loadGraphModules root
+      grouped =
+        listMap (\gm.
+          srcM = fileReadAll (gmPath gm)
+          pm = parseModule (tokenize srcM)
+          match pm
+            | MkModule _ ds ->
+              MJObj [MJStr "path"; MJStr (gmPath gm); MJStr "module"; MJStr (gmName gm); MJStr "symbols"; MJArr (collectSymbolsWithPath (gmPath gm) srcM ds)]
+        ) mods
+      MJObj [MJStr "ok"; MJBool true; MJStr "root"; MJStr root; MJStr "modules"; MJArr grouped]
+
+handleDefinition(params JsonVal) =
+  name = jsonGetStr (jsonGet params "symbol")
+  src = selectSource params
+  path = selectPath params
+  if strLen src > 0
+    m = parseModule (tokenize src)
+    match m
+      | MkModule _ decls ->
+        syms = collectSymbols src decls
+        match findByNameInJsons syms name
+          | Some s -> MJObj [MJStr "found"; MJBool true; MJStr "definition"; s]
+          | None -> MJObj [MJStr "found"; MJBool false; MJStr "symbol"; MJStr name]
+  else
+    if strLen path > 0
+      srcFile = readFile path
+      m = parseModule (tokenize srcFile)
+      match m
+        | MkModule _ decls ->
+          syms = collectSymbolsWithPath path srcFile decls
+          match findByNameInJsons syms name
+            | Some s -> MJObj [MJStr "found"; MJBool true; MJStr "definition"; s]
+            | None ->
+              root = resolveRoot params
+              mods = loadGraphModules root
+              match findSymbolInModules name mods
+                | Some s2 -> MJObj [MJStr "found"; MJBool true; MJStr "definition"; s2]
+                | None -> MJObj [MJStr "found"; MJBool false; MJStr "symbol"; MJStr name]
+    else
+      root = resolveRoot params
+      mods = loadGraphModules root
+      match findSymbolInModules name mods
+        | Some s3 -> MJObj [MJStr "found"; MJBool true; MJStr "definition"; s3]
+        | None -> MJObj [MJStr "found"; MJBool false; MJStr "symbol"; MJStr name]
+
+handleReferences(params JsonVal) =
+  name = jsonGetStr (jsonGet params "symbol")
+  src = selectSource params
+  path = selectPath params
+  includeDecl = jsonGetBool (jsonGet params "include_declaration")
+  if strLen src > 0
+    refs = refsInLines name (strSplit "\n" src) 1
+    MJObj [MJStr "ok"; MJBool true; MJStr "symbol"; MJStr name; MJStr "include_declaration"; MJBool includeDecl; MJStr "references"; MJArr refs]
+  else
+    if strLen path > 0
+      refs = refsInLines name (strSplit "\n" (readFile path)) 1
+      refsWithPath = listMap (\r. addPathToRef path r) refs
+      root = resolveRoot params
+      mods = loadGraphModules root
+      projectRefs = refsInModules name mods
+      MJObj [MJStr "ok"; MJBool true; MJStr "symbol"; MJStr name; MJStr "include_declaration"; MJBool includeDecl; MJStr "references"; MJArr (appendJsonLists refsWithPath projectRefs)]
+    else
+      root = resolveRoot params
+      mods = loadGraphModules root
+      MJObj [MJStr "ok"; MJBool true; MJStr "symbol"; MJStr name; MJStr "include_declaration"; MJBool includeDecl; MJStr "references"; MJArr (refsInModules name mods)]
+
+handleExplainError(params JsonVal) =
+  code0 = jsonGetStr (jsonGet params "code")
+  src = selectSource params
+  code =
+    if strLen code0 > 0
+      code0
+    else
+      if strLen src > 0
+        d = diagnoseFromCompact (checkCompact src)
+        diags = jsonGet d "diagnostics"
+        match diags
+          | MJArr (first :: _) -> jsonGetStr (jsonGet first "code")
+          | _ -> "E000"
+      else
+        "E000"
+  desc =
+    match findError code errorCodes
+      | Some (MkTriple _ _ d) -> d
+      | None -> "Unknown error code."
+  MJObj [MJStr "ok"; MJBool true; MJStr "code"; MJStr code; MJStr "cause"; MJStr desc; MJStr "hints"; MJArr (hintsFor code)]
+
+handleFixSuggest(params JsonVal) =
+  src = selectSource params
+  if strLen src == 0
+    MJObj [MJStr "ok"; MJBool false; MJStr "error"; MJStr "Missing source/path"]
+  else
+    d = diagnoseFromCompact (checkCompact src)
+    diags = jsonGet d "diagnostics"
+    ok = jsonGetBool (jsonGet d "ok")
+    if ok
+      MJObj [MJStr "ok"; MJBool true; MJStr "suggestions"; MJArr []]
+    else
+      firstDiag =
+        match diags
+          | MJArr (x :: _) -> x
+          | _ -> MJObj []
+      msg = jsonGetStr (jsonGet firstDiag "message")
+      code = jsonGetStr (jsonGet firstDiag "code")
+      missing = extractAfterColon msg
+      suggestion =
+        if code == "E002"
+          MJObj [MJStr "fix_id"; MJStr "insert_stub_binding"; MJStr "title"; MJStr "Insert stub binding for missing symbol"; MJStr "symbol"; MJStr missing; MJStr "confidence"; MJNum 70]
+        else
+          MJObj [MJStr "fix_id"; MJStr "no_auto_fix"; MJStr "title"; MJStr "No safe automatic fix available"; MJStr "confidence"; MJNum 10]
+      MJObj [MJStr "ok"; MJBool true; MJStr "suggestions"; MJArr [suggestion]]
+
+handleApplyFixPreview(params JsonVal) =
+  fixId = jsonGetStr (jsonGet params "fix_id")
+  src = selectSource params
+  if strLen src == 0
+    MJObj [MJStr "ok"; MJBool false; MJStr "error"; MJStr "Missing source/path"]
+  else
+    if fixId == "insert_stub_binding"
+      d = diagnoseFromCompact (checkCompact src)
+      diags = jsonGet d "diagnostics"
+      symbol =
+        match diags
+          | MJArr (first :: _) ->
+            extractAfterColon (jsonGetStr (jsonGet first "message"))
+          | _ -> ""
+      applied = insertStubBinding src symbol
+      diff = strConcat "--- source\n+++ source\n+ " (strConcat symbol " = 0")
+      MJObj [MJStr "ok"; MJBool true; MJStr "applied"; MJBool true; MJStr "fix_id"; MJStr fixId; MJStr "applied_source"; MJStr applied; MJStr "diff"; MJStr diff]
+    else
+      MJObj [MJStr "ok"; MJBool false; MJStr "applied"; MJBool false; MJStr "error"; MJStr (strConcat "Unknown fix_id: " fixId)]
+
+handleTestList(params JsonVal) =
+  notSupported "test_list" "Process execution is unavailable in self-hosted MCP runtime."
+
+handleTestRun(params JsonVal) =
+  notSupported "test_run" "Process execution is unavailable in self-hosted MCP runtime."
+
+handleModAdd(params JsonVal) =
+  root = jsonGetStr (jsonGet params "root")
+  depName = jsonGetStr (jsonGet params "name")
+  depSource = jsonGetStr (jsonGet params "source")
+  manifestPath = pathJoin root "lll.toml"
+  if fileExists manifestPath
+    content = readFile manifestPath
+    depLine = strConcat depName (strConcat " = \"" (strConcat depSource "\""))
+    already = strContains depLine content
+    if already
+      MJObj [MJStr "ok"; MJBool true; MJStr "changed"; MJBool false; MJStr "manifest_path"; MJStr manifestPath]
+    else
+      newContent =
+        if strContains "[deps]" content
+          strConcat content (strConcat "\n" (strConcat depLine "\n"))
+        else
+          strConcat content (strConcat "\n\n[deps]\n" (strConcat depLine "\n"))
+      _ = writeFile manifestPath newContent
+      MJObj [MJStr "ok"; MJBool true; MJStr "changed"; MJBool true; MJStr "manifest_path"; MJStr manifestPath]
+  else
+    MJObj [MJStr "ok"; MJBool false; MJStr "error"; MJStr (strConcat "Manifest not found: " manifestPath)]
+
+handleModTidy(params JsonVal) =
+  root = jsonGetStr (jsonGet params "root")
+  MJObj [MJStr "ok"; MJBool true; MJStr "changed"; MJBool false; MJStr "root"; MJStr root; MJStr "message"; MJStr "No-op in self-hosted MCP baseline. Use `lllc mod tidy` from CLI."]
+
+findDirectImporters(mods List[GraphModule])(dep Str) =
+  match mods
+    | [] -> []
+    | m :: rest ->
+      tail = findDirectImporters rest dep
+      if listAny (\i. i == dep) (gmImports m)
+        gmName m :: tail
+      else
+        tail
+
+handleModWhy(params JsonVal) =
+  root = jsonGetStr (jsonGet params "root")
+  dep = jsonGetStr (jsonGet params "dep")
+  manifestPath = pathJoin root "lll.toml"
+  inManifest =
+    if fileExists manifestPath
+      content = readFile manifestPath
+      strContains (strConcat dep " = ") content
+    else false
+  mods = loadGraphModules root
+  importers = findDirectImporters mods dep
+  MJObj [MJStr "ok"; MJBool true; MJStr "dep"; MJStr dep; MJStr "in_manifest"; MJBool inManifest; MJStr "direct_importers"; MJArr (listMap (\x. MJStr x) importers)]
 
 -- Stdlib entries
 stdlibEntries = [

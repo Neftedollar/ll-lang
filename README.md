@@ -56,7 +56,7 @@ Current release line: **1.0.0**.
 | 6 | Stdlib (~50 builtins) | ✅ |
 | **7** | **Bootstrap fixpoint** — ll-lang compiles itself (`compiler₁.fs == compiler₂.fs`) | ✅ |
 | **8** | **Module system** — `lll.toml`, multi-file builds, `lllc new`, topo-sort, E020/E024 | ✅ |
-| **9** | **MCP server** — `lllc mcp` stdio server with 10 tools for Claude Code / Cursor / Zed | ✅ |
+| **9** | **MCP server** — `lllc mcp` stdio server (self-hosted `lllcself`) with 28 tools for Claude Code / Cursor / Zed | ✅ |
 | **10** | **Multi-platform codegen** — `lllc build --target ts\|py\|java\|cs\|llvm`; TypeScript DU + Python @dataclass + Java sealed interfaces + C# records + LLVM IR (`llvm` is experimental subset in 1.0) | ✅ |
 
 ## Getting Started
@@ -140,14 +140,22 @@ ll-lang ships a built-in MCP server. Wire it to Claude Code, Cursor, or Zed — 
 {
   "mcpServers": {
     "lllc": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/path/to/ll-lang/src/LLLangTool", "--", "mcp"]
+      "command": "lllc",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-Available MCP tools (10): `compile_file`, `compile_source`, `check_file`, `check_source`, `run_file`, `list_errors`, `lookup_error`, `stdlib_search`, `grammar_lookup`, `project_info`.
+Available MCP tools (28):
+- Core compile/check: `compile_source`, `check_source`, `compile_file`, `check_file`
+- Diagnostics & repair: `diagnose_source`, `diagnose_file`, `explain_error`, `fix_suggest`, `apply_fix_preview`
+- Formatting & AST: `format_source`, `format_file`, `parse_source`, `typed_ast`
+- Project graph/build: `project_graph`, `check_project`, `build_project`
+- Symbol navigation: `symbols`, `definition`, `references`
+- Dependency helpers: `mod_add`, `mod_tidy`, `mod_why`
+- Test helpers: `test_list`, `test_run` (self-hosted baseline returns structured not-supported response)
+- Catalog/meta: `stdlib_search`, `list_errors`, `lookup_error`, `list_targets`
 
 The agent can ask "does this compile?" and get a structured JSON response with error codes, line numbers, and fix hints — no scraping required.
 
@@ -347,8 +355,9 @@ src/LLLangCompiler/        — compiler library (F#)
   CodegenJava.fs           — Java 21 source emitter
   Compiler.fs              — end-to-end pipeline + Target dispatch
 src/LLLangTool/            — `lllc` CLI (build / run / self / new / install / mcp + experimental reverse)
-  Mcp.fs                   — MCP server (10 tools for LLM clients)
   Program.fs               — entry point
+lllcself/src/              — self-hosted ll-lang implementation of CLI subcommands
+  Mcp.lll                  — MCP server (28 tools for LLM clients)
 stdlib/                    — self-hosted stdlib (10 modules, 5857 LOC ll-lang)
 tests/LLLangTests/         — xUnit test suite (see CI for current count)
 docs/user-guide/           — user documentation
