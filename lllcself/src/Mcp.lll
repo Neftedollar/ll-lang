@@ -756,256 +756,11 @@ truncateStr(s Str)(limit Int) =
   else
     strConcat (strSlice s 0 limit) "..."
 
-skipToDigit(cs List[Char]) =
-  match cs
-    | [] -> []
-    | c :: rest ->
-      if charIsDigit c
-        cs
-      else
-        skipToDigit rest
-
-firstIntInText(s Str) =
-  rest = skipToDigit (strChars s)
-  digitsRes = collectDigits rest []
-  digits = crDigits digitsRes
-  if listIsEmpty digits
-    0
-  else
-    strToIntWithDefault (strFromChars digits)
-
-intAfter(label Str)(text Str) =
-  idx = strIndexOf label text
-  if idx < 0
-    0
-  else
-    start = idx + strLen label
-    remLen = strLen text - start
-    if remLen <= 0
-      0
-    else
-      firstIntInText (strSlice text start remLen)
-
 normalizeTimeoutSec(raw Int)(defaultSec Int) =
   if raw <= 0
     defaultSec
   else
     clampInt raw 1 3600
-
-paramBoolOr(params JsonVal)(key Str)(fallback Bool) =
-  v = jsonGet params key
-  match v
-    | MJBool b -> b
-    | _ -> fallback
-
-resolveTestExecutionMode(params JsonVal) =
-  mode = strTrim (jsonGetStr (jsonGet params "execution_mode"))
-  if mode == "host_runner"
-    "host_runner"
-  else
-    if mode == "no_spawn"
-      "host_runner"
-    else
-      "process"
-
-resolveProcessSpawnAllowed(params JsonVal) =
-  mode = resolveTestExecutionMode params
-  processSpawn = paramBoolOr params "process_spawn" true
-  if mode == "process"
-    processSpawn
-  else
-    false
-
-testNoSpawnReason(params JsonVal) =
-  rawMode = strTrim (jsonGetStr (jsonGet params "execution_mode"))
-  processSpawn = paramBoolOr params "process_spawn" true
-  if rawMode == "host_runner"
-    "Requested host_runner mode but no host runner is configured in self-hosted runtime."
-  else
-    if rawMode == "no_spawn"
-      "Requested no_spawn mode but no host runner is configured in self-hosted runtime."
-    else
-      if processSpawn
-        "Process runner unavailable and no host runner is configured in self-hosted runtime."
-      else
-        "Process spawn is disabled and no host runner is configured in self-hosted runtime."
-
-testListNoSpawn(cwd Str)(projectArg Str)(filter Str)(reason Str) =
-  MJObj [
-    MJStr "ok"; MJBool false;
-    MJStr "supported"; MJBool false;
-    MJStr "execution_mode"; MJStr "host_runner";
-    MJStr "degraded_reason"; MJStr reason;
-    MJStr "cwd"; MJStr cwd;
-    MJStr "project"; MJStr projectArg;
-    MJStr "timed_out"; MJBool false;
-    MJStr "exit_code"; MJNum (0 - 1);
-    MJStr "filter"; MJStr filter;
-    MJStr "total"; MJNum 0;
-    MJStr "tests"; MJArr [];
-    MJStr "stderr_summary"; MJStr reason
-  ]
-
-testRunNoSpawn(cwd Str)(projectArg Str)(filter Str)(reason Str) =
-  MJObj [
-    MJStr "ok"; MJBool false;
-    MJStr "supported"; MJBool false;
-    MJStr "execution_mode"; MJStr "host_runner";
-    MJStr "degraded_reason"; MJStr reason;
-    MJStr "cwd"; MJStr cwd;
-    MJStr "project"; MJStr projectArg;
-    MJStr "timed_out"; MJBool false;
-    MJStr "exit_code"; MJNum (0 - 1);
-    MJStr "filter"; MJStr filter;
-    MJStr "total"; MJNum 0;
-    MJStr "passed"; MJNum 0;
-    MJStr "failed"; MJNum 0;
-    MJStr "skipped"; MJNum 0;
-    MJStr "tests"; MJArr [];
-    MJStr "stdout"; MJStr "";
-    MJStr "stderr"; MJStr "";
-    MJStr "stderr_summary"; MJStr reason
-  ]
-
-resolveTestCwd(params JsonVal) =
-  project = jsonGetStr (jsonGet params "project")
-  if strLen project > 0
-    if fileExists project
-      pathDir project
-    else
-      if dirExists project
-        project
-      else
-        "."
-  else
-    resolveRoot params
-
-resolveTestProjectArg(params JsonVal) =
-  project = jsonGetStr (jsonGet params "project")
-  if strLen (strTrim project) > 0
-    project
-  else
-    ""
-
-appendStrArg(args List[Str])(v Str) =
-  appendStrLists args [v]
-
-appendStrArgs(args List[Str])(a Str)(b Str) =
-  appendStrLists args [a; b]
-
-withFilterArg(args List[Str])(filter Str) =
-  if strLen (strTrim filter) == 0
-    args
-  else
-    appendStrArgs args "--filter" filter
-
-runDotnet(args List[Str])(cwd Str)(timeoutSec Int) =
-  raw = processRunEx "dotnet" args cwd timeoutSec
-  parsed = jsonParse raw
-  MJObj [
-    MJStr "ok"; MJBool (jsonGetBool (jsonGet parsed "ok"));
-    MJStr "exit_code"; MJNum (jsonGetInt (jsonGet parsed "exit_code"));
-    MJStr "timed_out"; MJBool (jsonGetBool (jsonGet parsed "timed_out"));
-    MJStr "stdout"; MJStr (jsonGetStr (jsonGet parsed "stdout"));
-    MJStr "stderr"; MJStr (jsonGetStr (jsonGet parsed "stderr"))
-  ]
-
-findListTestsStart(lines List[Str]) =
-  match lines
-    | [] -> []
-    | ln :: rest ->
-      t = strTrim ln
-      if strStartsWith "The following Tests are available:" t
-        rest
-      else
-        findListTestsStart rest
-
-listedTestJson(name Str) =
-  MJObj [MJStr "name"; MJStr name]
-
-collectListedTests(lines List[Str])(acc List[JsonVal]) =
-  match lines
-    | [] -> listReverse acc
-    | ln :: rest ->
-      t = strTrim ln
-      if strLen t == 0
-        collectListedTests rest acc
-      else
-        if strStartsWith "Test Run " t
-          collectListedTests rest acc
-        else
-          if strStartsWith "Total tests:" t
-            collectListedTests rest acc
-          else
-            collectListedTests rest ((listedTestJson t) :: acc)
-
-durationTokenToMs(tok Str) =
-  t = strTrim tok
-  n = firstIntInText t
-  if strContains "ms" t
-    n
-  else
-    if strContains "s" t
-      n * 1000
-    else
-      n
-
-dropPrefix(s Str)(prefix Str) =
-  plen = strLen prefix
-  slen = strLen s
-  if slen <= plen
-    ""
-  else
-    strSlice s plen (slen - plen)
-
-parseRunLine(statusWord Str)(status Str)(line Str) =
-  rem = dropPrefix line statusWord
-  idx = strIndexOf " [" rem
-  if idx < 0
-    MJObj [MJStr "name"; MJStr (strTrim rem); MJStr "status"; MJStr status; MJStr "duration_ms"; MJNum 0; MJStr "message"; MJStr ""]
-  else
-    name = strTrim (strSlice rem 0 idx)
-    start = idx + 2
-    remLen = strLen rem - start
-    durPart =
-      if remLen <= 0
-        ""
-      else
-        strSlice rem start remLen
-    endIdx = strIndexOf "]" durPart
-    tok =
-      if endIdx < 0
-        durPart
-      else
-        strSlice durPart 0 endIdx
-    MJObj [MJStr "name"; MJStr name; MJStr "status"; MJStr status; MJStr "duration_ms"; MJNum (durationTokenToMs tok); MJStr "message"; MJStr ""]
-
-runCaseFromLine(line Str) =
-  t = strTrim line
-  if strStartsWith "Passed " t
-    v = parseRunLine "Passed " "passed" t
-    [v]
-  else
-    if strStartsWith "Failed " t
-      v = parseRunLine "Failed " "failed" t
-      [v]
-    else
-      if strStartsWith "Skipped " t
-        v = parseRunLine "Skipped " "skipped" t
-        [v]
-      else
-        []
-
-collectRunCases(lines List[Str])(acc List[JsonVal]) =
-  match lines
-    | [] -> listReverse acc
-    | ln :: rest ->
-      cases = runCaseFromLine ln
-      nextAcc =
-        match cases
-          | [] -> acc
-          | c :: _ -> c :: acc
-      collectRunCases rest nextAcc
 
 -- ---- MCP handlers ----
 
@@ -1037,8 +792,8 @@ handleToolsList(params JsonVal) =
     (toolSchema "apply_fix_preview" "Preview source after applying fix candidate." [MJStr "fix_id"; MJObj [MJStr "type"; MJStr "string"]; MJStr "source"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "fix_id"]);
     (toolSchema "check_project" "Project-level check summary (self-hosted baseline)." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] []);
     (toolSchema "build_project" "Project-level build summary (self-hosted baseline)." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "path"; MJObj [MJStr "type"; MJStr "string"]] []);
-    (toolSchema "test_list" "List tests via dotnet test --list-tests (or structured no-spawn fallback)." [MJStr "filter"; MJObj [MJStr "type"; MJStr "string"]; MJStr "project"; MJObj [MJStr "type"; MJStr "string"]; MJStr "timeout_sec"; MJObj [MJStr "type"; MJStr "integer"]; MJStr "process_spawn"; MJObj [MJStr "type"; MJStr "boolean"]; MJStr "execution_mode"; MJObj [MJStr "type"; MJStr "string"]] []);
-    (toolSchema "test_run" "Run tests via dotnet test (or structured no-spawn fallback)." [MJStr "filter"; MJObj [MJStr "type"; MJStr "string"]; MJStr "project"; MJObj [MJStr "type"; MJStr "string"]; MJStr "timeout_sec"; MJObj [MJStr "type"; MJStr "integer"]; MJStr "collect_output"; MJObj [MJStr "type"; MJStr "boolean"]; MJStr "process_spawn"; MJObj [MJStr "type"; MJStr "boolean"]; MJStr "execution_mode"; MJObj [MJStr "type"; MJStr "string"]] []);
+    (toolSchema "test_list" "List self-hosted test cases from tools/check-selfhost-ci.sh." [MJStr "filter"; MJObj [MJStr "type"; MJStr "string"]; MJStr "timeout_sec"; MJObj [MJStr "type"; MJStr "integer"]; MJStr "root"; MJObj [MJStr "type"; MJStr "string"]] []);
+    (toolSchema "test_run" "Run self-hosted suite via tools/check-selfhost-ci.sh." [MJStr "filter"; MJObj [MJStr "type"; MJStr "string"]; MJStr "timeout_sec"; MJObj [MJStr "type"; MJStr "integer"]; MJStr "collect_output"; MJObj [MJStr "type"; MJStr "boolean"]; MJStr "root"; MJObj [MJStr "type"; MJStr "string"]] []);
     (toolSchema "mod_add" "Add dependency in lll.toml." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "name"; MJObj [MJStr "type"; MJStr "string"]; MJStr "source"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "root"; MJStr "name"; MJStr "source"]);
     (toolSchema "mod_tidy" "Tidy dependencies (self-hosted baseline)." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "root"]);
     (toolSchema "mod_why" "Explain why dependency appears." [MJStr "root"; MJObj [MJStr "type"; MJStr "string"]; MJStr "dep"; MJObj [MJStr "type"; MJStr "string"]] [MJStr "root"; MJStr "dep"]);
@@ -1390,113 +1145,145 @@ handleApplyFixPreview(params JsonVal) =
     else
       MJObj [MJStr "ok"; MJBool false; MJStr "applied"; MJBool false; MJStr "error"; MJStr (strConcat "Unknown fix_id: " fixId)]
 
+selfhostTestNames = [
+  "lllcself/src/Main.lll";
+  "lllcself/src/Mcp.lll";
+  "spec/examples/valid/01-basics.lll";
+  "spec/examples/valid/02-adts.lll";
+  "spec/examples/valid/03-tags.lll";
+  "spec/examples/valid/04-traits.lll";
+  "spec/examples/valid/06-stdlib.lll";
+  "spec/examples/valid/07-text-processing.lll";
+  "spec/examples/valid/08-lexer-poc.lll";
+  "spec/examples/valid/10-multiline-sum.lll";
+  "spec/examples/valid/16-elaborator-real.lll";
+  "spec/examples/valid/18-hminfer-real.lll";
+  "spec/examples/valid/19-codegen-real.lll";
+  "spec/examples/valid/20a-bootstrap-input.lll";
+  "spec/examples/valid/20b-bootstrap-input-maybe.lll";
+  "spec/examples/valid/20c-bootstrap-input-stdlib.lll";
+  "spec/examples/valid/20d-bootstrap-input-eqeq.lll";
+  "spec/examples/valid/20e-bootstrap-input-ltgt.lll";
+  "spec/examples/valid/20f-bootstrap-input-bool-lits.lll";
+  "spec/examples/valid/20g-bootstrap-input-char-lit.lll";
+  "spec/examples/valid/20h-bootstrap-input-char-esc.lll";
+  "spec/examples/valid/20i-bootstrap-input-ctor-pat.lll";
+  "spec/examples/valid/20j-bootstrap-input-layout.lll";
+  "spec/examples/valid/20k-bootstrap-input-str-esc.lll";
+  "spec/examples/valid/20l-bootstrap-input-comments.lll";
+  "spec/examples/valid/20m-bootstrap-input-type-layout.lll";
+  "spec/examples/valid/20n-bootstrap-input-stdlib-full.lll";
+  "spec/examples/valid/20o-bootstrap-input-multifn.lll";
+  "spec/examples/valid/20p-bootstrap-input-digit.lll";
+  "spec/examples/valid/20r-bootstrap-input-lists.lll";
+  "spec/examples/valid/20s-bootstrap-input-arm-if.lll";
+  "spec/examples/valid/20t-bootstrap-input-strtoint.lll";
+  "spec/examples/valid/20u-bootstrap-input-str-pat.lll";
+  "spec/examples/valid/20v-bootstrap-input-strchars.lll";
+  "spec/examples/valid/20w-bootstrap-input-clause.lll";
+  "spec/examples/valid/20x-bootstrap-input-tuple.lll";
+  "spec/examples/valid/20y-bootstrap-input-fmt.lll";
+  "spec/examples/valid/20y-bootstrap-input-mutrec.lll";
+  "spec/examples/valid/20y-bootstrap-input-prelude.lll";
+  "spec/examples/valid/20z-bootstrap-input-unknown-char.lll";
+  "spec/examples/valid/20z-bootstrap-input-unterminated-char.lll";
+  "spec/examples/valid/21-multi-param-types.lll";
+  "spec/examples/valid/23-external-opaque.lll";
+  "spec/examples/valid/30-file-io-external.lll";
+  "spec/examples/valid/hello.lll"
+]
+
+filterSelfhostTests(filter Str)(names List[Str]) =
+  f = strTrim filter
+  if strLen f == 0
+    names
+  else
+    listFilter (\n. strContains f n) names
+
+selfhostTestJson(name Str) =
+  MJObj [MJStr "name"; MJStr name]
+
+runSelfhostSuite(root Str)(timeoutSec Int) =
+  args = ["./tools/check-selfhost-ci.sh"]
+  raw = processRunEx "bash" args root timeoutSec
+  jsonParse raw
+
 handleTestList(params JsonVal) =
   filter = jsonGetStr (jsonGet params "filter")
-  cwd = resolveTestCwd params
-  projectArg = resolveTestProjectArg params
-  timeoutSec = normalizeTimeoutSec (jsonGetInt (jsonGet params "timeout_sec")) 120
-  allowProcessSpawn = resolveProcessSpawnAllowed params
-  if allowProcessSpawn
-    args0 = ["test"; "--nologo"; "--list-tests"]
-    args1 =
-      if strLen projectArg > 0
-        ["test"; projectArg; "--nologo"; "--list-tests"]
-      else
-        args0
-    args2 = withFilterArg args1 filter
-    run = runDotnet args2 cwd timeoutSec
-    stdout = jsonGetStr (jsonGet run "stdout")
-    stderr = jsonGetStr (jsonGet run "stderr")
-    exitCode = jsonGetInt (jsonGet run "exit_code")
-    timedOut = jsonGetBool (jsonGet run "timed_out")
-    started = findListTestsStart (strSplit "\n" stdout)
-    tests = collectListedTests started []
-    notTimedOut = not(timedOut)
-    ok =
-      if notTimedOut
-        exitCode == 0
-      else
-        false
-    MJObj [
-      MJStr "ok"; MJBool ok;
-      MJStr "supported"; MJBool true;
-      MJStr "execution_mode"; MJStr "process";
-      MJStr "degraded_reason"; MJStr "";
-      MJStr "cwd"; MJStr cwd;
-      MJStr "project"; MJStr projectArg;
-      MJStr "timed_out"; MJBool timedOut;
-      MJStr "exit_code"; MJNum exitCode;
-      MJStr "filter"; MJStr filter;
-      MJStr "total"; MJNum (listLen tests);
-      MJStr "tests"; MJArr tests;
-      MJStr "stderr_summary"; MJStr (truncateStr stderr 1200)
-    ]
-  else
-    testListNoSpawn cwd projectArg filter (testNoSpawnReason params)
+  root = resolveRoot params
+  selected = filterSelfhostTests filter selfhostTestNames
+  MJObj [
+    MJStr "ok"; MJBool true;
+    MJStr "supported"; MJBool true;
+    MJStr "execution_mode"; MJStr "selfhost";
+    MJStr "degraded_reason"; MJStr "";
+    MJStr "cwd"; MJStr root;
+    MJStr "project"; MJStr "";
+    MJStr "timed_out"; MJBool false;
+    MJStr "exit_code"; MJNum 0;
+    MJStr "filter"; MJStr filter;
+    MJStr "total"; MJNum (listLen selected);
+    MJStr "tests"; MJArr (listMap selfhostTestJson selected);
+    MJStr "stderr_summary"; MJStr ""
+  ]
 
 handleTestRun(params JsonVal) =
   filter = jsonGetStr (jsonGet params "filter")
   collectOutput = jsonGetBool (jsonGet params "collect_output")
-  cwd = resolveTestCwd params
-  projectArg = resolveTestProjectArg params
+  root = resolveRoot params
   timeoutSec = normalizeTimeoutSec (jsonGetInt (jsonGet params "timeout_sec")) 600
-  allowProcessSpawn = resolveProcessSpawnAllowed params
-  if allowProcessSpawn
-    args0 = ["test"; "--nologo"; "--logger"; "console;verbosity=detailed"]
-    args1 =
-      if strLen projectArg > 0
-        ["test"; projectArg; "--nologo"; "--logger"; "console;verbosity=detailed"]
-      else
-        args0
-    args2 = withFilterArg args1 filter
-    run = runDotnet args2 cwd timeoutSec
-    stdout = jsonGetStr (jsonGet run "stdout")
-    stderr = jsonGetStr (jsonGet run "stderr")
-    exitCode = jsonGetInt (jsonGet run "exit_code")
-    timedOut = jsonGetBool (jsonGet run "timed_out")
-    lines = strSplit "\n" stdout
-    tests = collectRunCases lines []
-    total = intAfter "Total tests:" stdout
-    passed = intAfter "Passed:" stdout
-    failed = intAfter "Failed:" stdout
-    skipped = intAfter "Skipped:" stdout
-    notTimedOut = not(timedOut)
-    ok =
-      if notTimedOut
-        exitCode == 0
-      else
-        false
-    stdoutOut =
-      if collectOutput
-        stdout
-      else
-        ""
-    stderrOut =
-      if collectOutput
-        stderr
-      else
-        ""
-    MJObj [
-      MJStr "ok"; MJBool ok;
-      MJStr "supported"; MJBool true;
-      MJStr "execution_mode"; MJStr "process";
-      MJStr "degraded_reason"; MJStr "";
-      MJStr "cwd"; MJStr cwd;
-      MJStr "project"; MJStr projectArg;
-      MJStr "timed_out"; MJBool timedOut;
-      MJStr "exit_code"; MJNum exitCode;
-      MJStr "filter"; MJStr filter;
-      MJStr "total"; MJNum total;
-      MJStr "passed"; MJNum passed;
-      MJStr "failed"; MJNum failed;
-      MJStr "skipped"; MJNum skipped;
-      MJStr "tests"; MJArr tests;
-      MJStr "stdout"; MJStr stdoutOut;
-      MJStr "stderr"; MJStr stderrOut;
-      MJStr "stderr_summary"; MJStr (truncateStr stderr 1200)
-    ]
-  else
-    testRunNoSpawn cwd projectArg filter (testNoSpawnReason params)
+  selected = filterSelfhostTests filter selfhostTestNames
+  run = runSelfhostSuite root timeoutSec
+  stdout = jsonGetStr (jsonGet run "stdout")
+  stderr = jsonGetStr (jsonGet run "stderr")
+  exitCode = jsonGetInt (jsonGet run "exit_code")
+  timedOut = jsonGetBool (jsonGet run "timed_out")
+  ok =
+    if timedOut
+      false
+    else
+      exitCode == 0
+  total = listLen selected
+  passed =
+    if ok
+      total
+    else
+      0
+  failed =
+    if ok
+      0
+    else
+      total
+  stdoutOut =
+    if collectOutput
+      stdout
+    else
+      ""
+  stderrOut =
+    if collectOutput
+      stderr
+    else
+      ""
+  tests = listMap selfhostTestJson selected
+  MJObj [
+    MJStr "ok"; MJBool ok;
+    MJStr "supported"; MJBool true;
+    MJStr "execution_mode"; MJStr "selfhost";
+    MJStr "degraded_reason"; MJStr "";
+    MJStr "cwd"; MJStr root;
+    MJStr "project"; MJStr "";
+    MJStr "timed_out"; MJBool timedOut;
+    MJStr "exit_code"; MJNum exitCode;
+    MJStr "filter"; MJStr filter;
+    MJStr "total"; MJNum total;
+    MJStr "passed"; MJNum passed;
+    MJStr "failed"; MJNum failed;
+    MJStr "skipped"; MJNum 0;
+    MJStr "tests"; MJArr tests;
+    MJStr "stdout"; MJStr stdoutOut;
+    MJStr "stderr"; MJStr stderrOut;
+    MJStr "stderr_summary"; MJStr (truncateStr stderr 1200)
+  ]
 
 handleModAdd(params JsonVal) =
   root = jsonGetStr (jsonGet params "root")

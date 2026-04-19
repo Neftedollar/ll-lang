@@ -75,7 +75,7 @@ Dependency helpers:
 - `mod_add`, `mod_tidy`, `mod_why`
 
 Test helpers:
-- `test_list`, `test_run` (structured test discovery/run over `dotnet test`)
+- `test_list`, `test_run` (structured self-host suite over `tools/check-selfhost-ci.sh`)
 
 Catalog/meta:
 - `stdlib_search`, `list_errors`, `lookup_error`, `list_targets`
@@ -288,15 +288,16 @@ and return path-aware locations.
 
 ### `test_list` / `test_run`
 
-`test_list` returns discovered tests:
+`test_list` returns self-host check-suite entries:
 
 ```json
 {
   "ok": true,
   "supported": true,
-  "total": 12,
+  "execution_mode": "selfhost",
+  "total": 45,
   "tests": [
-    { "name": "LLLangTests.McpTests.mcp initialize returns self-hosted metadata" }
+    { "name": "lllcself/src/Main.lll" }
   ],
   "timed_out": false,
   "exit_code": 0
@@ -309,40 +310,21 @@ and return path-aware locations.
 {
   "ok": true,
   "supported": true,
-  "total": 1,
-  "passed": 1,
+  "execution_mode": "selfhost",
+  "total": 45,
+  "passed": 45,
   "failed": 0,
   "skipped": 0,
   "tests": [
-    { "name": "LLLangTests.McpTests.mcp initialize returns self-hosted metadata", "status": "passed", "duration_ms": 7000, "message": "" }
+    { "name": "lllcself/src/Main.lll" }
   ],
   "timed_out": false,
   "exit_code": 0
 }
 ```
 
-Both tools also support a no-spawn fallback request shape:
-
-```json
-{
-  "process_spawn": false,
-  "execution_mode": "host_runner"
-}
-```
-
-In that mode the response remains structured, but reports degraded execution:
-
-```json
-{
-  "ok": false,
-  "supported": false,
-  "execution_mode": "host_runner",
-  "degraded_reason": "Requested host_runner mode but no host runner is configured in self-hosted runtime.",
-  "exit_code": -1,
-  "timed_out": false,
-  "total": 0
-}
-```
+`test_run` delegates to `tools/check-selfhost-ci.sh` in the provided `root`
+directory and uses that script's exit code as pass/fail truth.
 
 ---
 

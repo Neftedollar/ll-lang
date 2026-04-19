@@ -116,23 +116,26 @@ EOF
 ### CLI
 
 ```
-./tools/lllc-bootstrap.sh compile <file.lll>               # compile (bootstrap path)
-./tools/lllc-bootstrap.sh run <file.lll>                   # compile + run
-./tools/lllc-bootstrap.sh check <file.lll>                 # canonical single-file check
-./tools/lllc-bootstrap.sh mcp                              # run MCP server (stdio)
-
-# legacy stage0 CLI (optional)
-lllc build/check/run/new/install/mod/mcp ...
+./tools/lllc-bootstrap.sh build   [--target fs|ts|py|java|cs|llvm] <file|dir>
+./tools/lllc-bootstrap.sh compile [--target fs|ts|py|java|cs|llvm] <file.lll>
+./tools/lllc-bootstrap.sh check   [--target fs|ts|py|java|cs|llvm] <file|dir>
+./tools/lllc-bootstrap.sh run     [--target fs|ts|py|java|cs|llvm] <file.lll>
+./tools/lllc-bootstrap.sh new <name>
+./tools/lllc-bootstrap.sh install
+./tools/lllc-bootstrap.sh mod add <name>=<source>
+./tools/lllc-bootstrap.sh mod tidy
+./tools/lllc-bootstrap.sh mod why <dep>
+./tools/lllc-bootstrap.sh mcp
 ```
 
 ### Create a multi-file project
 
 ```bash
-lllc new myapp          # (stage0 helper) creates myapp/lll.toml + myapp/src/Main.lll
+./tools/lllc-bootstrap.sh new myapp
 cd myapp
 # edit src/Main.lll, add more .lll files to src/
-lllc build              # → bin/fsharp/myapp.fsproj (+ Prelude.fs + module .fs files)
-dotnet run --project bin/fsharp/myapp.fsproj
+../tools/lllc-bootstrap.sh check .
+../tools/lllc-bootstrap.sh build --target fs .
 ```
 
 ### Multi-target from lll.toml
@@ -175,7 +178,7 @@ Available MCP tools (28):
 - Project graph/build: `project_graph`, `check_project`, `build_project`
 - Symbol navigation: `symbols`, `definition`, `references`
 - Dependency helpers: `mod_add`, `mod_tidy`, `mod_why`
-- Test helpers: `test_list`, `test_run` (structured `dotnet test` discovery/run output, plus no-spawn fallback mode via `process_spawn=false` / `execution_mode=host_runner`)
+- Test helpers: `test_list`, `test_run` (structured self-host suite over `tools/check-selfhost-ci.sh`)
 - Catalog/meta: `stdlib_search`, `list_errors`, `lookup_error`, `list_targets`
 
 The agent can ask "does this compile?" and get a structured JSON response with error codes, line numbers, and fix hints — no scraping required.

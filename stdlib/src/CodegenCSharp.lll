@@ -459,6 +459,9 @@ emitModule(m Module) =
       body = emitDecls decls
       strConcat header (strConcat "\n\npublic static class " (strConcat className (strConcat " {\n\n" (strConcat prelude (strConcat "\n\n" (strConcat body "\n}\n"))))))
 
+emitModuleCSharp(m Module) =
+  emitModule m
+
 -- ---- Tests -----------------------------------------------------------------
 
 codegenCSharpCheck(label Str)(got Str)(expected Str) =

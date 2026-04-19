@@ -665,6 +665,9 @@ emitModule(m Module) =
       body = emitDecls decls 0
       strConcat prelude (strConcat header (strConcat "\n\n" body))
 
+emitModuleLLVM(m Module) =
+  emitModule m
+
 -- ---- Test helpers ----------------------------------------------------------
 
 checkContains(label Str)(got Str)(needle Str) =

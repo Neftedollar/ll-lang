@@ -432,6 +432,9 @@ emitModule(m Module) =
       body = emitDecls decls
       strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
 
+emitModuleFs(m Module) =
+  emitModule m
+
 -- ---- Tests -----------------------------------------------------------------
 
 codegenCheck(label Str)(got Str)(expected Str) =

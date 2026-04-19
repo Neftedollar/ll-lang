@@ -3,7 +3,19 @@ module Lllcself.Main
 import Std.Compiler
 import Std.Reverse
 import Std.CompilerLoader
+import Std.Parser
+import Std.Lexer
+import Std.Elaborator
+import Std.Codegen
+import Std.CodegenTS
+import Std.CodegenPy
+import Std.CodegenJava
+import Std.CodegenCSharp
+import Std.CodegenLLVM
 import Lllcself.Mcp
+
+external dirList(path Str) List[Str]
+external processRunEx(cmd Str)(args List[Str])(cwd Str)(timeoutSec Int) Str
 
 -- Self-hosted ll-lang CLI.
 -- Commands:
@@ -19,7 +31,7 @@ import Lllcself.Mcp
 -- With a single bare path argument, defaults to `compile <file>`.
 
 usageText =
-  "usage: lllcself <command> <file> [arg]\ncommands: compile | check | next | render | tokens | symbol | reverse | mcp"
+  "usage: lllcself <command> [--target fs|ts|py|java|cs|llvm] <file|dir> [arg]\ncommands: build | compile | check | run | new | install | mod add|tidy|why | next | render | tokens | symbol | reverse | mcp"
 
 encodeJsonEscape(c Char) =
   match c
@@ -154,6 +166,113 @@ listLastLocal(xs List[A]) =
     | x :: [] -> Some x
     | _ :: rest -> listLastLocal rest
 
+listFilterLocal(p A -> Bool)(xs List[A]) =
+  match xs
+    | [] -> []
+    | x :: rest ->
+      tail = listFilterLocal p rest
+      if p x
+        x :: tail
+      else
+        tail
+
+listMapLocal(f A -> B)(xs List[A]) =
+  match xs
+    | [] -> []
+    | x :: rest ->
+      f x :: listMapLocal f rest
+
+strLowerChar(c Char) =
+  n = charToInt c
+  if n >= 65
+    if n <= 90
+      intToChar (n + 32)
+    else
+      c
+  else
+    c
+
+strLower(s Str) =
+  strFromChars (listMapLocal strLowerChar (strChars s))
+
+strUpperChar(c Char) =
+  n = charToInt c
+  if n >= 97
+    if n <= 122
+      intToChar (n - 32)
+    else
+      c
+  else
+    c
+
+strUpper(s Str) =
+  strFromChars (listMapLocal strUpperChar (strChars s))
+
+normalizeTarget(raw Str) =
+  t = strLower (strTrim raw)
+  if t == "fsharp"
+    "fs"
+  else
+    if t == "typescript"
+      "ts"
+    else
+      if t == "python"
+        "py"
+      else
+        if t == "csharp"
+          "cs"
+        else
+          t
+
+emitForTarget(targetRaw Str)(m Module) =
+  target = normalizeTarget targetRaw
+  if target == "fs"
+    emitModuleFs m
+  else
+    if target == "ts"
+      emitModuleTs m
+    else
+      if target == "py"
+        emitModulePy m
+      else
+        if target == "java"
+          emitModuleJava m
+        else
+          if target == "cs"
+            emitModuleCSharp m
+          else
+            if target == "llvm"
+              emitModuleLLVM m
+            else
+              strConcat "Unsupported target: " targetRaw
+
+compileSourceForTarget(target Str)(src Str) =
+  compact = checkCompact src
+  if compactIsOk compact
+    m = parseModule (tokenize src)
+    emitForTarget target m
+  else
+    compact
+
+filterLllFiles(paths List[Str]) =
+  listFilterLocal (\p. strEndsWith ".lll" p) paths
+
+loadProjectFiles(root Str) =
+  srcDir = pathJoin root "src"
+  if dirExists srcDir
+    files = filterLllFiles (dirList srcDir)
+    listMapLocal (\p.
+      src = readFile p
+      MkLoadedFile p (modulePathFromSource src) (importsFromSource src)
+    ) files
+  else
+    []
+
+projectLoadErrorJson(msg Str) =
+  p1 = "{\"ok\":false,\"stage\":\"project\",\"primary_error\":"
+  p2 = strConcat p1 (jsonStr msg)
+  strConcat p2 ",\"secondary_count\":0}"
+
 SourcePair = MkSourcePair Str Str
 
 spPath(p SourcePair) =
@@ -281,7 +400,7 @@ checkCompactWithImports(path Str)(src Str) =
           else
             base
 
-runCheck(path Str) =
+runCheckFile(path Str) =
   if fileExists path
     src = readFile path
     result = checkCompactWithImports path src
@@ -294,14 +413,76 @@ runCheck(path Str) =
     _ = print (ioError (strConcat "File not found: " path))
     1
 
-runCompile(path Str) =
+runCheckProject(root Str) =
+  if dirExists root
+    files = loadProjectFiles root
+    if listIsEmpty files
+      _ = print (projectLoadErrorJson (strConcat "No .lll files under " (pathJoin root "src")))
+      1
+    else
+      loadRes = loadProject files
+      match loadRes
+        | LoaderErr errs ->
+          first = match errs | e :: _ -> renderLoaderError e | [] -> "project load failed"
+          _ = print (projectLoadErrorJson first)
+          1
+        | LoaderOk ordered ->
+          sources = listMapLocal (\lf. readFile (lfPath lf)) ordered
+          errs = compileProject sources
+          if listIsEmpty errs
+            _ = print okCompactJson
+            0
+          else
+            firstErr = match errs | e :: _ -> e | [] -> "project type-check failed"
+            _ = print (projectLoadErrorJson firstErr)
+            1
+  else
+    _ = print (ioError (strConcat "Directory not found: " root))
+    1
+
+runCheck(target Str)(path Str) =
+  if dirExists path
+    runCheckProject path
+  else
+    _ = target
+    runCheckFile path
+
+runCompile(target Str)(path Str) =
   if fileExists path
     src = readFile path
-    _ = print (compile src)
-    0
+    out = compileSourceForTarget target src
+    _ = print out
+    if strStartsWith "{\"ok\":false" out
+      1
+    else
+      0
   else
     _ = print (ioError (strConcat "File not found: " path))
     1
+
+runBuild(target Str)(path Str) =
+  if dirExists path
+    files = loadProjectFiles path
+    if listIsEmpty files
+      _ = print (projectLoadErrorJson (strConcat "No .lll files under " (pathJoin path "src")))
+      1
+    else
+      loadRes = loadProject files
+      match loadRes
+        | LoaderErr errs ->
+          first = match errs | e :: _ -> renderLoaderError e | [] -> "project load failed"
+          _ = print (projectLoadErrorJson first)
+          1
+        | LoaderOk ordered ->
+          outputs = listMapLocal (\lf. compileSourceForTarget target (readFile (lfPath lf))) ordered
+          _ = print (joinWith "\n\n" outputs)
+          bad = listAnyLocal (\s. strStartsWith "{\"ok\":false" s) outputs
+          if bad
+            1
+          else
+            0
+  else
+    runCompile target path
 
 runRender(path Str) =
   if fileExists path
@@ -352,17 +533,99 @@ runMcp(dummy Int) =
   _ = mcpLoop 0
   0
 
+splitOnceEq(s Str) =
+  idx = strIndexOf "=" s
+  if idx < 0
+    None
+  else
+    left = strSlice s 0 idx
+    right = strSlice s (idx + 1) (strLen s - idx - 1)
+    Some (left, right)
+
+runModAdd(root Str)(spec Str) =
+  manifest = pathJoin root "lll.toml"
+  if fileExists manifest
+    match splitOnceEq spec
+      | None ->
+        _ = print (ioError "mod add expects name=source")
+        1
+      | Some (name, source) ->
+        content = readFile manifest
+        depLine = strConcat (strTrim name) (strConcat " = \"" (strConcat (strTrim source) "\""))
+        next =
+          if strContains "[deps]" content
+            if strContains depLine content
+              content
+            else
+              strConcat content (strConcat "\n" (strConcat depLine "\n"))
+          else
+            strConcat content (strConcat "\n\n[deps]\n" (strConcat depLine "\n"))
+        _ = writeFile manifest next
+        _ = print "{\"ok\":true,\"changed\":true}"
+        0
+  else
+    _ = print (ioError (strConcat "Manifest not found: " manifest))
+    1
+
+runModWhy(root Str)(dep Str) =
+  files = loadProjectFiles root
+  names =
+    listFilterMap (\lf.
+      src = readFile (lfPath lf)
+      imps = importsFromSource src
+      if listAnyLocal (\i. i == dep) imps
+        Some (joinWith "." (lfModule lf))
+      else
+        None
+    ) files
+  _ = print (strConcat "{\"ok\":true,\"dep\":" (strConcat (jsonStr dep) (strConcat ",\"direct_importers\":[" (strConcat (joinWith "," (listMapLocal jsonStr names)) "]}"))))
+  0
+
+runInstall(root Str) =
+  _ = root
+  _ = print "{\"ok\":true,\"changed\":false,\"message\":\"Self-host baseline: install/tidy is no-op.\"}"
+  0
+
+runNew(name Str) =
+  if strLen (strTrim name) == 0
+    _ = print (ioError "new expects project name")
+    1
+  else
+    srcDir = pathJoin name "src"
+    _ = processRunEx "mkdir" ["-p"; srcDir] "." 30
+    cap =
+      c0 = strSlice name 0 1
+      rest = strSlice name 1 (strLen name - 1)
+      strConcat (strUpper c0) rest
+    manifest = strConcat "[project]\nname = \"" (strConcat name "\"\nversion = \"0.1.0\"\nentry = \"src/Main.lll\"\n")
+    mainSrc = strConcat "module " (strConcat cap ".Main\n\nmain() = printfn \"Hello from ll-lang!\"\n")
+    _ = writeFile (pathJoin name "lll.toml") manifest
+    _ = writeFile (pathJoin srcDir "Main.lll") mainSrc
+    _ = print (strConcat "{\"ok\":true,\"path\":" (strConcat (jsonStr name) "}"))
+    0
+
 runArgs(args List[Str]) =
   match args
-    | "check" :: path :: [] -> runCheck path
-    | "compile" :: path :: [] -> runCompile path
+    | "build" :: "--target" :: target :: path :: [] -> runBuild target path
+    | "build" :: path :: [] -> runBuild "fs" path
+    | "check" :: "--target" :: target :: path :: [] -> runCheck target path
+    | "check" :: path :: [] -> runCheck "fs" path
+    | "compile" :: "--target" :: target :: path :: [] -> runCompile target path
+    | "compile" :: path :: [] -> runCompile "fs" path
+    | "run" :: "--target" :: target :: path :: [] -> runCompile target path
+    | "run" :: path :: [] -> runCompile "fs" path
+    | "new" :: name :: [] -> runNew name
+    | "install" :: [] -> runInstall "."
+    | "mod" :: "tidy" :: [] -> runInstall "."
+    | "mod" :: "add" :: spec :: [] -> runModAdd "." spec
+    | "mod" :: "why" :: dep :: [] -> runModWhy "." dep
     | "next" :: path :: [] -> runNext path
     | "render" :: path :: [] -> runRender path
     | "tokens" :: path :: [] -> runTokens path
     | "symbol" :: path :: name :: [] -> runSymbol path name
     | "reverse" :: target :: path :: [] -> runReverse target path
     | "mcp" :: [] -> runMcp 0
-    | path :: [] -> runCompile path
+    | path :: [] -> runCompile "fs" path
     | _ ->
       _ = printfn usageText
       1

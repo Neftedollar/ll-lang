@@ -2,8 +2,6 @@ name: Legacy Stage0 (.NET)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 4 * * 1'
 
 jobs:
   release-core:

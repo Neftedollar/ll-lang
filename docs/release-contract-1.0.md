@@ -22,7 +22,7 @@ These features remain available but are explicitly non-blocking for `1.0`:
 
 - `lllc reverse --from ...` and reverse transpiler behavior.
 - `--target llvm` backend (subset-oriented surface).
-- `lllc check <file.lll>` stage0 single-file path (legacy compatibility mode).
+- Stage0 single-file `lllc check <file.lll>` behavior (legacy/unsupported path).
 
 Behavior or output shape in these areas may change between minor releases while
 the team designs a long-term architecture.

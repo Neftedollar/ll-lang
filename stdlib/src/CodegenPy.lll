@@ -328,6 +328,9 @@ emitModule(m Module) =
       body = emitDecls decls
       strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
 
+emitModulePy(m Module) =
+  emitModule m
+
 codegenPyCheck(label Str)(got Str)(expected Str) =
   if got == expected
     printfn (strConcat "OK " label)
