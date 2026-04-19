@@ -2,6 +2,7 @@ module Lllcself.Main
 
 import Std.Compiler
 import Std.Reverse
+import Std.CompilerLoader
 import Lllcself.Mcp
 
 -- Self-hosted ll-lang CLI.
@@ -40,11 +41,255 @@ ioError(msg Str) =
   p2 = strConcat p1 (jsonStr msg)
   strConcat p2 ",\"secondary_count\":0}"
 
+okCompactJson =
+  "{\"ok\":true,\"stage\":\"ok\",\"primary_error\":\"\",\"secondary_count\":0}"
+
+compactIsOk(s Str) =
+  strContains "\"ok\":true" s
+
+strStartsWith(prefix Str)(s Str) =
+  plen = strLen prefix
+  slen = strLen s
+  if plen > slen
+    false
+  else
+    strSlice s 0 plen == prefix
+
+strEndsWith(suffix Str)(s Str) =
+  slen = strLen s
+  tlen = strLen suffix
+  if tlen > slen
+    false
+  else
+    strSlice s (slen - tlen) tlen == suffix
+
+trimLeftRev(cs List[Char]) =
+  match cs
+    | [] -> []
+    | c :: rest ->
+      if c == ' '
+        trimLeftRev rest
+      else
+        if c == '\t'
+          trimLeftRev rest
+        else
+          cs
+
+trimLeft(s Str) =
+  strFromChars (trimLeftRev (strChars s))
+
+pathJoin(base Str)(name Str) =
+  blen = strLen base
+  if blen == 0
+    name
+  else
+    lastChar = strSlice base (blen - 1) 1
+    if lastChar == "/"
+      strConcat base name
+    else
+      strConcat base (strConcat "/" name)
+
+lastSlashChars(cs List[Char])(idx Int)(last Int) =
+  match cs
+    | [] -> last
+    | c :: rest ->
+      if c == '/'
+        lastSlashChars rest (idx + 1) idx
+      else
+        lastSlashChars rest (idx + 1) last
+
+pathDir(path Str) =
+  idx = lastSlashChars (strChars path) 0 (0 - 1)
+  if idx < 0
+    "."
+  else
+    strSlice path 0 idx
+
+findStdlibDirFrom(dir Str) =
+  candidate = pathJoin dir "stdlib/src"
+  if dirExists candidate
+    candidate
+  else
+    parent = pathDir dir
+    if parent == dir
+      "stdlib/src"
+    else
+      if strLen parent == 0
+        "stdlib/src"
+      else
+        findStdlibDirFrom parent
+
+joinWith(sep Str)(xs List[Str]) =
+  match xs
+    | [] -> ""
+    | x :: [] -> x
+    | x :: rest -> strConcat x (strConcat sep (joinWith sep rest))
+
+listAppendLocal(a List[A])(b List[A]) =
+  match a
+    | [] -> b
+    | x :: rest -> x :: listAppendLocal rest b
+
+listAnyLocal(p A -> Bool)(xs List[A]) =
+  match xs
+    | [] -> false
+    | x :: rest ->
+      if p x
+        true
+      else
+        listAnyLocal p rest
+
+listFindLocal(p A -> Bool)(xs List[A]) =
+  match xs
+    | [] -> None
+    | x :: rest ->
+      if p x
+        Some x
+      else
+        listFindLocal p rest
+
+listLastLocal(xs List[A]) =
+  match xs
+    | [] -> None
+    | x :: [] -> Some x
+    | _ :: rest -> listLastLocal rest
+
+SourcePair = MkSourcePair Str Str
+
+spPath(p SourcePair) =
+  match p
+    | MkSourcePair path _ -> path
+
+spSrc(p SourcePair) =
+  match p
+    | MkSourcePair _ src -> src
+
+ClosureState = MkClosureState (List[LoadedFile]) (List[SourcePair])
+
+csLoaded(st ClosureState) =
+  match st
+    | MkClosureState loaded _ -> loaded
+
+csPairs(st ClosureState) =
+  match st
+    | MkClosureState _ pairs -> pairs
+
+moduleNameFromSourceLines(lines List[Str]) =
+  match lines
+    | [] -> "Main"
+    | ln :: rest ->
+      t = trimLeft ln
+      if strStartsWith "module " t
+        strSlice t 7 (strLen t - 7)
+      else
+        moduleNameFromSourceLines rest
+
+importNamesFromSourceLines(lines List[Str]) =
+  match lines
+    | [] -> []
+    | ln :: rest ->
+      t = trimLeft ln
+      tail = importNamesFromSourceLines rest
+      if strStartsWith "import " t
+        name = strSlice t 7 (strLen t - 7)
+        if strLen name > 0
+          name :: tail
+        else
+          tail
+      else
+        tail
+
+modulePathFromSource(src Str) =
+  modName = moduleNameFromSourceLines (strSplit "\n" src)
+  strSplit "." modName
+
+importsFromSource(src Str) =
+  importNamesFromSourceLines (strSplit "\n" src)
+
+resolveImportPath(baseDir Str)(stdlibDir Str)(importName Str) =
+  parts = strSplit "." importName
+  match parts
+    | "Std" :: rest ->
+      if listIsEmpty rest
+        None
+      else
+        rel = strConcat (joinWith "/" rest) ".lll"
+        Some (pathJoin stdlibDir rel)
+    | _ ->
+      match listLastLocal parts
+        | None -> None
+        | Some last ->
+          if strLen last == 0
+            None
+          else
+            Some (pathJoin baseDir (strConcat last ".lll"))
+
+lookupSourceByPath(path Str)(pairs List[SourcePair]) =
+  match pairs
+    | [] -> None
+    | pair :: rest ->
+      p = spPath pair
+      src = spSrc pair
+      if p == path
+        Some src
+      else
+        lookupSourceByPath path rest
+
+collectImportClosure(baseDir Str)(stdlibDir Str)(queue List[Str])(seen List[Str])(loaded List[LoadedFile])(pairs List[SourcePair]) =
+  match queue
+    | [] -> MkClosureState loaded pairs
+    | p :: rest ->
+      if listAnyLocal (\x. x == p) seen
+        collectImportClosure baseDir stdlibDir rest seen loaded pairs
+      else
+        if fileExists p == false
+          collectImportClosure baseDir stdlibDir rest (p :: seen) loaded pairs
+        else
+          src = readFile p
+          modPath = modulePathFromSource src
+          imps = importsFromSource src
+          lf = MkLoadedFile p modPath imps
+          depPaths =
+            listFilterMap (\imp. resolveImportPath baseDir stdlibDir imp) imps
+          nextQueue = listAppendLocal rest depPaths
+          collectImportClosure baseDir stdlibDir nextQueue (p :: seen) (lf :: loaded) ((MkSourcePair p src) :: pairs)
+
+checkCompactWithImports(path Str)(src Str) =
+  base = checkCompact src
+  if compactIsOk base
+    base
+  else
+    baseDir = pathDir path
+    stdlibDir = findStdlibDirFrom baseDir
+    startQueue = path :: []
+    state = collectImportClosure baseDir stdlibDir startQueue [] [] []
+    loadedRev = csLoaded state
+    pairs = csPairs state
+    loaded = listReverse loadedRev
+    if listLen loaded <= 1
+      base
+    else
+      loadRes = loadProject loaded
+      match loadRes
+        | LoaderErr _ -> base
+        | LoaderOk ordered ->
+          orderedSrcs =
+            listFilterMap (\lf. lookupSourceByPath (lfPath lf) pairs) ordered
+          errs = compileProject orderedSrcs
+          if listIsEmpty errs
+            okCompactJson
+          else
+            base
+
 runCheck(path Str) =
   if fileExists path
     src = readFile path
-    _ = print (checkCompact src)
-    0
+    result = checkCompactWithImports path src
+    _ = print result
+    if compactIsOk result
+      0
+    else
+      1
   else
     _ = print (ioError (strConcat "File not found: " path))
     1
