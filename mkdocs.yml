@@ -1,0 +1,78 @@
+site_name: ll-lang
+site_description: ll-lang language and compiler documentation
+site_url: https://neftedollar.github.io/ll-lang/
+repo_url: https://github.com/Neftedollar/ll-lang
+repo_name: Neftedollar/ll-lang
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.sections
+    - navigation.expand
+    - search.suggest
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - codehilite
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: getting-started.md
+  - User Guide:
+      - user-guide/README.md
+      - user-guide/01-installation.md
+      - user-guide/02-syntax.md
+      - user-guide/03-types-and-inference.md
+      - user-guide/04-tags-and-units.md
+      - user-guide/05-traits.md
+      - user-guide/06-modules.md
+      - user-guide/07-error-codes.md
+      - user-guide/08-cli.md
+      - user-guide/09-mcp.md
+      - user-guide/09-llm-prompting.md
+      - user-guide/10-targets.md
+      - user-guide/11-java-target.md
+  - Tutorials:
+      - tutorials/01-hello-world.md
+      - tutorials/02-types-and-patterns.md
+      - tutorials/03-building-a-parser.md
+      - tutorials/04-multi-target.md
+  - Language:
+      - language-spec.md
+      - stdlib-reference.md
+  - Compiler Dev:
+      - compiler-dev/README.md
+      - compiler-dev/01-architecture-overview.md
+      - compiler-dev/02-lexer.md
+      - compiler-dev/03-parser.md
+      - compiler-dev/04-elaborator.md
+      - compiler-dev/05-hm-inference.md
+      - compiler-dev/06-codegen.md
+      - compiler-dev/07-testing.md
+      - compiler-dev/08-adding-an-error-code.md
+      - compiler-dev/09-self-hosting-roadmap.md
+      - compiler-dev/10-mcp-server.md
+      - compiler-dev/11-multi-target-codegen.md
+      - compiler-dev/12-v2-language-architecture.md
+      - compiler-dev/13-v2-implementation-roadmap.md
+      - compiler-dev/14-v2-canonical-compiler-boundaries.md
+      - compiler-dev/15-v2-pass-contracts.md
+      - compiler-dev/16-v2-project-system-execution.md
+      - compiler-dev/17-v2-stdlib-foundation-execution.md
+      - compiler-dev/18-v2-compiler-boundaries-execution.md
+      - compiler-dev/19-v2-syntax-ergonomics-execution.md
+      - compiler-dev/20-v2-self-host-transition-execution.md
+      - compiler-dev/21-v2-llm-operating-system-execution.md
+      - compiler-dev/22-v2-benchmarks-release-gates-execution.md
+  - Releases:
+      - release-contract-1.0.md
+      - release-v2.md
+  - Why ll-lang: why-ll-lang.md
