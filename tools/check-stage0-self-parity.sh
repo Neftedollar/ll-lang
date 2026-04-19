@@ -51,7 +51,7 @@ for rel in "${CORPUS[@]}"; do
   stage0_out="$tmp_root/stage0.$(basename "$rel").out"
   self_out="$tmp_root/self.$(basename "$rel").out"
 
-  if "$LLLC" check "$abs" >"$stage0_out" 2>&1; then
+  if LLLC_BOOTSTRAP_SELF_PRESET=off "$LLLC" check "$abs" >"$stage0_out" 2>&1; then
     stage0_code=0
   else
     stage0_code=$?

@@ -132,11 +132,10 @@ myapp/
 lllc run hello.lll
 ```
 
-1. Same pipeline as `build`.
-2. Materializes a temporary multi-file F# project (`.fs` files + `.fsproj`).
-3. Executes `dotnet run -c Release -v q --project <tmp>.fsproj`.
-4. Propagates the child process exit code.
-5. Deletes the temp directory.
+1. Compiles the source through the self-hosted pipeline.
+2. For `--target py` (default for `run` in self-host path), writes a temporary `.py` file next to the source.
+3. Executes `python3 <temp-file>`.
+4. Prints program stdout.
 
 Your ll-lang `main()` becomes the F# entry point:
 
@@ -150,12 +149,11 @@ lllc run examples/hello.lll
 # Hello, ll-lang!
 ```
 
-For non-F# targets, `lllc run --target <target> file.lll` uses Platform SDK run commands.
-Example TypeScript run path:
+Current self-hosted `run` supports `--target py`:
 
 ```bash
-lllc run --target ts hello.lll
-# internally: npx tsc hello.ts --target es2022 --module esnext && node hello.js
+lllc run hello.lll
+# internally: self compile --target py + python3
 ```
 
 ---
@@ -168,12 +166,10 @@ lllc self compile src/Main.lll
 lllc self symbol src/Main.lll lookupName
 ```
 
-`lllc self` compiles and runs the `lllcself` ll-lang project and delegates subcommands to its CLI (`check`, `compile`, `render`, `tokens`, `next`, `symbol`).
+`lllc self` compiles and runs the `lllcself` ll-lang project and delegates subcommands to its CLI (`check`, `compile`, `run`, `render`, `tokens`, `next`, `symbol`, `mcp`).
 
-In the current `1.x` line, `lllc self` is a bridge into the self-hosted
-compiler/tool layer, not yet the canonical top-level compiler path. The `v2`
-plan is to promote the ll-lang-owned compiler path and demote the stage0 F#
-driver to bootstrap-only support.
+In the current line, `lllc` commands routed via `tools/lllc-bootstrap.sh`
+default to self-host for `compile/check/run`. Stage0 remains bootstrap-only.
 
 ---
 

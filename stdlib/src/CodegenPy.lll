@@ -80,7 +80,7 @@ emitType(t TypeExpr) =
     | TyName "Bool" -> "bool"
     | TyName "Char" -> "str"
     | TyName "Unit" -> "None"
-    | TyName n -> n
+    | TyName n -> safeIdent n
     | TyApp (TyName "List") a -> strConcat "list[" (strConcat (emitType a) "]")
     | TyApp (TyName "Maybe") a -> strConcat "Optional[" (strConcat (emitType a) "]")
     | TyApp f a -> strConcat (emitType f) (strConcat "[" (strConcat (emitType a) "]"))
@@ -266,7 +266,8 @@ emitCtor(c Constructor) =
   match c
     | MkCon name args ->
       header = "@dataclass"
-      classDef = strConcat (strConcat "class " name) (strConcat ":\n    _tag: str = \"" (strConcat name "\""))
+      safeName = safeIdent name
+      classDef = strConcat (strConcat "class " safeName) (strConcat ":\n    _tag: str = field(init=False, default=\"" (strConcat name "\")"))
       fields = emitCtorField args 0
       if strLen fields == 0
         strConcat header (strConcat "\n" (strConcat classDef "\n    pass"))
@@ -277,8 +278,8 @@ emitCtors(cs List[Constructor]) =
   joinWith "\n\n" (listMap emitCtor cs)
 
 emitUnionAlias(name Str)(cs List[Constructor]) =
-  names = joinWith ", " (listMap (\c. match c | MkCon n _ -> n) cs)
-  strConcat name (strConcat " = Union[" (strConcat names "]"))
+  names = joinWith ", " (listMap (\c. match c | MkCon n _ -> safeIdent n) cs)
+  strConcat (safeIdent name) (strConcat " = Union[" (strConcat names "]"))
 
 emitParamStr(p Param) =
   match p
@@ -306,15 +307,15 @@ emitDecl(d Decl) =
       strConcat "# import " (joinWith "." parts)
     | DExport inner -> emitDecl inner
     | DExternal name _ _ ->
-      strConcat name " = object  # external"
+      strConcat (safeIdent name) " = object  # external"
     | DOpaque name ->
-      strConcat name " = object"
+      strConcat (safeIdent name) " = object"
 
 emitDecls(ds List[Decl]) =
   joinWith "\n\n" (listMap emitDecl ds)
 
 emitPrelude =
-  "# --- ll-lang Python runtime helpers ---\nfrom __future__ import annotations\nfrom dataclasses import dataclass\nfrom typing import Optional, Union, Callable, Any\nimport sys\ndef listLen(xs): return len(xs)\ndef listMap(f): return lambda xs: list(map(f, xs))\ndef listFilter(p): return lambda xs: list(filter(p, xs))\ndef listFold(f): return lambda z: lambda xs: (lambda: (lambda state: [state.__setitem__(0, f(state[0])(x)) for x in xs] or state[0])([z]))()\ndef listReverse(xs): return list(reversed(xs))\ndef listAppend(xs): return lambda ys: xs + ys\ndef listConcat(xss): return [x for xs in xss for x in xs]\ndef listIsEmpty(xs): return len(xs) == 0\ndef listHead(xs): return xs[0] if xs else None\ndef listTail(xs): return xs[1:] if xs else None\ndef strLen(s): return len(s)\ndef strConcat(a): return lambda b: a + b\ndef strChars(s): return list(s)\ndef strFromChars(cs): return ''.join(cs)\ndef strContains(needle): return lambda hay: needle in hay\ndef intToStr(n): return str(n)\ndef charToInt(c): return ord(c)\ndef printfn(s): print(s)\ndef _ll_print(s): sys.stdout.write(s)\n# --- end prelude ---"
+  "# --- ll-lang Python runtime helpers ---\nfrom __future__ import annotations\nfrom dataclasses import dataclass, field\nfrom typing import Optional, Union, Callable, Any\nimport sys\ndef listLen(xs): return len(xs)\ndef listMap(f): return lambda xs: list(map(f, xs))\ndef listFilter(p): return lambda xs: list(filter(p, xs))\ndef listFold(f):\n    return lambda z: (lambda xs: _ll_listFold_impl(f, z, xs))\ndef _ll_listFold_impl(f, z, xs):\n    acc = z\n    for x in xs:\n        acc = f(acc)(x)\n    return acc\ndef listReverse(xs): return list(reversed(xs))\ndef listAppend(xs): return lambda ys: xs + ys\ndef listConcat(xss): return [x for xs in xss for x in xs]\ndef listIsEmpty(xs): return len(xs) == 0\ndef listHead(xs): return xs[0] if xs else None\ndef listTail(xs): return xs[1:] if xs else None\ndef strLen(s): return len(s)\ndef strConcat(a): return lambda b: a + b\ndef strChars(s): return list(s)\ndef strFromChars(cs): return ''.join(cs)\ndef strContains(needle): return lambda hay: needle in hay\ndef intToStr(n): return str(n)\ndef charToInt(c): return ord(c)\ndef charIsDigit(c): return c.isdigit()\ndef charIsAlpha(c): return c.isalpha()\ndef charIsSpace(c): return c.isspace()\ndef printfn(s): print(s)\ndef _ll_print(s): sys.stdout.write(s)\n# --- end prelude ---"
 
 emitModulePath(parts List[Str]) =
   joinWith "." parts

@@ -23,7 +23,7 @@ Environment:
   LLLC_BOOTSTRAP_AUTO_INSTALL=0   disable auto-install (default: 1)
   LLLC_BOOTSTRAP_REINSTALL=1      force reinstall before run
   LLLC_BOOTSTRAP_SELF_PRESET=off|safe|all
-                                  command routing preset (default: off)
+                                  command routing preset (default: all)
                                   safe => compile/check route to `self`
                                   all  => compile/check/run route to `self`
   LLLC_BOOTSTRAP_SELF_COMMANDS=compile,check,run
@@ -46,7 +46,7 @@ fi
 
 AUTO_INSTALL="${LLLC_BOOTSTRAP_AUTO_INSTALL:-1}"
 REINSTALL="${LLLC_BOOTSTRAP_REINSTALL:-0}"
-SELF_PRESET="${LLLC_BOOTSTRAP_SELF_PRESET:-off}"
+SELF_PRESET="${LLLC_BOOTSTRAP_SELF_PRESET:-all}"
 
 case "$SELF_PRESET" in
   off|"")
@@ -72,6 +72,15 @@ should_route_to_self() {
   [[ ",$SELF_COMMANDS," == *",$cmd,"* ]]
 }
 
+abspath() {
+  local p="$1"
+  if [[ "$p" == /* ]]; then
+    printf '%s\n' "$p"
+  else
+    printf '%s\n' "$(pwd)/$p"
+  fi
+}
+
 if [[ "$AUTO_INSTALL" == "1" ]]; then
   if [[ "$REINSTALL" == "1" ]]; then
     "$INSTALLER" install --reinstall >/dev/null
@@ -84,10 +93,47 @@ BOOTSTRAP_BIN="$("$INSTALLER" path)"
 [[ -x "$BOOTSTRAP_BIN" ]] || fail "resolved bootstrap binary is not executable: $BOOTSTRAP_BIN"
 
 if [[ "${1:-}" != "self" ]] && should_route_to_self "${1:-}"; then
-  if [[ "$SELF_VERBOSE" == "1" ]]; then
-    echo "lllc-bootstrap: routing '${1}' to self-hosted path" >&2
+  route_to_self=1
+  cmd="${1:-}"
+  path_arg=""
+  path_idx=0
+  case "$cmd" in
+    compile|check|run|build)
+      if [[ "${2:-}" == "--target" && -n "${4:-}" ]]; then
+        path_arg="${4:-}"
+        path_idx=4
+      elif [[ -n "${2:-}" ]]; then
+        path_arg="${2:-}"
+        path_idx=2
+      fi
+      ;;
+  esac
+
+  # Keep project-directory check/build on legacy path for now.
+  if [[ "$cmd" == "check" || "$cmd" == "build" ]]; then
+    if [[ -n "$path_arg" && -d "$path_arg" ]]; then
+      route_to_self=0
+    fi
   fi
-  set -- self "$@"
+
+  if [[ "$route_to_self" == "1" ]]; then
+    if [[ "$path_idx" == "4" ]]; then
+      set -- "$1" "$2" "$3" "$(abspath "$path_arg")" "${@:5}"
+    elif [[ "$path_idx" == "2" ]]; then
+      set -- "$1" "$(abspath "$path_arg")" "${@:3}"
+    fi
+    if [[ "$SELF_VERBOSE" == "1" ]]; then
+      echo "lllc-bootstrap: routing '${1}' to self-hosted path" >&2
+    fi
+    set -- self "$@"
+  fi
+fi
+
+if [[ "${1:-}" == "self" && -z "${LLLC_SELF_MAIN:-}" ]]; then
+  DEFAULT_SELF_MAIN="${ROOT_DIR}/lllcself/src/Main.lll"
+  if [[ -f "$DEFAULT_SELF_MAIN" ]]; then
+    export LLLC_SELF_MAIN="$DEFAULT_SELF_MAIN"
+  fi
 fi
 
 exec "$BOOTSTRAP_BIN" "$@"

@@ -103,14 +103,14 @@ not fall back to stage0 / `dotnet run` bridge paths.
 Self-host routing rollout controls:
 
 ```bash
-# default: no routing changes
-LLLC_BOOTSTRAP_SELF_PRESET=off
+# default: route compile/check/run through self-hosted command path
+LLLC_BOOTSTRAP_SELF_PRESET=all
 
 # route compile/check through self-hosted command path
 LLLC_BOOTSTRAP_SELF_PRESET=safe
 
-# route compile/check/run through self-hosted command path (canary)
-LLLC_BOOTSTRAP_SELF_PRESET=all
+# disable routing (legacy/stage0 behavior)
+LLLC_BOOTSTRAP_SELF_PRESET=off
 
 # explicit override list
 LLLC_BOOTSTRAP_SELF_COMMANDS=compile,check
