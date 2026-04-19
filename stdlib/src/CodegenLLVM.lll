@@ -34,8 +34,10 @@ emitLLVMType(t TypeExpr) =
     | TyName "Char"  -> "i8"
     | TyName "Str"   -> "i8*"
     | TyName "Unit"  -> "void"
-    | TyName _       -> "i64"
-    | TyApp _ _      -> "%struct.List*"
+    -- User-defined named types lower to runtime heap nodes.
+    | TyName _       -> "ptr"
+    -- Generic/app types are represented as runtime pointers in opaque-ptr mode.
+    | TyApp _ _      -> "ptr"
     | TyFn _ _       -> "i8*"
 
 -- ---- SSA name helper -------------------------------------------------------
@@ -423,6 +425,8 @@ emitDecl(d Decl)(strIdx Int) =
       strConcat "; type " name
     | DImport parts ->
       strConcat "; import " (joinWith "." parts)
+    | DImportUrl url ->
+      strConcat "; import-url " url
     | DLet name body ->
       bodyInstrs = emitExprInstrs body 0 strIdx
       reg = emitExprReg body 0 strIdx
@@ -552,5 +556,15 @@ main =
   extParams = MkParam "url" (TyName "Str") :: []
   extOut = emitDecl (DExternal "httpGet" extParams (TyName "Str")) 0
   _ = codegenLLVMCheck "16 DExternal declare" extOut "declare i8* @httpGet(i8*)"
+
+  -- 17. User-defined named type emits ptr
+  _ = codegenLLVMCheck "17 TyName user type" (emitLLVMType (TyName "Color")) "ptr"
+
+  -- 18. TyApp emits ptr in opaque pointer mode
+  _ = codegenLLVMCheck "18 TyApp ptr" (emitLLVMType (TyApp (TyName "List") (TyName "Int"))) "ptr"
+
+  -- 19. DImportUrl comment emission
+  importUrlOut = emitDecl (DImportUrl "https://example.com/mod.lll") 0
+  _ = codegenLLVMCheck "19 DImportUrl comment" importUrlOut "; import-url https://example.com/mod.lll"
 
   0
