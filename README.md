@@ -70,6 +70,20 @@ dotnet build
 dotnet test    # run full test suite (current count in CI)
 ```
 
+### Bootstrap installer (pinned release artifact)
+
+For clean-machine bootstrap flows, install a pinned prebuilt `lllc` artifact:
+
+```bash
+./tools/bootstrap-self.sh install
+BOOTSTRAP_BIN="$(./tools/bootstrap-self.sh path)"
+"$BOOTSTRAP_BIN" check "$PWD/lllcself/src/Main.lll"
+```
+
+`tools/bootstrap-self.sh` verifies `sha256` against
+[`bootstrap/lllc-bootstrap.lock.json`](bootstrap/lllc-bootstrap.lock.json)
+before extraction. Use `--reinstall` to force refresh.
+
 ### Run your first program
 
 ```bash

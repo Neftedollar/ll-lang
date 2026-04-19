@@ -66,3 +66,19 @@ Then the rest of this guide can be followed literally:
 lllc run hello.lll
 lllc build hello.lll    # produces hello.fs
 ```
+
+## Bootstrap installer (pinned + sha256)
+
+To bootstrap from a downloadable compiler artifact on a clean machine:
+
+```bash
+./tools/bootstrap-self.sh install
+./tools/bootstrap-self.sh verify
+BOOTSTRAP_BIN="$(./tools/bootstrap-self.sh path)"
+"$BOOTSTRAP_BIN" check "$PWD/lllcself/src/Main.lll"
+```
+
+Notes:
+- Artifact metadata is pinned in `bootstrap/lllc-bootstrap.lock.json`.
+- Integrity is enforced via `sha256` verification before extraction.
+- Use `./tools/bootstrap-self.sh install --reinstall` to refresh cache.

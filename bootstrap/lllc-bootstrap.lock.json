@@ -1,0 +1,36 @@
+{
+  "version": "v1.2.1",
+  "schema": "v1",
+  "artifacts": {
+    "linux-x64": {
+      "url": "https://github.com/Neftedollar/ll-lang/releases/download/v1.2.1/lllc-linux-x64.tar.gz",
+      "sha256": "c151b5dc90f0c4cfad5df2a6079d8760bca0aee43d91c63c9bc08581ace04f97",
+      "archive": "tar.gz",
+      "entry": "lllc"
+    },
+    "linux-arm64": {
+      "url": "https://github.com/Neftedollar/ll-lang/releases/download/v1.2.1/lllc-linux-arm64.tar.gz",
+      "sha256": "0602740581dfa0d395cce94ec7046598023f55d3f11f743af4100dcdcee4ca4f",
+      "archive": "tar.gz",
+      "entry": "lllc"
+    },
+    "osx-x64": {
+      "url": "https://github.com/Neftedollar/ll-lang/releases/download/v1.2.1/lllc-osx-x64.tar.gz",
+      "sha256": "4636a0741b541fc8aea12451e9f3fdbc397631a31dc82a9f97eb4c6150c9a83d",
+      "archive": "tar.gz",
+      "entry": "lllc"
+    },
+    "osx-arm64": {
+      "url": "https://github.com/Neftedollar/ll-lang/releases/download/v1.2.1/lllc-osx-arm64.tar.gz",
+      "sha256": "73c7b709e65be2ff1f7afd9405872d9f1896252010f8a35a0e96278161b699a9",
+      "archive": "tar.gz",
+      "entry": "lllc"
+    },
+    "win-x64": {
+      "url": "https://github.com/Neftedollar/ll-lang/releases/download/v1.2.1/lllc-win-x64.zip",
+      "sha256": "60f6f84549b5086bb3cec81b35159ec8daf2caf9973163d625e7902c25546bdf",
+      "archive": "zip",
+      "entry": "lllc.exe"
+    }
+  }
+}
