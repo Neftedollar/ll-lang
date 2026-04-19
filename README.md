@@ -19,7 +19,7 @@ Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting 
 
 ## Status
 
-Working end-to-end compiler with self-host CI (bootstrap `lllc` artifact + corpus checks) and a legacy stage0 .NET regression workflow. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib → module system → MCP server → TypeScript + Python + Java + C# + LLVM codegen.
+Working end-to-end compiler with self-host CI (bootstrap `lllc` artifact + corpus checks + CLI e2e + LLVM smoke). Archived stage0 .NET code remains only under `obsolete/stage0` for emergency bootstrap diagnostics. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib → module system → MCP server → TypeScript + Python + Java + C# + LLVM codegen.
 Current release line: **1.0.0**.
 
 **Release contract (1.0):**
@@ -61,8 +61,7 @@ Current release line: **1.0.0**.
 
 ## Getting Started
 
-Bootstrap path (default) does not require .NET.  
-Optional: install [.NET 10](https://dotnet.microsoft.com/download) only for legacy stage0 build/tests.
+Bootstrap path (default) does not require .NET.
 
 ```bash
 git clone https://github.com/Neftedollar/ll-lang.git
@@ -70,12 +69,7 @@ cd ll-lang
 LLLC_BOOTSTRAP_REINSTALL=1 ./tools/check-selfhost-ci.sh
 ```
 
-Legacy stage0 verification (optional):
-
-```bash
-dotnet build
-dotnet test
-```
+Archived stage0 remains in `obsolete/stage0` and is not part of default CI/path.
 
 ### Bootstrap installer (pinned release artifact)
 
@@ -90,6 +84,12 @@ BOOTSTRAP_BIN="$(./tools/bootstrap-self.sh path)"
 `tools/bootstrap-self.sh` verifies `sha256` against
 [`bootstrap/lllc-bootstrap.lock.json`](bootstrap/lllc-bootstrap.lock.json)
 before extraction. Use `--reinstall` to force refresh.
+
+To build a new bootstrap release bundle and regenerate the lock:
+
+```bash
+./tools/build-bootstrap-artifacts.sh --version vX.Y.Z
+```
 
 Strict no-fallback launcher:
 
@@ -365,25 +365,10 @@ spec/                      — formal grammar (EBNF), type rules, example corpus
   error-codes.md
   examples/valid/          — working .lll programs (hello, basics, ADTs, ...)
   examples/invalid/        — programs annotated with expected error codes
-src/LLLangCompiler/        — compiler library (F#)
-  AST.fs                   — untyped surface AST
-  Lexer.fs                 — tokenizer with layout (INDENT/DEDENT)
-  Parser.fs                — recursive-descent parser
-  Elaborator.fs            — name resolution, declared-type checking (E001-E005)
-  Types.fs                 — TypeScheme, Subst, generalize/instantiate
-  TypedAST.fs              — typed AST after H-M inference
-  HMInfer.fs               — Algorithm W, unification (E008), trait dispatch
-  Codegen.fs               — F# source emitter
-  CodegenTS.fs             — TypeScript source emitter
-  CodegenPy.fs             — Python source emitter
-  CodegenJava.fs           — Java 21 source emitter
-  Compiler.fs              — end-to-end pipeline + Target dispatch
-src/LLLangTool/            — legacy stage0 `lllc` CLI bridge (.NET)
-  Program.fs               — entry point
 lllcself/src/              — self-hosted ll-lang implementation of CLI subcommands
   Mcp.lll                  — MCP server (28 tools for LLM clients)
 stdlib/                    — self-hosted stdlib (10 modules, 5857 LOC ll-lang)
-tests/LLLangTests/         — legacy stage0 xUnit regression suite
+obsolete/stage0/           — archived stage0 (.NET) compiler/tool/tests (manual use only)
 docs/user-guide/           — user documentation
 docs/compiler-dev/         — compiler developer documentation
 ```

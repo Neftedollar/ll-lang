@@ -1,5 +1,11 @@
 # NEXT_STEPS
 
+## 2026-04-19 migration bundle (completed)
+- [x] Bootstrap artifact + lock automation (`tools/build-bootstrap-artifacts.sh` + `bootstrap-release.yml`)
+- [x] Self-host CLI e2e script (`tools/check-selfhost-e2e.sh`) wired into `build.yml`
+- [x] LLVM smoke chain (`tools/check-llvm-smoke.sh`) wired into `build.yml`
+- [x] Archive stage0 under `obsolete/stage0` and demote legacy workflow to manual-only
+
 ## MCP (LLL-first) stabilization
 - [x] Sync docs with real MCP surface (`lllc mcp` now served by `lllcself`):
   - [x] `README.md` (tool inventory + architecture note)

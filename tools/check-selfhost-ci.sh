@@ -19,13 +19,15 @@ fi
 
 BOOTSTRAP_BIN="$("$INSTALLER" path)"
 [[ -x "$BOOTSTRAP_BIN" ]] || fail "resolved bootstrap binary is not executable: $BOOTSTRAP_BIN"
+SELF_MAIN="$ROOT_DIR/lllcself/src/Main.lll"
+[[ -f "$SELF_MAIN" ]] || fail "missing self main file: $SELF_MAIN"
 
 check_file() {
   local file="$1"
   local output
 
   echo "==> check $file"
-  output="$("$BOOTSTRAP_BIN" check "$file" 2>&1 || true)"
+  output="$(LLLC_SELF_MAIN="$SELF_MAIN" "$BOOTSTRAP_BIN" self check "$file" 2>&1 || true)"
   printf '%s\n' "$output"
 
   if ! printf '%s' "$output" | rg -q '"ok":true'; then

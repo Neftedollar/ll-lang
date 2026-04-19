@@ -15,6 +15,12 @@ jobs:
         run: |
           LLLC_BOOTSTRAP_REINSTALL=1 ./tools/check-selfhost-ci.sh
         working-directory: .
+      - name: Self-host CLI E2E
+        run: ./tools/check-selfhost-e2e.sh
+        working-directory: .
+      - name: LLVM Smoke Chain
+        run: ./tools/check-llvm-smoke.sh
+        working-directory: .
       - name: Doc Contract Check
         run: ./tools/check-doc-contract.sh
         working-directory: .

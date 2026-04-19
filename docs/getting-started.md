@@ -8,8 +8,6 @@ ll-lang is a statically-typed functional language designed for LLM code generati
 
 - A POSIX or Windows shell.
 - No .NET required for bootstrap execution.
-- Optional: [.NET 10 SDK](https://dotnet.microsoft.com/download) for legacy
-  stage0 build/test workflows.
 
 ---
 
@@ -20,16 +18,6 @@ git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
 LLLC_BOOTSTRAP_REINSTALL=1 ./tools/check-selfhost-ci.sh
 ```
-
-### Optional legacy `lllc` alias (stage0)
-
-```bash
-alias lllc='dotnet run --project /path/to/ll-lang/src/LLLangTool --'
-```
-
-Add to your shell profile to persist it.
-
----
 
 ## Write your first program
 
@@ -56,8 +44,8 @@ Key rules:
 ```bash
 ./tools/lllc-bootstrap.sh run hello.lll    # compile + execute
 ./tools/lllc-bootstrap.sh check hello.lll  # canonical single-file type-check
-lllc build hello.lll                        # legacy stage0 compile → hello.fs
-lllc check .                                # legacy stage0 project check
+./tools/lllc-bootstrap.sh build hello.lll  # compile → hello.fs
+./tools/lllc-bootstrap.sh check .          # project check
 ```
 
 ---
@@ -65,7 +53,7 @@ lllc check .                                # legacy stage0 project check
 ## Create a project
 
 ```bash
-lllc new myapp
+./tools/lllc-bootstrap.sh new myapp
 ```
 
 Creates:
@@ -98,7 +86,7 @@ Build and run the project:
 
 ```bash
 cd myapp
-lllc build                          # → bin/myapp.fs + bin/myapp.fsproj
+../tools/lllc-bootstrap.sh build .  # project compile
 dotnet run --project bin/myapp.fsproj
 ```
 
@@ -156,10 +144,10 @@ std = { path = "../stdlib" }
 Then fetch:
 
 ```bash
-lllc mod tidy
+./tools/lllc-bootstrap.sh mod tidy
 ```
 
-`lllc mod tidy` resolves direct + transitive deps into `vendor/` and rewrites
+`./tools/lllc-bootstrap.sh mod tidy` resolves direct + transitive deps into `vendor/` and rewrites
 `ll.sum` deterministically so repeated installs are stable (hashing ignores
 `.git` metadata inside vendored git dependencies). For same-repo git refs,
 resolver selection is deterministic: highest semver tag wins when tags parse as
@@ -180,7 +168,7 @@ use = ["fsharp", "typescript"]
 ```
 
 ```bash
-lllc build
+./tools/lllc-bootstrap.sh build .
 # bin/fsharp/myapp.fs
 # bin/typescript/myapp.ts
 ```
@@ -188,12 +176,12 @@ lllc build
 Or pass `--target` for a one-off:
 
 ```bash
-lllc build --target ts   myapp.lll   # TypeScript
-lllc build --target py   myapp.lll   # Python
-lllc build --target java myapp.lll   # Java 21
-lllc build --target cs   myapp.lll   # C#
-lllc build --target llvm myapp.lll   # LLVM IR (experimental subset)
-lllc build --target fs   myapp.lll   # F# (default)
+./tools/lllc-bootstrap.sh build --target ts   myapp.lll   # TypeScript
+./tools/lllc-bootstrap.sh build --target py   myapp.lll   # Python
+./tools/lllc-bootstrap.sh build --target java myapp.lll   # Java 21
+./tools/lllc-bootstrap.sh build --target cs   myapp.lll   # C#
+./tools/lllc-bootstrap.sh build --target llvm myapp.lll   # LLVM IR (experimental subset)
+./tools/lllc-bootstrap.sh build --target fs   myapp.lll   # F# (default)
 ```
 
 ---
@@ -210,19 +198,9 @@ Add to `~/.config/claude/mcp.json`:
 {
   "mcpServers": {
     "ll-lang": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/path/to/ll-lang/src/LLLangTool", "--", "mcp"]
+      "command": "/path/to/ll-lang/tools/lllc-bootstrap.sh",
+      "args": ["mcp"]
     }
-  }
-}
-```
-
-Or if you have the `lllc` alias:
-
-```json
-{
-  "mcpServers": {
-    "ll-lang": { "command": "lllc", "args": ["mcp"] }
   }
 }
 ```

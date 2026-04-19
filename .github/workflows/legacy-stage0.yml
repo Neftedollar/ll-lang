@@ -1,25 +1,10 @@
-name: Legacy Stage0 (.NET)
+name: Archived Stage0 (.NET, manual)
 
 on:
   workflow_dispatch:
 
 jobs:
-  release-core:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - name: Build
-        run: dotnet clean --nologo && dotnet build --nologo -warnaserror
-        working-directory: .
-      - name: Test (release-core)
-        run: dotnet test --no-build --verbosity normal --filter "FullyQualifiedName!~ReverseTranspilerTests&FullyQualifiedName!~CodegenLLVMTests"
-        working-directory: .
-
-  experimental:
+  archived-stage0:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -28,9 +13,14 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: Build
-        run: dotnet clean --nologo && dotnet build --nologo -warnaserror
-        working-directory: .
-      - name: Test (reverse + llvm experimental)
-        run: dotnet test --no-build --verbosity normal --filter "FullyQualifiedName~ReverseTranspilerTests|FullyQualifiedName~CodegenLLVMTests"
-        working-directory: .
+      - name: Archive notice
+        run: |
+          echo "Stage0 is archived under obsolete/stage0 and is not part of default CI."
+          echo "Use this workflow only for emergency bootstrap diagnostics."
+      - name: Build archived stage0 solution
+        run: |
+          dotnet clean obsolete/stage0/LLLang.sln --nologo
+          dotnet build obsolete/stage0/LLLang.sln --nologo -warnaserror
+      - name: Test archived stage0 suite
+        run: |
+          dotnet test obsolete/stage0/tests/LLLangTests/LLLangTests.fsproj --no-build --verbosity normal

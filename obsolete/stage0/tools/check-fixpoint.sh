@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/check-fixpoint.sh
+# obsolete/stage0/tools/check-fixpoint.sh
 #
 # Fixpoint / parity test: compare stage0 compiler vs self-hosted compiler on
 # the same corpus .lll file.
@@ -36,15 +36,15 @@
 #   5. Verify module header matches in both outputs
 #
 # Usage:
-#   bash tools/check-fixpoint.sh [corpus-file.lll]
+#   bash obsolete/stage0/tools/check-fixpoint.sh [corpus-file.lll]
 #   Default corpus: spec/examples/valid/01-basics.lll
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LLLC="$REPO_ROOT/src/LLLangTool/bin/Debug/net10.0/lllc.dll"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+LLLC="$REPO_ROOT/obsolete/stage0/src/LLLangTool/bin/Debug/net10.0/lllc.dll"
 CORPUS="${1:-$REPO_ROOT/spec/examples/valid/01-basics.lll}"
 
 TMPDIR_FP="$(mktemp -d)"

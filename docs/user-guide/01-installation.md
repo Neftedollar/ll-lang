@@ -4,8 +4,6 @@
 
 - A POSIX or Windows shell. Examples in this guide assume bash.
 - No .NET required for bootstrap execution.
-- Optional: [.NET 10 SDK](https://dotnet.microsoft.com/download) only for
-  legacy stage0 build/test workflows.
 
 ## Bootstrap-first setup
 
@@ -15,16 +13,8 @@ cd ll-lang
 LLLC_BOOTSTRAP_REINSTALL=1 ./tools/check-selfhost-ci.sh
 ```
 
-## Optional legacy stage0 verification
-
-```bash
-dotnet --version   # must report 10.x
-dotnet build
-dotnet test
-```
-
-This path is not required for bootstrap usage; it remains for stage0 regression
-coverage.
+Stage0 code is archived under `obsolete/stage0` and not part of default CI or
+daily workflows.
 
 ## Hello, ll-lang
 
@@ -48,21 +38,6 @@ Expected output:
 Hello, ll-lang!
 ```
 
-## Optional legacy `lllc` alias (stage0)
-
-If you still need stage0 CLI commands (`new`, project `check`, etc.), alias:
-
-```bash
-alias lllc='dotnet run --project /path/to/ll-lang/src/LLLangTool --'
-```
-
-Then you can run legacy commands:
-
-```bash
-lllc run hello.lll
-lllc build hello.lll    # produces hello.fs
-```
-
 ## Bootstrap installer (pinned + sha256)
 
 To bootstrap from a downloadable compiler artifact on a clean machine:
@@ -78,6 +53,8 @@ Notes:
 - Artifact metadata is pinned in `bootstrap/lllc-bootstrap.lock.json`.
 - Integrity is enforced via `sha256` verification before extraction.
 - Use `./tools/bootstrap-self.sh install --reinstall` to refresh cache.
+- To regenerate release artifacts + lock file, run:
+  - `./tools/build-bootstrap-artifacts.sh --version vX.Y.Z`
 
 ### Strict no-fallback launcher
 

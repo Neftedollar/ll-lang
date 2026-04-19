@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 INPUT_FILE="$ROOT_DIR/spec/examples/valid/20a-bootstrap-input.lll"
 BOOTSTRAP_SRC="$ROOT_DIR/spec/examples/valid/20-bootstrap-compiler.lll"
 SNAPSHOT_FILE="$ROOT_DIR/docs/compiler-dev/fixpoint-snapshots/compiler1-latest.fs"
-TOOL_DLL="$ROOT_DIR/src/LLLangTool/bin/Debug/net10.0/lllc.dll"
+TOOL_DLL="$ROOT_DIR/obsolete/stage0/src/LLLangTool/bin/Debug/net10.0/lllc.dll"
 BACKUP_FILE="${INPUT_FILE}.bak.snapshot"
 
 if [[ ! -f "$BOOTSTRAP_SRC" ]]; then
@@ -15,7 +15,7 @@ fi
 
 if [[ ! -f "$TOOL_DLL" ]]; then
   echo "lllc tool not built yet; building solution first..."
-  dotnet build "$ROOT_DIR/LLLang.sln" --nologo >/dev/null
+  dotnet build "$ROOT_DIR/obsolete/stage0/LLLang.sln" --nologo >/dev/null
 fi
 
 cp "$INPUT_FILE" "$BACKUP_FILE"

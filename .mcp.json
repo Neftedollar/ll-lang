@@ -1,14 +1,8 @@
 {
   "mcpServers": {
     "ll-lang": {
-      "command": "dotnet",
-      "args": [
-        "run",
-        "--project",
-        "/Users/roman/Documents/dev/tens/code/ll-lang/src/LLLangTool",
-        "--",
-        "mcp"
-      ]
+      "command": "/Users/roman/Documents/dev/tens/code/ll-lang/tools/lllc-bootstrap.sh",
+      "args": ["mcp"]
     }
   }
 }

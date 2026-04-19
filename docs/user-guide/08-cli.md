@@ -1,6 +1,7 @@
 # The `lllc` CLI
 
-`lllc` (the `LLLangTool` project) drives the compiler for both single-file and multi-file project builds.
+`lllc` is the bootstrap binary entrypoint for single-file and multi-file project builds.
+Stage0 `LLLangTool` is archived under `obsolete/stage0/src/LLLangTool` and is not the default runtime path.
 
 1.0 note: `build/run/new/install/self/mcp` and `check [dir]` are stable CLI
 surface. `reverse` is available as experimental tooling.
@@ -243,20 +244,20 @@ E003 0:0 NonExhaustiveMatch Shape missing:Empty
 ### Nullness warnings on build
 
 The compiler projects enable `<Nullable>enable</Nullable>` under `LangVersion=preview`.
-Current baseline is warning-free (`0 Warning(s)` on `dotnet build src/LLLangTool/LLLangTool.fsproj`).
+Current baseline is warning-free (`0 Warning(s)` on `dotnet build obsolete/stage0/src/LLLangTool/LLLangTool.fsproj`).
 Treat new nullness warnings as regressions to fix rather than suppress.
 
 ---
 
-## Invoking via `dotnet run`
+## Invoking archived stage0 via `dotnet run`
 
 If you have not set up the `lllc` alias (see [01-installation.md](01-installation.md)):
 
 ```bash
-dotnet run --project src/LLLangTool -- build hello.lll
-dotnet run --project src/LLLangTool -- build ./myapp
-dotnet run --project src/LLLangTool -- new myapp
-dotnet run --project src/LLLangTool -- reverse --from ts bin/typescript/myapp.ts
+dotnet run --project obsolete/stage0/src/LLLangTool -- build hello.lll
+dotnet run --project obsolete/stage0/src/LLLangTool -- build ./myapp
+dotnet run --project obsolete/stage0/src/LLLangTool -- new myapp
+dotnet run --project obsolete/stage0/src/LLLangTool -- reverse --from ts bin/typescript/myapp.ts
 ```
 
 ---

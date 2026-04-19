@@ -298,19 +298,13 @@ emitExprInstrs(e Expr)(ctr Int)(sidx Int) =
       bindA = strConcat "  %" (strConcat a (strConcat " = add i64 " (strConcat v1 ", 0")))
       bindB = strConcat "  %" (strConcat b (strConcat " = add i64 " (strConcat v2 ", 0")))
       tuplePrep =
-        strConcat instP1
-          (strConcat "\n"
-            (strConcat instV1
-              (strConcat "\n"
-                (strConcat instTailPtr
-                  (strConcat "\n"
-                    (strConcat instTailLoad
-                      (strConcat "\n"
-                        (strConcat instP2
-                          (strConcat "\n"
-                            (strConcat instV2
-                              (strConcat "\n"
-                                (strConcat bindA (strConcat "\n" bindB))))))))))))
+        s1 = strJoin2 instP1 instV1
+        s2 = strJoin2 s1 instTailPtr
+        s3 = strJoin2 s2 instTailLoad
+        s4 = strJoin2 s3 instP2
+        s5 = strJoin2 s4 instV2
+        s6 = strJoin2 s5 bindA
+        strJoin2 s6 bindB
       bi = emitExprInstrs bodyE (vc + 6) vs
       withVal =
         if strLen vi == 0
