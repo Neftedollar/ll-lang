@@ -292,6 +292,40 @@ emitExprInstrs(e Expr)(ctr Int)(sidx Int) =
       if strLen prefix == 0
         callInstr
       else strConcat prefix (strConcat "\n" callInstr)
+    | ECons h t ->
+      hi = emitExprInstrs h ctr sidx
+      hc = emitExprNextCtr h ctr sidx
+      hs = emitExprNextSidx h ctr sidx
+      ti = emitExprInstrs t hc hs
+      tc = emitExprNextCtr t hc hs
+      hreg = emitExprReg h ctr sidx
+      treg = emitExprReg t hc hs
+      dst = ssaName tc
+      consInstr = strConcat "  " (strConcat dst (strConcat " = call ptr @__ll_alloc(i64 -1, i64 " (strConcat hreg (strConcat ", ptr " (strConcat treg ")")))))
+      prefix = strJoin2 hi ti
+      if strLen prefix == 0
+        consInstr
+      else
+        strConcat prefix (strConcat "\n" consInstr)
+    | ETuple a b ->
+      ai = emitExprInstrs a ctr sidx
+      ac = emitExprNextCtr a ctr sidx
+      as = emitExprNextSidx a ctr sidx
+      bi = emitExprInstrs b ac as
+      bc = emitExprNextCtr b ac as
+      areg = emitExprReg a ctr sidx
+      breg = emitExprReg b ac as
+      tailDst = ssaName bc
+      headDst = ssaName (bc + 1)
+      tailInstr = strConcat "  " (strConcat tailDst (strConcat " = call ptr @__ll_alloc(i64 -1, i64 " (strConcat breg ", ptr null)")))
+      headInstr = strConcat "  " (strConcat headDst (strConcat " = call ptr @__ll_alloc(i64 -1, i64 " (strConcat areg (strConcat ", ptr " (strConcat tailDst ")")))))
+      prefix = strJoin2 ai bi
+      withTail =
+        if strLen prefix == 0
+          tailInstr
+        else
+          strConcat prefix (strConcat "\n" tailInstr)
+      strConcat withTail (strConcat "\n" headInstr)
     | _ -> ""
 
 -- ---- emitExprReg -----------------------------------------------------------
@@ -337,6 +371,16 @@ emitExprReg(e Expr)(ctr Int)(sidx Int) =
       fs = emitExprNextSidx f ctr sidx
       ac = emitExprNextCtr a fc fs
       ssaName ac
+    | ECons h t ->
+      hc = emitExprNextCtr h ctr sidx
+      hs = emitExprNextSidx h ctr sidx
+      tc = emitExprNextCtr t hc hs
+      ssaName tc
+    | ETuple a b ->
+      ac = emitExprNextCtr a ctr sidx
+      as = emitExprNextSidx a ctr sidx
+      bc = emitExprNextCtr b ac as
+      ssaName (bc + 1)
     | _ -> "0"
 
 -- ---- emitExprNextCtr -------------------------------------------------------
@@ -374,6 +418,16 @@ emitExprNextCtr(e Expr)(ctr Int)(sidx Int) =
       fs = emitExprNextSidx f ctr sidx
       ac = emitExprNextCtr a fc fs
       ac + 1
+    | ECons h t ->
+      hc = emitExprNextCtr h ctr sidx
+      hs = emitExprNextSidx h ctr sidx
+      tc = emitExprNextCtr t hc hs
+      tc + 1
+    | ETuple a b ->
+      ac = emitExprNextCtr a ctr sidx
+      as = emitExprNextSidx a ctr sidx
+      bc = emitExprNextCtr b ac as
+      bc + 2
     | _ -> ctr
 
 -- ---- emitExprNextSidx ------------------------------------------------------
@@ -408,6 +462,14 @@ emitExprNextSidx(e Expr)(ctr Int)(sidx Int) =
       fc = emitExprNextCtr f ctr sidx
       fs = emitExprNextSidx f ctr sidx
       emitExprNextSidx a fc fs
+    | ECons h t ->
+      hc = emitExprNextCtr h ctr sidx
+      hs = emitExprNextSidx h ctr sidx
+      emitExprNextSidx t hc hs
+    | ETuple a b ->
+      ac = emitExprNextCtr a ctr sidx
+      as = emitExprNextSidx a ctr sidx
+      emitExprNextSidx b ac as
     | _ -> sidx
 
 -- ---- emitExprGlobs ---------------------------------------------------------
@@ -443,6 +505,18 @@ emitExprGlobs(e Expr)(ctr Int)(sidx Int) =
       fs = emitExprNextSidx f ctr sidx
       ag = emitExprGlobs a fc fs
       strJoin2 fg ag
+    | ECons h t ->
+      hg = emitExprGlobs h ctr sidx
+      hc = emitExprNextCtr h ctr sidx
+      hs = emitExprNextSidx h ctr sidx
+      tg = emitExprGlobs t hc hs
+      strJoin2 hg tg
+    | ETuple a b ->
+      ag = emitExprGlobs a ctr sidx
+      ac = emitExprNextCtr a ctr sidx
+      as = emitExprNextSidx a ctr sidx
+      bg = emitExprGlobs b ac as
+      strJoin2 ag bg
     | _ -> ""
 
 -- ---- Param helpers ---------------------------------------------------------
@@ -631,5 +705,14 @@ main =
   -- 21. float comparison uses fcmp predicate
   fcmpInstrs = emitExprInstrs (EBinOp "==" (EFloat "1.0") (EFloat "1.0")) 0 0
   _ = checkContains "21 float cmp instrs" fcmpInstrs "fcmp oeq double"
+
+  -- 22. cons lowering allocates runtime node
+  consInstrs = emitExprInstrs (ECons (EInt 1) ENil) 0 0
+  _ = checkContains "22 cons alloc call" consInstrs "call ptr @__ll_alloc(i64 -1, i64 1, ptr null)"
+
+  -- 23. tuple lowering emits two linked alloc calls
+  tupleInstrs = emitExprInstrs (ETuple (EInt 7) (EInt 9)) 0 0
+  _ = checkContains "23 tuple tail alloc" tupleInstrs "call ptr @__ll_alloc(i64 -1, i64 9, ptr null)"
+  _ = checkContains "23 tuple head alloc" tupleInstrs "call ptr @__ll_alloc(i64 -1, i64 7, ptr %t0)"
 
   0
