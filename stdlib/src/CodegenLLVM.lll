@@ -52,52 +52,100 @@ strJoin2(a Str)(b Str) =
 -- TypedExpr path consults the pool/set via the state; the Expr path keeps
 -- its pre-pool behaviour (allocate-on-demand @.str.N indices).
 
-EmitState = MkEmitState Int Int (RBMap[Str][Int]) (RBMap[Str][Int])
-  -- tempCtr, strIdx, strPool (literal -> pool index), nullaryGlobals (name -> 1)
+-- Phase 3 shape: Phase 2 fields + labelCtr + ctorTags + nextCtorTag.
+-- ctorTags is project-scope: set once by the emit driver via a pre-pass over
+-- all TDType decls, then read-only during emission. nextCtorTag is stored
+-- in the state so the seed pass can thread its counter without globals.
+
+EmitState = MkEmitState Int Int (RBMap[Str][Int]) (RBMap[Str][Int]) Int (RBMap[Str][Int]) Int
+  -- tempCtr, strIdx, strPool, nullaryGlobals, labelCtr, ctorTags, nextCtorTag
 
 esTempCtr(st EmitState) =
   match st
-    | MkEmitState c s p g -> c
+    | MkEmitState c s p g l t n -> c
 
 esStrIdx(st EmitState) =
   match st
-    | MkEmitState c s p g -> s
+    | MkEmitState c s p g l t n -> s
 
 esStrPool(st EmitState) =
   match st
-    | MkEmitState c s p g -> p
+    | MkEmitState c s p g l t n -> p
 
 esNullaryGlobals(st EmitState) =
   match st
-    | MkEmitState c s p g -> g
+    | MkEmitState c s p g l t n -> g
+
+esLabelCtr(st EmitState) =
+  match st
+    | MkEmitState c s p g l t n -> l
+
+esCtorTags(st EmitState) =
+  match st
+    | MkEmitState c s p g l t n -> t
+
+esNextCtorTag(st EmitState) =
+  match st
+    | MkEmitState c s p g l t n -> n
 
 -- Allocate a fresh SSA register: bumps tempCtr and returns (regName, newState).
 esFresh(st EmitState) =
   match st
-    | MkEmitState c s p g ->
+    | MkEmitState c s p g l t n ->
       let reg = strConcat "%t" (intToStr (c + 1))
-      (reg, MkEmitState (c + 1) s p g)
+      (reg, MkEmitState (c + 1) s p g l t n)
 
 -- Allocate the next string-literal index: returns (idx, newState) where idx
 -- is the current index before allocation.
 esNextStr(st EmitState) =
   match st
-    | MkEmitState c s p g -> (s, MkEmitState c (s + 1) p g)
+    | MkEmitState c s p g l t n -> (s, MkEmitState c (s + 1) p g l t n)
+
+-- Allocate a fresh block label. Returns (labelName, newState). The labelName
+-- is always the bare identifier (no leading `%`); callers prepend `%` when
+-- emitting a `br label %X` instruction or a plain `X:` for the label itself.
+esFreshLabel(prefix Str)(st EmitState) =
+  match st
+    | MkEmitState c s p g l t n ->
+      let lbl = strConcat prefix (intToStr l)
+      (lbl, MkEmitState c s p g (l + 1) t n)
+
+-- Allocate three labels in one go: (case, body, next) — the shape used by
+-- match-arm lowering. Returns ((caseLbl, bodyLbl, nextLbl), newState).
+esFreshLabelTriple(st EmitState) =
+  let (caseLbl, st1) = esFreshLabel "match_case_" st
+  let (bodyLbl, st2) = esFreshLabel "match_body_" st1
+  let (nextLbl, st3) = esFreshLabel "match_next_" st2
+  ((caseLbl, bodyLbl, nextLbl), st3)
 
 -- Replace the pool / globals sections (used by the pre-pass).
 esSetPool(st EmitState)(pool RBMap[Str][Int]) =
   match st
-    | MkEmitState c s _ g -> MkEmitState c s pool g
+    | MkEmitState c s _ g l t n -> MkEmitState c s pool g l t n
 
 esSetGlobals(st EmitState)(globs RBMap[Str][Int]) =
   match st
-    | MkEmitState c s p _ -> MkEmitState c s p globs
+    | MkEmitState c s p _ l t n -> MkEmitState c s p globs l t n
 
--- Build a fresh initial state.
-emitStateInit = MkEmitState 0 0 Leaf Leaf
+esSetCtorTags(st EmitState)(tags RBMap[Str][Int])(nextN Int) =
+  match st
+    | MkEmitState c s p g l _ _ -> MkEmitState c s p g l tags nextN
+
+-- Look up a constructor's tag; returns -99 (sentinel) for unknown names
+-- so mis-use surfaces quickly in generated IR rather than silently matching 0.
+esCtorTag(name Str)(st EmitState) =
+  match mapLookup strCmp name (esCtorTags st)
+    | Some v -> v
+    | None -> 0 - 99
+
+-- Build a fresh initial state (all counters 0, empty maps).
+emitStateInit = MkEmitState 0 0 Leaf Leaf 0 Leaf 1
 
 emitStateWith(pool RBMap[Str][Int])(globs RBMap[Str][Int]) =
-  MkEmitState 0 0 pool globs
+  MkEmitState 0 0 pool globs 0 Leaf 1
+
+emitStateWithTags(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(nextN Int) =
+  MkEmitState 0 0 pool globs 0 tags nextN
 
 -- Predicate: is `name` a nullary global?
 isNullaryGlobal(name Str)(st EmitState) =
@@ -659,10 +707,378 @@ emitTypedBinOpByTy(state EmitState)(op Str)(lTyStr Str)(lreg Str)(rreg Str) =
     else
       emitBinInstr state (llvmIntOp op) lreg rreg
 
+-- ---- Phase 3: ADT runtime block, tag seeding, alloc helpers --------------
+--
+-- Port of F# emitRuntimeBlock + declares for node_tag_safe / node_payload_safe
+-- / node_tail_safe. Emitted once per program at the top of the .ll output.
+-- The C runtime in sdks/Platform.LLVM.SDK/runtime/lllc_runtime.c implements
+-- the three node_* helpers; we only need a `declare`.
+
+llvmRuntimeBlock =
+  rtMalloc = "declare ptr @malloc(i64)\n\n"
+  rtAlloc = "define ptr @__ll_alloc(i64 %tag, i64 %payload, ptr %tail) {\nentry:\n  %raw = call ptr @malloc(i64 24)\n  %tagp = getelementptr inbounds { i64, i64, ptr }, ptr %raw, i32 0, i32 0\n  store i64 %tag, ptr %tagp\n  %payloadp = getelementptr inbounds { i64, i64, ptr }, ptr %raw, i32 0, i32 1\n  store i64 %payload, ptr %payloadp\n  %tailp = getelementptr inbounds { i64, i64, ptr }, ptr %raw, i32 0, i32 2\n  store ptr %tail, ptr %tailp\n  ret ptr %raw\n}\n\n"
+  rtNodeHelpers = "declare i64 @node_tag_safe(ptr)\ndeclare i64 @node_payload_safe(ptr)\ndeclare ptr @node_tail_safe(ptr)\n"
+  strConcat rtMalloc (strConcat rtAlloc rtNodeHelpers)
+
+-- LIST_CONS_TAG as a Str; matches F# `-1` sentinel used for list spine cells
+-- and for extra-arg tail nodes of multi-arg constructors.
+listConsTagStr = "-1"
+
+-- ---- Ctor tag seeding -----------------------------------------------------
+-- Walk TDType decls and build a project-scope (name -> Int) tag map.
+-- Tag assignment: first ctor in first module gets tag 1, then +1 per new
+-- ctor across all modules. Re-seeing the same name keeps the first tag.
+
+-- Extract ctor-name list from a Constructor value.
+ctorNameOf(c Constructor) =
+  match c
+    | MkCon n _ -> n
+
+-- Seed tags for a list of Constructor. Returns (tags', nextN').
+seedCtorsList(tags RBMap[Str][Int])(nextN Int)(cs List[Constructor]) =
+  match cs
+    | [] -> (tags, nextN)
+    | c :: rest ->
+      name = ctorNameOf c
+      match mapLookup strCmp name tags
+        | Some _ -> seedCtorsList tags nextN rest
+        | None ->
+          tags2 = mapInsert strCmp name nextN tags
+          seedCtorsList tags2 (nextN + 1) rest
+
+-- Seed tags for one TypedDecl (only TDType contributes).
+seedCtorsDecl(tags RBMap[Str][Int])(nextN Int)(d TypedDecl) =
+  match d
+    | TDType _ _ ctors -> seedCtorsList tags nextN ctors
+    | _ -> (tags, nextN)
+
+-- Seed tags for a list of TypedDecls.
+seedCtorsDecls(tags RBMap[Str][Int])(nextN Int)(ds List[TypedDecl]) =
+  match ds
+    | [] -> (tags, nextN)
+    | d :: rest ->
+      let (tags2, n2) = seedCtorsDecl tags nextN d
+      seedCtorsDecls tags2 n2 rest
+
+-- Seed tags for a single module.
+seedCtorsModule(tags RBMap[Str][Int])(nextN Int)(tm TypedModule) =
+  seedCtorsDecls tags nextN (typedModDecls tm)
+
+-- Seed tags for a list of modules (project-scope). Recursive walk so we
+-- avoid tuple-in-lambda-arg HM issues.
+seedCtorsModulesFrom(tags RBMap[Str][Int])(nextN Int)(tms List[TypedModule]) =
+  match tms
+    | [] -> (tags, nextN)
+    | tm :: rest ->
+      let (t2, n2) = seedCtorsModule tags nextN tm
+      seedCtorsModulesFrom t2 n2 rest
+
+seedCtorsModules(tms List[TypedModule]) =
+  seedCtorsModulesFrom Leaf 1 tms
+
+-- ---- Alloc + null-safe loads ----------------------------------------------
+-- Port of F# emitAllocNode / emitLoadNodeTag / emitLoadNodePayload /
+-- emitLoadNodeTail. Each returns EmitExprResult (state', instr, reg).
+
+emitAllocNode(state EmitState)(tagStr Str)(payloadStr Str)(tailStr Str) =
+  let (dst, st1) = esFresh state
+  args = strConcat "(i64 " (strConcat tagStr (strConcat ", i64 " (strConcat payloadStr (strConcat ", ptr " (strConcat tailStr ")")))))
+  instr = strConcat "  " (strConcat dst (strConcat " = call ptr @__ll_alloc" args))
+  MkEER st1 instr dst
+
+emitLoadNodeTag(state EmitState)(nodePtr Str) =
+  let (dst, st1) = esFresh state
+  instr = strConcat "  " (strConcat dst (strConcat " = call i64 @node_tag_safe(ptr " (strConcat nodePtr ")")))
+  MkEER st1 instr dst
+
+emitLoadNodePayload(state EmitState)(nodePtr Str) =
+  let (dst, st1) = esFresh state
+  instr = strConcat "  " (strConcat dst (strConcat " = call i64 @node_payload_safe(ptr " (strConcat nodePtr ")")))
+  MkEER st1 instr dst
+
+emitLoadNodeTail(state EmitState)(nodePtr Str) =
+  let (dst, st1) = esFresh state
+  instr = strConcat "  " (strConcat dst (strConcat " = call ptr @node_tail_safe(ptr " (strConcat nodePtr ")")))
+  MkEER st1 instr dst
+
+-- Emit an icmp/phi-style helper: compare i1 a to constant 1 etc. Actually
+-- simpler: just emit `<dst> = and i1 <a>, <b>`, returning EER.
+emitAndI1(state EmitState)(a Str)(b Str) =
+  if a == "1"
+    MkEER state "" b
+  else if b == "1"
+    MkEER state "" a
+  else if a == "0"
+    MkEER state "" "0"
+  else if b == "0"
+    MkEER state "" "0"
+  else
+    let (dst, st1) = esFresh state
+    instr = strConcat "  " (strConcat dst (strConcat " = and i1 " (strConcat a (strConcat ", " b))))
+    MkEER st1 instr dst
+
+-- Emit `<dst> = icmp <pred> i64 <a>, <b>`.
+emitICmpI64(state EmitState)(pred Str)(a Str)(b Str) =
+  let (dst, st1) = esFresh state
+  instr = strConcat "  " (strConcat dst (strConcat " = icmp " (strConcat pred (strConcat " i64 " (strConcat a (strConcat ", " b))))))
+  MkEER st1 instr dst
+
+-- Emit `<dst> = icmp <pred> ptr <a>, <b>`.
+emitICmpPtr(state EmitState)(pred Str)(a Str)(b Str) =
+  let (dst, st1) = esFresh state
+  instr = strConcat "  " (strConcat dst (strConcat " = icmp " (strConcat pred (strConcat " ptr " (strConcat a (strConcat ", " b))))))
+  MkEER st1 instr dst
+
+-- ---- Constructor ABI ------------------------------------------------------
+--
+-- ABI (matches F# emitAllocNode + LIST_CONS_TAG tail-chain convention):
+--   0-arg: single cell {tag=T, payload=0, tail=null}
+--   1-arg: single cell {tag=T, payload=arg0_i64, tail=null}
+--   N-arg (N>=2): head cell {tag=T, payload=arg0_i64, tail=chain} where
+--     chain is a reverse cons of remaining args with tag=LIST_CONS_TAG.
+--
+-- All scalar payloads are coerced to i64 (the ADT-cell payload slot width).
+
+-- Build a cons chain from list of already-coerced i64 payloads (in order),
+-- terminating in `null`. Returns (state', instrs, reg) where `reg` holds
+-- the head of the reverse chain — i.e. last element is the tail's tail.
+-- Matches F# `buildRest`: walks the REVERSED list, building each node
+-- pointing at the previous accumulator.
+emitBuildConsTail(state EmitState)(payloadsRev List[Str]) =
+  match payloadsRev
+    | [] -> MkEER state "" "null"
+    | x :: rest ->
+      prior = emitBuildConsTail state rest
+      nodeRes = emitAllocNode (eerState prior) listConsTagStr x (eerReg prior)
+      instrs = strJoin2 (eerInstrs prior) (eerInstrs nodeRes)
+      MkEER (eerState nodeRes) instrs (eerReg nodeRes)
+
+-- Emit allocation for a constructor application given tag + i64 arg regs.
+emitCtorAlloc(state EmitState)(tagStr Str)(argI64s List[Str]) =
+  match argI64s
+    | [] -> emitAllocNode state tagStr "0" "null"
+    | firstArg :: rest ->
+      tailRes =
+        match rest
+          | [] -> MkEER state "" "null"
+          | _ -> emitBuildConsTail state (listReverse rest)
+      headRes = emitAllocNode (eerState tailRes) tagStr firstArg (eerReg tailRes)
+      all = strJoin2 (eerInstrs tailRes) (eerInstrs headRes)
+      MkEER (eerState headRes) all (eerReg headRes)
+
+-- Ctor application: emit args + allocation. Inlined for up to 3 args
+-- (Phase 3 target examples have ≤ 2 args per ctor; grows easily if needed).
+emitCtorApp(state EmitState)(cname Str)(argsList List[TypedExpr]) =
+  match argsList
+    | [] ->
+      tagStr = intToStr (esCtorTag cname state)
+      emitAllocNode state tagStr "0" "null"
+    | a :: [] ->
+      argR = emitOneArgI64 state a
+      tagStr = intToStr (esCtorTag cname (eerState argR))
+      alloc = emitAllocNode (eerState argR) tagStr (eerReg argR) "null"
+      all = strJoin2 (eerInstrs argR) (eerInstrs alloc)
+      MkEER (eerState alloc) all (eerReg alloc)
+    | a :: b :: [] ->
+      aR = emitOneArgI64 state a
+      bR = emitOneArgI64 (eerState aR) b
+      -- Tail chain: 2nd arg in a single LIST_CONS_TAG cell with null tail.
+      tailCell = emitAllocNode (eerState bR) listConsTagStr (eerReg bR) "null"
+      tagStr = intToStr (esCtorTag cname (eerState tailCell))
+      headCell = emitAllocNode (eerState tailCell) tagStr (eerReg aR) (eerReg tailCell)
+      all = strJoin2 (strJoin2 (eerInstrs aR) (eerInstrs bR)) (strJoin2 (eerInstrs tailCell) (eerInstrs headCell))
+      MkEER (eerState headCell) all (eerReg headCell)
+    | a :: b :: c :: [] ->
+      aR = emitOneArgI64 state a
+      bR = emitOneArgI64 (eerState aR) b
+      cR = emitOneArgI64 (eerState bR) c
+      cell3 = emitAllocNode (eerState cR) listConsTagStr (eerReg cR) "null"
+      cell2 = emitAllocNode (eerState cell3) listConsTagStr (eerReg bR) (eerReg cell3)
+      tagStr = intToStr (esCtorTag cname (eerState cell2))
+      cell1 = emitAllocNode (eerState cell2) tagStr (eerReg aR) (eerReg cell2)
+      ia = strJoin2 (eerInstrs aR) (eerInstrs bR)
+      iab = strJoin2 ia (eerInstrs cR)
+      ic = strJoin2 (eerInstrs cell3) (eerInstrs cell2)
+      icc = strJoin2 ic (eerInstrs cell1)
+      all = strJoin2 iab icc
+      MkEER (eerState cell1) all (eerReg cell1)
+    | _ ->
+      -- Fallback: 4+ args unsupported in Phase 3 (add when needed).
+      MkEER state "" "null"
+
+-- Gather nested TEApp spine. Returns (headTypedExpr, argsInOrder).
+gatherTypedApp(te TypedExpr)(acc List[TypedExpr]) =
+  match te
+    | TEApp f a _ -> gatherTypedApp f (a :: acc)
+    | _ -> (te, acc)
+
+-- Emit i64-coerced argument regs for a list of TypedExprs. Uses a PatRes-
+-- style wrapper type to dodge HM inference trouble with self-recursive 3-
+-- tuple returns when the recursion also forward-refs emitTypedExpr.
+ArgsRes = MkArgResult EmitState Str (List[Str])
+
+argsState(r ArgsRes) = match r | MkArgResult s _ _ -> s
+argsInstrs(r ArgsRes) = match r | MkArgResult _ i _ -> i
+argsResRegs(r ArgsRes) = match r | MkArgResult _ _ rs -> rs
+
+-- Emit one TypedExpr, i64-coerced. Returns EER (state', instrs, reg).
+emitOneArgI64(state EmitState)(a TypedExpr) =
+  r = emitTypedExpr state a
+  argTy = llvmTypeOfTE a
+  coerced = coerceValue (eerState r) argTy "i64" (eerReg r)
+  combined = strJoin2 (eerInstrs r) (eerInstrs coerced)
+  MkEER (eerState coerced) combined (eerReg coerced)
+
+-- ---- Pattern match lowering ----------------------------------------------
+--
+-- Port of F# emitMatch + emitPatternValue + emitListPattern + emitCtorPattern
+-- (lines 883-1059). Simplified for Phase 3 target examples 40-43:
+--   - PWild / PVar / PLitInt / PLitStr
+--   - PCon name args (including 0-arg nullary)
+--   - PCons head tail
+--   - PNil (empty list; also PCon "[]" [])
+-- No PLitBool, PLitChar, PLitFloat, PTuple (not in Pattern type).
+--
+-- Bindings implemented via alias instructions: after a successful sub-pattern
+-- load, emit `%<name> = add i64 %tN, 0` (or ptr variant) so later `TEVar n`
+-- resolves naturally.
+
+-- Result shape for pattern lowering.
+PatRes = MkPatRes EmitState Str Str
+  -- state', instrs (test+bind code), condReg ("0" / "1" / SSA %tN)
+
+prState(r PatRes) =
+  match r | MkPatRes s _ _ -> s
+
+prInstrs(r PatRes) =
+  match r | MkPatRes _ i _ -> i
+
+prCond(r PatRes) =
+  match r | MkPatRes _ _ c -> c
+
+-- Emit a bind-alias for a pattern variable `name` holding value `val` of
+-- type `valTy` ("i64" / "ptr"). Always returns instrs that define `%name`.
+emitBindAlias(state EmitState)(name Str)(valTy Str)(value Str) =
+  if valTy == "ptr"
+    -- alias ptr: use getelementptr with i64 0 (no-op)
+    instr = strConcat "  %" (strConcat name (strConcat " = getelementptr i8, ptr " (strConcat value ", i64 0")))
+    MkEER state instr (strConcat "%" name)
+  else
+    instr = strConcat "  %" (strConcat name (strConcat " = add i64 " (strConcat value ", 0")))
+    MkEER state instr (strConcat "%" name)
+
+-- Core pattern-value lowering.
+--   valTy : LLVM type of scrutinee value ("i64" / "ptr")
+--   value : register holding scrutinee
+--   pat   : the pattern to match
+-- Returns PatRes with condReg (i1) + bind-alias instrs interleaved.
+emitPatternValue(state EmitState)(valTy Str)(value Str)(pat Pattern) =
+  MkPatRes state "" "1"
+
+-- Stubs during bisection.
+emitCtorPattern(state EmitState)(valTy Str)(value Str)(name Str)(args List[Pattern]) =
+  MkPatRes state "" "1"
+
+consumeCtorArgs(state EmitState)(accCond Str)(firstPayload Str)(tailPtr Str)(idx Int)(rest List[Pattern]) =
+  MkPatRes state "" accCond
+
+-- Emit a full match expression. scrutVal / scrutTy / pats / bodies / resultTy.
+-- Returns EmitExprResult. Lowering shape:
+--
+--   <scrut code>
+--   br label %case0
+-- case0:
+--   <pat0 test+bind>
+--   br i1 %c0, label %body0, label %next0      (if c0 == "1"/"0", emit plain br)
+-- body0:
+--   <body0 code>
+--   %r0 = <coerce body0 to resultTy>
+--   br label %end
+-- next0:            (actually same as case1's label)
+--   ...
+-- fail:
+--   br label %end   (contributes `undef` fallback to phi)
+-- end:
+--   %result = phi <resultTy> [ %r0, %body0 ], ..., [ undef, %fail ]
+
+-- One-arm lowering helper: emit the case label, pattern test, conditional br,
+-- body label, body code, br to end, next label. Returns PatRes-style but
+-- additionally tracks the body-value for phi incoming.
+
+-- MatchArm emission result: carries (state', instrs, bodyVal, bodyLbl).
+MatchArmRes = MkMatchArmRes EmitState Str Str Str
+marState(r MatchArmRes) = match r | MkMatchArmRes s _ _ _ -> s
+marInstrs(r MatchArmRes) = match r | MkMatchArmRes _ i _ _ -> i
+marBodyVal(r MatchArmRes) = match r | MkMatchArmRes _ _ v _ -> v
+marBodyLbl(r MatchArmRes) = match r | MkMatchArmRes _ _ _ l -> l
+
+-- Lower one arm. `caseLbl` is the entry label for this arm. `nextLbl` is
+-- the label to fall through to on mismatch (next arm or failLbl).
+emitOneArm(state EmitState)(resultTy Str)(scrutTy Str)(scrutVal Str)(endLbl Str)(caseLbl Str)(nextLbl Str)(pat Pattern)(body TypedExpr) =
+  MkMatchArmRes state "" "0" caseLbl
+
+-- Walk arms. Returns (state', instrs, incomingList) where incomingList is
+-- `List[(bodyVal, bodyLbl)]` encoded as TagEntry Str Str to avoid tuple-in-
+-- type-param parser bug.
+PhiIncoming = MkPhiIncoming Str Str
+
+emitAllArms(state EmitState)(resultTy Str)(scrutTy Str)(scrutVal Str)(endLbl Str)(failLbl Str)(caseLbls List[Str])(arms List[Pattern])(bodies List[TypedExpr]) =
+  match arms
+    | [] -> (state, "", [])
+    | pat :: restPats ->
+      match bodies
+        | [] -> (state, "", [])
+        | body :: restBodies ->
+          match caseLbls
+            | [] -> (state, "", [])
+            | caseLbl :: restCaseLbls ->
+              nextLbl =
+                match restCaseLbls
+                  | [] -> failLbl
+                  | nxt :: _ -> nxt
+              armRes = emitOneArm state resultTy scrutTy scrutVal endLbl caseLbl nextLbl pat body
+              let (st2, tailInstrs, tailInc) = emitAllArms (marState armRes) resultTy scrutTy scrutVal endLbl failLbl restCaseLbls restPats restBodies
+              inc = MkPhiIncoming (marBodyVal armRes) (marBodyLbl armRes)
+              combinedInstrs = strJoin2 (marInstrs armRes) tailInstrs
+              (st2, combinedInstrs, listAppend [inc] tailInc)
+
+-- Allocate N fresh match_case labels.
+allocCaseLbls(state EmitState)(n Int) =
+  if n == 0
+    (state, [])
+  else
+    let (lbl, st1) = esFreshLabel "match_case_" state
+    let (st2, rest) = allocCaseLbls st1 (n - 1)
+    (st2, listAppend [lbl] rest)
+
+-- Render phi incoming list: "[ v0, %l0 ], [ v1, %l1 ], ..."
+renderIncoming(incoming List[PhiIncoming]) =
+  match incoming
+    | [] -> ""
+    | inc :: [] ->
+      match inc | MkPhiIncoming v l -> strConcat "[ " (strConcat v (strConcat ", %" (strConcat l " ]")))
+    | inc :: rest ->
+      match inc | MkPhiIncoming v l ->
+        strConcat "[ " (strConcat v (strConcat ", %" (strConcat l (strConcat " ], " (renderIncoming rest)))))
+
+-- Default (undef) fallback value for a given resultTy.
+undefFallback(resultTy Str) =
+  if resultTy == "void"
+    ""
+  else if resultTy == "ptr"
+    "null"
+  else if resultTy == "double"
+    "0.0"
+  else "0"
+
+emitMatch(state EmitState)(scrut TypedExpr)(pats List[TypedPattern])(bodies List[TypedExpr])(resultTy Str) =
+  MkEER state "" "0"
+
 -- ---- emitTypedExpr ---------------------------------------------------------
 -- Phase 2: consumes typed IR, dispatches on operand type for binops,
 -- pulls string literals from the state-held pool, and lowers bare TEVar
 -- references to nullary globals as `call <ty> @name()`.
+-- Phase 3: adds TECon / TEApp-with-TECon-head / TECons / TEList / TEMatch.
 
 emitTypedExpr(state EmitState)(te TypedExpr) =
   match te
@@ -677,9 +1093,28 @@ emitTypedExpr(state EmitState)(te TypedExpr) =
     | TEChar c _ -> MkEER state "" (intToStr (charToInt c))
     | TEStr s _ -> emitStringPtrGep state s
     | TEVar n _ -> MkEER state "" (strConcat "%" n)
-    | TECon _ _ -> MkEER state "" "0"
+    | TECon name _ -> MkEER state "" "0"
     | TENil _   -> MkEER state "" "null"
     | TEUnit _  -> MkEER state "" "void"
+    -- | TECons h t _ ->
+    --   hr = emitTypedExpr state h
+    --   tr = emitTypedExpr (eerState hr) t
+    --   hTy = llvmTypeOfTE h
+    --   tTy = llvmTypeOfTE t
+    --   hc = coerceValue (eerState tr) hTy "i64" (eerReg hr)
+    --   tc = coerceValue (eerState hc) tTy "ptr" (eerReg tr)
+    --   alloc = emitAllocNode (eerState tc) listConsTagStr (eerReg hc) (eerReg tc)
+    --   all =
+    --     strJoin2
+    --       (strJoin2 (eerInstrs hr) (eerInstrs tr))
+    --       (strJoin2 (strJoin2 (eerInstrs hc) (eerInstrs tc)) (eerInstrs alloc))
+    --   MkEER (eerState alloc) all (eerReg alloc)
+    -- | TEList items _ ->
+    --   emitTypedListLit state items
+    -- TEMatch disabled temporarily for HM bisection
+    -- | TEMatch scrut pats bodies _ ->
+    --   resultTy = llvmTypeOfTE te
+    --   emitMatch state scrut pats bodies resultTy
     | TEBinOp op l r _ ->
       lr = emitTypedExpr state l
       rr = emitTypedExpr (eerState lr) r
@@ -756,6 +1191,20 @@ emitTypedExpr(state EmitState)(te TypedExpr) =
         else strConcat prefix (strConcat "\n" callInstr)
       MkEER st2 all dst
     | _ -> MkEER state "" "0"
+
+-- Helper for TEList lowering: build a reverse cons chain from a list of
+-- TypedExprs. (Placed after emitTypedExpr since it recurses into it.)
+emitTypedListLit(state EmitState)(items List[TypedExpr]) =
+  match items
+    | [] -> MkEER state "" "null"
+    | x :: rest ->
+      tailRes = emitTypedListLit state rest
+      hr = emitTypedExpr (eerState tailRes) x
+      hTy = llvmTypeOfTE x
+      hc = coerceValue (eerState hr) hTy "i64" (eerReg hr)
+      alloc = emitAllocNode (eerState hc) listConsTagStr (eerReg hc) (eerReg tailRes)
+      all = strJoin2 (eerInstrs tailRes) (strJoin2 (strJoin2 (eerInstrs hr) (eerInstrs hc)) (eerInstrs alloc))
+      MkEER (eerState alloc) all (eerReg alloc)
 
 -- ---- emitExprGlobs ---------------------------------------------------------
 -- Walks the expression and accumulates every string-literal global declaration
@@ -975,13 +1424,13 @@ isEntryMain(sig TypedFnSig) =
           | _ -> false
       else false
 
-emitTypedFn(pool RBMap[Str][Int])(globs RBMap[Str][Int])(sig TypedFnSig)(body TypedExpr) =
+emitTypedFn(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(sig TypedFnSig)(body TypedExpr) =
   match sig
     | MkTypedFnSig name params retTy ->
       retType = emitLLVMType retTy
       paramStr = emitTypedParamsWithIdx params
       isMain = isEntryMain sig
-      initSt = emitStateWith pool globs
+      initSt = emitStateWithTags pool globs tags 1
       bodyRes = emitTypedExpr initSt body
       bodyInstrs = eerInstrs bodyRes
       retReg = eerReg bodyRes
@@ -1017,9 +1466,9 @@ emitTypedFn(pool RBMap[Str][Int])(globs RBMap[Str][Int])(sig TypedFnSig)(body Ty
         strConcat "define " (strConcat retType (strConcat " @" (strConcat name (strConcat "(" (strConcat paramStr (strConcat ") {\nentry:" (strConcat instrBlock (strConcat "\n  ret " (strConcat retType (strConcat " " (strConcat retReg "\n}")))))))))))
 
 -- Emit a TypedDecl.
-emitTypedDecl(pool RBMap[Str][Int])(globs RBMap[Str][Int])(d TypedDecl) =
+emitTypedDecl(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(d TypedDecl) =
   match d
-    | TDFn sig _ body -> emitTypedFn pool globs sig body
+    | TDFn sig _ body -> emitTypedFn pool globs tags sig body
     | TDLet name sch e ->
       ty = match sch | MkScheme _ b -> emitLLVMType b
       -- Try to evaluate the RHS as a constant.
@@ -1064,11 +1513,11 @@ emitDecl(d Decl)(strIdx Int) =
     | DFn name params retTy body ->
       retType = paramReturnType retTy
       paramStr = emitParams params
-      initSt = MkEmitState 0 strIdx Leaf Leaf
+      initSt = MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1
       res = emitExpr initSt body
       bodyInstrs = eerInstrs res
       retReg = eerReg res
-      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf) body
+      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1) body
       globSection =
         if strLen globs == 0
           ""
@@ -1083,10 +1532,10 @@ emitDecl(d Decl)(strIdx Int) =
     | DImport parts ->
       strConcat "; import " (joinWith "." parts)
     | DLet name body ->
-      initSt = MkEmitState 0 strIdx Leaf Leaf
+      initSt = MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1
       res = emitExpr initSt body
       reg = eerReg res
-      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf) body
+      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1) body
       globSection =
         if strLen globs == 0
           ""
@@ -1133,12 +1582,12 @@ emitModuleLlvm(m Module) = emitModule m
 -- Output shape matches F# emitModule:
 --   "; Generated by lllc (ll-lang LLVM backend)\n; Module: <name>\n\n"
 --   + string decls + body
-emitTypedDecls(pool RBMap[Str][Int])(globs RBMap[Str][Int])(ds List[TypedDecl]) =
+emitTypedDecls(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(ds List[TypedDecl]) =
   match ds
     | [] -> ""
     | d :: rest ->
-      first = emitTypedDecl pool globs d
-      remaining = emitTypedDecls pool globs rest
+      first = emitTypedDecl pool globs tags d
+      remaining = emitTypedDecls pool globs tags rest
       if strLen first == 0
         remaining
       else if strLen remaining == 0
@@ -1152,13 +1601,50 @@ emitTypedModule(tm TypedModule) =
   pool = buildStringPoolMap lits
   poolDecls = buildStringPoolDecls lits
   globs = collectNullaryGlobals decls
+  let (tags, _) = seedCtorsDecls Leaf 1 decls
   header = strConcat "; Generated by lllc (ll-lang LLVM backend)\n; Module: " pathStr
   stringBlock =
     if strLen poolDecls == 0
       ""
     else strConcat poolDecls "\n\n"
-  body = emitTypedDecls pool globs decls
+  body = emitTypedDecls pool globs tags decls
+  -- Prepend runtime block (ADT allocator + node_* declares).
+  strConcat llvmRuntimeBlock (strConcat "\n" (strConcat header (strConcat "\n\n" (strConcat stringBlock (strConcat body "\n")))))
+
+-- Render one module's body with shared ctor-tag table (no runtime block).
+emitTypedModuleBody(tags RBMap[Str][Int])(tm TypedModule) =
+  pathStr = joinWith "." (typedModPath tm)
+  decls = typedModDecls tm
+  lits = buildStringPoolLits decls
+  pool = buildStringPoolMap lits
+  poolDecls = buildStringPoolDecls lits
+  globs = collectNullaryGlobals decls
+  header = strConcat "; Module: " pathStr
+  stringBlock =
+    if strLen poolDecls == 0
+      ""
+    else strConcat poolDecls "\n\n"
+  body = emitTypedDecls pool globs tags decls
   strConcat header (strConcat "\n\n" (strConcat stringBlock (strConcat body "\n")))
+
+-- Walk a list of modules accumulating textual output.
+emitTypedProjectBodies(tags RBMap[Str][Int])(tms List[TypedModule]) =
+  match tms
+    | [] -> ""
+    | tm :: rest ->
+      first = emitTypedModuleBody tags tm
+      remaining = emitTypedProjectBodies tags rest
+      if strLen remaining == 0
+        first
+      else strConcat first (strConcat "\n" remaining)
+
+-- Project-scope emit: seed ctor tags across all modules first, then emit
+-- each module. Runtime block is emitted once at the top.
+emitTypedProject(tms List[TypedModule]) =
+  let (tags, _) = seedCtorsModules tms
+  runtimeHeader = strConcat llvmRuntimeBlock "\n"
+  moduleBodies = emitTypedProjectBodies tags tms
+  strConcat runtimeHeader moduleBodies
 
 -- ---- Test helpers ----------------------------------------------------------
 
