@@ -63,67 +63,88 @@ strJoin2(a Str)(b Str) =
 -- accumulates the emitted definitions so the module driver can append them
 -- after the regular decls. Threading through the state avoids global
 -- mutable refs (.lll has none) while keeping the counter collision-free.
-EmitState = MkEmitState Int Int (RBMap[Str][Int]) (RBMap[Str][Int]) Int (RBMap[Str][Int]) Int Int (List[Str])
+--
+-- Phase 4.1 shape: Phase 4 fields + varEnv.
+-- varEnv maps ll-lang variable name -> SSA register that holds its value
+-- in the current LLVM scope. Used by emitLamLift to resolve free vars at
+-- the use-site env struct population, and by the lambda body prelude to
+-- rebind captures loaded from the env pointer. TEVar consults varEnv first
+-- before falling back to the `%<name>` or nullary-global conventions.
+EmitState = MkEmitState Int Int (RBMap[Str][Int]) (RBMap[Str][Int]) Int (RBMap[Str][Int]) Int Int (List[Str]) (RBMap[Str][Str])
   -- tempCtr, strIdx, strPool, nullaryGlobals, labelCtr, ctorTags,
-  -- nextCtorTag, lambdaCtr, liftedLambdas
+  -- nextCtorTag, lambdaCtr, liftedLambdas, varEnv
 
 esTempCtr(st EmitState) =
   match st
-    | MkEmitState c s p g l t n lc ll -> c
+    | MkEmitState c s p g l t n lc ll ve -> c
 
 esStrIdx(st EmitState) =
   match st
-    | MkEmitState c s p g l t n lc ll -> s
+    | MkEmitState c s p g l t n lc ll ve -> s
 
 esStrPool(st EmitState) =
   match st
-    | MkEmitState c s p g l t n lc ll -> p
+    | MkEmitState c s p g l t n lc ll ve -> p
 
 esNullaryGlobals(st EmitState) =
   match st
-    | MkEmitState c s p g l t n lc ll -> g
+    | MkEmitState c s p g l t n lc ll ve -> g
 
 esLabelCtr(st EmitState) =
   match st
-    | MkEmitState c s p g l t n lc ll -> l
+    | MkEmitState c s p g l t n lc ll ve -> l
 
 esCtorTags(st EmitState) =
   match st
-    | MkEmitState c s p g l t n lc ll -> t
+    | MkEmitState c s p g l t n lc ll ve -> t
 
 esNextCtorTag(st EmitState) =
   match st
-    | MkEmitState c s p g l t n lc ll -> n
+    | MkEmitState c s p g l t n lc ll ve -> n
 
 esLambdaCtr(st EmitState) =
   match st
-    | MkEmitState c s p g l t n lc ll -> lc
+    | MkEmitState c s p g l t n lc ll ve -> lc
 
 esLiftedLambdas(st EmitState) =
   match st
-    | MkEmitState c s p g l t n lc ll -> ll
+    | MkEmitState c s p g l t n lc ll ve -> ll
+
+esVarEnv(st EmitState) =
+  match st
+    | MkEmitState c s p g l t n lc ll ve -> ve
+
+-- Bind `name -> ssaReg` in varEnv. Overwrites existing binding.
+esSetVar(st EmitState)(name Str)(ssaReg Str) =
+  match st
+    | MkEmitState c s p g l t n lc ll ve ->
+      MkEmitState c s p g l t n lc ll (mapInsert strCmp name ssaReg ve)
+
+-- Look up `name` in varEnv. Returns Maybe[Str].
+esGetVar(st EmitState)(name Str) =
+  mapLookup strCmp name (esVarEnv st)
 
 -- Allocate a fresh SSA register: bumps tempCtr and returns (regName, newState).
 esFresh(st EmitState) =
   match st
-    | MkEmitState c s p g l t n lc ll ->
+    | MkEmitState c s p g l t n lc ll ve ->
       let reg = strConcat "%t" (intToStr (c + 1))
-      (reg, MkEmitState (c + 1) s p g l t n lc ll)
+      (reg, MkEmitState (c + 1) s p g l t n lc ll ve)
 
 -- Allocate the next string-literal index: returns (idx, newState) where idx
 -- is the current index before allocation.
 esNextStr(st EmitState) =
   match st
-    | MkEmitState c s p g l t n lc ll -> (s, MkEmitState c (s + 1) p g l t n lc ll)
+    | MkEmitState c s p g l t n lc ll ve -> (s, MkEmitState c (s + 1) p g l t n lc ll ve)
 
 -- Allocate a fresh block label. Returns (labelName, newState). The labelName
 -- is always the bare identifier (no leading `%`); callers prepend `%` when
 -- emitting a `br label %X` instruction or a plain `X:` for the label itself.
 esFreshLabel(prefix Str)(st EmitState) =
   match st
-    | MkEmitState c s p g l t n lc ll ->
+    | MkEmitState c s p g l t n lc ll ve ->
       let lbl = strConcat prefix (intToStr l)
-      (lbl, MkEmitState c s p g (l + 1) t n lc ll)
+      (lbl, MkEmitState c s p g (l + 1) t n lc ll ve)
 
 -- Allocate three labels in one go: (case, body, next) — the shape used by
 -- match-arm lowering. Returns ((caseLbl, bodyLbl, nextLbl), newState).
@@ -136,37 +157,38 @@ esFreshLabelTriple(st EmitState) =
 -- Replace the pool / globals sections (used by the pre-pass).
 esSetPool(st EmitState)(pool RBMap[Str][Int]) =
   match st
-    | MkEmitState c s _ g l t n lc ll -> MkEmitState c s pool g l t n lc ll
+    | MkEmitState c s _ g l t n lc ll ve -> MkEmitState c s pool g l t n lc ll ve
 
 esSetGlobals(st EmitState)(globs RBMap[Str][Int]) =
   match st
-    | MkEmitState c s p _ l t n lc ll -> MkEmitState c s p globs l t n lc ll
+    | MkEmitState c s p _ l t n lc ll ve -> MkEmitState c s p globs l t n lc ll ve
 
 esSetCtorTags(st EmitState)(tags RBMap[Str][Int])(nextN Int) =
   match st
-    | MkEmitState c s p g l _ _ lc ll -> MkEmitState c s p g l tags nextN lc ll
+    | MkEmitState c s p g l _ _ lc ll ve -> MkEmitState c s p g l tags nextN lc ll ve
 
 -- Phase 4: allocate a fresh `@__lam_N` name. Monotonic within the state —
 -- never reset, so cross-decl emission in a module cannot collide.
 esFreshLambdaName(st EmitState) =
   match st
-    | MkEmitState c s p g l t n lc ll ->
+    | MkEmitState c s p g l t n lc ll ve ->
       let name = strConcat "__lam_" (intToStr lc)
-      (name, MkEmitState c s p g l t n (lc + 1) ll)
+      (name, MkEmitState c s p g l t n (lc + 1) ll ve)
 
 -- Phase 4: cons a lifted lambda definition onto the side-buffer. Callers
 -- pass the whole `define <ty> @__lam_N(...) { ... }` text.
 esAddLiftedLambda(st EmitState)(def Str) =
   match st
-    | MkEmitState c s p g l t n lc ll -> MkEmitState c s p g l t n lc (listAppend ll [def])
+    | MkEmitState c s p g l t n lc ll ve -> MkEmitState c s p g l t n lc (listAppend ll [def]) ve
 
 -- Reset just the temp/label counters (used when re-entering a function body
 -- that shares the pool / globals / ctor tags / lambda side-buffer with the
 -- enclosing module walk). tempCtr and labelCtr reset to 0 per-function so
--- fresh SSA names start at `%t1` inside each define.
+-- fresh SSA names start at `%t1` inside each define. varEnv resets to Leaf
+-- so per-function bindings don't leak across decls.
 esResetForFunc(st EmitState) =
   match st
-    | MkEmitState _ s p g _ t n lc ll -> MkEmitState 0 s p g 0 t n lc ll
+    | MkEmitState _ s p g _ t n lc ll _ -> MkEmitState 0 s p g 0 t n lc ll Leaf
 
 -- Look up a constructor's tag; returns -99 (sentinel) for unknown names
 -- so mis-use surfaces quickly in generated IR rather than silently matching 0.
@@ -176,20 +198,20 @@ esCtorTag(name Str)(st EmitState) =
     | None -> 0 - 99
 
 -- Build a fresh initial state (all counters 0, empty maps).
-emitStateInit = MkEmitState 0 0 Leaf Leaf 0 Leaf 1 0 []
+emitStateInit = MkEmitState 0 0 Leaf Leaf 0 Leaf 1 0 [] Leaf
 
 emitStateWith(pool RBMap[Str][Int])(globs RBMap[Str][Int]) =
-  MkEmitState 0 0 pool globs 0 Leaf 1 0 []
+  MkEmitState 0 0 pool globs 0 Leaf 1 0 [] Leaf
 
 emitStateWithTags(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(nextN Int) =
-  MkEmitState 0 0 pool globs 0 tags nextN 0 []
+  MkEmitState 0 0 pool globs 0 tags nextN 0 [] Leaf
 
 -- Phase 4: state factory that preserves lambdaCtr + liftedLambdas across
 -- a per-decl reset. Temp/label counters start at 0 for the new function
 -- body, but the lambda side-buffer persists so top-level definitions
 -- accumulate across every decl in the module.
 emitStateForFunc(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(nextN Int)(lambdaCtr Int)(lifted List[Str]) =
-  MkEmitState 0 0 pool globs 0 tags nextN lambdaCtr lifted
+  MkEmitState 0 0 pool globs 0 tags nextN lambdaCtr lifted Leaf
 
 -- Predicate: is `name` a nullary global?
 isNullaryGlobal(name Str)(st EmitState) =
@@ -1369,6 +1391,26 @@ emitTypedExpr(state EmitState)(te TypedExpr) =
       MkEER st2 all dst
     | TELam paramName paramTy body lamTy ->
       emitLamLift state paramName paramTy body lamTy
+    -- Phase 5: TETuple is binary (fst, snd) in the ll-lang Typed IR. Lower
+    -- as a 2-cell cons chain with LIST_CONS_TAG — same ABI as list spine
+    -- cells and as constructor multi-arg tail chains:
+    --   head: { tag=-1, payload=fst_i64, tail=tailCell }
+    --   tail: { tag=-1, payload=snd_i64, tail=null }
+    -- Destructure via node_payload_safe / node_tail_safe exactly like a list.
+    | TETuple fst snd _ ->
+      fr = emitTypedExpr state fst
+      sr = emitTypedExpr (eerState fr) snd
+      fTy = llvmTypeOfTE fst
+      sTy = llvmTypeOfTE snd
+      fc = coerceValue (eerState sr) fTy "i64" (eerReg fr)
+      sc = coerceValue (eerState fc) sTy "i64" (eerReg sr)
+      tailCell = emitAllocNode (eerState sc) listConsTagStr (eerReg sc) "null"
+      headCell = emitAllocNode (eerState tailCell) listConsTagStr (eerReg fc) (eerReg tailCell)
+      allFs = strJoin2 (eerInstrs fr) (eerInstrs sr)
+      allCs = strJoin2 (eerInstrs fc) (eerInstrs sc)
+      allNodes = strJoin2 (eerInstrs tailCell) (eerInstrs headCell)
+      all = strJoin2 (strJoin2 allFs allCs) allNodes
+      MkEER (eerState headCell) all (eerReg headCell)
     | _ -> MkEER state "" "0"
 
 -- Phase 4: Is this TypedExpr's type a function type? Used by wrapIfFnRef to
@@ -1404,14 +1446,90 @@ wrapIfFnRef(state EmitState)(argExpr TypedExpr)(argVal Str) =
       (tmp, st2, instr)
     | _ -> (argVal, state, "")
 
--- Phase 4: Lift a TELam to a top-level `@__lam_N` and return a closure value.
--- Captureless case: emit `@__lam_N(paramTy %arg0)`, return closure with null env.
--- Captureful case (scope-cut): also emit `@__lam_N(ptr %__env, paramTy %arg0)`
---   but env pointers are not populated — captures stay unresolved at runtime.
---   Marked as a follow-up; current target examples (36-48) don't use captures.
+-- Phase 4.1: helpers for captureful closure env building.
+
+-- Given a list of capture names (in index order), resolve each to its SSA
+-- value in the *outer* varEnv. Falls back to `%<name>` for names not in the
+-- varEnv — matches the existing convention used by TDFn params / alias binds.
+outerCaptureReg(state EmitState)(name Str) =
+  match esGetVar state name
+    | Some reg -> reg
+    | None     -> strConcat "%" name
+
+-- Emit the env-store sequence at the use site. For a capture list of length
+-- N, allocates `N * 8` bytes via @malloc, then stores each capture (coerced
+-- to i64) at offset `i * 8`. Returns (instrs, envReg, state').
+--
+-- Passing captureList :: List[Str] only — we assume each capture has i64
+-- ABI at the env layer (matches F# port: all captures stored as i64).
+-- Any non-i64 captures are cast at load time inside the lambda body.
+emitEnvStores(state EmitState)(captures List[Str]) =
+  match captures
+    | [] -> ("", "null", state)
+    | _ ->
+      nCaps = listLen captures
+      envBytes = nCaps * 8
+      let (envTmp, st1) = esFresh state
+      mallocInstr = strConcat "  " (strConcat envTmp (strConcat " = call ptr @malloc(i64 " (strConcat (intToStr envBytes) ")")))
+      let (storeInstrs, st2) = emitEnvStoreEach st1 envTmp 0 captures
+      combined =
+        if strLen storeInstrs == 0
+          mallocInstr
+        else strConcat mallocInstr (strConcat "\n" storeInstrs)
+      (combined, envTmp, st2)
+
+-- Walk captures, emitting `getelementptr` + `store i64` for each index.
+-- Returns (instrs, state').
+emitEnvStoreEach(state EmitState)(envTmp Str)(idx Int)(captures List[Str]) =
+  match captures
+    | [] -> ("", state)
+    | name :: rest ->
+      srcReg = outerCaptureReg state name
+      let (slotPtr, st1) = esFresh state
+      gep = strConcat "  " (strConcat slotPtr (strConcat " = getelementptr inbounds i64, ptr " (strConcat envTmp (strConcat ", i64 " (intToStr idx)))))
+      storeInstr = strConcat "  store i64 " (strConcat srcReg (strConcat ", ptr " slotPtr))
+      one = strConcat gep (strConcat "\n" storeInstr)
+      let (restInstrs, st2) = emitEnvStoreEach st1 envTmp (idx + 1) rest
+      combined =
+        if strLen restInstrs == 0
+          one
+        else strConcat one (strConcat "\n" restInstrs)
+      (combined, st2)
+
+-- Emit the env-load prelude inside the lambda body. For each capture at
+-- index `i`, emit:
+--   %__cap_slot_i = getelementptr inbounds i64, ptr %__env, i64 i
+--   %__cap_i      = load i64, ptr %__cap_slot_i
+--   %<name>       = add i64 %__cap_i, 0     -- alias for TEVar lookup
+-- Also populates the sub-state's varEnv so TEVar consults the capture.
+-- Returns (instrs, state').
+emitEnvLoadPrelude(state EmitState)(idx Int)(captures List[Str]) =
+  match captures
+    | [] -> ("", state)
+    | name :: rest ->
+      let (slotPtr, st1) = esFresh state
+      gep = strConcat "  " (strConcat slotPtr (strConcat " = getelementptr inbounds i64, ptr %__env, i64 " (intToStr idx)))
+      let (loadReg, st2) = esFresh st1
+      loadInstr = strConcat "  " (strConcat loadReg (strConcat " = load i64, ptr " slotPtr))
+      aliasInstr = strConcat "  %" (strConcat name (strConcat " = add i64 " (strConcat loadReg ", 0")))
+      -- Bind the capture in varEnv so TEVar uses `%<name>` (via the alias).
+      st3 = esSetVar st2 name (strConcat "%" name)
+      one = strConcat gep (strConcat "\n" (strConcat loadInstr (strConcat "\n" aliasInstr)))
+      let (restInstrs, st4) = emitEnvLoadPrelude st3 (idx + 1) rest
+      combined =
+        if strLen restInstrs == 0
+          one
+        else strConcat one (strConcat "\n" restInstrs)
+      (combined, st4)
+
+-- Phase 4 / 4.1: Lift a TELam to a top-level `@__lam_N` and return a closure.
+-- Captureless: emit `@__lam_N(paramTy %arg0_abi)`, return closure with null env.
+-- Captureful:  emit `@__lam_N(ptr %__env, paramTy %arg0_abi)` whose prologue
+--              loads each capture from the env slot and rebinds it inside
+--              the lambda body. The use-site `@malloc`s the env buffer and
+--              stores each capture's i64-coerced value at the matching slot.
 emitLamLift(state EmitState)(paramName Str)(paramTy TypeExpr)(body TypedExpr)(lamTy TypeExpr) =
   let (lamName, st1) = esFreshLambdaName state
-  -- Compute free vars (not yet used for capture env — see scope-cut note).
   paramTyStr = emitLLVMType paramTy
   bodyTyStr = emitLLVMType (typedExprType body)
   -- ABI-uniform: scalar param becomes i64, ptr stays ptr, ret same.
@@ -1425,18 +1543,30 @@ emitLamLift(state EmitState)(paramName Str)(paramTy TypeExpr)(body TypedExpr)(la
     else if bodyTyStr == "ptr"
       "ptr"
     else "i64"
-  argsSig = strConcat paramAbi (strConcat " %arg0_abi" "")
+  -- Compute free vars of the lambda body, excluding the param name.
+  captures = freeVars [paramName] body
+  hasCaptures =
+    match captures
+      | [] -> false
+      | _ -> true
+  -- Function signature: prepend `ptr %__env` when captureful.
+  argsSig =
+    if hasCaptures
+      strConcat "ptr %__env, " (strConcat paramAbi " %arg0_abi")
+    else strConcat paramAbi " %arg0_abi"
   -- Fresh sub-state for lambda body emission. Temp/label counters reset to 0
-  -- inside the lambda's own SSA namespace (the name is unique via lamName).
+  -- inside the lambda's own SSA namespace.
   subSt = esResetForFunc st1
+  -- Emit env-load prelude FIRST (so captures are visible to the param bind
+  -- and the body). Empty string when no captures.
+  let (capPrelude, subSt0) = emitEnvLoadPrelude subSt 0 captures
   -- Entry prelude: coerce %arg0_abi back to its natural type, bound as %<name>.
   preludePair =
     if paramAbi == paramTyStr
       -- No coercion needed. Just alias.
-      (strConcat "  %" (strConcat paramName (strConcat " = add i64 %arg0_abi, 0" "")), subSt)
+      (strConcat "  %" (strConcat paramName (strConcat " = add i64 %arg0_abi, 0" "")), subSt0)
     else
-      -- Coerce paramAbi -> paramTyStr and bind as %<paramName>.
-      coRes = coerceValue subSt paramAbi paramTyStr "%arg0_abi"
+      coRes = coerceValue subSt0 paramAbi paramTyStr "%arg0_abi"
       bindInstr =
         if paramTyStr == "ptr"
           strConcat "  %" (strConcat paramName (strConcat " = getelementptr i8, ptr " (strConcat (eerReg coRes) ", i64 0")))
@@ -1446,12 +1576,18 @@ emitLamLift(state EmitState)(paramName Str)(paramTy TypeExpr)(body TypedExpr)(la
           bindInstr
         else strConcat (eerInstrs coRes) (strConcat "\n" bindInstr)
       (full, eerState coRes)
-  preludeInstrs = match preludePair | (p, _) -> p
-  subSt2 = match preludePair | (_, s) -> s
+  paramBindInstrs = match preludePair | (p, _) -> p
+  subSt1b = match preludePair | (_, s) -> s
+  -- Combine capture prelude + param bind.
+  preludeInstrs =
+    if strLen capPrelude == 0
+      paramBindInstrs
+    else strConcat capPrelude (strConcat "\n" paramBindInstrs)
+  -- Also bind the param in varEnv for TEVar resolution inside body.
+  subSt2 = esSetVar subSt1b paramName (strConcat "%" paramName)
   bodyRes = emitTypedExpr subSt2 body
   bodyInstrs = eerInstrs bodyRes
   bodyReg = eerReg bodyRes
-  -- Coerce body result to retAbi for the uniform signature.
   retTriple =
     if retAbi == bodyTyStr
       ("", bodyReg, eerState bodyRes)
@@ -1474,20 +1610,70 @@ emitLamLift(state EmitState)(paramName Str)(paramTy TypeExpr)(body TypedExpr)(la
       "  ret void"
     else strConcat "  ret " (strConcat retAbi (strConcat " " retReg))
   defText = strConcat "define " (strConcat retAbi (strConcat " @" (strConcat lamName (strConcat "(" (strConcat argsSig (strConcat ") {\nentry:\n" (strConcat fullInstrs (strConcat "\n" (strConcat retStmt "\n}")))))))))
-  -- Push the emitted define onto the lifted-lambdas buffer. We thread the
-  -- lambda-counter + liftedLambdas forward from subSt3 (post-body), then
-  -- also preserve any string-pool additions that may have happened inside
-  -- the body. Since we keep the pool/globals read-only during emission,
-  -- just carry lambdaCtr/liftedLambdas back onto the OUTER state.
   outerLamCtr = esLambdaCtr subSt3
   outerLifted = listAppend (esLiftedLambdas subSt3) [defText]
   stLifted =
     match st1
-      | MkEmitState c s p g l t n _ _ -> MkEmitState c s p g l t n outerLamCtr outerLifted
-  -- At the use site: build a closure `{@__lam_N, null}` via @make_closure.
-  let (cloTmp, stUse) = esFresh stLifted
-  callInstr = strConcat "  " (strConcat cloTmp (strConcat " = call ptr @make_closure(ptr @" (strConcat lamName ", ptr null)")))
-  MkEER stUse callInstr cloTmp
+      | MkEmitState c s p g l t n _ _ ve -> MkEmitState c s p g l t n outerLamCtr outerLifted ve
+  -- Use site: if captureful, allocate + populate the env buffer, then build
+  -- the closure referencing both the fn and the env. If captureless, pass
+  -- `null` for env. `@make_closure` returns a fat pointer `{fn, env}`.
+  let (envInstrs, envReg, stEnv) = emitEnvStores stLifted captures
+  let (cloTmp, stUse) = esFresh stEnv
+  callInstr = strConcat "  " (strConcat cloTmp (strConcat " = call ptr @make_closure(ptr @" (strConcat lamName (strConcat ", ptr " (strConcat envReg ")")))))
+  allInstrs =
+    if strLen envInstrs == 0
+      callInstr
+    else strConcat envInstrs (strConcat "\n" callInstr)
+  MkEER stUse allInstrs cloTmp
+
+-- Phase 4.1: env-branching call for a closure-typed SSA value. Given a fat
+-- pointer `%closure` (from @make_closure), extract (fn, env), branch on
+-- `env != null`, and emit either the bare-fn call or the env-call. Produces
+-- a phi-node combining both result values.
+--
+--   %fn      = load ptr from closure[0]
+--   %env     = load ptr from closure[1]
+--   %nonnull = icmp ne ptr %env, null
+--   br i1 %nonnull, label %env_call, label %bare_call
+-- bare_call:
+--   %r0 = call <retty> %fn(<args>)
+--   br label %call_end
+-- env_call:
+--   %r1 = call <retty> %fn(ptr %env, <args>)
+--   br label %call_end
+-- call_end:
+--   %result = phi <retty> [%r0, %bare_call], [%r1, %env_call]
+--
+-- `argSig`/`argExprList` are rendered as `i64 %arg0` etc. by caller.
+-- `retTy` is the LLVM type of the expected return value ("i64"/"ptr"/etc.).
+emitClosureCall(state EmitState)(closureReg Str)(retTy Str)(argSig Str) =
+  let (fnReg, st1)      = esFresh state
+  let (envReg, st2)     = esFresh st1
+  let (nonnull, st3)    = esFresh st2
+  let (envSlot, st3b)   = esFresh st3
+  let (bareLbl, st4)    = esFreshLabel "bare_call_" st3b
+  let (envLbl, st5)     = esFreshLabel "env_call_" st4
+  let (endLbl, st6)     = esFreshLabel "call_end_" st5
+  let (bareRes, st7)    = esFresh st6
+  let (envRes, st8)     = esFresh st7
+  let (phiRes, st9)     = esFresh st8
+  loadFn  = strConcat "  " (strConcat fnReg (strConcat " = load ptr, ptr " closureReg))
+  gepEnv  = strConcat "  " (strConcat envSlot (strConcat " = getelementptr inbounds i8, ptr " (strConcat closureReg ", i64 8")))
+  loadEnv = strConcat "  " (strConcat envReg (strConcat " = load ptr, ptr " envSlot))
+  cmp     = strConcat "  " (strConcat nonnull (strConcat " = icmp ne ptr " (strConcat envReg ", null")))
+  brInstr = strConcat "  br i1 " (strConcat nonnull (strConcat ", label %" (strConcat envLbl (strConcat ", label %" bareLbl))))
+  bareCall = strConcat "  " (strConcat bareRes (strConcat " = call " (strConcat retTy (strConcat " " (strConcat fnReg (strConcat "(" (strConcat argSig ")")))))))
+  bareBr = strConcat "  br label %" endLbl
+  bareBlk = strConcat bareLbl (strConcat ":\n" (strConcat bareCall (strConcat "\n" bareBr)))
+  envCall = strConcat "  " (strConcat envRes (strConcat " = call " (strConcat retTy (strConcat " " (strConcat fnReg (strConcat "(ptr " (strConcat envReg (strConcat ", " (strConcat argSig ")")))))))))
+  envBr = strConcat "  br label %" endLbl
+  envBlk  = strConcat envLbl (strConcat ":\n" (strConcat envCall (strConcat "\n" envBr)))
+  phiInstr = strConcat "  " (strConcat phiRes (strConcat " = phi " (strConcat retTy (strConcat " [" (strConcat bareRes (strConcat ", %" (strConcat bareLbl (strConcat "], [" (strConcat envRes (strConcat ", %" (strConcat envLbl "]")))))))))))
+  phiStr  = strConcat endLbl (strConcat ":\n" phiInstr)
+  parts = [loadFn; gepEnv; loadEnv; cmp; brInstr; bareBlk; envBlk; phiStr]
+  all = joinWith "\n" parts
+  MkEER st9 all phiRes
 
 -- Helper for TEList lowering: build a reverse cons chain from a list of
 -- TypedExprs. (Placed after emitTypedExpr since it recurses into it.)
@@ -1833,11 +2019,11 @@ emitDecl(d Decl)(strIdx Int) =
     | DFn name params retTy body ->
       retType = paramReturnType retTy
       paramStr = emitParams params
-      initSt = MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 []
+      initSt = MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 [] Leaf
       res = emitExpr initSt body
       bodyInstrs = eerInstrs res
       retReg = eerReg res
-      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 []) body
+      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 [] Leaf) body
       globSection =
         if strLen globs == 0
           ""
@@ -1852,10 +2038,10 @@ emitDecl(d Decl)(strIdx Int) =
     | DImport parts ->
       strConcat "; import " (joinWith "." parts)
     | DLet name body ->
-      initSt = MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 []
+      initSt = MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 [] Leaf
       res = emitExpr initSt body
       reg = eerReg res
-      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 []) body
+      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 [] Leaf) body
       globSection =
         if strLen globs == 0
           ""
@@ -2002,6 +2188,163 @@ emitTypedProject(tms List[TypedModule]) =
   moduleBodies = emitTypedProjectBodies tags tms
   strConcat runtimeHeader moduleBodies
 
+-- Alias: project-scope ctor tag seed, exposed under the name the plan refers
+-- to. Calls the already-existing seedCtorsModules; returns just the tag map
+-- (callers rarely need the next-tag counter outside the seed).
+seedCtorTagsFromModules(tms List[TypedModule]) =
+  let (tags, _) = seedCtorsModules tms
+  tags
+
+-- ---- Phase 5: multi-module decl dedup ----------------------------------
+-- When multiple typed modules declare the same external ABI (e.g. identical
+-- `declare` lines from overlapping FFI imports) or re-export the same type
+-- decl, we emit each once. Dedup is by TDExternal name + TDType name only.
+-- TDFn / TDLet / TDOpaque don't collide because each module defines its own
+-- namespace. Import decls are elided (no codegen output).
+
+declIdentKey(d TypedDecl) =
+  match d
+    | TDFn sig _ _ ->
+      match sig | MkTypedFnSig n _ _ -> strConcat "fn:" n
+    | TDLet n _ _ -> strConcat "let:" n
+    | TDExternal sig _ ->
+      match sig | MkTypedFnSig n _ _ -> strConcat "ext:" n
+    | TDOpaque n -> strConcat "opaque:" n
+    | TDType n _ _ -> strConcat "type:" n
+    | TDTag n -> strConcat "tag:" n
+    | TDUnit n -> strConcat "unit:" n
+    | TDImport _ -> "import:"
+
+-- Which decl kinds collide across modules? Only externals and types — fn/let
+-- live in per-module namespaces (differentiated by module path in the
+-- rewriteNonEntryMain step below).
+declKindCollides(d TypedDecl) =
+  match d
+    | TDExternal _ _ -> true
+    | TDType _ _ _  -> true
+    | TDOpaque _    -> true
+    | _             -> false
+
+-- Filter a list of decls, dropping any duplicate TDExternal / TDType entries
+-- already present in `seen`. Returns (filteredDecls, updatedSeen).
+dedupeDeclList(seen List[Str])(decls List[TypedDecl]) =
+  match decls
+    | [] -> ([], seen)
+    | d :: rest ->
+      key = declIdentKey d
+      isDup =
+        if declKindCollides d
+          fvContains key seen
+        else false
+      if isDup
+        dedupeDeclList seen rest
+      else
+        seen2 =
+          if declKindCollides d
+            fvInsert key seen
+          else seen
+        let (tailDecls, seen3) = dedupeDeclList seen2 rest
+        (d :: tailDecls, seen3)
+
+-- Walk modules, deduping across-module collisions. Preserves per-module
+-- decl order; drops repeats on the 2nd+ module. Returns the transformed
+-- list of typed modules.
+dedupeModuleDecls(tms List[TypedModule]) =
+  dedupeModulesFrom [] tms
+
+dedupeModulesFrom(seen List[Str])(tms List[TypedModule]) =
+  match tms
+    | [] -> []
+    | tm :: rest ->
+      path = typedModPath tm
+      env  = typedModEnv tm
+      let (deduped, seen2) = dedupeDeclList seen (typedModDecls tm)
+      MkTypedModule path deduped env :: dedupeModulesFrom seen2 rest
+
+-- ---- Phase 5: rewrite `main` in non-entry modules ----------------------
+-- When multiple .lll files each declare `main`, we keep the entry module's
+-- `main` as-is (the driver picks the single entry explicitly) and rename
+-- the others to `__ll_main_<suffix>`. The suffix is derived from the module
+-- path: e.g. module `Std.Test` becomes `@__ll_main_Std_Test`. This keeps
+-- the symbol resolvable in case it's referenced from elsewhere via the
+-- module-path convention; the driver picks a single top-level `@main`.
+
+pathToSuffix(path List[Str]) =
+  match path
+    | [] -> "anon"
+    | _  -> joinWith "_" path
+
+rewriteFnNameInSig(sig TypedFnSig)(newName Str) =
+  match sig
+    | MkTypedFnSig _ params retTy -> MkTypedFnSig newName params retTy
+
+rewriteMainInDecl(suffix Str)(d TypedDecl) =
+  match d
+    | TDFn sig sch body ->
+      match sig
+        | MkTypedFnSig "main" params _ ->
+          -- Only rewrite zero-arg `main` (entry-point shape). Preserve
+          -- multi-arg user fns named `main` (non-entry) as-is.
+          match params
+            | [] ->
+              newName = strConcat "__ll_main_" suffix
+              TDFn (rewriteFnNameInSig sig newName) sch body
+            | _ -> d
+    | _ -> d
+
+rewriteMainInDecls(suffix Str)(ds List[TypedDecl]) =
+  listMap (rewriteMainInDecl suffix) ds
+
+-- Rewrite `main` in every module EXCEPT the entry module (matched by path).
+-- `entryPath` is the path list (e.g. ["Main"]) of the module whose main()
+-- should stay. All others get `main` renamed with their path-suffixed name.
+rewriteNonEntryMain(entryPath List[Str])(tms List[TypedModule]) =
+  match tms
+    | [] -> []
+    | tm :: rest ->
+      path = typedModPath tm
+      decls = typedModDecls tm
+      env = typedModEnv tm
+      newDecls =
+        if pathEquals path entryPath
+          decls
+        else rewriteMainInDecls (pathToSuffix path) decls
+      MkTypedModule path newDecls env :: rewriteNonEntryMain entryPath rest
+
+-- Shallow equality of path segments.
+pathEquals(a List[Str])(b List[Str]) =
+  match a
+    | [] ->
+      match b | [] -> true | _ -> false
+    | x :: restA ->
+      match b
+        | [] -> false
+        | y :: restB ->
+          if x == y
+            pathEquals restA restB
+          else false
+
+-- ---- Phase 5: top-level multi-file entry -------------------------------
+-- Full project pipeline:
+--   1. Seed ctor tags project-scope (all modules share the same tag table).
+--   2. Dedupe cross-module declare/type decls.
+--   3. Rewrite `main` in non-entry modules to `@__ll_main_<suffix>`.
+--   4. Emit the runtime block + each module's bodies.
+--
+-- `entryPath` selects which module's `main` stays as `@main`. Pass `[]` to
+-- disable main-rewriting entirely (every module's `main` flows through —
+-- caller's responsibility to avoid duplicate-symbol errors at link time).
+emitProjectModules(entryPath List[Str])(tms List[TypedModule]) =
+  deduped = dedupeModuleDecls tms
+  rewritten =
+    match entryPath
+      | [] -> deduped
+      | _  -> rewriteNonEntryMain entryPath deduped
+  tags = seedCtorTagsFromModules rewritten
+  runtimeHeader = strConcat llvmRuntimeBlock "\n"
+  moduleBodies = emitTypedProjectBodies tags rewritten
+  strConcat runtimeHeader moduleBodies
+
 -- ---- Test helpers ----------------------------------------------------------
 
 checkContains(label Str)(got Str)(needle Str) =
@@ -2021,5 +2364,39 @@ phase4FreeVarsSelfCheck =
   match fvs
     | "y" :: [] -> "OK freeVars \\x. x+y = {y}"
     | _ -> "FAIL freeVars: expected {y}"
+
+-- Phase 4.1 self-check: captureful emitLamLift emits both the @malloc for the
+-- env struct and the `call ptr @make_closure(...)` with a non-null env.
+phase41CaptureSelfCheck =
+  body = TEBinOp "+" (TEVar "x" (TyName "Int")) (TEVar "y" (TyName "Int")) (TyName "Int")
+  lam = TELam "x" (TyName "Int") body (TyFn (TyName "Int") (TyName "Int"))
+  -- Seed outer varEnv so `y` resolves to a real SSA register (%y_outer).
+  st0 = esSetVar emitStateInit "y" "%y_outer"
+  res = emitTypedExpr st0 lam
+  instrs = eerInstrs res
+  hasMalloc = strContains "@malloc(i64" instrs
+  hasMakeClosure = strContains "@make_closure" instrs
+  hasEnvStore = strContains "store i64 %y_outer" instrs
+  if hasMalloc
+    if hasMakeClosure
+      if hasEnvStore
+        "OK captureful closure emits malloc+make_closure+store"
+      else "FAIL missing env store"
+    else "FAIL missing make_closure"
+  else "FAIL missing malloc"
+
+-- Phase 5 self-check: TETuple lowers to two __ll_alloc calls (head + tail
+-- cons cells) with LIST_CONS_TAG (-1).
+phase5TupleSelfCheck =
+  tup = TETuple (TEInt 1 (TyName "Int")) (TEInt 2 (TyName "Int")) (TyApp (TyName "Tuple") (TyName "Int"))
+  res = emitTypedExpr emitStateInit tup
+  instrs = eerInstrs res
+  hasAlloc = strContains "__ll_alloc(" instrs
+  hasConsTag = strContains "i64 -1" instrs
+  if hasAlloc
+    if hasConsTag
+      "OK TETuple emits cons-tag __ll_alloc calls"
+    else "FAIL missing cons tag"
+  else "FAIL missing __ll_alloc"
 
 -- ---- Tests -----------------------------------------------------------------
