@@ -433,8 +433,15 @@ emitDecl(d Decl)(strIdx Int) =
         else strConcat globs "\n"
       strConcat globSection (strConcat "@" (strConcat name (strConcat " = global i64 " reg)))
     | DExport inner -> emitDecl inner strIdx
-    | DExternal name _ _ ->
-      strConcat "; external: " name
+    | DExternal extName extParams extRetTy ->
+      retType = emitLLVMType extRetTy
+      paramTypes =
+        listMap (\p.
+          match p
+            | MkParam _ ty -> emitLLVMType ty
+        ) extParams
+      paramStr = joinWith ", " paramTypes
+      strConcat "declare " (strConcat retType (strConcat " @" (strConcat extName (strConcat "(" (strConcat paramStr ")")))))
     | DOpaque name ->
       strConcat "; opaque: " name
 
@@ -540,5 +547,10 @@ main =
   _ = checkContains "15 module target" modOut "x86_64-unknown-linux-gnu"
   _ = checkContains "15 module name" modOut "module Test.LLVM"
   _ = checkContains "15 module fn" modOut "define i64 @id("
+
+  -- 16. DExternal emits LLVM declare
+  extParams = MkParam "url" (TyName "Str") :: []
+  extOut = emitDecl (DExternal "httpGet" extParams (TyName "Str")) 0
+  _ = codegenLLVMCheck "16 DExternal declare" extOut "declare i8* @httpGet(i8*)"
 
   0
