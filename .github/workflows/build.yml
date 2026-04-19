@@ -18,6 +18,17 @@ jobs:
       - name: Self-host CLI E2E
         run: ./tools/check-selfhost-e2e.sh
         working-directory: .
+      - name: Self-routing Smoke (safe preset)
+        run: |
+          tmp_dir="$(mktemp -d)"
+          cat > "$tmp_dir/Smoke.lll" <<'SRC'
+          module Smoke
+
+          main() = printfn "smoke"
+          SRC
+          LLLC_BOOTSTRAP_SELF_PRESET=safe ./tools/lllc-bootstrap.sh check "$tmp_dir/Smoke.lll" | rg '"ok":true'
+          LLLC_BOOTSTRAP_SELF_PRESET=safe ./tools/lllc-bootstrap.sh compile "$tmp_dir/Smoke.lll" | rg 'module Smoke'
+        working-directory: .
       - name: LLVM Smoke Chain
         run: ./tools/check-llvm-smoke.sh
         working-directory: .

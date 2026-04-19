@@ -100,6 +100,22 @@ Strict no-fallback launcher:
 `tools/lllc-bootstrap.sh` always executes the pinned bootstrap binary and does
 not fall back to stage0 / `dotnet run` bridge paths.
 
+Self-host routing rollout controls:
+
+```bash
+# default: no routing changes
+LLLC_BOOTSTRAP_SELF_PRESET=off
+
+# route compile/check through self-hosted command path
+LLLC_BOOTSTRAP_SELF_PRESET=safe
+
+# route compile/check/run through self-hosted command path (canary)
+LLLC_BOOTSTRAP_SELF_PRESET=all
+
+# explicit override list
+LLLC_BOOTSTRAP_SELF_COMMANDS=compile,check
+```
+
 ### Run your first program
 
 ```bash
