@@ -1,0 +1,110 @@
+module Std.Reverse
+
+import Std.Maybe
+
+-- Minimal reverse foundation in ll-lang itself.
+-- Current stable slice:
+--   * F# (`fs`, `fsharp`, `f#`) simple module/let recovery
+--   * other targets return explicit TODO marker
+
+ReverseState = MkReverseState Str List[Str]
+
+stateModule(st ReverseState) =
+  match st
+    | MkReverseState m _ -> m
+
+stateDecls(st ReverseState) =
+  match st
+    | MkReverseState _ ds -> ds
+
+mkState(modLine Str)(decls List[Str]) = MkReverseState modLine decls
+
+startsWith(prefix Str)(s Str) =
+  plen = strLen prefix
+  if strLen s < plen
+    false
+  else
+    strSlice s 0 plen == prefix
+
+dropPrefix(n Int)(s Str) =
+  total = strLen s
+  if n >= total
+    ""
+  else
+    strSlice s n (total - n)
+
+moduleFromFsLine(line Str) =
+  if startsWith "module " line
+    modName = strTrim (dropPrefix 7 line)
+    if strLen modName > 0
+      strConcat "module " modName
+    else
+      "module Recovered"
+  else
+    "module Recovered"
+
+normalizeFsLet(line Str) =
+  if startsWith "let " line
+    body0 = dropPrefix 4 line
+    body =
+      if startsWith "rec " body0
+        dropPrefix 4 body0
+      else
+        body0
+    eqPos = strIndexOf " = " body
+    if eqPos >= 0
+      lhs = strTrim (strSlice body 0 eqPos)
+      rhs = strTrim (dropPrefix (eqPos + 3) body)
+      if strLen lhs > 0
+        Some (strConcat lhs (strConcat " = " rhs))
+      else
+        None
+    else
+      None
+  else
+    None
+
+scanFsLine(st ReverseState)(rawLine Str) =
+  line = strTrim rawLine
+  if startsWith "module " line
+    mkState (moduleFromFsLine line) (stateDecls st)
+  else
+    match normalizeFsLet line
+      | Some d -> mkState (stateModule st) (d :: stateDecls st)
+      | None -> st
+
+joinLines(lines List[Str]) =
+  match lines
+    | [] -> ""
+    | x :: rest -> listFold (\acc s. strConcat acc (strConcat "\n" s)) x rest
+
+renderFs(st ReverseState) =
+  moduleLine = stateModule st
+  decls = listReverse (stateDecls st)
+  if listIsEmpty decls
+    strConcat moduleLine "\n\n-- TODO(selfhost:backend): no recoverable F# declarations"
+  else
+    strConcat moduleLine (strConcat "\n\n" (joinLines decls))
+
+reverseFs(src Str) =
+  lines = strSplit "\n" src
+  st = listFold scanFsLine (mkState "module Recovered" []) lines
+  renderFs st
+
+isFsTarget(target Str) =
+  t = strTrim target
+  if t == "fs"
+    true
+  else
+    if t == "fsharp"
+      true
+    else
+      t == "f#"
+
+export reverseToLll(target Str)(src Str) =
+  if isFsTarget target
+    reverseFs src
+  else
+    strConcat
+      "module Recovered\n\n-- TODO(selfhost:backend): reverse parser for target "
+      target

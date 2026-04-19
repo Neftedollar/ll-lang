@@ -335,13 +335,13 @@ logGreeting(name Str) =
 ```
 
 **Rules:**
-- `external` names must have a Platform SDK mapping for the selected target, otherwise the compiler emits E026 `UnknownExternalMapping`.
+- `external` names must have a selected-target mapping in discovered `FFI.lll` sidecars (SDK and/or `vendor/*/src/FFI.lll`), otherwise the compiler emits E026 `UnknownExternalMapping`.
 - `opaque` types can appear as param/return types on both `external` and regular functions.
 - Built-in mappings: `console_log` (all targets), `JSON_parse` (fs/ts/py/cs), `fetch` (ts).
 
 **E026 fix recipe:** If you get `E026 UnknownExternalMapping target:fsharp name:foo`, either:
 1. Use a pre-mapped name (`console_log`, `JSON_parse`)
-2. Add a Platform SDK that maps `foo` to the native implementation
+2. Add/update an `FFI.lll` sidecar map entry for the selected target
 
 ## 7. Anti-patterns
 

@@ -2,33 +2,19 @@
 
 ## Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download) (the compiler targets
-  `net10.0` and uses `LangVersion=preview`).
 - A POSIX or Windows shell. Examples in this guide assume bash.
+- No .NET required for bootstrap execution.
 
-Verify:
-
-```bash
-dotnet --version
-# must report 10.x
-```
-
-## Build from source
+## Bootstrap-first setup
 
 ```bash
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
-dotnet build
+LLLC_BOOTSTRAP_REINSTALL=1 ./tools/check-selfhost-ci.sh
 ```
 
-Optional: run the test suite.
-
-```bash
-dotnet test
-```
-
-All tests should pass. The suite grows with each phase; a clean build on
-main should report zero failures.
+Stage0 code is archived under `obsolete/stage0` and not part of default CI or
+daily workflows.
 
 ## Hello, ll-lang
 
@@ -43,7 +29,7 @@ main() = printfn "Hello, ll-lang!"
 Run it:
 
 ```bash
-dotnet run --project src/LLLangTool -- run hello.lll
+./tools/lllc-bootstrap.sh run hello.lll
 ```
 
 Expected output:
@@ -52,17 +38,31 @@ Expected output:
 Hello, ll-lang!
 ```
 
-## The `lllc` alias
+## Bootstrap installer (pinned + sha256)
 
-The project does not install `lllc` to PATH. For convenience, alias it:
-
-```bash
-alias lllc='dotnet run --project /path/to/ll-lang/src/LLLangTool --'
-```
-
-Then the rest of this guide can be followed literally:
+To bootstrap from a downloadable compiler artifact on a clean machine:
 
 ```bash
-lllc run hello.lll
-lllc build hello.lll    # produces hello.fs
+./tools/bootstrap-self.sh install
+./tools/bootstrap-self.sh verify
+BOOTSTRAP_BIN="$(./tools/bootstrap-self.sh path)"
+"$BOOTSTRAP_BIN" check "$PWD/lllcself/src/Main.lll"
 ```
+
+Notes:
+- Artifact metadata is pinned in `bootstrap/lllc-bootstrap.lock.json`.
+- Integrity is enforced via `sha256` verification before extraction.
+- Use `./tools/bootstrap-self.sh install --reinstall` to refresh cache.
+- To regenerate release artifacts + lock file, run:
+  - `./tools/build-bootstrap-artifacts.sh --version vX.Y.Z`
+
+### Strict no-fallback launcher
+
+Use the launcher for deterministic bootstrap-only execution:
+
+```bash
+./tools/lllc-bootstrap.sh check "$PWD/lllcself/src/Main.lll"
+```
+
+This path never falls back to stage0. If bootstrap install/resolve fails, the
+command fails hard.

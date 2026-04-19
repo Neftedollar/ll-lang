@@ -257,16 +257,16 @@ parseFactor(toks List[Token]) =
 showExpr(e Expr) =
   | ENum n -> intToStr n
   | EVar s -> s
-  | EAdd l r -> "(" + showExpr l + " + " + showExpr r + ")"
-  | ESub l r -> "(" + showExpr l + " - " + showExpr r + ")"
-  | EMul l r -> "(" + showExpr l + " * " + showExpr r + ")"
-  | EDiv l r -> "(" + showExpr l + " / " + showExpr r + ")"
+  | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " + ") (showExpr r)) ")"
+  | ESub l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " - ") (showExpr r)) ")"
+  | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " * ") (showExpr r)) ")"
+  | EDiv l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " / ") (showExpr r)) ")"
 
 showTypeRef(t TypeRef) =
   | TR s -> s
 
 showParam(p Param) =
-  | MkParam n t -> "(" + n + ": " + showTypeRef t + ")"
+  | MkParam n t -> strConcat (strConcat (strConcat "(" n) ": ") (strConcat (showTypeRef t) ")")
 
 -- Render the curried param list as ` (a: Int) (b: Int)` with a leading
 -- space on every group, or ` ()` when there are no params at all. That
@@ -274,7 +274,7 @@ showParam(p Param) =
 showParams(ps List[Param]) =
   if listIsEmpty ps
     " ()"
-  else listFold (\acc p. acc + " " + showParam p) "" ps
+  else listFold (\acc p. strConcat (strConcat acc " ") (showParam p)) "" ps
 
 showReturn(r Maybe[TypeRef]) =
   match r
@@ -283,14 +283,14 @@ showReturn(r Maybe[TypeRef]) =
 
 showDecl(d FnDecl) =
   | MkFn name prms ret body ->
-    headPart = name + showParams prms
-    arrowPart = headPart + " -> " + showReturn ret
-    arrowPart + " = " + showExpr body
+    headPart = strConcat name (showParams prms)
+    arrowPart = strConcat (strConcat headPart " -> ") (showReturn ret)
+    strConcat (strConcat arrowPart " = ") (showExpr body)
 
 show(ds List[FnDecl]) =
   listFold (\acc d. if strLen acc == 0
     showDecl d
-  else acc + "\n" + showDecl d) "" ds
+  else strConcat (strConcat acc "\n") (showDecl d)) "" ds
 
 -- ---------- Driver -------------------------------------------------------
 

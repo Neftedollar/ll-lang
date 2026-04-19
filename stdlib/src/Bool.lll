@@ -1,0 +1,7 @@
+module Std.Bool
+
+export not(b Bool) =
+  if b
+    false
+  else
+    true

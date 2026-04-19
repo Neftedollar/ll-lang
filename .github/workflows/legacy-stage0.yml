@@ -1,0 +1,26 @@
+name: Archived Stage0 (.NET, manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  archived-stage0:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Archive notice
+        run: |
+          echo "Stage0 is archived under obsolete/stage0 and is not part of default CI."
+          echo "Use this workflow only for emergency bootstrap diagnostics."
+      - name: Build archived stage0 solution
+        run: |
+          dotnet clean obsolete/stage0/LLLang.sln --nologo
+          dotnet build obsolete/stage0/LLLang.sln --nologo -warnaserror
+      - name: Test archived stage0 suite
+        run: |
+          dotnet test obsolete/stage0/tests/LLLangTests/LLLangTests.fsproj --no-build --verbosity normal

@@ -214,28 +214,28 @@ showArgs(args List[TypeArg]) =
   else
     inner = listFold (\acc a. if strLen acc == 0
       showTypeArg a
-    else acc + ", " + showTypeArg a) "" args
-    "(" + inner + ")"
+    else strConcat (strConcat acc ", ") (showTypeArg a)) "" args
+    strConcat (strConcat "(" inner) ")"
 
 showCtor(c Ctor) =
-  | MkCtor name args -> name + showArgs args
+  | MkCtor name args -> strConcat name (showArgs args)
 
 showCtors(cs List[Ctor]) =
   listFold (\acc c. if strLen acc == 0
     showCtor c
-  else acc + " | " + showCtor c) "" cs
+  else strConcat (strConcat acc " | ") (showCtor c)) "" cs
 
 -- Render the type-param list as ` (A) (B)` with a leading space, or empty.
 showParams(ps List[Str]) =
-  listFold (\acc p. acc + " (" + p + ")") "" ps
+  listFold (\acc p. strConcat (strConcat acc " (") (strConcat p ")")) "" ps
 
 showDecl(d TypeDecl) =
-  | MkTypeDecl name prms ctors -> name + showParams prms + " = " + showCtors ctors
+  | MkTypeDecl name prms ctors -> strConcat (strConcat (strConcat name (showParams prms)) " = ") (showCtors ctors)
 
 show(ds List[TypeDecl]) =
   listFold (\acc d. if strLen acc == 0
     showDecl d
-  else acc + "\n" + showDecl d) "" ds
+  else strConcat (strConcat acc "\n") (showDecl d)) "" ds
 
 -- ---------- Driver -------------------------------------------------------
 

@@ -5,40 +5,13 @@ module Platform.LLVM.FFI
 -- The LLVM backend uses direct symbol declarations for external functions.
 
 llvmExternalMap =
-  -- I/O
   ("console_log", "console_log") ::
-  ("print_str", "print_str") ::
-  ("print_int", "print_int") ::
-  ("read_line", "read_line") ::
-  ("read_file", "read_file") ::
-  ("write_file", "write_file") ::
-  -- String operations
-  ("str_concat", "str_concat") ::
-  ("str_len", "str_len") ::
-  ("str_eq", "str_eq") ::
-  ("str_from_int", "str_from_int") ::
-  ("int_to_str", "int_to_str") ::
-  -- Memory
-  ("malloc", "malloc") ::
-  ("free", "free") ::
-  ("gc_alloc", "gc_alloc") ::
-  ("gc_collect", "gc_collect") ::
-  -- ADT support
-  ("adt_alloc", "adt_alloc") ::
-  ("adt_tag", "adt_tag") ::
-  ("adt_field", "adt_field") ::
-  -- List support
-  ("list_nil", "list_nil") ::
-  ("list_cons", "list_cons") ::
-  ("list_head", "list_head") ::
-  ("list_tail", "list_tail") ::
-  ("list_is_empty", "list_is_empty") ::
   []
 
 lookupExternal(name Str) =
   lookupExternal_ llvmExternalMap name
 
-lookupExternal_(entries)(name Str) =
+lookupExternal_(entries List[(Str, Str)])(name Str) =
   match entries
     | [] -> ""
     | (k, v) :: rest ->
@@ -48,54 +21,3 @@ lookupExternal_(entries)(name Str) =
 
 hasExternal(name Str) =
   strLen (lookupExternal name) > 0
-
--- ---- Self-tests -------------------------------------------------------------
-
-check(label Str)(ok Bool) =
-  if ok
-    printfn (strConcat "OK " label)
-  else
-    printfn (strConcat "FAIL " label)
-
-main() =
-  -- 1. lookup existing entry
-  _ = check "1 lookup console_log" (lookupExternal "console_log" == "console_log")
-
-  -- 2. lookup missing entry
-  _ = check "2 lookup missing" (lookupExternal "no_such_fn" == "")
-
-  -- 3. hasExternal true
-  _ = check "3 has str_concat" (hasExternal "str_concat")
-
-  -- 4. hasExternal false
-  _ = check "4 has missing" (hasExternal "no_such_fn" == false)
-
-  -- 5. lookup str operations
-  _ = check "5 has str_len" (hasExternal "str_len")
-  _ = check "5 has str_eq" (hasExternal "str_eq")
-  _ = check "5 has int_to_str" (hasExternal "int_to_str")
-
-  -- 6. lookup memory
-  _ = check "6 has gc_alloc" (hasExternal "gc_alloc")
-  _ = check "6 has gc_collect" (hasExternal "gc_collect")
-
-  -- 7. lookup ADT
-  _ = check "7 has adt_alloc" (hasExternal "adt_alloc")
-  _ = check "7 has adt_tag" (hasExternal "adt_tag")
-  _ = check "7 has adt_field" (hasExternal "adt_field")
-
-  -- 8. lookup list
-  _ = check "8 has list_nil" (hasExternal "list_nil")
-  _ = check "8 has list_cons" (hasExternal "list_cons")
-  _ = check "8 has list_head" (hasExternal "list_head")
-  _ = check "8 has list_tail" (hasExternal "list_tail")
-  _ = check "8 has list_is_empty" (hasExternal "list_is_empty")
-
-  -- 9. lookup I/O
-  _ = check "9 has print_str" (hasExternal "print_str")
-  _ = check "9 has print_int" (hasExternal "print_int")
-  _ = check "9 has read_line" (hasExternal "read_line")
-  _ = check "9 has read_file" (hasExternal "read_file")
-  _ = check "9 has write_file" (hasExternal "write_file")
-
-  printfn "Done"

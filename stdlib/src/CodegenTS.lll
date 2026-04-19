@@ -383,9 +383,8 @@ emitModule(m Module) =
       body = emitDecls decls
       strConcat header (strConcat "\n\n" (strConcat prelude (strConcat "\n\n" body)))
 
--- Uniquely-named alias so callers that import multiple codegens can pick
--- TypeScript's emitter without bare-name shadowing.
-emitModuleTs(m Module) = emitModule m
+emitModuleTs(m Module) =
+  emitModule m
 
 codegenTSCheck(label Str)(got Str)(expected Str) =
   if got == expected

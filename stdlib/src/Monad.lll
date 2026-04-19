@@ -1,168 +1,30 @@
 module Std.Monad
 
--- Monadic pattern documentation and naming-consistency aliases for ll-lang.
---
--- ll-lang has no higher-kinded types, so there is no generic Monad typeclass.
--- Instead, each monadic type provides module-level functions following a
--- naming convention:
---
---   pure  : A -> M[A]           -- wrap a value
---   map   : (A -> B) -> M[A] -> M[B]           -- functor map
---   bind  : M[A] -> (A -> M[B]) -> M[B]        -- monadic bind (>>=)
---
--- Concrete instances:
---
---   Maybe:  Some        (pure), maybeMap   (map), maybeBind   (bind)
---   Result: Ok          (pure), resultMap  (map), resultBind  (bind)
---   List:   listPure    (pure), listMap    (map), listBind    (bind)
---   State:  statePure   (pure), stateMap   (map), stateBind   (bind)
---
--- Maybe and List builtins (maybeMap, maybeBind, listMap) are provided by the
--- compiler prelude. Result operations live in Std.Result, State in Std.State,
--- and List helpers in Std.List.
---
--- This module re-exports listPure and listBind for naming consistency, and
--- provides self-tests demonstrating monadic composition patterns.
-
-import Std.List
+import Std.Maybe
 import Std.Result
 import Std.State
 
--- ---- List monad aliases -------------------------------------------------------
+-- Compact monadic adapters for compiler-heavy code.
+-- TODO(selfhost:typing): re-introduce a canonical trait-based Monad surface
+-- once method dispatch for `pure`/`bind` is stabilized in self-hosted mode.
 
--- Wrap a single value in a one-element list (pure / return for List).
-listPure(x A) = [x]
+-- Maybe adapters.
+export maybePure(a A) Maybe[A] = Some a
+export maybeBindM(fa Maybe[A])(f A -> Maybe[B]) Maybe[B] = maybeBind fa f
+export maybeMapM(fa Maybe[A])(f A -> B) Maybe[B] = maybeMap f fa
+export maybeJoinM(ffa Maybe[Maybe[A]]) Maybe[A] = maybeBind ffa (\fa. fa)
+export maybeThenM(fa Maybe[A])(fb Maybe[B]) Maybe[B] = maybeBind fa (\ignored. fb)
 
--- Monadic bind for List: apply f to each element and flatten.
--- Alias for listFlatMap, provided for naming consistency with other monads.
-listBind(f A -> List[B])(xs List[A]) =
-  listFlatMap f xs
+-- Result adapters (E fixed by surrounding type usage).
+export resultPure(a A) Result[A][E] = Ok a
+export resultBindM(fa Result[A][E])(f A -> Result[B][E]) Result[B][E] = resultBind fa f
+export resultMapM(fa Result[A][E])(f A -> B) Result[B][E] = resultMap f fa
+export resultJoinM(ffa Result[Result[A][E]][E]) Result[A][E] = resultBind ffa (\fa. fa)
+export resultThenM(fa Result[A][E])(fb Result[B][E]) Result[B][E] = resultBind fa (\ignored. fb)
 
--- ---- Self-tests ---------------------------------------------------------------
-
-check(label Str)(ok Bool) =
-  if ok
-    _ = printfn (strConcat "OK " label)
-    0
-  else
-    _ = printfn (strConcat "FAIL " label)
-    1
-
-showIntList(xs List[Int]) =
-  strs = listMap intToStr xs
-  listFold (\acc s. strConcat acc (strConcat "," s)) "" strs
-
--- Test helpers: named functions for monadic steps that use if/else
--- (ll-lang requires multiline if, so these cannot be inline lambdas)
-
-doubleIfGt3(x Int) =
-  if x > 3
-    Some (x * 2)
-  else None
-
-tripleIfGt5(x Int) =
-  if x > 5
-    Some x
-  else None
-
-tripleIfPos(x Int) =
-  if x > 0
-    Ok (x * 3)
-  else Err "neg"
-
-keepIfGt10(x Int) =
-  if x > 10
-    Ok x
-  else Err "low"
-
-keepIfGt2(x Int) =
-  if x > 2
-    [x]
-  else []
-
-duplicate(x Int) =
-  y = x * 10
-  [x; y]
-
-expand(x Int) =
-  y = x + 10
-  [x; y]
-
-wrapTimes100(x Int) =
-  y = x * 100
-  [y]
-
-main =
-  -- ---- Maybe monad ------------------------------------------------------------
-  -- Demonstrates: Some (pure), maybeMap (map), maybeBind (bind)
-
-  -- 1. Maybe pure (Some) + map
-  r1 = maybeMap (\x. x + 1) (Some 10)
-  _ = check "1 Maybe map" (maybeWithDefault 0 r1 == 11)
-
-  -- 2. Maybe bind: chain a fallible step on Some
-  r2 = maybeBind (Some 5) doubleIfGt3
-  _ = check "2 Maybe bind Some" (maybeWithDefault 0 r2 == 10)
-
-  -- 3. Maybe bind: short-circuit on None
-  r3 = maybeBind None (\x. Some (x + 1))
-  _ = check "3 Maybe bind None" (maybeWithDefault 0 r3 == 0)
-
-  -- 4. Maybe composition: map then bind
-  r4 = maybeBind (maybeMap (\x. x * 3) (Some 2)) tripleIfGt5
-  _ = check "4 Maybe map+bind" (maybeWithDefault 0 r4 == 6)
-
-  -- ---- Result monad -----------------------------------------------------------
-  -- Demonstrates: Ok (pure), resultMap (map), resultBind (bind)
-
-  -- 5. Result pure (Ok) + map
-  r5 = resultMap (\x. x + 1) (Ok 10)
-  _ = check "5 Result map Ok" (resultWithDefault 0 r5 == 11)
-
-  -- 6. Result bind: chain two steps
-  r6 = resultBind (Ok 4) tripleIfPos
-  _ = check "6 Result bind Ok" (resultWithDefault 0 r6 == 12)
-
-  -- 7. Result bind: short-circuit on Err
-  r7 = resultBind (Err "fail") tripleIfPos
-  _ = check "7 Result bind Err" (resultWithDefault 0 r7 == 0)
-
-  -- 8. Result composition: map then bind
-  r8 = resultBind (resultMap (\x. x + 10) (Ok 5)) keepIfGt10
-  _ = check "8 Result map+bind" (resultWithDefault 0 r8 == 15)
-
-  -- ---- List monad -------------------------------------------------------------
-  -- Demonstrates: listPure (pure), listMap (map), listBind (bind / flatMap)
-
-  -- 9. listPure wraps a value
-  _ = check "9 listPure" (showIntList (listPure 42) == ",42")
-
-  -- 10. listBind: flatMap over a list
-  _ = check "10 listBind" (showIntList (listBind duplicate [1; 2; 3]) == ",1,10,2,20,3,30")
-
-  -- 11. listBind with empty result: filtering effect
-  _ = check "11 listBind filter" (showIntList (listBind keepIfGt2 [1; 2; 3; 4]) == ",3,4")
-
-  -- 12. listBind chaining: compose two expansions
-  step1 = listBind expand [1; 2]
-  r12 = listBind wrapTimes100 step1
-  _ = check "12 listBind chain" (showIntList r12 == ",100,1100,200,1200")
-
-  -- ---- State monad ------------------------------------------------------------
-  -- Demonstrates: statePure (pure), stateMap (map), stateBind (bind)
-
-  -- 13. statePure + stateEval
-  _ = check "13 State pure" (stateEval (statePure 42) 0 == 42)
-
-  -- 14. stateMap
-  _ = check "14 State map" (stateEval (stateMap (\x. x * 3) (statePure 7)) 0 == 21)
-
-  -- 15. stateBind: put then get
-  prog15 = stateBind (statePut 99) (\ignored. stateGet 0)
-  _ = check "15 State bind" (stateEval prog15 0 == 99)
-
-  -- 16. stateBind chaining: modify then read
-  prog16 = stateBind (stateModify (\s. s + 5)) (\ignored. stateGet 0)
-  _ = check "16 State bind chain" (stateEval prog16 10 == 15)
-
-  printfn "Done"
+-- State adapters (S fixed by surrounding type usage).
+export statePureM(a A) State[S][A] = statePure a
+export stateBindM(fa State[S][A])(f A -> State[S][B]) State[S][B] = stateBind fa f
+export stateMapM(fa State[S][A])(f A -> B) State[S][B] = stateMap f fa
+export stateJoinM(ffa State[S][State[S][A]]) State[S][A] = stateBind ffa (\fa. fa)
+export stateThenM(fa State[S][A])(fb State[S][B]) State[S][B] = stateBind fa (\ignored. fb)

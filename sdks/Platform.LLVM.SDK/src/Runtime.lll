@@ -2,77 +2,10 @@ module Platform.LLVM.Runtime
 
 -- LLVM IR runtime helper declarations for ll-lang programs.
 -- These are external functions available via the LLVM runtime.
--- The C runtime (runtime/) provides the actual implementations;
--- these declarations let ll-lang code call them.
 
--- ---- Standard I/O -----------------------------------------------------------
-
+-- Standard I/O
 external console_log(msg Str) Unit
-external print_str(s Str) Unit
-external print_int(n Int) Unit
-external read_line() Str
-external read_file(path Str) Str
-external write_file(path Str)(content Str) Unit
 
--- ---- String operations ------------------------------------------------------
-
-external str_concat(a Str)(b Str) Str
-external str_len(s Str) Int
-external str_eq(a Str)(b Str) Bool
-external str_from_int(n Int) Str
-external int_to_str(n Int) Str
-
--- ---- Memory management ------------------------------------------------------
-
+-- Memory
 external malloc(size Int) Int
 external free(ptr Int) Unit
-external gc_alloc(size Int) Int
-external gc_collect() Unit
-
--- ---- ADT (algebraic data type) support --------------------------------------
--- Tagged unions: a block of memory with [tagval : i64][field0][field1]...
--- adt_alloc creates a block, adt_tag reads the tag, adt_field reads a field.
-
-external adt_alloc(tagval Int)(numFields Int) Int
-external adt_tag(ptr Int) Int
-external adt_field(ptr Int)(idx Int) Int
-
--- ---- List support -----------------------------------------------------------
--- Cons-cell linked list: nil = 0 (null), cons = [head : i64][tail : ptr]
--- These are thin wrappers around adt_alloc / adt_field.
-
-external list_nil() Int
-external list_cons(head Int)(tail Int) Int
-external list_head(lst Int) Int
-external list_tail(lst Int) Int
-external list_is_empty(lst Int) Bool
-
--- ---- Self-tests -------------------------------------------------------------
--- Validate that the declarations parse correctly and the module is well-formed.
-
-check(label Str)(ok Bool) =
-  if ok
-    printfn (strConcat "OK " label)
-  else
-    printfn (strConcat "FAIL " label)
-
-main() =
-  -- 1. Module compiles with all externals declared
-  _ = check "1 module-compiles" true
-
-  -- 2. Verify string op externals are visible (call-site type check)
-  _ = check "2 str-externals-declared" true
-
-  -- 3. Verify I/O externals are visible
-  _ = check "3 io-externals-declared" true
-
-  -- 4. Verify memory externals are visible
-  _ = check "4 mem-externals-declared" true
-
-  -- 5. Verify ADT externals are visible (adt_alloc, adt_tag, adt_field)
-  _ = check "5 adt-externals-declared" true
-
-  -- 6. Verify list externals are visible
-  _ = check "6 list-externals-declared" true
-
-  printfn "Done"

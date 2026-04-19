@@ -9,7 +9,8 @@ The following surface is covered by `1.0` compatibility guarantees:
 
 - Core compiler pipeline: lexer, parser, elaborator, HM inference, diagnostics,
   and forward code generation.
-- CLI workflows: `build`, `check`, `run`, `new`, `install`, `mcp`.
+- CLI workflows: `build`, `run`, `new`, `install`, `mcp`, `self`, and
+  project-mode `check [dir]`.
 - Stable targets: `fs` (default), `ts`, `py`, `java`, `cs`.
 - Project mode (`lll.toml`, multi-file topo build, module checks).
 - Published error-code contract (`E001`, `E002`, `E003`, `E004`, `E005`,
@@ -21,6 +22,7 @@ These features remain available but are explicitly non-blocking for `1.0`:
 
 - `lllc reverse --from ...` and reverse transpiler behavior.
 - `--target llvm` backend (subset-oriented surface).
+- Stage0 single-file `lllc check <file.lll>` behavior (legacy/unsupported path).
 
 Behavior or output shape in these areas may change between minor releases while
 the team designs a long-term architecture.

@@ -303,7 +303,7 @@ nextToken(cs List[Char]) =
           | NumScanOk n restN -> NextTokOk (TNum n) restN
           | NumScanErr e -> NextTokErr e
       else
-        NextTokErr ("unexpected character while lexing JSON: " + strFromChars [c])
+        NextTokErr (strConcat "unexpected character while lexing JSON: " (strFromChars [c]))
 
 tokenizeChars(cs List[Char])(accRev List[Token]) =
   match nextToken cs
@@ -320,7 +320,7 @@ showToken(tok Token) =
     | TNull -> "null"
     | TTrue -> "true"
     | TFalse -> "false"
-    | TNum n -> "number(" + n + ")"
+    | TNum n -> strConcat "number(" (strConcat n ")")
     | TStr _ -> "string"
     | TLBrace -> "{"
     | TRBrace -> "}"
@@ -347,11 +347,11 @@ parseValue(tokens List[Token]) =
     | TNum n :: rest ->
       match strToFloat n
         | Some _ -> ParseOk (JNum n) rest
-        | None -> ParseErr ("invalid numeric literal: " + n)
+        | None -> ParseErr (strConcat "invalid numeric literal: " n)
     | TStr s :: rest -> ParseOk (JStr s) rest
     | TLBracket :: rest -> parseArrayValues rest []
     | TLBrace :: rest -> parseObjectFields rest []
-    | t :: _ -> ParseErr ("unexpected token in value: " + showToken t)
+    | t :: _ -> ParseErr (strConcat "unexpected token in value: " (showToken t))
     | _ -> ParseErr "unexpected end of input in value"
 
 parseArrayValues(tokens List[Token])(accRev List[JsonValue]) =
@@ -364,7 +364,7 @@ parseArrayValues(tokens List[Token])(accRev List[JsonValue]) =
           match rest2
             | TComma :: rest3 -> parseArrayValues rest3 (v :: accRev)
             | TRBracket :: rest3 -> ParseOk (JArr (listReverse (v :: accRev))) rest3
-            | t :: _ -> ParseErr ("expected ',' or ']' in array, got " + showToken t)
+            | t :: _ -> ParseErr (strConcat "expected ',' or ']' in array, got " (showToken t))
             | _ -> ParseErr "unexpected end of input in array"
 
 parseObjectFields(tokens List[Token])(accRev List[JsonField]) =
@@ -378,9 +378,9 @@ parseObjectFields(tokens List[Token])(accRev List[JsonField]) =
           match rest2
             | TComma :: rest3 -> parseObjectFields rest3 (field :: accRev)
             | TRBrace :: rest3 -> ParseOk (JObj (listReverse (field :: accRev))) rest3
-            | t :: _ -> ParseErr ("expected ',' or '}' in object, got " + showToken t)
+            | t :: _ -> ParseErr (strConcat "expected ',' or '}' in object, got " (showToken t))
             | _ -> ParseErr "unexpected end of input in object"
-    | t :: _ -> ParseErr ("expected string key or '}' in object, got " + showToken t)
+    | t :: _ -> ParseErr (strConcat "expected string key or '}' in object, got " (showToken t))
     | _ -> ParseErr "unexpected end of input in object"
 
 parseTokens(tokens List[Token]) =
@@ -389,12 +389,12 @@ parseTokens(tokens List[Token]) =
     | ParseOk v rest ->
       match rest
         | TEOF :: _ -> ParseOk v []
-        | t :: _ -> ParseErr ("trailing token after JSON value: " + showToken t)
+        | t :: _ -> ParseErr (strConcat "trailing token after JSON value: " (showToken t))
         | _ -> ParseErr "missing EOF token"
 
 parse(src Str) =
   match tokenize src
-    | LexErr e -> ParseErr ("lex error: " + e)
+    | LexErr e -> ParseErr (strConcat "lex error: " e)
     | LexOk toks -> parseTokens toks
 
 eqJsonValueList(xs List[JsonValue])(ys List[JsonValue]) =
@@ -480,34 +480,34 @@ escapeChar(c Char) =
 
 escapeChars(cs List[Char])(acc Str) =
   match cs
-    | c :: rest -> escapeChars rest (acc + escapeChar c)
+    | c :: rest -> escapeChars rest (strConcat acc (escapeChar c))
     | _ -> acc
 
 renderString(s Str) =
-  "\"" + escapeChars (strChars s) "" + "\""
+  strConcat "\"" (strConcat (escapeChars (strChars s) "") "\"")
 
 renderField(f JsonField) =
   match f
-    | JField k v -> renderString k + ":" + renderJson v
+    | JField k v -> strConcat (renderString k) (strConcat ":" (renderJson v))
 
 renderArrayTail(xs List[JsonValue]) =
   match xs
-    | x :: rest -> "," + renderJson x + renderArrayTail rest
+    | x :: rest -> strConcat "," (strConcat (renderJson x) (renderArrayTail rest))
     | _ -> ""
 
 renderArray(xs List[JsonValue]) =
   match xs
-    | x :: rest -> "[" + renderJson x + renderArrayTail rest + "]"
+    | x :: rest -> strConcat "[" (strConcat (renderJson x) (strConcat (renderArrayTail rest) "]"))
     | _ -> "[]"
 
 renderObjectTail(fs List[JsonField]) =
   match fs
-    | f :: rest -> "," + renderField f + renderObjectTail rest
+    | f :: rest -> strConcat "," (strConcat (renderField f) (renderObjectTail rest))
     | _ -> ""
 
 renderObject(fs List[JsonField]) =
   match fs
-    | f :: rest -> "{" + renderField f + renderObjectTail rest + "}"
+    | f :: rest -> strConcat "{" (strConcat (renderField f) (strConcat (renderObjectTail rest) "}"))
     | _ -> "{}"
 
 renderJson(v JsonValue) =
@@ -522,30 +522,30 @@ renderJson(v JsonValue) =
     | JArr xs -> renderArray xs
     | JObj fs -> renderObject fs
 
-mkOk(name Str) = "OK " + name
-mkFail(name Str)(msg Str) = "FAIL " + name + " " + msg
+mkOk(name Str) = strConcat "OK " name
+mkFail(name Str)(msg Str) = strConcat (strConcat "FAIL " name) (strConcat " " msg)
 
 runOkCase(name Str)(src Str)(wantKind Str) =
   match parse src
-    | ParseErr e -> mkFail name ("parse-error:" + e)
+    | ParseErr e -> mkFail name (strConcat "parse-error:" e)
     | ParseOk v _ ->
       got = kindOf v
       if got == wantKind
         mkOk name
-      else mkFail name ("kind-mismatch:" + got)
+      else mkFail name (strConcat "kind-mismatch:" got)
 
 runErrCase(name Str)(src Str) =
   match parse src
     | ParseErr _ -> mkOk name
-    | ParseOk v _ -> mkFail name ("expected-error-got:" + kindOf v)
+    | ParseOk v _ -> mkFail name (strConcat "expected-error-got:" (kindOf v))
 
 runRoundtripCase(name Str)(src Str) =
   match parse src
-    | ParseErr e -> mkFail name ("parse-error:" + e)
+    | ParseErr e -> mkFail name (strConcat "parse-error:" e)
     | ParseOk v _ ->
       rendered = renderJson v
       match parse rendered
-        | ParseErr e2 -> mkFail name ("reparse-error:" + e2)
+        | ParseErr e2 -> mkFail name (strConcat "reparse-error:" e2)
         | ParseOk v2 _ ->
           if eqJsonValue v v2
             mkOk name
@@ -569,7 +569,7 @@ main() =
   u1 =
     if floatToStr 1.25 == "1.25"
       mkOk "util-float-to-str"
-    else mkFail "util-float-to-str" ("unexpected:" + floatToStr 1.25)
+    else mkFail "util-float-to-str" (strConcat "unexpected:" (floatToStr 1.25))
   n1 = runErrCase "neg-leading-zero" "01"
   n2 = runErrCase "neg-bad-exp" "1e"
   n3 = runErrCase "neg-bad-frac" "1."

@@ -1,6 +1,0 @@
-module LlvmWriteFile
-
-main() =
-  w = writeFile "/tmp/llvm-test-output.txt" "Written by native lllc"
-  content = readFile "/tmp/llvm-test-output.txt"
-  printfn content

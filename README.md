@@ -1,58 +1,33 @@
 # ll-lang
 
-[![Build & Test](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml/badge.svg)](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml)
-[![npm](https://img.shields.io/npm/v/%40neftedollar%2Flllc)](https://www.npmjs.com/package/@neftedollar/lllc)
-[![PyPI](https://img.shields.io/pypi/v/lllc)](https://pypi.org/project/lllc/)
-[![NuGet](https://img.shields.io/nuget/v/lllc)](https://www.nuget.org/packages/lllc)
+[![Self-host CI](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml/badge.svg)](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml)
 
-> **Write once → compile to F#, TypeScript, Python, Java, and C#.**
-> Statically typed. Token-efficient. LLM-optimized. Self-hosting.
+> **A statically-typed functional language designed for LLM code generation.** Token-efficient syntax, compiled = works, errors formatted for LLMs to read directly.
 
-```lll
-module Factorial
+```
+module Hello
 
-fact(n Int) Int =
-  if n <= 1
-    1
-  else n * fact (n - 1)
+Hello = printfn "Hello, ll-lang!"
 ```
 
-| Target | Output |
-|--------|--------|
-| `lllc build fact.lll` | `fact.fs` — `let rec fact (n: int64) ...` |
-| `lllc build --target ts fact.lll` | `fact.ts` — `function fact(n: number) ...` |
-| `lllc build --target py fact.lll` | `fact.py` — `def fact(n: int) ...` |
-| `lllc build --target java fact.lll` | `fact.java` — `static long fact(long n) ...` |
-| `lllc build --target cs fact.lll` | `fact.cs` — `static long Fact(long n) ...` |
+```
+$ lllc run hello.lll
+Hello, ll-lang!
+```
 
-## Install
-
-| Platform | Command | .NET needed? |
-|----------|---------|--------------|
-| **npm / Bun** | `npm install -g @neftedollar/lllc` | No — TS/JS output works standalone |
-| **pip** | `pip install lllc` | No — Python output works standalone |
-| **.NET tool** | `dotnet tool install -g lllc` | Yes — full compiler, all targets |
-| **from source** | `git clone https://github.com/Neftedollar/ll-lang && dotnet build` | Yes |
-
-Jump to [Getting Started](#getting-started), [Syntax](#syntax), [Problem](#problem).
-
-<br>
-
-<img src="assets/demo.svg" alt="ll-lang terminal demo" width="100%"/>
+Jump to [Problem](#problem), [Solution](#solution), [Syntax](#syntax), [Getting Started](#getting-started).
 
 ## Status
 
-> **The compiler is written in ll-lang itself** and compiled to .NET, TypeScript, and Python distributions.
-> The F# bootstrap (`src/LLLangCompiler/`) is a one-time seed — the canonical compiler lives in `stdlib/src/`.
+Working end-to-end compiler with self-host CI (bootstrap `lllc` artifact + corpus checks + CLI e2e + LLVM smoke). Archived stage0 .NET code remains only under `obsolete/stage0` for emergency bootstrap diagnostics. All 10 compiler phases green: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → `lllc` CLI → stdlib → module system → MCP server → TypeScript + Python + Java + C# + LLVM codegen.
+Current release line: **1.0.0**.
 
-**Fixpoint achieved:** `compiler₁.fs == compiler₂.fs` — compiling the compiler with itself produces byte-identical output. All 10 pipeline phases self-hosted: lexer → parser → elaborator → Hindley-Milner inference → F# codegen → CLI → stdlib → module system → MCP server → TypeScript + Python + Java + C# + LLVM codegen.
-
-Current release: **1.1.1** | Packages: [`npm`](https://www.npmjs.com/package/@neftedollar/lllc) · [`pip`](https://pypi.org/project/lllc/) · [`nuget`](https://www.nuget.org/packages/lllc)
-
-**Release contract (1.x):**
-- **Stable:** `lllc build/check/run/new/install/mcp` + targets `fs/ts/py/java/cs`
-- **Experimental:** `lllc reverse`, `--target llvm` (subset backend)
+**Release contract (1.0):**
+- **Stable:** core compiler + `lllc build/run/new/install/mcp/self` + `lllc check [dir]` + targets `fs/ts/py/java/cs`
+- **Experimental:** `lllc reverse` and `--target llvm` (subset backend, non-blocking for 1.0)
 - Full contract: [`docs/release-contract-1.0.md`](docs/release-contract-1.0.md)
+
+**Bootstrap: COMPLETE.** `compiler₁.fs == compiler₂.fs` — ll-lang compiles itself (2900+ line bootstrap compiler, fixpoint achieved).
 
 **Self-hosted stdlib** — 10 modules (5857 LOC of ll-lang), covering parsing, type inference, codegen, and data structures:
 
@@ -81,76 +56,86 @@ Current release: **1.1.1** | Packages: [`npm`](https://www.npmjs.com/package/@ne
 | 6 | Stdlib (~50 builtins) | ✅ |
 | **7** | **Bootstrap fixpoint** — ll-lang compiles itself (`compiler₁.fs == compiler₂.fs`) | ✅ |
 | **8** | **Module system** — `lll.toml`, multi-file builds, `lllc new`, topo-sort, E020/E024 | ✅ |
-| **9** | **MCP server** — `lllc mcp` stdio server with 10 tools for Claude Code / Cursor / Zed | ✅ |
+| **9** | **MCP server** — `lllc mcp` stdio server (self-hosted `lllcself`) with 28 tools for Claude Code / Cursor / Zed | ✅ |
 | **10** | **Multi-platform codegen** — `lllc build --target ts\|py\|java\|cs\|llvm`; TypeScript DU + Python @dataclass + Java sealed interfaces + C# records + LLVM IR (`llvm` is experimental subset in 1.0) | ✅ |
 
 ## Getting Started
 
-Pick your platform and run your first program in under 2 minutes:
-
-```bash
-# npm/Bun
-npm install -g @neftedollar/lllc
-
-# pip
-pip install lllc
-
-# .NET tool (all targets)
-dotnet tool install -g lllc
-```
-
-### Hello, ll-lang!
-
-```bash
-cat > hello.lll << 'EOF'
-module Hello
-
-main() = printfn "Hello, ll-lang!"
-EOF
-
-lllc run hello.lll            # compile + run (F# by default)
-lllc run --target ts hello.lll  # compile + run via TypeScript
-lllc run --target py hello.lll  # compile + run via Python
-```
-
-### Build from source
+Bootstrap path (default) does not require .NET.
 
 ```bash
 git clone https://github.com/Neftedollar/ll-lang.git
 cd ll-lang
-dotnet build
-dotnet test    # run full test suite
+LLLC_BOOTSTRAP_REINSTALL=1 ./tools/check-selfhost-ci.sh
+```
+
+Archived stage0 remains in `obsolete/stage0` and is not part of default CI/path.
+
+### Bootstrap installer (pinned release artifact)
+
+For clean-machine bootstrap flows, install a pinned prebuilt `lllc` artifact:
+
+```bash
+./tools/bootstrap-self.sh install
+BOOTSTRAP_BIN="$(./tools/bootstrap-self.sh path)"
+"$BOOTSTRAP_BIN" check "$PWD/lllcself/src/Main.lll"
+```
+
+`tools/bootstrap-self.sh` verifies `sha256` against
+[`bootstrap/lllc-bootstrap.lock.json`](bootstrap/lllc-bootstrap.lock.json)
+before extraction. Use `--reinstall` to force refresh.
+
+To build a new bootstrap release bundle and regenerate the lock:
+
+```bash
+./tools/build-bootstrap-artifacts.sh --version vX.Y.Z
+```
+
+Strict no-fallback launcher:
+
+```bash
+./tools/lllc-bootstrap.sh check "$PWD/lllcself/src/Main.lll"
+```
+
+`tools/lllc-bootstrap.sh` always executes the pinned bootstrap binary and does
+not fall back to stage0 / `dotnet run` bridge paths.
+
+### Run your first program
+
+```bash
+cat > hello.lll <<'EOF'
+module Hello
+
+Hello = printfn "Hello, ll-lang!"
+EOF
+
+./tools/lllc-bootstrap.sh run hello.lll
+# → Hello, ll-lang!
 ```
 
 ### CLI
 
 ```
-lllc build <file.lll>               # compile → <file>.fs  (F# default)
-lllc build --target ts <file.lll>   # compile → <file>.ts  (TypeScript)
-lllc build --target py <file.lll>   # compile → <file>.py  (Python)
-lllc build --target java <file.lll> # compile → <file>.java (Java 21)
-lllc build --target cs <file.lll>   # compile → <file>.cs  (C#)
-lllc build --target llvm <file.lll> # compile → <file>.ll  (LLVM IR)
-lllc build [dir]                    # compile project (reads lll.toml)
-lllc check <file.lll>               # type-check single file (no codegen)
-lllc check [dir]                    # type-check project (no codegen)
-lllc run   <file.lll>               # compile and run via temporary F# project
-lllc new   <name>                   # scaffold new project
-lllc install                        # resolve direct+transitive deps into vendor/ + rewrite ll.sum
-lllc mod tidy                       # same as install (canonical dependency sync)
-lllc mod add dep=https://repo#ref   # add dependency and sync
-lllc mod why dep                    # explain dependency chain + local direct importers
-lllc mcp                            # run MCP server (stdio, for Claude/Cursor)
+./tools/lllc-bootstrap.sh build   [--target fs|ts|py|java|cs|llvm] <file|dir>
+./tools/lllc-bootstrap.sh compile [--target fs|ts|py|java|cs|llvm] <file.lll>
+./tools/lllc-bootstrap.sh check   [--target fs|ts|py|java|cs|llvm] <file|dir>
+./tools/lllc-bootstrap.sh run     [--target fs|ts|py|java|cs|llvm] <file.lll>
+./tools/lllc-bootstrap.sh new <name>
+./tools/lllc-bootstrap.sh install
+./tools/lllc-bootstrap.sh mod add <name>=<source>
+./tools/lllc-bootstrap.sh mod tidy
+./tools/lllc-bootstrap.sh mod why <dep>
+./tools/lllc-bootstrap.sh mcp
 ```
 
 ### Create a multi-file project
 
 ```bash
-lllc new myapp          # creates myapp/lll.toml + myapp/src/Main.lll
+./tools/lllc-bootstrap.sh new myapp
 cd myapp
 # edit src/Main.lll, add more .lll files to src/
-lllc build              # → bin/fsharp/myapp.fsproj (+ Prelude.fs + module .fs files)
-dotnet run --project bin/fsharp/myapp.fsproj
+../tools/lllc-bootstrap.sh check .
+../tools/lllc-bootstrap.sh build --target fs .
 ```
 
 ### Multi-target from lll.toml
@@ -179,14 +164,22 @@ ll-lang ships a built-in MCP server. Wire it to Claude Code, Cursor, or Zed — 
 {
   "mcpServers": {
     "lllc": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/path/to/ll-lang/src/LLLangTool", "--", "mcp"]
+      "command": "lllc",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-Available MCP tools (10): `compile_file`, `compile_source`, `check_file`, `check_source`, `run_file`, `list_errors`, `lookup_error`, `stdlib_search`, `grammar_lookup`, `project_info`.
+Available MCP tools (28):
+- Core compile/check: `compile_source`, `check_source`, `compile_file`, `check_file`
+- Diagnostics & repair: `diagnose_source`, `diagnose_file`, `explain_error`, `fix_suggest`, `apply_fix_preview`
+- Formatting & AST: `format_source`, `format_file`, `parse_source`, `typed_ast`
+- Project graph/build: `project_graph`, `check_project`, `build_project`
+- Symbol navigation: `symbols`, `definition`, `references`
+- Dependency helpers: `mod_add`, `mod_tidy`, `mod_why`
+- Test helpers: `test_list`, `test_run` (structured self-host suite over `tools/check-selfhost-ci.sh`)
+- Catalog/meta: `stdlib_search`, `list_errors`, `lookup_error`, `list_targets`
 
 The agent can ask "does this compile?" and get a structured JSON response with error codes, line numbers, and fix hints — no scraping required.
 
@@ -255,15 +248,14 @@ Result A E = Ok A | Err E
 
 -- exhaustive pattern match
 area(s Shape) Float =
-  match s
-    | Circle r -> 3.14159 * r * r
-    | Rect w h -> w * h
-    | Empty    -> 0.0
+  match s with
+  | Circle r -> 3.14159 * r * r
+  | Rect w h -> w * h
+  | Empty    -> 0.0
 
 -- returning Maybe
 safeDivide(a Float)(b Float) Maybe[Float] =
-  if b == 0.0
-    None
+  if b == 0.0 then None
   else Some (a / b)
 ```
 
@@ -279,10 +271,7 @@ impl Show Int =
   show(n Int) Str = intToStr n
 
 impl Show Bool =
-  show(b Bool) Str =
-    if b
-      "true"
-    else "false"
+  show(b Bool) Str = if b then "true" else "false"
 
 printVal(x A) [Show A] = printfn (show x)
 ```
@@ -324,72 +313,6 @@ config = Toml.parse (readFile "config.toml")
 ### Keywords
 
 ll-lang has 15 keywords: `match`, `if`, `else`, `import`, `export`, `module`, `trait`, `impl`, `external`, `opaque`, `tag`, `unit`, `true`, `false`, `let`. Everything else — most function/type declaration forms — is expressed through the uppercase/lowercase convention.
-
-## For TypeScript developers
-
-Install without .NET — the npm package bundles the TypeScript compiler:
-
-```bash
-npm install -g @neftedollar/lllc
-lllc build --target ts app.lll   # → app.ts
-lllc run   --target ts app.lll   # compile + run via tsc/bun
-```
-
-Sum types become discriminated unions, pattern matching becomes type-narrowing:
-
-```typescript
-// generated from Shape = Circle Float | Rect Float Float | Empty
-type Shape =
-  | { tag: "Circle"; _0: number }
-  | { tag: "Rect"; _0: number; _1: number }
-  | { tag: "Empty" };
-```
-
-Full npm docs: [`packages/npm/lllc`](packages/npm/lllc/README.md)
-
-## For Python developers
-
-Install without .NET — the pip package bundles the Python compiler:
-
-```bash
-pip install lllc
-lllc build --target py app.lll   # → app.py
-lllc run   --target py app.lll   # compile + run via python3
-```
-
-Sum types become `@dataclass` + `Union`, pattern match becomes `isinstance` dispatch:
-
-```python
-# generated from Shape = Circle Float | Rect Float Float | Empty
-@dataclass
-class Circle:
-    _0: float
-
-@dataclass
-class Rect:
-    _0: float
-    _1: float
-
-@dataclass
-class Empty:
-    pass
-
-Shape = Union[Circle, Rect, Empty]
-```
-
-Full pip docs: [`packages/pip`](packages/pip/README.md)
-
-## For .NET / F# developers
-
-Install as a global dotnet tool:
-
-```bash
-dotnet tool install -g lllc
-lllc build app.lll              # → app.fs + .fsproj (default)
-lllc run   app.lll              # compile + dotnet run
-```
-
-F# output uses discriminated unions, let bindings, and `LLLang.Prelude` for the runtime. Multi-file projects emit a `.fsproj` ready for `dotnet build`.
 
 ## Error Format
 
@@ -442,24 +365,10 @@ spec/                      — formal grammar (EBNF), type rules, example corpus
   error-codes.md
   examples/valid/          — working .lll programs (hello, basics, ADTs, ...)
   examples/invalid/        — programs annotated with expected error codes
-src/LLLangCompiler/        — compiler library (F#)
-  AST.fs                   — untyped surface AST
-  Lexer.fs                 — tokenizer with layout (INDENT/DEDENT)
-  Parser.fs                — recursive-descent parser
-  Elaborator.fs            — name resolution, declared-type checking (E001-E005)
-  Types.fs                 — TypeScheme, Subst, generalize/instantiate
-  TypedAST.fs              — typed AST after H-M inference
-  HMInfer.fs               — Algorithm W, unification (E008), trait dispatch
-  Codegen.fs               — F# source emitter
-  CodegenTS.fs             — TypeScript source emitter
-  CodegenPy.fs             — Python source emitter
-  CodegenJava.fs           — Java 21 source emitter
-  Compiler.fs              — end-to-end pipeline + Target dispatch
-src/LLLangTool/            — `lllc` CLI (build / run / self / new / install / mcp + experimental reverse)
-  Mcp.fs                   — MCP server (10 tools for LLM clients)
-  Program.fs               — entry point
+lllcself/src/              — self-hosted ll-lang implementation of CLI subcommands
+  Mcp.lll                  — MCP server (28 tools for LLM clients)
 stdlib/                    — self-hosted stdlib (10 modules, 5857 LOC ll-lang)
-tests/LLLangTests/         — xUnit test suite (see CI for current count)
+obsolete/stage0/           — archived stage0 (.NET) compiler/tool/tests (manual use only)
 docs/user-guide/           — user documentation
 docs/compiler-dev/         — compiler developer documentation
 ```

@@ -1,18 +1,23 @@
 # ll-lang MCP Server
 
-ll-lang ships an embedded [Model Context Protocol](https://modelcontextprotocol.io) server so that LLM clients like **Claude Code**, **Cursor**, and **Zed** can drive the compiler through structured tool calls instead of parsing stderr.
+`lllc mcp` starts a stdio Model Context Protocol server for ll-lang tooling.
 
+Current implementation is **self-hosted**: the F# CLI command forwards to
+`lllcself/src/Main.lll` (`mcp` subcommand), and the MCP handlers live in
+`lllcself/src/Mcp.lll`.
+
+```bash
+lllc mcp
 ```
-lllc mcp          # starts the stdio MCP server; runs until stdin closes
-```
+
+The process blocks until stdin closes.
 
 ---
 
 ## Setup
 
-### Claude Code
-
-Add to your MCP config (e.g. `~/.config/claude/mcp.json` or the project's `.mcp.json`):
+Add to your MCP config (for example `~/.config/claude/mcp.json` or project
+`.mcp.json`):
 
 ```json
 {
@@ -25,238 +30,310 @@ Add to your MCP config (e.g. `~/.config/claude/mcp.json` or the project's `.mcp.
 }
 ```
 
-If `lllc` is not on `$PATH`, use the full path:
-```json
-"command": "/usr/local/bin/lllc"
-```
-
-### Cursor / Zed / Continue
-
-These clients follow the same stdio MCP pattern. Add `lllc mcp` as a server command in their MCP settings. Refer to each client's documentation for the exact location.
+If `lllc` is not on `$PATH`, use an absolute path to the binary.
 
 ---
 
-## Available tools
+## Protocol calls
+
+The server handles these JSON-RPC methods:
+
+- `initialize`
+- `tools/list`
+- `tools/call`
+
+`initialize` response:
+
+```json
+{
+  "protocolVersion": "2024-11-05",
+  "capabilities": { "tools": {} },
+  "serverInfo": { "name": "lllcself", "version": "1.0.0" }
+}
+```
+
+---
+
+## Available tools (28)
+
+Core compile/check:
+- `compile_source`, `check_source`, `compile_file`, `check_file`
+
+Diagnostics and repair:
+- `diagnose_source`, `diagnose_file`, `explain_error`, `fix_suggest`, `apply_fix_preview`
+
+Formatting and AST/introspection:
+- `format_source`, `format_file`, `parse_source`, `typed_ast`
+
+Project-level:
+- `project_graph`, `check_project`, `build_project`
+
+Symbol navigation:
+- `symbols`, `definition`, `references`
+
+Dependency helpers:
+- `mod_add`, `mod_tidy`, `mod_why`
+
+Test helpers:
+- `test_list`, `test_run` (structured self-host suite over `tools/check-selfhost-ci.sh`)
+
+Catalog/meta:
+- `stdlib_search`, `list_errors`, `lookup_error`, `list_targets`
+
+---
+
+## Tool reference
 
 ### `compile_source`
 
-Compile ll-lang source text end-to-end and return generated code for the selected target.
+Input:
 
-**Input:**
 ```json
-{ "source": "module M\nmain() = 0", "target": "fs" }
-```
-`target` is optional (`fs` default). Aliases: `fs`, `ts`, `py`, `java`, `cs`, `llvm` (`llvm` is experimental subset in 1.0).
-
-**Output:**
-```json
-{ "ok": true, "errors": [], "target": "FSharp", "fsharp": "module M\n..." }
-{ "ok": false, "errors": [{"code":"E001","line":3,"col":5,"message":"..."}] }
+{ "source": "module M\nmain = 1" }
 ```
 
----
+Current response shape:
 
-### `compile_file`
-
-Compile a `.lll` file end-to-end. Returns structured JSON.
-
-**Input:**
 ```json
-{ "path": "/abs/path/to/foo.lll", "target": "fs", "include_output": false }
-```
-Set `include_output: true` to include generated code in the response for the selected target.
-
-**Output:**
-```json
-{ "ok": true,  "errors": [], "target": "FSharp" }
-{ "ok": false, "errors": [{"code": "E002", "line": 5, "col": 3, "message": "E002 5:3 UnboundVar foo"}] }
+{ "ok": true, "errors": [], "target": "fsharp", "fs": "module M\n..." }
 ```
 
----
+Note: on compile failure, this tool still returns `"ok": true`; diagnostic text
+currently appears in `"fs"` (current self-hosted behavior).
 
 ### `check_source`
 
-Type-check ll-lang source text **without** code generation.
+Input:
 
-**Input:** `{ "source": "module M\nmain() = 0" }`  
-**Output:** `{ "ok": true, "errors": [] }` or `{ "ok": false, "errors": [...] }`
+```json
+{ "source": "module M\nmain = 1" }
+```
 
----
+Current response shape:
+
+```json
+{ "ok": true, "result": "{\"ok\":true,\"stage\":\"ok\",\"primary_error\":\"\",\"secondary_count\":0}" }
+```
+
+`result` is a JSON string payload (not a nested object).
+
+### `compile_file`
+
+Input:
+
+```json
+{ "path": "/absolute/path/to/file.lll" }
+```
+
+Current response shape:
+
+```json
+{ "ok": true, "errors": [], "target": "fsharp", "fs": "module ..." }
+```
+
+Missing-file response:
+
+```json
+{ "ok": false, "errors": [{ "code": "E000", "message": "File not found: ..." }] }
+```
+
+Use absolute paths. Relative paths are resolved from the temporary self-host
+run directory and usually fail.
 
 ### `check_file`
 
-Type-check a file **without** running codegen. Faster than `compile_file`.
+Input:
 
-**Input:** `{ "path": "/abs/path/to/foo.lll" }`  
-**Output:** `{ "ok": true, "errors": [] }` or `{ "ok": false, "errors": [...] }`
-
----
-
-### `run_file`
-
-Compile and run a `.lll` file via temporary F# project execution (`dotnet run`). Captures stdout + stderr.
-
-**Input:** `{ "path": "/abs/path/to/foo.lll" }`
-
-**Output:**
 ```json
-{
-  "exit_code": 0,
-  "stdout": "Hello, ll-lang!\n",
-  "stderr": "",
-  "errors": []
-}
+{ "path": "/absolute/path/to/file.lll" }
 ```
 
-> **Warning:** `run_file` executes arbitrary user code. Only use it on files you trust.
+Current response shape:
 
----
-
-### `list_errors`
-
-Return all known error codes with names and descriptions.
-
-**Input:** `{}` (no required fields)  
-**Output:**
 ```json
-[
-  { "code": "E001", "name": "TypeMismatch",  "description": "Expected type A, got type B at a usage site." },
-  { "code": "E002", "name": "UnboundVar",    "description": "Identifier not found in scope." },
-  ...
-]
+{ "ok": true, "result": "{\"ok\":true,\"stage\":\"ok\",\"primary_error\":\"\",\"secondary_count\":0}" }
 ```
 
----
-
-### `lookup_error`
-
-Get detailed explanation + minimal repro snippet for a specific error code.
-
-**Input:** `{ "code": "E003" }`  
-**Output:**
-```json
-{
-  "found": true,
-  "code": "E003",
-  "name": "NonExhaustiveMatch",
-  "description": "Pattern match does not cover all constructors of a sum type.",
-  "example": "-- expect: E003\nmodule Bad\n\nShape = Circle Float | Rect Float Float\n\narea(s Shape) =\n  | Circle r -> r * r\n"
-}
-```
-
----
+Missing-file response matches `compile_file` (`E000`).
 
 ### `stdlib_search`
 
-Search the stdlib by name or type signature substring.
+Input:
 
-**Input:** `{ "query": "list" }`  
-**Output:**
+```json
+{ "query": "list" }
+```
+
+Current response shape:
+
+```json
+{
+  "tools": [
+    { "name": "listMap", "signature": "(A -> B) -> List[A] -> List[B]", "module": "Std.List", "scope": "stdlib" }
+  ]
+}
+```
+
+### `list_errors`
+
+Input:
+
+```json
+{}
+```
+
+Current response shape:
+
 ```json
 [
-  { "name": "listLen",    "signature": "List[A] -> Int",                    "module": "Std.List", "scope": "stdlib" },
-  { "name": "listMap",    "signature": "(A -> B) -> List[A] -> List[B]",    "module": "Std.List", "scope": "stdlib" },
-  { "name": "listFilter", "signature": "(A -> Bool) -> List[A] -> List[A]", "module": "Std.List", "scope": "stdlib" },
-  ...
+  { "code": "E001", "name": "TypeMismatch", "description": "Expected type A got type B" }
 ]
 ```
 
----
+### `lookup_error`
 
-### `grammar_lookup`
+Input:
 
-Get the EBNF production for a grammar rule.
-
-**Input:** `{ "rule": "Expr" }`  
-**Output:**
 ```json
-{
-  "found": true,
-  "rule": "Expr",
-  "production": "Expr = ..."
-}
+{ "code": "E003" }
 ```
 
-The grammar is read from `spec/grammar.ebnf` (relative to the binary). Returns `{ "found": false }` if the rule is not found or the file is missing.
+Current response shape:
 
----
-
-### `project_info`
-
-Walk up from a path to find `lll.toml` and return project metadata.
-
-**Input:** `{ "path": "/abs/path/to/src/Main.lll" }`  
-**Output:**
 ```json
-{
-  "root": "/abs/path/to/myapp",
-  "manifest_path": "/abs/path/to/myapp/lll.toml",
-  "manifest_kind": "lll.toml",
-  "manifest": { "name": "myapp", "version": "1.0.0" },
-  "modules": [
-    { "path": "/abs/path/to/myapp/src/Greet.lll", "module": "Myapp.Greet" },
-    { "path": "/abs/path/to/myapp/src/Main.lll",  "module": "Myapp.Main" }
-  ],
-  "deps": [],
-  "platform_use": [],
-  "sdk_registry_errors": [],
-  "errors": []
-}
+{ "found": true, "code": "E003", "name": "NonExhaustiveMatch", "description": "Pattern match missing cases" }
 ```
-
-In single-file mode (no `lll.toml`), `root`/`manifest_path`/`manifest_kind` are `null` and `modules` contains one entry.
-
----
 
 ### `list_targets`
 
-List all available compilation targets with their status and description. No input required.
+Input:
 
-**Input:** `{}` (no fields required)  
-**Output:**
+```json
+{}
+```
+
+Current response shape:
+
 ```json
 [
-  {"id":"fs",   "name":"FSharp",     "status":"stable",       "extension":".fs",   "description":"F# source files; multi-module .fsproj output; default target"},
-  {"id":"ts",   "name":"TypeScript", "status":"stable",       "extension":".ts",   "description":"TypeScript source files; ADTs as tagged union types"},
-  {"id":"py",   "name":"Python",     "status":"stable",       "extension":".py",   "description":"Python source files; ADTs as @dataclass + Union types"},
-  {"id":"java", "name":"Java",       "status":"stable",       "extension":".java", "description":"Java 21 source files; ADTs as sealed interfaces + records"},
-  {"id":"cs",   "name":"CSharp",     "status":"stable",       "extension":".cs",   "description":"C# source files; ADTs as sealed record hierarchies"},
-  {"id":"llvm", "name":"LLVM",       "status":"experimental", "extension":".ll",   "description":"LLVM IR; subset backend — pattern-matching and ADT support is partial"}
+  { "id": "fs", "name": "FSharp", "status": "stable", "extension": ".fs", "description": "F# source files; default target" },
+  { "id": "llvm", "name": "LLVM", "status": "experimental", "extension": ".ll", "description": "LLVM IR; subset backend — ADT support partial" }
 ]
 ```
 
+### `diagnose_source` / `diagnose_file`
+
+Structured diagnostics for repair loops:
+
+```json
+{
+  "ok": false,
+  "stage": "elaborator",
+  "diagnostics": [
+    {
+      "code": "E002",
+      "message": "Unbound variable: undefined",
+      "line": 0,
+      "col": 0,
+      "endLine": 0,
+      "endCol": 0,
+      "severity": "error",
+      "hint": ""
+    }
+  ]
+}
+```
+
+### `format_source` / `format_file`
+
+Canonical formatting (newline normalization + trailing-space cleanup):
+
+```json
+{
+  "ok": true,
+  "changed": true,
+  "check_only": true,
+  "formatted": "module M\nmain = 1\n"
+}
+```
+
+### `parse_source` / `typed_ast`
+
+`parse_source` returns AST summary (`module`, `decl_count`, `decls[]`).
+`typed_ast` returns typed summary baseline (`typed_decls[]`) and diagnostics.
+
+### `project_graph` / `check_project` / `build_project`
+
+- `project_graph`: modules, import edges, topo order, loader errors.
+- `check_project`: per-file check diagnostics.
+- `build_project`: per-file build summary and output previews.
+
+### `symbols` / `definition` / `references`
+
+Top-level symbol discovery and textual reference lookups over source/file input.
+When `root` is provided, these tools can resolve over project files (`src/**/*.lll`)
+and return path-aware locations.
+
+### `explain_error` / `fix_suggest` / `apply_fix_preview`
+
+- `explain_error`: code + cause + hints.
+- `fix_suggest`: candidate fix IDs.
+- `apply_fix_preview`: returns patched source + preview diff.
+
+### `mod_add` / `mod_tidy` / `mod_why`
+
+- `mod_add`: writes dependency line into `lll.toml`.
+- `mod_tidy`: self-hosted baseline no-op (structured response).
+- `mod_why`: reports manifest presence + direct importers.
+
+### `test_list` / `test_run`
+
+`test_list` returns self-host check-suite entries:
+
+```json
+{
+  "ok": true,
+  "supported": true,
+  "execution_mode": "selfhost",
+  "total": 45,
+  "tests": [
+    { "name": "lllcself/src/Main.lll" }
+  ],
+  "timed_out": false,
+  "exit_code": 0
+}
+```
+
+`test_run` returns structured run summary:
+
+```json
+{
+  "ok": true,
+  "supported": true,
+  "execution_mode": "selfhost",
+  "total": 45,
+  "passed": 45,
+  "failed": 0,
+  "skipped": 0,
+  "tests": [
+    { "name": "lllcself/src/Main.lll" }
+  ],
+  "timed_out": false,
+  "exit_code": 0
+}
+```
+
+`test_run` delegates to `tools/check-selfhost-ci.sh` in the provided `root`
+directory and uses that script's exit code as pass/fail truth.
+
 ---
 
-## How LLM agents should use these tools
+## Smoke test
 
-| Task | Recommended tool |
-|------|-----------------|
-| "Does this snippet type-check?" | `check_source` |
-| "Compile this snippet and show target output" | `compile_source` |
-| "Does this file type-check?" | `check_file` — fast, no codegen overhead |
-| "Compile and show me the F# output" | `compile_file` with `include_output: true` |
-| "Run this ll-lang program" | `run_file` |
-| "What does E003 mean?" | `lookup_error` |
-| "What list functions are available?" | `stdlib_search` with `"query": "list"` |
-| "What's the syntax for pattern matching?" | `grammar_lookup` with `"rule": "Pattern"` |
-| "What modules are in this project?" | `project_info` |
-| "What compile targets are available?" | `list_targets` |
-
----
-
-## Transport
-
-stdio only. One process per workspace session. The server blocks until stdin closes (client disconnects). No persistent state — every tool call re-reads files from disk and re-runs the pipeline.
-
----
-
-## Troubleshooting
-
-### `lllc: command not found`
-Set up the alias per [01-installation.md](01-installation.md) or use `dotnet run --project src/LLLangTool -- mcp` instead.
-
-### `grammar_lookup` returns `"found": false` for a valid rule name
-The server looks for `spec/grammar.ebnf` relative to the binary. When running via `dotnet run`, the binary lives in `bin/Debug/net10.0/` — the grammar file search walks up 6 levels and should find `spec/`. If it doesn't, set the working directory to the repo root.
-
-### `run_file` is slow
-`lllc run` builds and executes a fresh temporary project each time. For faster iteration, use `compile_file` + `dotnet run --project <generated .fsproj>`.
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"check_source","arguments":{"source":"module M\nmain = 1"}}}' \
+  | lllc mcp
+```

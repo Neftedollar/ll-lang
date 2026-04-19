@@ -1,129 +1,123 @@
 # MCP Server
 
-`src/LLLangTool/Mcp.fs` implements an in-process Model Context Protocol server
-that wraps the ll-lang compiler pipeline in 8 structured tools. Entry point:
-`Mcp.runServer ()` in `Program.fs` (routes `lllc mcp`).
+Current MCP implementation is self-hosted in ll-lang:
 
-## Architecture
+- `lllcself/src/Mcp.lll` — JSON parser/serializer, JSON-RPC dispatch, tool handlers
+- `lllcself/src/Main.lll` — CLI command routing (`mcp`)
 
-```
+The F# CLI entrypoint (`src/LLLangTool/Program.fs`) routes `lllc mcp` to the
+self-hosted command via `cmdRunSelf ["mcp"]`.
+
+## Runtime flow
+
+```text
 lllc mcp
-   │
-   ▼
-Mcp.runServer()
-   │
-   ├─ mcpServer CE (FsMcp.Server)
-   │     name "ll-lang"  version "1.0.0"
-   │     tool compile_file   → compileFileTool
-   │     tool check_file     → checkFileTool
-   │     tool run_file       → runFileTool
-   │     tool list_errors    → listErrorsTool
-   │     tool lookup_error   → lookupErrorTool
-   │     tool stdlib_search  → stdlibSearchTool
-   │     tool grammar_lookup → grammarLookupTool
-   │     tool project_info   → projectInfoTool
-   │     useStdio
-   │
-   └─ Server.run server   (blocks until stdin closes)
+  │
+  ▼
+Program.fs: cmdRunSelf ["mcp"]
+  │
+  ▼
+compile lllcself/src/Main.lll to temp F# project
+  │
+  ▼
+run generated self-hosted binary with args: mcp
+  │
+  ▼
+lllcself/src/Mcp.lll handles JSON-RPC over stdio
 ```
 
-## Dependencies
+## Supported JSON-RPC methods
 
-`LLLangTool.fsproj` adds:
-- `FsMcp.Core` v1.0.0 — `Content`, `McpError`, `TypedTool.define`, `unwrapResult`
-- `FsMcp.Server` v1.0.0 — `mcpServer` CE, `Server.run`, `useStdio`
+- `initialize`
+- `tools/list`
+- `tools/call`
 
-Both packages are already used by the `age-mcp` server in this repo (`my-mcps/age-mcp/`). Same API pattern, proven on .NET 10.
+`initialize` returns:
 
-## Tool implementations
+- `protocolVersion = "2024-11-05"`
+- `serverInfo.name = "lllcself"`
+- `serverInfo.version = "1.0.0"`
 
-All tools follow the same structure:
+## Tool contract (current)
 
-```fsharp
-let toolName (args: ArgsType) : Task<Result<Content list, McpError>> =
-    task {
-        try
-            // ... work ...
-            return! ok (sprintf "{...}" ...)
-        with ex ->
-            return! ok (sprintf "{\"error\":%s}" (js ex.Message))
-    }
-```
+`tools/list` currently returns **28** tools.
 
-`ok text` is `Task.FromResult(Ok [ Content.text text ])`. Errors are always
-returned as structured JSON inside `ok` — never as `McpError`. This lets the
-LLM client parse and display errors without special-casing the MCP envelope.
+### Core compile/check
 
-## `compile_file`
+- `compile_source`, `check_source`
+- `compile_file`, `check_file`
 
-Calls `LLLang.Compiler.compile`. Returns `{ok, errors[], fsharp?}`.
-The `fsharp` field is only populated when `include_output = true` to avoid
-sending multi-KB F# source by default.
+### Diagnostics/repair
 
-## `check_file`
+- `diagnose_source`, `diagnose_file`
+- `explain_error`
+- `fix_suggest`, `apply_fix_preview`
 
-Calls `LLLang.Compiler.check` — the same pipeline as `compile` but stops
-before `emit`. Useful as a "does it type-check?" fast gate.
+### Formatting/AST
 
-## `run_file`
+- `format_source`, `format_file`
+- `parse_source`, `typed_ast`
 
-Same as `cmdRun` in Program.fs but with `RedirectStandardOutput = true` /
-`RedirectStandardError = true`. Reads both streams concurrently via
-`Task.WhenAll` to avoid the stdout/stderr deadlock. Returns
-`{exit_code, stdout, stderr, errors[]}`.
+### Project graph/build
 
-## `list_errors` / `lookup_error`
+- `project_graph`
+- `check_project`, `build_project`
 
-Static data in `knownErrors : (string * string * string) list`. `lookup_error`
-additionally walks `spec/examples/invalid/` to find a `.lll` file whose
-first line contains `-- expect: EXXX`.
+### Symbol navigation
 
-## `stdlib_search`
+- `symbols`, `definition`, `references`
 
-Scans `stdlibEntries : (string * string * string) list` — a hand-maintained
-mirror of `Elaborator.builtinEnv`. Each entry is `(name, signature, module)`.
-Substring match on both name and signature.
+### Dependency helpers
 
-**Keep in sync:** when you add a builtin to `Elaborator.builtinEnv`, add a
-matching line to `stdlibEntries` in `Mcp.fs`.
+- `mod_add`, `mod_tidy`, `mod_why`
 
-## `grammar_lookup`
+### Test helpers
 
-Finds `spec/grammar.ebnf` by walking up from `AppContext.BaseDirectory`.
-Searches for a line matching `<rule> ` (rule followed by space or tab), then
-collects until a blank line or the start of the next rule.
+- `test_list`, `test_run` (execute `dotnet test` with structured JSON output)
+- both tools accept runtime mode controls:
+  - `process_spawn` (bool, default `true`)
+  - `execution_mode` (`"process"` default, `"host_runner"` / `"no_spawn"` for no-spawn requests)
 
-## `project_info`
+### Existing utility surface
 
-Uses `findProjectRoot` (same walk-upward-for-lll.toml logic as Program.fs) and
-then calls `LLLang.ProjectLoader.loadProject`. Falls back to single-file mode
-(no lll.toml) gracefully.
+- `stdlib_search`
+- `list_errors`, `lookup_error`
+- `list_targets`
 
-## Testing
+## Tool behavior notes
 
-`tests/LLLangTests/McpTests.fs` tests the compiler functions that the tools
-delegate to — not the MCP envelope itself:
+- `compile_source` and `compile_file` return:
+  - `{"ok": true, "errors": [], "target": "fsharp", "fs": "..."}`
+- `check_source` and `check_file` return:
+  - `{"ok": true, "result": "<json-string-from-checkCompact>"}`
+- file tools emit `E000` if path is missing.
+- file paths should be absolute for stable behavior (self-host runs in temp dir).
+- `test_list` / `test_run` run through a controlled process shim (`dotnet test`).
+- responses include `exit_code`, `timed_out`, counters, and per-test entries.
+- in no-spawn mode responses remain structured and include `execution_mode` + `degraded_reason`.
 
-- `Compiler.check` on valid/invalid sources
-- Agreement between `check` and `compile`
-- Stdlib names accessible without import (contract for `stdlib_search`)
-- Grammar file presence (contract for `grammar_lookup`)
-- Error code examples present in corpus (contract for `lookup_error`)
+## Main loop shape
 
-## Adding a new tool
+`mcpLoop` currently:
 
-1. Define an arg type: `type MyToolArgs = { param: string }`
-2. Implement: `let myTool (args: MyToolArgs) : Task<Result<Content list, McpError>> = task { ... }`
-3. Register in `runServer ()`:
-   ```fsharp
-   tool (TypedTool.define<MyToolArgs> "my_tool" "description" myTool |> unwrapResult)
-   ```
-4. Add a test in `McpTests.fs`.
+1. Reads full stdin (`readFile "/dev/stdin"`).
+2. Splits by newline into JSON-RPC messages.
+3. Processes each line independently.
+4. Writes newline-delimited JSON responses.
 
-## Security
+This is a batch-on-stdin model, suitable for current MCP integration tests.
 
-- Tools that take paths validate the `.lll` extension but do not sandbox.
-- `run_file` executes compiled code via `dotnet run` on a temporary project — arbitrary code execution. The tool
-  description warns clients; MCP clients typically surface a confirmation UI.
-- Never write to stdout except via the FsMcp SDK — anything else corrupts the
-  JSON-RPC channel. Log to stderr only.
+## Tests
+
+`tests/LLLangTests/McpTests.fs` is the integration contract suite against
+`dotnet run --project src/LLLangTool -- mcp` and verifies:
+
+- `initialize` metadata
+- `tools/list` inventory
+- core `tools/call` smoke
+- diagnostics/format/typed AST behavior
+- project graph cycle detection
+- project-scope symbol/definition/reference lookup
+- dependency helper roundtrip in a temp project
+- file tool behavior on absolute paths
+- target inventory and status mapping

@@ -1,0 +1,187 @@
+module Std.McpProtocol
+
+import Std.Json
+import Std.Maybe
+
+-- JSON-RPC envelope foundation for ll-lang MCP tooling.
+
+export McpId =
+  | McpIdStr Str
+  | McpIdInt Int
+  | McpIdNull
+
+export McpRequest = MkMcpRequest Str McpId JsonValue
+export McpNotification = MkMcpNotification Str JsonValue
+export McpSuccessResponse = MkMcpSuccessResponse McpId JsonValue
+export McpErrorObject = MkMcpErrorObject Int Str Maybe[JsonValue]
+export McpErrorResponse = MkMcpErrorResponse McpId McpErrorObject
+
+fieldName(f JsonField) =
+  match f
+    | JField k _ -> k
+
+fieldValue(f JsonField) =
+  match f
+    | JField _ v -> v
+
+findField(name Str)(fields List[JsonField]) =
+  match fields
+    | f :: rest ->
+      if fieldName f == name
+        Some (fieldValue f)
+      else
+        findField name rest
+    | [] -> None
+
+lookupObjField(obj JsonValue)(name Str) =
+  match obj
+    | JObj fields -> findField name fields
+    | _ -> None
+
+requireField(obj JsonValue)(name Str) =
+  match lookupObjField obj name
+    | Some v -> Ok v
+    | None -> Err (strConcat "missing field: " name)
+
+jsonValueAsStr(v JsonValue) =
+  match v
+    | JStr s -> Ok s
+    | _ -> Err "expected string"
+
+jsonValueAsInt(v JsonValue) =
+  match v
+    | JNum n ->
+      match strToInt n
+        | Some i -> Ok i
+        | None -> Err "expected integer number"
+    | _ -> Err "expected number"
+
+decodeId(v JsonValue) =
+  match v
+    | JStr s -> Ok (McpIdStr s)
+    | JNum _ ->
+      match jsonValueAsInt v
+        | Ok n -> Ok (McpIdInt n)
+        | Err e -> Err e
+    | JNull -> Ok McpIdNull
+    | _ -> Err "invalid id type"
+
+encodeId(id McpId) =
+  match id
+    | McpIdStr s -> JStr s
+    | McpIdInt n -> JNum (intToStr n)
+    | McpIdNull -> JNull
+
+isJsonRpc2(v JsonValue) =
+  match v
+    | JStr s -> s == "2.0"
+    | _ -> false
+
+decodeRequestValue(obj JsonValue) =
+  match requireField obj "jsonrpc"
+    | Err e -> Err e
+    | Ok rpcV ->
+      if isJsonRpc2 rpcV
+        match requireField obj "method"
+          | Err e -> Err e
+          | Ok methodV ->
+            match jsonValueAsStr methodV
+              | Err e -> Err e
+              | Ok method ->
+                match requireField obj "id"
+                  | Err e -> Err e
+                  | Ok idV ->
+                    match decodeId idV
+                      | Err e -> Err e
+                      | Ok id ->
+                        params = maybeWithDefault (JObj []) (lookupObjField obj "params")
+                        Ok (MkMcpRequest method id params)
+      else Err "jsonrpc must be '2.0'"
+
+decodeNotificationValue(obj JsonValue) =
+  match requireField obj "jsonrpc"
+    | Err e -> Err e
+    | Ok rpcV ->
+      if isJsonRpc2 rpcV
+        match requireField obj "method"
+          | Err e -> Err e
+          | Ok methodV ->
+            match jsonValueAsStr methodV
+              | Err e -> Err e
+              | Ok method ->
+                params = maybeWithDefault (JObj []) (lookupObjField obj "params")
+                Ok (MkMcpNotification method params)
+      else Err "jsonrpc must be '2.0'"
+
+parseJsonValue(src Str) =
+  match parseJson src
+    | ParseOk v _ -> Ok v
+    | ParseErr e -> Err e
+
+export parseRequestJson(src Str) =
+  match parseJsonValue src
+    | Ok v -> decodeRequestValue v
+    | Err e -> Err e
+
+export parseNotificationJson(src Str) =
+  match parseJsonValue src
+    | Ok v -> decodeNotificationValue v
+    | Err e -> Err e
+
+export encodeRequest(req McpRequest) =
+  match req
+    | MkMcpRequest method id params ->
+      stringify (JObj [
+        JField "jsonrpc" (JStr "2.0")
+        JField "id" (encodeId id)
+        JField "method" (JStr method)
+        JField "params" params
+      ])
+
+export encodeNotification(n McpNotification) =
+  match n
+    | MkMcpNotification method params ->
+      stringify (JObj [
+        JField "jsonrpc" (JStr "2.0")
+        JField "method" (JStr method)
+        JField "params" params
+      ])
+
+export encodeSuccess(resp McpSuccessResponse) =
+  match resp
+    | MkMcpSuccessResponse id resultValue ->
+      stringify (JObj [
+        JField "jsonrpc" (JStr "2.0")
+        JField "id" (encodeId id)
+        JField "result" resultValue
+      ])
+
+errorDataField(data Maybe[JsonValue]) =
+  match data
+    | Some v -> [JField "data" v]
+    | None -> []
+
+encodeErrorObj(err McpErrorObject) =
+  match err
+    | MkMcpErrorObject code msg data ->
+      match data
+        | Some v ->
+          JObj [
+            JField "code" (JNum (intToStr code))
+            JField "message" (JStr msg)
+            JField "data" v
+          ]
+        | None ->
+          JObj [
+            JField "code" (JNum (intToStr code))
+            JField "message" (JStr msg)
+          ]
+
+export encodeError(resp McpErrorResponse) =
+  match resp
+    | MkMcpErrorResponse id err ->
+      stringify (JObj [
+        JField "jsonrpc" (JStr "2.0")
+        JField "id" (encodeId id)
+        JField "error" (encodeErrorObj err)
+      ])

@@ -118,9 +118,6 @@ ftvSchemeList(sch Scheme) =
     | MkScheme vs body ->
       listFilter (\v. listAll (\q. v != q) vs) (ftvTypeList body)
 
-ftvEnvList(env RBMap[Str][Scheme]) =
-  strNub (mapFold (\acc k sch. listAppend acc (ftvSchemeList sch)) [] env)
-
 -- Deduplicate a list of strings (preserves first occurrence).
 strNub(xs List[Str]) =
   listFold
@@ -131,6 +128,9 @@ strNub(xs List[Str]) =
     )
     []
     xs
+
+ftvEnvList(env RBMap[Str][Scheme]) =
+  strNub (mapFold (\acc k sch. listAppend acc (ftvSchemeList sch)) [] env)
 
 -- ---- Fresh variable state ---------------------------------------------
 

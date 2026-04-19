@@ -8,6 +8,13 @@ module Platform.FSharp.FFI
 fsharpExternalMap =
   ("console_log", "System.Console.WriteLine") ::
   ("JSON_parse", "System.Text.Json.JsonSerializer.Deserialize<obj>") ::
+  ("fileReadAll", "System.IO.File.ReadAllText") ::
+  ("fileWriteAll", "System.IO.File.WriteAllText") ::
+  ("fileExists", "System.IO.File.Exists") ::
+  ("dirList", "ll_dirList") ::
+  ("dirExists", "System.IO.Directory.Exists") ::
+  ("processRun", "ll_processRun") ::
+  ("processRunEx", "ll_processRunEx") ::
   []
 
 -- Look up the F# implementation for an ll-lang external name.

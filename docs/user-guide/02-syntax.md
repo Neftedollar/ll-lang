@@ -258,8 +258,9 @@ logGreeting(name Str) =
 ```
 
 `external` functions are called exactly like regular ll-lang functions.
-The compiler validates that the selected target has a mapping for the name;
-if not, it emits **E026 UnknownExternalMapping**.
+The compiler validates that the selected target has a mapping for the name in
+discovered `FFI.lll` sidecars (SDK and/or vendored packages); if not, it emits
+**E026 UnknownExternalMapping**.
 
 Pre-mapped names available on all targets: `console_log`, `JSON_parse`.
 

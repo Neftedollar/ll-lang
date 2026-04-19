@@ -34,6 +34,7 @@ Expr =
   | EMatch Expr (List[Pattern]) (List[Expr])
   | ELam Str Expr
   | ELet Str Expr Expr
+  | ELetTuple Str Str Expr Expr
   | EList (List[Expr])
   | EBinOp Str Expr Expr
   | ETuple Expr Expr
@@ -108,62 +109,22 @@ skipBrackTypeBody(toks List[Token]) =
     | _ :: rest -> skipBrackTypeBody rest
     | [] -> []
 
--- Parse bracket type args like [Int] in List[Int], building TyApp.
--- Handles simple TypeId/Ident atoms and one level of nesting.
--- Falls back to skipping for unknown/complex bracket content.
-applyBrackTypeArgs(base TypeExpr)(toks List[Token]) =
-  match toks
-    | LBrack :: TypeId arg :: LBrack :: TypeId inner :: RBrack :: RBrack :: rest ->
-      applyBrackTypeArgs (TyApp base (TyApp (TyName arg) (TyName inner))) rest
-    | LBrack :: TypeId arg :: RBrack :: rest ->
-      applyBrackTypeArgs (TyApp base (TyName arg)) rest
-    | LBrack :: Ident arg :: RBrack :: rest ->
-      applyBrackTypeArgs (TyApp base (TyName arg)) rest
-    | LBrack :: rest ->
-      rest2 = skipBrackTypeBody rest
-      (base, rest2)
-    | _ -> (base, toks)
-
--- Parse a single type expression atom: TypeId[brackets] | Ident | (TypeApp).
--- Parenthesised groups allow multi-arg type application: (RBMap K V).
-parseTypeExprAtom(toks List[Token]) =
+-- Parse a single type expression (name or name[arg]).
+parseTypeExpr(toks List[Token]) =
   match toks
     | TypeId name :: rest ->
-      applyBrackTypeArgs (TyName name) rest
+      rest2 = skipBrackTypeArgs rest
+      (TyName name, rest2)
     | Ident name :: rest ->
       (TyName name, rest)
-    | LParen :: rest ->
-      parseTypeExprParens rest
     | _ -> (TyName "?", toks)
-
--- Parse inside parens: head atom, then fold additional atoms as left-assoc TyApp.
-parseTypeExprParens(toks List[Token]) =
-  let (head, rest) = parseTypeExprAtom toks
-  parseTypeExprParensTail head rest
-
-parseTypeExprParensTail(acc TypeExpr)(toks List[Token]) =
-  match toks
-    | TypeId _ :: _ ->
-      let (next, rest) = parseTypeExprAtom toks
-      parseTypeExprParensTail (TyApp acc next) rest
-    | Ident _ :: _ ->
-      let (next, rest) = parseTypeExprAtom toks
-      parseTypeExprParensTail (TyApp acc next) rest
-    | LParen :: _ ->
-      let (next, rest) = parseTypeExprAtom toks
-      parseTypeExprParensTail (TyApp acc next) rest
-    | RParen :: rest -> (acc, rest)
-    | _ -> (acc, toks)
-
--- Backward-compat alias (no callers outside this file).
-parseTypeExpr(toks List[Token]) = parseTypeExprAtom toks
 
 -- Optional return type annotation before `=`.
 parseReturnType(toks List[Token]) =
   match toks
     | TypeId name :: rest ->
-      let (ty, rest2) = applyBrackTypeArgs (TyName name) rest
-      (Some ty, rest2)
+      rest2 = skipBrackTypeArgs rest
+      (Some (TyName name), rest2)
     | _ -> (None, toks)
 
 -- ---- Param group parsing -----------------------------------------------
@@ -173,19 +134,19 @@ parseParamGroups(toks List[Token]) =
   match toks
     | LParen :: RParen :: rest -> ([], rest)
     | LParen :: Ident pname :: TypeId tname :: rest ->
-      let (ty, rest2) = applyBrackTypeArgs (TyName tname) rest
+      rest2 = skipBrackTypeArgs rest
       rest3 = match rest2
         | RParen :: r -> r
         | _ -> rest2
       let (ps, rest4) = parseParamGroups rest3
-      (MkParam pname ty :: ps, rest4)
+      (MkParam pname (TyName tname) :: ps, rest4)
     | LParen :: Underscore :: Ident pname :: TypeId tname :: rest ->
-      let (ty, rest2) = applyBrackTypeArgs (TyName tname) rest
+      rest2 = skipBrackTypeArgs rest
       rest3 = match rest2
         | RParen :: r -> r
         | _ -> rest2
       let (ps, rest4) = parseParamGroups rest3
-      (MkParam (strConcat "_" pname) ty :: ps, rest4)
+      (MkParam (strConcat "_" pname) (TyName tname) :: ps, rest4)
     | LParen :: Ident pname :: RParen :: rest ->
       let (ps, rest2) = parseParamGroups rest
       (MkParam pname (TyName "?") :: ps, rest2)
@@ -205,11 +166,7 @@ parseTypeParams(toks List[Token]) =
 parseConArgs(toks List[Token]) =
   match toks
     | TypeId _ :: _ ->
-      let (arg, rest) = parseTypeExprAtom toks
-      let (args, rest2) = parseConArgs rest
-      (arg :: args, rest2)
-    | LParen :: _ ->
-      let (arg, rest) = parseTypeExprAtom toks
+      let (arg, rest) = parseTypeExpr toks
       let (args, rest2) = parseConArgs rest
       (arg :: args, rest2)
     | _ -> ([], toks)
@@ -340,9 +297,7 @@ parseIf(toks List[Token]) =
   (EIf cond thenE elseE, rest5)
 
 skipKwIn(toks List[Token]) =
-  match toks
-    | KwLet :: r -> skipNewlines r
-    | _ -> skipNewlines toks
+  skipNewlines toks
 
 parseLetIn(toks List[Token]) =
   match toks
@@ -351,7 +306,7 @@ parseLetIn(toks List[Token]) =
       let (e1, rest2) = parseExpr rest0
       rest3 = skipKwIn rest2
       let (e2, rest4) = parseExpr rest3
-      (ELet a e1 (ELet b (ETuple e1 e2) e2), rest4)
+      (ELetTuple a b e1 e2, rest4)
     | Ident name :: Eq :: rest ->
       rest0 = skipNewlines rest
       let (e1, rest2) = parseExpr rest0

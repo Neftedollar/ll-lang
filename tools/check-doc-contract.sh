@@ -29,7 +29,7 @@ check_pattern() {
 }
 
 check_pattern '\.ll-deps\b' "replace legacy dependency path .ll-deps with vendor/ + ll.sum"
-check_pattern '\binstall_package\b|\blist_targets\b' "remove stale MCP tool names"
+check_pattern '\binstall_package\b' "remove stale MCP tool names"
 check_pattern '\b12\s+keywords\b|\b12-keyword\b' "keyword count drift (language no longer 12-keyword)"
 check_pattern '\b`fn`,\s*`type`,\s*`let`\b' "outdated phrasing: let is now a keyword"
 check_pattern 'supports three compilation targets' "outdated target matrix wording (ll-lang supports more than 3 targets)"

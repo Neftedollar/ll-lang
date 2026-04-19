@@ -1,11 +1,13 @@
 module Examples.Modules
 
 import Std.List
-import Std.Maybe
 
--- using imported functions
-firstDoubled(xs List[Int]) =
-  xs -> head -> map (\x. x * 2)
+-- using listTake and listDrop from Std.List
+firstThree(xs List[Int]) =
+  listTake 3 xs
+
+restAfterTwo(xs List[Int]) =
+  listDrop 2 xs
 
 -- export
-export greet(name Str) = "hello " + name
+export greet(name Str) = strConcat "hello " name

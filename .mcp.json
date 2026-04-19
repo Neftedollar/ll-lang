@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ll-lang": {
+      "command": "tools/lllc-bootstrap.sh",
+      "args": ["mcp"]
+    }
+  }
+}

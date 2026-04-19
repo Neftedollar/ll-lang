@@ -304,7 +304,8 @@ entry = "src/Main.lll"
 Stable CLI/project workflows:
 
 - `lllc new`
-- `lllc check`
+- `lllc check [dir]`
+- `lllc self check <file.lll>`
 - `lllc build`
 - `lllc run`
 - `lllc install`

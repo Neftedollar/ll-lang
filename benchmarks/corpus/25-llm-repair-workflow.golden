@@ -1,11 +1,3 @@
-OK 1 valid program
-OK 2 unbound variable
-OK 3 duplicate function
-OK 4 valid match with constructors
-OK 5 unbound constructor
-OK 6 let binding scoping
-OK 7 external decl registers name
-OK 8 opaque type and external
 OK 1 isFlex $0=true
 OK 2 isFlex Int=false
 OK 3 isFlex a=false
@@ -42,9 +34,9 @@ OK 12 lambda arith
 Done
 OK 1 valid program no errors
 OK 2 unbound var E002 detected
-FAIL 3 non-exhaustive E003 detected
+OK 3 non-exhaustive E003 detected
 OK 4 MCP JSON ok:true on good src
 OK 5 MCP JSON ok:false on bad src
 OK 6 compile produces output
-FAIL 7 broken and fixed differ
+OK 7 broken and fixed differ
 Done

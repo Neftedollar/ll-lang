@@ -1,0 +1,67 @@
+name: Bootstrap Release Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag (e.g. v1.2.2)"
+        required: true
+        type: string
+      publish_release:
+        description: "Upload artifacts to GitHub Release"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build Artifacts + Lock
+        run: |
+          ./tools/build-bootstrap-artifacts.sh \
+            --version "${{ inputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --output-dir "dist/bootstrap/${{ inputs.version }}" \
+            --lock-out "dist/bootstrap/${{ inputs.version }}/lllc-bootstrap.lock.json"
+
+      - name: Upload Workflow Artifact Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-${{ inputs.version }}
+          path: dist/bootstrap/${{ inputs.version }}
+
+      - name: Publish GitHub Release Assets
+        if: ${{ inputs.publish_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          DIST="dist/bootstrap/${VERSION}"
+
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION exists; uploading with --clobber"
+          else
+            gh release create "$VERSION" \
+              --title "$VERSION" \
+              --notes "Bootstrap artifacts for self-hosted lllc."
+          fi
+
+          gh release upload "$VERSION" \
+            "$DIST/lllc-linux-x64.tar.gz" \
+            "$DIST/lllc-linux-arm64.tar.gz" \
+            "$DIST/lllc-osx-x64.tar.gz" \
+            "$DIST/lllc-osx-arm64.tar.gz" \
+            "$DIST/lllc-win-x64.zip" \
+            --clobber

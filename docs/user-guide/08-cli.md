@@ -1,16 +1,18 @@
 # The `lllc` CLI
 
-`lllc` (the `LLLangTool` project) drives the compiler for both single-file and multi-file project builds.
+`lllc` is the bootstrap binary entrypoint for single-file and multi-file project builds.
+Stage0 `LLLangTool` is archived under `obsolete/stage0/src/LLLangTool` and is not the default runtime path.
 
-1.0 note: `build/check/run/new/install/self/mcp` are stable CLI surface. `reverse`
-is available as experimental tooling.
+1.0 note: `build/run/new/install/self/mcp` and `check [dir]` are stable CLI
+surface. `reverse` is available as experimental tooling.
 
 ```
 Usage:
   lllc build [--target fs|ts|py|java|cs|llvm] <file.lll>   compile single file
   lllc build [--target fs|ts|py|java|cs|llvm] [dir]        compile project (reads lll.toml)
-  lllc check [--target fs|ts|py|java|cs|llvm] <file.lll>   type-check single file (no codegen)
   lllc check [--target fs|ts|py|java|cs|llvm] [dir]        type-check project (no codegen)
+  lllc self check <file.lll>                                 canonical single-file type-check (LLL path)
+  lllc check [--target fs|ts|py|java|cs|llvm] <file.lll>    legacy stage0 single-file check (compatibility path)
   lllc run   [--target fs|ts|py|java|cs|llvm] <file.lll>   compile and run single file
   lllc self  <cmd> <file> [arg]                             run self-hosted lllc tool layer
   lllc new   <name>         scaffold new project
@@ -78,14 +80,21 @@ dotnet run   --project bin/myapp.fsproj
 
 ---
 
-## `lllc check <file.lll>` — single-file type-check
+## `lllc self check <file.lll>` — canonical single-file type-check
 
 ```bash
-lllc check hello.lll
-lllc check --target ts hello.lll
+lllc self check hello.lll
 ```
 
-Runs lex → parse → elaborate → infer and target-specific external mapping validation (E026), without writing generated target files.
+Runs the self-hosted LLL checker path (import-aware closure + compile pipeline)
+without writing generated target files.
+
+## `lllc check <file.lll>` — legacy stage0 single-file check
+
+This compatibility path is retained for bootstrap/recovery scenarios.
+
+- Not the canonical single-file checker in the current self-host migration.
+- May diverge on import resolution behavior versus `lllc self check`.
 
 ---
 
@@ -235,20 +244,20 @@ E003 0:0 NonExhaustiveMatch Shape missing:Empty
 ### Nullness warnings on build
 
 The compiler projects enable `<Nullable>enable</Nullable>` under `LangVersion=preview`.
-Current baseline is warning-free (`0 Warning(s)` on `dotnet build src/LLLangTool/LLLangTool.fsproj`).
+Current baseline is warning-free (`0 Warning(s)` on `dotnet build obsolete/stage0/src/LLLangTool/LLLangTool.fsproj`).
 Treat new nullness warnings as regressions to fix rather than suppress.
 
 ---
 
-## Invoking via `dotnet run`
+## Invoking archived stage0 via `dotnet run`
 
 If you have not set up the `lllc` alias (see [01-installation.md](01-installation.md)):
 
 ```bash
-dotnet run --project src/LLLangTool -- build hello.lll
-dotnet run --project src/LLLangTool -- build ./myapp
-dotnet run --project src/LLLangTool -- new myapp
-dotnet run --project src/LLLangTool -- reverse --from ts bin/typescript/myapp.ts
+dotnet run --project obsolete/stage0/src/LLLangTool -- build hello.lll
+dotnet run --project obsolete/stage0/src/LLLangTool -- build ./myapp
+dotnet run --project obsolete/stage0/src/LLLangTool -- new myapp
+dotnet run --project obsolete/stage0/src/LLLangTool -- reverse --from ts bin/typescript/myapp.ts
 ```
 
 ---
@@ -290,29 +299,3 @@ Use this as a migration/bootstrap tool for target code that follows emitted idio
 - F# nested `let ... in ...` chains are flattened into ll-lang local-binding statement blocks
 - F# tuple-style DU constructor calls (e.g. `Ctor(a, b)`) are normalized to curried ll-lang constructor application
 - Identifier normalization from `PascalCase` to ll-lang-compatible `lowerCamelCase` during recovery
-
----
-
-## Known issues and limitations
-
-### `lllc check <file.lll>` — single-file import resolution (issue #139)
-
-**Symptom**: `lllc check` may report `E002 UnboundVar` for names that come from `import` declarations,
-even though the code is correct.
-
-```
-$ lllc check spec/examples/valid/05-modules.lll
-E002 8:9 UnboundVar head
-E002 8:17 UnboundVar map
-```
-
-**Cause**: Single-file `check` runs the stage-0 type checker against the built-in base environment
-only. It does not load or type-check imported modules. Affected files include any `.lll` that
-uses names imported from `Std.*` or other multi-module libraries.
-
-**Workarounds**:
-- Use `lllc check [dir]` (project mode) when a `lll.toml` manifest is present — this resolves imports correctly.
-- For stdlib builtins (`listMap`, `listFold`, etc.) the built-in base env covers all standard names;
-  non-standard aliases like `map`/`head` are not in scope without import resolution.
-
-**Status**: tracked in Neftedollar/ll-lang#139. Fix: wire stdlib import resolution into single-file `check`.

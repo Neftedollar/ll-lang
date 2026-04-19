@@ -1,5 +1,13 @@
-module Examples.Clean
-useIt(s Str) =
-  x = strToInt s
-  0
-main() = useIt "42"
+module Examples.StrToInt
+
+-- Must declare Maybe so the stage0 prelude injects strToInt / listHead etc.
+Maybe A = Some A | None
+
+parseOrZero(s Str) =
+  match strToInt s
+    | Some n -> n
+    | None -> 0
+
+main =
+  _ = printfn (intToStr (parseOrZero "42"))
+  printfn (intToStr (parseOrZero "abc"))

@@ -27,6 +27,7 @@ The goal is not only "compiler builds compiler". The goal is:
 - [x] a self-hosted compiler slice exists
 - [x] stage0 F# compiler exists and is operational
 - [x] self-hosting is already part of product direction and docs
+- [x] target external mappings are sourced from ll-lang `FFI.lll` sidecars (SDK/vendor), not hardcoded backend tables
 
 Still not done enough for `v2`:
 

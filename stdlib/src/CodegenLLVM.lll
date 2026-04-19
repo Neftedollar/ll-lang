@@ -2,34 +2,11 @@ module Std.CodegenLLVM
 
 import Std.Parser
 import Std.Maybe
-import Std.Map
-import Std.Str
-import Std.CompilerTypes
-import Std.CompilerTyped
 
 -- LLVM IR code emitter written in ll-lang.
 -- Takes the AST produced by Std.Parser and emits LLVM IR text format (.ll).
 -- Uses SSA numbering for unique register names.
---
--- Phase 1 refactor (#149):
---   - Single EmitState record threads temp counter + string index
---   - Single emitExpr(state)(expr) walk replaces 4-way duplicated Instrs/Reg/NextCtr/NextSidx walks
---   - TypedExpr dispatch via emitTypedExpr coexists with the untyped Expr path
---   - emitType extended for TyApp List/Maybe and TyFn -> ptr
---
--- Phase 2 (#149):
---   - EmitState extended with strPool + nullaryGlobals set
---   - TEBinOp dispatches on operand type (Int/Float/Bool/Str)
---   - Str equality lowers to @strEq runtime call
---   - String pool with dedup (buildStringPool + emitStringPtrGep)
---   - coerceValue helper (i1/i8/i64/double/ptr conversions)
---   - main coerce: entry-point `main` forced to i32 signature, body value
---     cast via emitCastToMainI32
---   - collectNullaryGlobals: bare TEVar references to zero-arg TDFn lower
---     to `call <ty> @name()` instead of `%name`
---   - litToConst / evalConst / constToLlvm for TDLet globals with constant
---     RHS (e.g. `pi = 3.14` -> `@pi = global double 3.14`)
---   - emitTypedDecl / emitTypedModule wire the full pipeline
+-- Each emit family (Instrs/Reg/NextCtr/NextSidx/Globs) threads state explicitly.
 
 -- ---- String helpers --------------------------------------------------------
 
@@ -47,197 +24,6 @@ strJoin2(a Str)(b Str) =
       a
     else strConcat a (strConcat "\n" b)
 
--- ---- EmitState -------------------------------------------------------------
--- Phase 2 shape: temp counter + string-literal counter (used by the Expr
--- path) + pre-built string pool + pre-built nullary-globals set. The
--- TypedExpr path consults the pool/set via the state; the Expr path keeps
--- its pre-pool behaviour (allocate-on-demand @.str.N indices).
-
--- Phase 3 shape: Phase 2 fields + labelCtr + ctorTags + nextCtorTag.
--- ctorTags is project-scope: set once by the emit driver via a pre-pass over
--- all TDType decls, then read-only during emission. nextCtorTag is stored
--- in the state so the seed pass can thread its counter without globals.
-
--- Phase 4 shape: Phase 3 fields + lambdaCtr + liftedLambdas.
--- lambdaCtr MUST be monotonic across all decls emitted in a module — every
--- TELam generates a fresh `@__lam_N` top-level fn, and `liftedLambdas`
--- accumulates the emitted definitions so the module driver can append them
--- after the regular decls. Threading through the state avoids global
--- mutable refs (.lll has none) while keeping the counter collision-free.
---
--- Phase 4.1 shape: Phase 4 fields + varEnv.
--- varEnv maps ll-lang variable name -> SSA register that holds its value
--- in the current LLVM scope. Used by emitLamLift to resolve free vars at
--- the use-site env struct population, and by the lambda body prelude to
--- rebind captures loaded from the env pointer. TEVar consults varEnv first
--- before falling back to the `%<name>` or nullary-global conventions.
-EmitState = MkEmitState Int Int (RBMap[Str][Int]) (RBMap[Str][Int]) Int (RBMap[Str][Int]) Int Int (List[Str]) (RBMap[Str][Str])
-  -- tempCtr, strIdx, strPool, nullaryGlobals, labelCtr, ctorTags,
-  -- nextCtorTag, lambdaCtr, liftedLambdas, varEnv
-
-esTempCtr(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve -> c
-
-esStrIdx(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve -> s
-
-esStrPool(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve -> p
-
-esNullaryGlobals(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve -> g
-
-esLabelCtr(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve -> l
-
-esCtorTags(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve -> t
-
-esNextCtorTag(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve -> n
-
-esLambdaCtr(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve -> lc
-
-esLiftedLambdas(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve -> ll
-
-esVarEnv(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve -> ve
-
--- Bind `name -> ssaReg` in varEnv. Overwrites existing binding.
-esSetVar(st EmitState)(name Str)(ssaReg Str) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve ->
-      MkEmitState c s p g l t n lc ll (mapInsert strCmp name ssaReg ve)
-
--- Look up `name` in varEnv. Returns Maybe[Str].
-esGetVar(st EmitState)(name Str) =
-  mapLookup strCmp name (esVarEnv st)
-
--- Allocate a fresh SSA register: bumps tempCtr and returns (regName, newState).
-esFresh(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve ->
-      let reg = strConcat "%t" (intToStr (c + 1))
-      (reg, MkEmitState (c + 1) s p g l t n lc ll ve)
-
--- Allocate the next string-literal index: returns (idx, newState) where idx
--- is the current index before allocation.
-esNextStr(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve -> (s, MkEmitState c (s + 1) p g l t n lc ll ve)
-
--- Allocate a fresh block label. Returns (labelName, newState). The labelName
--- is always the bare identifier (no leading `%`); callers prepend `%` when
--- emitting a `br label %X` instruction or a plain `X:` for the label itself.
-esFreshLabel(prefix Str)(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve ->
-      let lbl = strConcat prefix (intToStr l)
-      (lbl, MkEmitState c s p g (l + 1) t n lc ll ve)
-
--- Allocate three labels in one go: (case, body, next) — the shape used by
--- match-arm lowering. Returns ((caseLbl, bodyLbl, nextLbl), newState).
-esFreshLabelTriple(st EmitState) =
-  let (caseLbl, st1) = esFreshLabel "match_case_" st
-  let (bodyLbl, st2) = esFreshLabel "match_body_" st1
-  let (nextLbl, st3) = esFreshLabel "match_next_" st2
-  ((caseLbl, bodyLbl, nextLbl), st3)
-
--- Replace the pool / globals sections (used by the pre-pass).
-esSetPool(st EmitState)(pool RBMap[Str][Int]) =
-  match st
-    | MkEmitState c s _ g l t n lc ll ve -> MkEmitState c s pool g l t n lc ll ve
-
-esSetGlobals(st EmitState)(globs RBMap[Str][Int]) =
-  match st
-    | MkEmitState c s p _ l t n lc ll ve -> MkEmitState c s p globs l t n lc ll ve
-
-esSetCtorTags(st EmitState)(tags RBMap[Str][Int])(nextN Int) =
-  match st
-    | MkEmitState c s p g l _ _ lc ll ve -> MkEmitState c s p g l tags nextN lc ll ve
-
--- Phase 4: allocate a fresh `@__lam_N` name. Monotonic within the state —
--- never reset, so cross-decl emission in a module cannot collide.
-esFreshLambdaName(st EmitState) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve ->
-      let name = strConcat "__lam_" (intToStr lc)
-      (name, MkEmitState c s p g l t n (lc + 1) ll ve)
-
--- Phase 4: cons a lifted lambda definition onto the side-buffer. Callers
--- pass the whole `define <ty> @__lam_N(...) { ... }` text.
-esAddLiftedLambda(st EmitState)(def Str) =
-  match st
-    | MkEmitState c s p g l t n lc ll ve -> MkEmitState c s p g l t n lc (listAppend ll [def]) ve
-
--- Reset just the temp/label counters (used when re-entering a function body
--- that shares the pool / globals / ctor tags / lambda side-buffer with the
--- enclosing module walk). tempCtr and labelCtr reset to 0 per-function so
--- fresh SSA names start at `%t1` inside each define. varEnv resets to Leaf
--- so per-function bindings don't leak across decls.
-esResetForFunc(st EmitState) =
-  match st
-    | MkEmitState _ s p g _ t n lc ll _ -> MkEmitState 0 s p g 0 t n lc ll Leaf
-
--- Look up a constructor's tag; returns -99 (sentinel) for unknown names
--- so mis-use surfaces quickly in generated IR rather than silently matching 0.
-esCtorTag(name Str)(st EmitState) =
-  match mapLookup strCmp name (esCtorTags st)
-    | Some v -> v
-    | None -> 0 - 99
-
--- Build a fresh initial state (all counters 0, empty maps).
-emitStateInit = MkEmitState 0 0 Leaf Leaf 0 Leaf 1 0 [] Leaf
-
-emitStateWith(pool RBMap[Str][Int])(globs RBMap[Str][Int]) =
-  MkEmitState 0 0 pool globs 0 Leaf 1 0 [] Leaf
-
-emitStateWithTags(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(nextN Int) =
-  MkEmitState 0 0 pool globs 0 tags nextN 0 [] Leaf
-
--- Phase 4: state factory that preserves lambdaCtr + liftedLambdas across
--- a per-decl reset. Temp/label counters start at 0 for the new function
--- body, but the lambda side-buffer persists so top-level definitions
--- accumulate across every decl in the module.
-emitStateForFunc(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(nextN Int)(lambdaCtr Int)(lifted List[Str]) =
-  MkEmitState 0 0 pool globs 0 tags nextN lambdaCtr lifted Leaf
-
--- Predicate: is `name` a nullary global?
-isNullaryGlobal(name Str)(st EmitState) =
-  mapContains strCmp name (esNullaryGlobals st)
-
--- ---- Emit result -----------------------------------------------------------
--- The canonical return shape for emitExpr / emitTypedExpr. Carries:
---   - the updated EmitState (so callers thread it forward),
---   - the instruction block for the expression (may be empty),
---   - the register / value string that holds the expression's result.
-
-EmitExprResult = MkEER EmitState Str Str
-
-eerState(r EmitExprResult) =
-  match r
-    | MkEER s _ _ -> s
-
-eerInstrs(r EmitExprResult) =
-  match r
-    | MkEER _ i _ -> i
-
-eerReg(r EmitExprResult) =
-  match r
-    | MkEER _ _ v -> v
-
 -- ---- Type emission ---------------------------------------------------------
 
 emitLLVMType(t TypeExpr) =
@@ -246,27 +32,13 @@ emitLLVMType(t TypeExpr) =
     | TyName "Float" -> "double"
     | TyName "Bool"  -> "i1"
     | TyName "Char"  -> "i8"
-    | TyName "Str"   -> "ptr"
+    | TyName "Str"   -> "i8*"
     | TyName "Unit"  -> "void"
-    | TyName _       -> "i64"
-    | TyApp (TyName "List") _  -> "ptr"
-    | TyApp (TyName "Maybe") _ -> "ptr"
-    | TyApp _ _                -> "ptr"
-    | TyFn _ _                 -> "ptr"
-
--- Default value for a given emit type. Matches F# `defaultValue`.
-defaultLLVMValue(ty Str) =
-  if ty == "i64"
-    "0"
-  else if ty == "i1"
-    "0"
-  else if ty == "i8"
-    "0"
-  else if ty == "double"
-    "0.0"
-  else if ty == "void"
-    ""
-  else "null"
+    -- User-defined named types lower to runtime heap nodes.
+    | TyName _       -> "ptr"
+    -- Generic/app types are represented as runtime pointers in opaque-ptr mode.
+    | TyApp _ _      -> "ptr"
+    | TyFn _ _       -> "i8*"
 
 -- ---- SSA name helper -------------------------------------------------------
 
@@ -292,40 +64,6 @@ strGlobalDecl(idx Int)(s Str) =
   len = intToStr (strLen s + 1)
   idxStr = intToStr idx
   strConcat "@.str." (strConcat idxStr (strConcat " = private unnamed_addr constant [" (strConcat len (strConcat " x i8] c\"" (strConcat encoded "\\00\"")))))
-
--- Phase 2: pool-style string global with `@.strK` symbol (no dot), matches
--- F# `buildStringPool` naming ("@.str" + index).
-strPoolDecl(idx Int)(s Str) =
-  encoded = encodeLLVMStr s
-  len = intToStr (strLen s + 1)
-  idxStr = intToStr idx
-  strConcat "@.str" (strConcat idxStr (strConcat " = private unnamed_addr constant [" (strConcat len (strConcat " x i8] c\"" (strConcat encoded "\\00\", align 1")))))
-
--- Materialize a getelementptr expression for string literal @.str.<idx>
--- given its total byte length (strLen s + 1 for the trailing NUL).
-strGepExpr(idx Int)(totalLen Int) =
-  idxStr = intToStr idx
-  lenStr = intToStr totalLen
-  strConcat "getelementptr inbounds ([" (strConcat lenStr (strConcat " x i8], [" (strConcat lenStr (strConcat " x i8]* @.str." (strConcat idxStr ", i64 0, i64 0")))))
-
--- Phase 2 pool GEP: matches F# emitStringPtr output shape:
---   "getelementptr inbounds ([N x i8], ptr @.strK, i64 0, i64 0)"
--- Returns the raw expression text; caller inlines into an instruction.
-strPoolGepExpr(idx Int)(totalLen Int) =
-  idxStr = intToStr idx
-  lenStr = intToStr totalLen
-  strConcat "getelementptr inbounds ([" (strConcat lenStr (strConcat " x i8], ptr @.str" (strConcat idxStr ", i64 0, i64 0)")))
-
--- Emit an instruction that loads a pool string pointer into a fresh reg.
--- Returns EmitExprResult (state, instrs, reg).
-emitStringPtrGep(state EmitState)(lit Str) =
-  match mapLookup strCmp lit (esStrPool state)
-    | None -> MkEER state "" "null"
-    | Some idx ->
-      totalLen = strLen lit + 1
-      let (dst, st2) = esFresh state
-      instr = strConcat "  " (strConcat dst (strConcat " = " (strPoolGepExpr idx totalLen)))
-      MkEER st2 instr dst
 
 -- ---- Binary op helpers -----------------------------------------------------
 
@@ -397,16 +135,6 @@ llvmFloatCmpOp(op Str) =
               "fcmp oge double"
             else "fcmp oeq double"
 
--- Bool-typed ops: arithmetic `+/-/*//` degenerate to `and/or i1`, and
--- comparisons flow through `icmp`.
-llvmBoolOp(op Str) =
-  if op == "=="
-    "icmp eq i1"
-  else
-    if op == "!="
-      "icmp ne i1"
-    else "icmp eq i1"
-
 isCmpOp(op Str) =
   if op == "=="
     true
@@ -427,19 +155,21 @@ isCmpOp(op Str) =
               true
             else false
 
-isArithOp(op Str) =
-  if op == "+"
-    true
-  else
-    if op == "-"
-      true
-    else
-      if op == "*"
-        true
+isFloatExpr(e Expr) =
+  match e
+    | EFloat _ -> true
+    | EBinOp _ l r ->
+      if isFloatExpr l
+        isFloatExpr r
       else
-        if op == "/"
-          true
-        else false
+        false
+    | _ -> false
+
+isFloatBinOp(l Expr)(r Expr) =
+  if isFloatExpr l
+    isFloatExpr r
+  else
+    false
 
 -- ---- getStrVal helper ------------------------------------------------------
 
@@ -457,1291 +187,392 @@ extractFnName(e Expr) =
     | EApp f _ -> extractFnName f
     | _ -> "unknown"
 
-extractTypedFnName(te TypedExpr) =
-  match te
-    | TEVar n _ -> n
-    | TECon n _ -> n
-    | TEApp f _ _ -> extractTypedFnName f
-    | _ -> "unknown"
+-- ---- emitExprInstrs --------------------------------------------------------
+-- Returns the LLVM IR instructions (not including final ret) for expression e.
 
--- ---- coerceValue ----------------------------------------------------------
--- Port of F# `coerceValue`. Given from/to LLVM types and a register, emit
--- zext/trunc/sitofp/fptosi/ptrtoint/inttoptr as needed. Returns
--- EmitExprResult so callers thread the state.
-
-coerceValue(state EmitState)(fromTy Str)(toTy Str)(value Str) =
-  if fromTy == toTy
-    MkEER state "" value
-  else
-    if fromTy == "i1"
-      if toTy == "i64"
-        let (dst, st2) = esFresh state
-        instr = strConcat "  " (strConcat dst (strConcat " = zext i1 " (strConcat value " to i64")))
-        MkEER st2 instr dst
-      else if toTy == "double"
-        r1 = coerceValue state "i1" "i64" value
-        r2 = coerceValue (eerState r1) "i64" "double" (eerReg r1)
-        MkEER (eerState r2) (strJoin2 (eerInstrs r1) (eerInstrs r2)) (eerReg r2)
-      else MkEER state "" value
-    else if fromTy == "i8"
-      if toTy == "i64"
-        let (dst, st2) = esFresh state
-        instr = strConcat "  " (strConcat dst (strConcat " = zext i8 " (strConcat value " to i64")))
-        MkEER st2 instr dst
-      else if toTy == "double"
-        r1 = coerceValue state "i8" "i64" value
-        r2 = coerceValue (eerState r1) "i64" "double" (eerReg r1)
-        MkEER (eerState r2) (strJoin2 (eerInstrs r1) (eerInstrs r2)) (eerReg r2)
-      else MkEER state "" value
-    else if fromTy == "double"
-      if toTy == "i64"
-        let (dst, st2) = esFresh state
-        instr = strConcat "  " (strConcat dst (strConcat " = fptosi double " (strConcat value " to i64")))
-        MkEER st2 instr dst
-      else MkEER state "" value
-    else if fromTy == "ptr"
-      if toTy == "i64"
-        let (dst, st2) = esFresh state
-        instr = strConcat "  " (strConcat dst (strConcat " = ptrtoint ptr " (strConcat value " to i64")))
-        MkEER st2 instr dst
-      else if toTy == "i1"
-        r1 = coerceValue state "ptr" "i64" value
-        r2 = coerceValue (eerState r1) "i64" "i1" (eerReg r1)
-        MkEER (eerState r2) (strJoin2 (eerInstrs r1) (eerInstrs r2)) (eerReg r2)
-      else if toTy == "double"
-        r1 = coerceValue state "ptr" "i64" value
-        r2 = coerceValue (eerState r1) "i64" "double" (eerReg r1)
-        MkEER (eerState r2) (strJoin2 (eerInstrs r1) (eerInstrs r2)) (eerReg r2)
-      else MkEER state "" value
-    else if fromTy == "i64"
-      if toTy == "i1"
-        let (dst, st2) = esFresh state
-        instr = strConcat "  " (strConcat dst (strConcat " = icmp ne i64 " (strConcat value ", 0")))
-        MkEER st2 instr dst
-      else if toTy == "i8"
-        let (dst, st2) = esFresh state
-        instr = strConcat "  " (strConcat dst (strConcat " = trunc i64 " (strConcat value " to i8")))
-        MkEER st2 instr dst
-      else if toTy == "double"
-        let (dst, st2) = esFresh state
-        instr = strConcat "  " (strConcat dst (strConcat " = sitofp i64 " (strConcat value " to double")))
-        MkEER st2 instr dst
-      else if toTy == "ptr"
-        let (dst, st2) = esFresh state
-        instr = strConcat "  " (strConcat dst (strConcat " = inttoptr i64 " (strConcat value " to ptr")))
-        MkEER st2 instr dst
-      else MkEER state "" value
-    else MkEER state "" value
-
--- Cast the body value of `main` to i32 for the C-ABI entry-point return.
--- Mirrors F# emitCastToMainI32.
-emitCastToMainI32(state EmitState)(bodyTy Str)(value Str) =
-  if bodyTy == "i32"
-    MkEER state "" value
-  else if bodyTy == "i64"
-    let (dst, st2) = esFresh state
-    instr = strConcat "  " (strConcat dst (strConcat " = trunc i64 " (strConcat value " to i32")))
-    MkEER st2 instr dst
-  else if bodyTy == "i1"
-    let (dst, st2) = esFresh state
-    instr = strConcat "  " (strConcat dst (strConcat " = zext i1 " (strConcat value " to i32")))
-    MkEER st2 instr dst
-  else if bodyTy == "i8"
-    let (dst, st2) = esFresh state
-    instr = strConcat "  " (strConcat dst (strConcat " = zext i8 " (strConcat value " to i32")))
-    MkEER st2 instr dst
-  else if bodyTy == "double"
-    let (dst, st2) = esFresh state
-    instr = strConcat "  " (strConcat dst (strConcat " = fptosi double " (strConcat value " to i32")))
-    MkEER st2 instr dst
-  else if bodyTy == "ptr"
-    r1 = coerceValue state "ptr" "i64" value
-    let (dst, st2) = esFresh (eerState r1)
-    instr = strConcat "  " (strConcat dst (strConcat " = trunc i64 " (strConcat (eerReg r1) " to i32")))
-    MkEER st2 (strJoin2 (eerInstrs r1) instr) dst
-  else MkEER state "" "0"
-
--- ---- isStrType ------------------------------------------------------------
-
-isStrType(t TypeExpr) =
-  match t
-    | TyName "Str" -> true
-    | _ -> false
-
-isBoolType(t TypeExpr) =
-  match t
-    | TyName "Bool" -> true
-    | _ -> false
-
-isFloatType(t TypeExpr) =
-  match t
-    | TyName "Float" -> true
-    | _ -> false
-
-isIntType(t TypeExpr) =
-  match t
-    | TyName "Int" -> true
-    | _ -> false
-
--- ---- emitExpr --------------------------------------------------------------
--- Phase 1: single threaded walk, returns EmitExprResult (state, instrs, reg).
--- Replaces the 4-way duplicated POC walks
--- (emitExprInstrs / emitExprReg / emitExprNextCtr / emitExprNextSidx).
---
--- Not yet supported (remain in Phase 2+): ELam, EMatch, EList, ETuple, ECons.
-
-emitExpr(state EmitState)(e Expr) =
+emitExprInstrs(e Expr)(ctr Int)(sidx Int) =
   match e
-    | EInt n  -> MkEER state "" (intToStr n)
-    | EFloat s -> MkEER state "" s
-    | EBool b ->
-      reg =
-        if b
-          "1"
-        else "0"
-      MkEER state "" reg
-    | EChar c -> MkEER state "" (intToStr (charToInt c))
-    | EStr s ->
-      let (idx, st2) = esNextStr state
-      totalLen = strLen s + 1
-      decl = strGlobalDecl idx s
-      gep = strGepExpr idx totalLen
-      MkEER st2 decl gep
-    | EVar n  -> MkEER state "" (strConcat "%" n)
-    | ECon _  -> MkEER state "" "0"
-    | ENil    -> MkEER state "" "null"
+    | EInt _  -> ""
+    | EFloat _ -> ""
+    | EBool _ -> ""
+    | EChar _ -> ""
+    | EStr s  -> strGlobalDecl sidx s
+    | EVar _  -> ""
+    | ECon _  -> ""
+    | ENil    -> ""
     | EBinOp op l r ->
-      lr = emitExpr state l
-      rr = emitExpr (eerState lr) r
-      let (dst, st2) = esFresh (eerState rr)
-      lreg = eerReg lr
-      rreg = eerReg rr
+      li = emitExprInstrs l ctr sidx
+      lc = emitExprNextCtr l ctr sidx
+      ls = emitExprNextSidx l ctr sidx
+      ri = emitExprInstrs r lc ls
+      rc = emitExprNextCtr r lc ls
+      lreg = emitExprReg l ctr sidx
+      rreg = emitExprReg r lc ls
+      dst = ssaName rc
+      floatOp = isFloatBinOp l r
       instrBody =
         if isCmpOp op
-          strConcat (llvmCmpOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+          if floatOp
+            strConcat (llvmFloatCmpOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+          else
+            strConcat (llvmCmpOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
         else
-          strConcat (llvmIntOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+          if floatOp
+            strConcat (llvmFloatOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+          else
+            strConcat (llvmIntOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
       instr = strConcat "  " (strConcat dst (strConcat " = " instrBody))
-      prefix = strJoin2 (eerInstrs lr) (eerInstrs rr)
-      all =
-        if strLen prefix == 0
-          instr
-        else strConcat prefix (strConcat "\n" instr)
-      MkEER st2 all dst
+      prefix = strJoin2 li ri
+      if strLen prefix == 0
+        instr
+      else strConcat prefix (strConcat "\n" instr)
     | EIf cond thenE elseE ->
-      cr = emitExpr state cond
-      -- Labels use the temp counter at the branch point for uniqueness.
-      labelN = esTempCtr (eerState cr)
-      thenLbl = strConcat "then" (intToStr labelN)
-      elseLbl = strConcat "else" (intToStr labelN)
-      mergeLbl = strConcat "merge" (intToStr labelN)
-      creg = eerReg cr
+      ci = emitExprInstrs cond ctr sidx
+      cc = emitExprNextCtr cond ctr sidx
+      cs = emitExprNextSidx cond ctr sidx
+      creg = emitExprReg cond ctr sidx
+      thenLbl = strConcat "then" (intToStr cc)
+      elseLbl = strConcat "else" (intToStr cc)
+      mergeLbl = strConcat "merge" (intToStr cc)
       brInstr = strConcat "  br i1 " (strConcat creg (strConcat ", label %" (strConcat thenLbl (strConcat ", label %" elseLbl))))
-      -- Bump counter once before descending into the branches so the phi
-      -- destination doesn't collide with intermediate regs.
-      let (_, stAfterBr) = esFresh (eerState cr)
-      tr = emitExpr stAfterBr thenE
+      tc1 = cc + 1
+      ti = emitExprInstrs thenE tc1 cs
+      tc = emitExprNextCtr thenE tc1 cs
+      ts = emitExprNextSidx thenE tc1 cs
+      treg = emitExprReg thenE tc1 cs
       thenBodyPre =
-        if strLen (eerInstrs tr) == 0
+        if strLen ti == 0
           ""
-        else strConcat (eerInstrs tr) "\n"
+        else strConcat ti "\n"
       thenBlock = strConcat thenLbl (strConcat ":\n" (strConcat thenBodyPre (strConcat "  br label %" mergeLbl)))
-      let (_, stAfterThen) = esFresh (eerState tr)
-      er = emitExpr stAfterThen elseE
+      ec1 = tc + 1
+      ei = emitExprInstrs elseE ec1 ts
+      ec = emitExprNextCtr elseE ec1 ts
+      ereg = emitExprReg elseE ec1 ts
       elseBodyPre =
-        if strLen (eerInstrs er) == 0
+        if strLen ei == 0
           ""
-        else strConcat (eerInstrs er) "\n"
+        else strConcat ei "\n"
       elseBlock = strConcat elseLbl (strConcat ":\n" (strConcat elseBodyPre (strConcat "  br label %" mergeLbl)))
-      let (dst, stPhi) = esFresh (eerState er)
-      treg = eerReg tr
-      ereg = eerReg er
+      dst = ssaName ec
       phiParts = strConcat treg (strConcat ", %" (strConcat thenLbl (strConcat "], [" (strConcat ereg (strConcat ", %" (strConcat elseLbl "]"))))))
       phiInstr = strConcat "  " (strConcat dst (strConcat " = phi i64 [" phiParts))
       mergeBlock = strConcat mergeLbl (strConcat ":\n" phiInstr)
       condPart =
-        if strLen (eerInstrs cr) == 0
+        if strLen ci == 0
           brInstr
-        else strConcat (eerInstrs cr) (strConcat "\n" brInstr)
-      all = strConcat condPart (strConcat "\n" (strConcat thenBlock (strConcat "\n" (strConcat elseBlock (strConcat "\n" mergeBlock)))))
-      MkEER stPhi all dst
-    | ELet _ valE bodyE ->
-      vr = emitExpr state valE
-      let (dst, st2) = esFresh (eerState vr)
-      aliasInstr = strConcat "  " (strConcat dst (strConcat " = add i64 " (strConcat (eerReg vr) ", 0")))
-      br = emitExpr st2 bodyE
+        else strConcat ci (strConcat "\n" brInstr)
+      strConcat condPart (strConcat "\n" (strConcat thenBlock (strConcat "\n" (strConcat elseBlock (strConcat "\n" mergeBlock)))))
+    | ELet name valE bodyE ->
+      vi = emitExprInstrs valE ctr sidx
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      vreg = emitExprReg valE ctr sidx
+      dst = ssaName vc
+      aliasInstr = strConcat "  " (strConcat dst (strConcat " = add i64 " (strConcat vreg ", 0")))
+      bi = emitExprInstrs bodyE (vc + 1) vs
       viAlias =
-        if strLen (eerInstrs vr) == 0
+        if strLen vi == 0
           aliasInstr
-        else strConcat (eerInstrs vr) (strConcat "\n" aliasInstr)
-      all =
-        if strLen (eerInstrs br) == 0
-          viAlias
-        else strConcat viAlias (strConcat "\n" (eerInstrs br))
-      MkEER (eerState br) all (eerReg br)
-    | EApp f a ->
-      fr = emitExpr state f
-      ar = emitExpr (eerState fr) a
-      let (dst, st2) = esFresh (eerState ar)
-      fnName = extractFnName f
-      areg = eerReg ar
-      callInstr = strConcat "  " (strConcat dst (strConcat " = call i64 @" (strConcat fnName (strConcat "(i64 " (strConcat areg ")")))))
-      prefix = strJoin2 (eerInstrs fr) (eerInstrs ar)
-      all =
-        if strLen prefix == 0
-          callInstr
-        else strConcat prefix (strConcat "\n" callInstr)
-      MkEER st2 all dst
-    | _ -> MkEER state "" "0"
-
--- ---- Typed binop emission -------------------------------------------------
--- Phase 2: dispatch on operand type. For Str ==/!=, lower to @strEq call.
-
--- Extract the LLVM type string from a TypedExpr node. Avoids using
--- `typedExprType` (which returns a TypeExpr), since threading TypeExpr
--- values through this function seemed to confuse the HM inferencer on
--- sibling branches. Here we pattern-match and call emitLLVMType on the
--- embedded TypeExpr, returning Str.
-llvmTypeOfTE(te TypedExpr) =
-  match te
-    | TEInt _ ty -> emitLLVMType ty
-    | TEStr _ ty -> emitLLVMType ty
-    | TEBool _ ty -> emitLLVMType ty
-    | TEChar _ ty -> emitLLVMType ty
-    | TEFloat _ ty -> emitLLVMType ty
-    | TEVar _ ty -> emitLLVMType ty
-    | TECon _ ty -> emitLLVMType ty
-    | TEApp _ _ ty -> emitLLVMType ty
-    | TELam _ _ _ ty -> emitLLVMType ty
-    | TeLet _ _ _ ty -> emitLLVMType ty
-    | TEIf _ _ _ ty -> emitLLVMType ty
-    | TEMatch _ _ _ ty -> emitLLVMType ty
-    | TEList _ ty -> emitLLVMType ty
-    | TECons _ _ ty -> emitLLVMType ty
-    | TEBinOp _ _ _ ty -> emitLLVMType ty
-    | TETuple _ _ ty -> emitLLVMType ty
-    | TENil ty -> emitLLVMType ty
-    | TEUnit ty -> emitLLVMType ty
-
--- Emit a simple binop instruction "%dst = <opStr> <lreg>, <rreg>".
--- Returns EmitExprResult.
-emitBinInstr(state EmitState)(opStr Str)(lreg Str)(rreg Str) =
-  let (dst, st1) = esFresh state
-  tail = strConcat " " (strConcat lreg (strConcat ", " rreg))
-  instr = strConcat "  " (strConcat dst (strConcat " = " (strConcat opStr tail)))
-  MkEER st1 instr dst
-
--- Emit `strEq ==` (returns i1 in a fresh register).
-emitStrEq(state EmitState)(lreg Str)(rreg Str) =
-  let (dst, st1) = esFresh state
-  args = strConcat lreg (strConcat ", ptr " rreg)
-  closeParen = ")"
-  callPart = strConcat " = call i1 @strEq(ptr " (strConcat args closeParen)
-  instr = strConcat "  " (strConcat dst callPart)
-  MkEER st1 instr dst
-
--- Emit `strEq !=` (strEq then xor 1).
-emitStrNeq(state EmitState)(lreg Str)(rreg Str) =
-  eqRes = emitStrEq state lreg rreg
-  let (notReg, st2) = esFresh (eerState eqRes)
-  notInstr = strConcat "  " (strConcat notReg (strConcat " = xor i1 " (strConcat (eerReg eqRes) ", 1")))
-  combined = strConcat (eerInstrs eqRes) (strConcat "\n" notInstr)
-  MkEER st2 combined notReg
-
--- Dispatch binop emission on the LLVM type of the left operand (passed as Str).
--- `lTyStr` is the already-lowered LLVM type ("i64"/"double"/"i1"/"ptr").
-emitTypedBinOpByTy(state EmitState)(op Str)(lTyStr Str)(lreg Str)(rreg Str) =
-  if lTyStr == "ptr"
-    if op == "=="
-      emitStrEq state lreg rreg
-    else if op == "!="
-      emitStrNeq state lreg rreg
-    else MkEER state "" "0"
-  else if lTyStr == "double"
-    if isCmpOp op
-      emitBinInstr state (llvmFloatCmpOp op) lreg rreg
-    else
-      emitBinInstr state (llvmFloatOp op) lreg rreg
-  else if lTyStr == "i1"
-    if op == "=="
-      emitBinInstr state "icmp eq i1" lreg rreg
-    else if op == "!="
-      emitBinInstr state "icmp ne i1" lreg rreg
-    else MkEER state "" "0"
-  else
-    if isCmpOp op
-      emitBinInstr state (llvmCmpOp op) lreg rreg
-    else
-      emitBinInstr state (llvmIntOp op) lreg rreg
-
--- ---- Phase 3: ADT runtime block, tag seeding, alloc helpers --------------
---
--- Port of F# emitRuntimeBlock + declares for node_tag_safe / node_payload_safe
--- / node_tail_safe. Emitted once per program at the top of the .ll output.
--- The C runtime in sdks/Platform.LLVM.SDK/runtime/lllc_runtime.c implements
--- the three node_* helpers; we only need a `declare`.
-
-llvmRuntimeBlock =
-  rtMalloc = "declare ptr @malloc(i64)\n\n"
-  rtAlloc = "define ptr @__ll_alloc(i64 %tag, i64 %payload, ptr %tail) {\nentry:\n  %raw = call ptr @malloc(i64 24)\n  %tagp = getelementptr inbounds { i64, i64, ptr }, ptr %raw, i32 0, i32 0\n  store i64 %tag, ptr %tagp\n  %payloadp = getelementptr inbounds { i64, i64, ptr }, ptr %raw, i32 0, i32 1\n  store i64 %payload, ptr %payloadp\n  %tailp = getelementptr inbounds { i64, i64, ptr }, ptr %raw, i32 0, i32 2\n  store ptr %tail, ptr %tailp\n  ret ptr %raw\n}\n\n"
-  rtNodeHelpers = "declare i64 @node_tag_safe(ptr)\ndeclare i64 @node_payload_safe(ptr)\ndeclare ptr @node_tail_safe(ptr)\n"
-  strConcat rtMalloc (strConcat rtAlloc rtNodeHelpers)
-
--- LIST_CONS_TAG as a Str; matches F# `-1` sentinel used for list spine cells
--- and for extra-arg tail nodes of multi-arg constructors.
-listConsTagStr = "-1"
-
--- ---- Ctor tag seeding -----------------------------------------------------
--- Walk TDType decls and build a project-scope (name -> Int) tag map.
--- Tag assignment: first ctor in first module gets tag 1, then +1 per new
--- ctor across all modules. Re-seeing the same name keeps the first tag.
-
--- Extract ctor-name list from a Constructor value.
-ctorNameOf(c Constructor) =
-  match c
-    | MkCon n _ -> n
-
--- Seed tags for a list of Constructor. Returns (tags', nextN').
-seedCtorsList(tags RBMap[Str][Int])(nextN Int)(cs List[Constructor]) =
-  match cs
-    | [] -> (tags, nextN)
-    | c :: rest ->
-      name = ctorNameOf c
-      match mapLookup strCmp name tags
-        | Some _ -> seedCtorsList tags nextN rest
-        | None ->
-          tags2 = mapInsert strCmp name nextN tags
-          seedCtorsList tags2 (nextN + 1) rest
-
--- Seed tags for one TypedDecl (only TDType contributes).
-seedCtorsDecl(tags RBMap[Str][Int])(nextN Int)(d TypedDecl) =
-  match d
-    | TDType _ _ ctors -> seedCtorsList tags nextN ctors
-    | _ -> (tags, nextN)
-
--- Seed tags for a list of TypedDecls.
-seedCtorsDecls(tags RBMap[Str][Int])(nextN Int)(ds List[TypedDecl]) =
-  match ds
-    | [] -> (tags, nextN)
-    | d :: rest ->
-      let (tags2, n2) = seedCtorsDecl tags nextN d
-      seedCtorsDecls tags2 n2 rest
-
--- Seed tags for a single module.
-seedCtorsModule(tags RBMap[Str][Int])(nextN Int)(tm TypedModule) =
-  seedCtorsDecls tags nextN (typedModDecls tm)
-
--- Seed tags for a list of modules (project-scope). Recursive walk so we
--- avoid tuple-in-lambda-arg HM issues.
-seedCtorsModulesFrom(tags RBMap[Str][Int])(nextN Int)(tms List[TypedModule]) =
-  match tms
-    | [] -> (tags, nextN)
-    | tm :: rest ->
-      let (t2, n2) = seedCtorsModule tags nextN tm
-      seedCtorsModulesFrom t2 n2 rest
-
-seedCtorsModules(tms List[TypedModule]) =
-  seedCtorsModulesFrom Leaf 1 tms
-
--- ---- Alloc + null-safe loads ----------------------------------------------
--- Port of F# emitAllocNode / emitLoadNodeTag / emitLoadNodePayload /
--- emitLoadNodeTail. Each returns EmitExprResult (state', instr, reg).
-
-emitAllocNode(state EmitState)(tagStr Str)(payloadStr Str)(tailStr Str) =
-  let (dst, st1) = esFresh state
-  args = strConcat "(i64 " (strConcat tagStr (strConcat ", i64 " (strConcat payloadStr (strConcat ", ptr " (strConcat tailStr ")")))))
-  instr = strConcat "  " (strConcat dst (strConcat " = call ptr @__ll_alloc" args))
-  MkEER st1 instr dst
-
-emitLoadNodeTag(state EmitState)(nodePtr Str) =
-  let (dst, st1) = esFresh state
-  instr = strConcat "  " (strConcat dst (strConcat " = call i64 @node_tag_safe(ptr " (strConcat nodePtr ")")))
-  MkEER st1 instr dst
-
-emitLoadNodePayload(state EmitState)(nodePtr Str) =
-  let (dst, st1) = esFresh state
-  instr = strConcat "  " (strConcat dst (strConcat " = call i64 @node_payload_safe(ptr " (strConcat nodePtr ")")))
-  MkEER st1 instr dst
-
-emitLoadNodeTail(state EmitState)(nodePtr Str) =
-  let (dst, st1) = esFresh state
-  instr = strConcat "  " (strConcat dst (strConcat " = call ptr @node_tail_safe(ptr " (strConcat nodePtr ")")))
-  MkEER st1 instr dst
-
--- Emit an icmp/phi-style helper: compare i1 a to constant 1 etc. Actually
--- simpler: just emit `<dst> = and i1 <a>, <b>`, returning EER.
-emitAndI1(state EmitState)(a Str)(b Str) =
-  if a == "1"
-    MkEER state "" b
-  else if b == "1"
-    MkEER state "" a
-  else if a == "0"
-    MkEER state "" "0"
-  else if b == "0"
-    MkEER state "" "0"
-  else
-    let (dst, st1) = esFresh state
-    instr = strConcat "  " (strConcat dst (strConcat " = and i1 " (strConcat a (strConcat ", " b))))
-    MkEER st1 instr dst
-
--- Emit `<dst> = icmp <pred> i64 <a>, <b>`.
-emitICmpI64(state EmitState)(pred Str)(a Str)(b Str) =
-  let (dst, st1) = esFresh state
-  instr = strConcat "  " (strConcat dst (strConcat " = icmp " (strConcat pred (strConcat " i64 " (strConcat a (strConcat ", " b))))))
-  MkEER st1 instr dst
-
--- Emit `<dst> = icmp <pred> ptr <a>, <b>`.
-emitICmpPtr(state EmitState)(pred Str)(a Str)(b Str) =
-  let (dst, st1) = esFresh state
-  instr = strConcat "  " (strConcat dst (strConcat " = icmp " (strConcat pred (strConcat " ptr " (strConcat a (strConcat ", " b))))))
-  MkEER st1 instr dst
-
--- ---- Constructor ABI ------------------------------------------------------
---
--- ABI (matches F# emitAllocNode + LIST_CONS_TAG tail-chain convention):
---   0-arg: single cell {tag=T, payload=0, tail=null}
---   1-arg: single cell {tag=T, payload=arg0_i64, tail=null}
---   N-arg (N>=2): head cell {tag=T, payload=arg0_i64, tail=chain} where
---     chain is a reverse cons of remaining args with tag=LIST_CONS_TAG.
---
--- All scalar payloads are coerced to i64 (the ADT-cell payload slot width).
-
--- Build a cons chain from list of already-coerced i64 payloads (in order),
--- terminating in `null`. Returns (state', instrs, reg) where `reg` holds
--- the head of the reverse chain — i.e. last element is the tail's tail.
--- Matches F# `buildRest`: walks the REVERSED list, building each node
--- pointing at the previous accumulator.
-emitBuildConsTail(state EmitState)(payloadsRev List[Str]) =
-  match payloadsRev
-    | [] -> MkEER state "" "null"
-    | x :: rest ->
-      prior = emitBuildConsTail state rest
-      nodeRes = emitAllocNode (eerState prior) listConsTagStr x (eerReg prior)
-      instrs = strJoin2 (eerInstrs prior) (eerInstrs nodeRes)
-      MkEER (eerState nodeRes) instrs (eerReg nodeRes)
-
--- Emit allocation for a constructor application given tag + i64 arg regs.
-emitCtorAlloc(state EmitState)(tagStr Str)(argI64s List[Str]) =
-  match argI64s
-    | [] -> emitAllocNode state tagStr "0" "null"
-    | firstArg :: rest ->
-      tailRes =
-        match rest
-          | [] -> MkEER state "" "null"
-          | _ -> emitBuildConsTail state (listReverse rest)
-      headRes = emitAllocNode (eerState tailRes) tagStr firstArg (eerReg tailRes)
-      all = strJoin2 (eerInstrs tailRes) (eerInstrs headRes)
-      MkEER (eerState headRes) all (eerReg headRes)
-
--- Ctor application: emit args + allocation. Inlined for up to 3 args
--- (Phase 3 target examples have ≤ 2 args per ctor; grows easily if needed).
-emitCtorApp(state EmitState)(cname Str)(argsList List[TypedExpr]) =
-  match argsList
-    | [] ->
-      tagStr = intToStr (esCtorTag cname state)
-      emitAllocNode state tagStr "0" "null"
-    | a :: [] ->
-      argR = emitOneArgI64 state a
-      tagStr = intToStr (esCtorTag cname (eerState argR))
-      alloc = emitAllocNode (eerState argR) tagStr (eerReg argR) "null"
-      all = strJoin2 (eerInstrs argR) (eerInstrs alloc)
-      MkEER (eerState alloc) all (eerReg alloc)
-    | a :: b :: [] ->
-      aR = emitOneArgI64 state a
-      bR = emitOneArgI64 (eerState aR) b
-      -- Tail chain: 2nd arg in a single LIST_CONS_TAG cell with null tail.
-      tailCell = emitAllocNode (eerState bR) listConsTagStr (eerReg bR) "null"
-      tagStr = intToStr (esCtorTag cname (eerState tailCell))
-      headCell = emitAllocNode (eerState tailCell) tagStr (eerReg aR) (eerReg tailCell)
-      all = strJoin2 (strJoin2 (eerInstrs aR) (eerInstrs bR)) (strJoin2 (eerInstrs tailCell) (eerInstrs headCell))
-      MkEER (eerState headCell) all (eerReg headCell)
-    | a :: b :: c :: [] ->
-      aR = emitOneArgI64 state a
-      bR = emitOneArgI64 (eerState aR) b
-      cR = emitOneArgI64 (eerState bR) c
-      cell3 = emitAllocNode (eerState cR) listConsTagStr (eerReg cR) "null"
-      cell2 = emitAllocNode (eerState cell3) listConsTagStr (eerReg bR) (eerReg cell3)
-      tagStr = intToStr (esCtorTag cname (eerState cell2))
-      cell1 = emitAllocNode (eerState cell2) tagStr (eerReg aR) (eerReg cell2)
-      ia = strJoin2 (eerInstrs aR) (eerInstrs bR)
-      iab = strJoin2 ia (eerInstrs cR)
-      ic = strJoin2 (eerInstrs cell3) (eerInstrs cell2)
-      icc = strJoin2 ic (eerInstrs cell1)
-      all = strJoin2 iab icc
-      MkEER (eerState cell1) all (eerReg cell1)
-    | _ ->
-      -- Fallback: 4+ args unsupported in Phase 3 (add when needed).
-      MkEER state "" "null"
-
--- Gather nested TEApp spine. Returns (headTypedExpr, argsInOrder).
-gatherTypedApp(te TypedExpr)(acc List[TypedExpr]) =
-  match te
-    | TEApp f a _ -> gatherTypedApp f (a :: acc)
-    | _ -> (te, acc)
-
--- Emit i64-coerced argument regs for a list of TypedExprs. Uses a PatRes-
--- style wrapper type to dodge HM inference trouble with self-recursive 3-
--- tuple returns when the recursion also forward-refs emitTypedExpr.
-ArgsRes = MkArgResult EmitState Str (List[Str])
-
-argsState(r ArgsRes) = match r | MkArgResult s _ _ -> s
-argsInstrs(r ArgsRes) = match r | MkArgResult _ i _ -> i
-argsResRegs(r ArgsRes) = match r | MkArgResult _ _ rs -> rs
-
--- Emit one TypedExpr, i64-coerced. Returns EER (state', instrs, reg).
-emitOneArgI64(state EmitState)(a TypedExpr) =
-  r = emitTypedExpr state a
-  argTy = llvmTypeOfTE a
-  coerced = coerceValue (eerState r) argTy "i64" (eerReg r)
-  combined = strJoin2 (eerInstrs r) (eerInstrs coerced)
-  MkEER (eerState coerced) combined (eerReg coerced)
-
--- ---- Pattern match lowering ----------------------------------------------
---
--- Port of F# emitMatch + emitPatternValue + emitListPattern + emitCtorPattern
--- (lines 883-1059). Simplified for Phase 3 target examples 40-43:
---   - PWild / PVar / PLitInt / PLitStr
---   - PCon name args (including 0-arg nullary)
---   - PCons head tail
---   - PNil (empty list; also PCon "[]" [])
--- No PLitBool, PLitChar, PLitFloat, PTuple (not in Pattern type).
---
--- Bindings implemented via alias instructions: after a successful sub-pattern
--- load, emit `%<name> = add i64 %tN, 0` (or ptr variant) so later `TEVar n`
--- resolves naturally.
-
--- Result shape for pattern lowering.
-PatRes = MkPatRes EmitState Str Str
-  -- state', instrs (test+bind code), condReg ("0" / "1" / SSA %tN)
-
-prState(r PatRes) =
-  match r | MkPatRes s _ _ -> s
-
-prInstrs(r PatRes) =
-  match r | MkPatRes _ i _ -> i
-
-prCond(r PatRes) =
-  match r | MkPatRes _ _ c -> c
-
--- Emit a bind-alias for a pattern variable `name` holding value `val` of
--- type `valTy` ("i64" / "ptr"). Always returns instrs that define `%name`.
-emitBindAlias(state EmitState)(name Str)(valTy Str)(value Str) =
-  if valTy == "ptr"
-    -- alias ptr: use getelementptr with i64 0 (no-op)
-    instr = strConcat "  %" (strConcat name (strConcat " = getelementptr i8, ptr " (strConcat value ", i64 0")))
-    MkEER state instr (strConcat "%" name)
-  else
-    instr = strConcat "  %" (strConcat name (strConcat " = add i64 " (strConcat value ", 0")))
-    MkEER state instr (strConcat "%" name)
-
--- Core pattern-value lowering.
---   valTy : LLVM type of scrutinee value ("i64" / "ptr")
---   value : register holding scrutinee
---   pat   : the pattern to match
--- Returns PatRes with condReg (i1) + bind-alias instrs interleaved.
-emitPatternValue(state EmitState)(valTy Str)(value Str)(pat Pattern) =
-  MkPatRes state "" "1"
-
--- Stubs during bisection.
-emitCtorPattern(state EmitState)(valTy Str)(value Str)(name Str)(args List[Pattern]) =
-  MkPatRes state "" "1"
-
-consumeCtorArgs(state EmitState)(accCond Str)(firstPayload Str)(tailPtr Str)(idx Int)(rest List[Pattern]) =
-  MkPatRes state "" accCond
-
--- Emit a full match expression. scrutVal / scrutTy / pats / bodies / resultTy.
--- Returns EmitExprResult. Lowering shape:
---
---   <scrut code>
---   br label %case0
--- case0:
---   <pat0 test+bind>
---   br i1 %c0, label %body0, label %next0      (if c0 == "1"/"0", emit plain br)
--- body0:
---   <body0 code>
---   %r0 = <coerce body0 to resultTy>
---   br label %end
--- next0:            (actually same as case1's label)
---   ...
--- fail:
---   br label %end   (contributes `undef` fallback to phi)
--- end:
---   %result = phi <resultTy> [ %r0, %body0 ], ..., [ undef, %fail ]
-
--- One-arm lowering helper: emit the case label, pattern test, conditional br,
--- body label, body code, br to end, next label. Returns PatRes-style but
--- additionally tracks the body-value for phi incoming.
-
--- MatchArm emission result: carries (state', instrs, bodyVal, bodyLbl).
-MatchArmRes = MkMatchArmRes EmitState Str Str Str
-marState(r MatchArmRes) = match r | MkMatchArmRes s _ _ _ -> s
-marInstrs(r MatchArmRes) = match r | MkMatchArmRes _ i _ _ -> i
-marBodyVal(r MatchArmRes) = match r | MkMatchArmRes _ _ v _ -> v
-marBodyLbl(r MatchArmRes) = match r | MkMatchArmRes _ _ _ l -> l
-
--- Lower one arm. `caseLbl` is the entry label for this arm. `nextLbl` is
--- the label to fall through to on mismatch (next arm or failLbl).
-emitOneArm(state EmitState)(resultTy Str)(scrutTy Str)(scrutVal Str)(endLbl Str)(caseLbl Str)(nextLbl Str)(pat Pattern)(body TypedExpr) =
-  MkMatchArmRes state "" "0" caseLbl
-
--- Walk arms. Returns (state', instrs, incomingList) where incomingList is
--- `List[(bodyVal, bodyLbl)]` encoded as TagEntry Str Str to avoid tuple-in-
--- type-param parser bug.
-PhiIncoming = MkPhiIncoming Str Str
-
-emitAllArms(state EmitState)(resultTy Str)(scrutTy Str)(scrutVal Str)(endLbl Str)(failLbl Str)(caseLbls List[Str])(arms List[Pattern])(bodies List[TypedExpr]) =
-  match arms
-    | [] -> (state, "", [])
-    | pat :: restPats ->
-      match bodies
-        | [] -> (state, "", [])
-        | body :: restBodies ->
-          match caseLbls
-            | [] -> (state, "", [])
-            | caseLbl :: restCaseLbls ->
-              nextLbl =
-                match restCaseLbls
-                  | [] -> failLbl
-                  | nxt :: _ -> nxt
-              armRes = emitOneArm state resultTy scrutTy scrutVal endLbl caseLbl nextLbl pat body
-              let (st2, tailInstrs, tailInc) = emitAllArms (marState armRes) resultTy scrutTy scrutVal endLbl failLbl restCaseLbls restPats restBodies
-              inc = MkPhiIncoming (marBodyVal armRes) (marBodyLbl armRes)
-              combinedInstrs = strJoin2 (marInstrs armRes) tailInstrs
-              (st2, combinedInstrs, listAppend [inc] tailInc)
-
--- Allocate N fresh match_case labels.
-allocCaseLbls(state EmitState)(n Int) =
-  if n == 0
-    (state, [])
-  else
-    let (lbl, st1) = esFreshLabel "match_case_" state
-    let (st2, rest) = allocCaseLbls st1 (n - 1)
-    (st2, listAppend [lbl] rest)
-
--- Render phi incoming list: "[ v0, %l0 ], [ v1, %l1 ], ..."
-renderIncoming(incoming List[PhiIncoming]) =
-  match incoming
-    | [] -> ""
-    | inc :: [] ->
-      match inc | MkPhiIncoming v l -> strConcat "[ " (strConcat v (strConcat ", %" (strConcat l " ]")))
-    | inc :: rest ->
-      match inc | MkPhiIncoming v l ->
-        strConcat "[ " (strConcat v (strConcat ", %" (strConcat l (strConcat " ], " (renderIncoming rest)))))
-
--- Default (undef) fallback value for a given resultTy.
-undefFallback(resultTy Str) =
-  if resultTy == "void"
-    ""
-  else if resultTy == "ptr"
-    "null"
-  else if resultTy == "double"
-    "0.0"
-  else "0"
-
-emitMatch(state EmitState)(scrut TypedExpr)(pats List[TypedPattern])(bodies List[TypedExpr])(resultTy Str) =
-  MkEER state "" "0"
-
--- ---- Free-variable analysis (Phase 4) -------------------------------------
--- Port of F# freeVars / patternBinds (CodegenLLVM.fs ~472-527).
--- Set[Str] is represented as List[Str] (ordered, deduped on insertion).
--- All recursive walks use explicit pattern matching — never listMap over the
--- recursive function itself, which trips HM.
-
-fvEmpty = []
-
-fvContains(name Str)(xs List[Str]) =
-  match xs
-    | [] -> false
-    | y :: rest ->
-      if y == name
-        true
-      else fvContains name rest
-
-fvInsert(name Str)(xs List[Str]) =
-  if fvContains name xs
-    xs
-  else listAppend xs [name]
-
--- Union two sets. Recursive rather than listFold so HM stays monomorphic.
-fvUnion(a List[Str])(b List[Str]) =
-  match b
-    | [] -> a
-    | x :: rest -> fvUnion (fvInsert x a) rest
-
--- Subtract `b` from `a`: keep only names in `a` not present in `b`.
-fvSubtract(a List[Str])(b List[Str]) =
-  match a
-    | [] -> []
-    | x :: rest ->
-      restSub = fvSubtract rest b
-      if fvContains x b
-        restSub
-      else x :: restSub
-
--- Names bound by a Pattern. Mirrors F# patternBinds.
--- Explicit match recursion, no listMap.
-patternBinds(p Pattern) =
-  match p
-    | PVar x -> [x]
-    | PWild -> []
-    | PLitInt _ -> []
-    | PLitStr _ -> []
-    | PNil -> []
-    | PCon _ args -> patternBindsMany args
-    | PCons h t -> fvUnion (patternBinds h) (patternBinds t)
-
-patternBindsMany(ps List[Pattern]) =
-  match ps
-    | [] -> []
-    | p :: rest -> fvUnion (patternBinds p) (patternBindsMany rest)
-
--- Free vars of a TypedExpr given a set of bound names. Explicit recursion
--- throughout; never passes `freeVars` to listMap/listFold (HM risk).
-freeVars(bound List[Str])(e TypedExpr) =
-  match e
-    | TEInt _ _ -> []
-    | TEStr _ _ -> []
-    | TEBool _ _ -> []
-    | TEChar _ _ -> []
-    | TEFloat _ _ -> []
-    | TEVar x _ ->
-      if fvContains x bound
-        []
-      else [x]
-    | TECon _ _ -> []
-    | TEApp f a _ -> fvUnion (freeVars bound f) (freeVars bound a)
-    | TELam paramName _ body _ ->
-      bound2 = fvInsert paramName bound
-      freeVars bound2 body
-    | TeLet name v b _ ->
-      s1 = freeVars bound v
-      bound2 = fvInsert name bound
-      s2 = freeVars bound2 b
-      fvUnion s1 s2
-    | TEIf c t el _ ->
-      fvUnion (fvUnion (freeVars bound c) (freeVars bound t)) (freeVars bound el)
-    | TEMatch scrut pats bodies _ ->
-      s0 = freeVars bound scrut
-      fvUnion s0 (freeVarsMatchArms bound pats bodies)
-    | TEList items _ -> freeVarsList bound items
-    | TECons h t _ -> fvUnion (freeVars bound h) (freeVars bound t)
-    | TEBinOp _ l r _ -> fvUnion (freeVars bound l) (freeVars bound r)
-    | TETuple a b _ -> fvUnion (freeVars bound a) (freeVars bound b)
-    | TENil _ -> []
-    | TEUnit _ -> []
-
-freeVarsList(bound List[Str])(items List[TypedExpr]) =
-  match items
-    | [] -> []
-    | x :: rest -> fvUnion (freeVars bound x) (freeVarsList bound rest)
-
--- Walk match arms. `bound` is extended by each arm's pattern bindings.
-freeVarsMatchArms(bound List[Str])(pats List[TypedPattern])(bodies List[TypedExpr]) =
-  match pats
-    | [] -> []
-    | tp :: restPats ->
-      match bodies
-        | [] -> []
-        | body :: restBodies ->
-          patP =
-            match tp
-              | MkTypedPat p _ -> p
-          bound2 = fvUnion bound (patternBinds patP)
-          fvUnion (freeVars bound2 body) (freeVarsMatchArms bound restPats restBodies)
-
--- ---- emitTypedExpr ---------------------------------------------------------
--- Phase 2: consumes typed IR, dispatches on operand type for binops,
--- pulls string literals from the state-held pool, and lowers bare TEVar
--- references to nullary globals as `call <ty> @name()`.
--- Phase 3: adds TECon / TEApp-with-TECon-head / TECons / TEList / TEMatch.
-
-emitTypedExpr(state EmitState)(te TypedExpr) =
-  match te
-    | TEInt n _  -> MkEER state "" (intToStr n)
-    | TEFloat s _ -> MkEER state "" s
-    | TEBool b _ ->
-      reg =
-        if b
-          "1"
-        else "0"
-      MkEER state "" reg
-    | TEChar c _ -> MkEER state "" (intToStr (charToInt c))
-    | TEStr s _ -> emitStringPtrGep state s
-    | TEVar n _ -> MkEER state "" (strConcat "%" n)
-    | TECon name _ -> MkEER state "" "0"
-    | TENil _   -> MkEER state "" "null"
-    | TEUnit _  -> MkEER state "" "void"
-    -- | TECons h t _ ->
-    --   hr = emitTypedExpr state h
-    --   tr = emitTypedExpr (eerState hr) t
-    --   hTy = llvmTypeOfTE h
-    --   tTy = llvmTypeOfTE t
-    --   hc = coerceValue (eerState tr) hTy "i64" (eerReg hr)
-    --   tc = coerceValue (eerState hc) tTy "ptr" (eerReg tr)
-    --   alloc = emitAllocNode (eerState tc) listConsTagStr (eerReg hc) (eerReg tc)
-    --   all =
-    --     strJoin2
-    --       (strJoin2 (eerInstrs hr) (eerInstrs tr))
-    --       (strJoin2 (strJoin2 (eerInstrs hc) (eerInstrs tc)) (eerInstrs alloc))
-    --   MkEER (eerState alloc) all (eerReg alloc)
-    -- | TEList items _ ->
-    --   emitTypedListLit state items
-    -- TEMatch disabled temporarily for HM bisection
-    -- | TEMatch scrut pats bodies _ ->
-    --   resultTy = llvmTypeOfTE te
-    --   emitMatch state scrut pats bodies resultTy
-    | TEBinOp op l r _ ->
-      lr = emitTypedExpr state l
-      rr = emitTypedExpr (eerState lr) r
-      lTyStr = llvmTypeOfTE l
-      binRes = emitTypedBinOpByTy (eerState rr) op lTyStr (eerReg lr) (eerReg rr)
-      prefix = strJoin2 (eerInstrs lr) (eerInstrs rr)
-      all =
-        if strLen prefix == 0
-          eerInstrs binRes
+        else strConcat vi (strConcat "\n" aliasInstr)
+      if strLen bi == 0
+        viAlias
+      else strConcat viAlias (strConcat "\n" bi)
+    | ELetTuple a b valE bodyE ->
+      vi = emitExprInstrs valE ctr sidx
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      vreg = emitExprReg valE ctr sidx
+      p1 = ssaName vc
+      v1 = ssaName (vc + 1)
+      tailPtr = ssaName (vc + 2)
+      tailVal = ssaName (vc + 3)
+      p2 = ssaName (vc + 4)
+      v2 = ssaName (vc + 5)
+      instP1 = strConcat "  " (strConcat p1 (strConcat " = getelementptr inbounds { i64, i64, ptr }, ptr " (strConcat vreg ", i32 0, i32 1")))
+      instV1 = strConcat "  " (strConcat v1 (strConcat " = load i64, ptr " p1))
+      instTailPtr = strConcat "  " (strConcat tailPtr (strConcat " = getelementptr inbounds { i64, i64, ptr }, ptr " (strConcat vreg ", i32 0, i32 2")))
+      instTailLoad = strConcat "  " (strConcat tailVal (strConcat " = load ptr, ptr " tailPtr))
+      instP2 = strConcat "  " (strConcat p2 (strConcat " = getelementptr inbounds { i64, i64, ptr }, ptr " (strConcat tailVal ", i32 0, i32 1")))
+      instV2 = strConcat "  " (strConcat v2 (strConcat " = load i64, ptr " p2))
+      bindA = strConcat "  %" (strConcat a (strConcat " = add i64 " (strConcat v1 ", 0")))
+      bindB = strConcat "  %" (strConcat b (strConcat " = add i64 " (strConcat v2 ", 0")))
+      tuplePrep =
+        s1 = strJoin2 instP1 instV1
+        s2 = strJoin2 s1 instTailPtr
+        s3 = strJoin2 s2 instTailLoad
+        s4 = strJoin2 s3 instP2
+        s5 = strJoin2 s4 instV2
+        s6 = strJoin2 s5 bindA
+        strJoin2 s6 bindB
+      bi = emitExprInstrs bodyE (vc + 6) vs
+      withVal =
+        if strLen vi == 0
+          tuplePrep
         else
-          if strLen (eerInstrs binRes) == 0
-            prefix
-          else strConcat prefix (strConcat "\n" (eerInstrs binRes))
-      MkEER (eerState binRes) all (eerReg binRes)
-    | TEIf cond thenE elseE _ ->
-      cr = emitTypedExpr state cond
-      labelN = esTempCtr (eerState cr)
-      thenLbl = strConcat "then" (intToStr labelN)
-      elseLbl = strConcat "else" (intToStr labelN)
-      mergeLbl = strConcat "merge" (intToStr labelN)
-      creg = eerReg cr
-      brInstr = strConcat "  br i1 " (strConcat creg (strConcat ", label %" (strConcat thenLbl (strConcat ", label %" elseLbl))))
-      let (_, stAfterBr) = esFresh (eerState cr)
-      tr = emitTypedExpr stAfterBr thenE
-      thenBodyPre =
-        if strLen (eerInstrs tr) == 0
-          ""
-        else strConcat (eerInstrs tr) "\n"
-      thenBlock = strConcat thenLbl (strConcat ":\n" (strConcat thenBodyPre (strConcat "  br label %" mergeLbl)))
-      let (_, stAfterThen) = esFresh (eerState tr)
-      er = emitTypedExpr stAfterThen elseE
-      elseBodyPre =
-        if strLen (eerInstrs er) == 0
-          ""
-        else strConcat (eerInstrs er) "\n"
-      elseBlock = strConcat elseLbl (strConcat ":\n" (strConcat elseBodyPre (strConcat "  br label %" mergeLbl)))
-      let (dst, stPhi) = esFresh (eerState er)
-      treg = eerReg tr
-      ereg = eerReg er
-      phiParts = strConcat treg (strConcat ", %" (strConcat thenLbl (strConcat "], [" (strConcat ereg (strConcat ", %" (strConcat elseLbl "]"))))))
-      phiInstr = strConcat "  " (strConcat dst (strConcat " = phi i64 [" phiParts))
-      mergeBlock = strConcat mergeLbl (strConcat ":\n" phiInstr)
-      condPart =
-        if strLen (eerInstrs cr) == 0
-          brInstr
-        else strConcat (eerInstrs cr) (strConcat "\n" brInstr)
-      all = strConcat condPart (strConcat "\n" (strConcat thenBlock (strConcat "\n" (strConcat elseBlock (strConcat "\n" mergeBlock)))))
-      MkEER stPhi all dst
-    | TeLet _ valE bodyE _ ->
-      vr = emitTypedExpr state valE
-      let (dst, st2) = esFresh (eerState vr)
-      aliasInstr = strConcat "  " (strConcat dst (strConcat " = add i64 " (strConcat (eerReg vr) ", 0")))
-      br = emitTypedExpr st2 bodyE
-      viAlias =
-        if strLen (eerInstrs vr) == 0
-          aliasInstr
-        else strConcat (eerInstrs vr) (strConcat "\n" aliasInstr)
-      all =
-        if strLen (eerInstrs br) == 0
-          viAlias
-        else strConcat viAlias (strConcat "\n" (eerInstrs br))
-      MkEER (eerState br) all (eerReg br)
-    | TEApp f a _ ->
-      fr = emitTypedExpr state f
-      ar = emitTypedExpr (eerState fr) a
-      fnName = extractTypedFnName f
-      areg = eerReg ar
-      -- Phase 6: if `f` is a TEVar bound in the local varEnv (i.e. an SSA
-      -- closure pointer — e.g. a parameter of type `fn T -> U`), route the
-      -- call through emitClosureCall so we handle both bare-fn and enveloped
-      -- forms via runtime branching. Top-level fn refs (not in varEnv) keep
-      -- the direct-call fast path to preserve stdlib HOF + example parity.
-      localClosureReg =
-        match f
-          | TEVar n _ -> esGetVar (eerState ar) n
-          | _ -> None
-      match localClosureReg
-        | Some closReg ->
-          argTyStr =
-            if isFnTypeTE a
-              "ptr"
-            else "i64"
-          argSig = strConcat argTyStr (strConcat " " areg)
-          ccRes = emitClosureCall (eerState ar) closReg "i64" argSig
-          prefix = strJoin2 (eerInstrs fr) (eerInstrs ar)
-          all =
-            if strLen prefix == 0
-              eerInstrs ccRes
-            else strConcat prefix (strConcat "\n" (eerInstrs ccRes))
-          MkEER (eerState ccRes) all (eerReg ccRes)
-        | None ->
-          -- Phase 4 `wrapIfFnRef`: if the arg is function-typed, wrap bare
-          -- global references in a closure `{@name, null}` so HOFs see a
-          -- uniform Closure* value. Non-fn args pass through. The call-site
-          -- arg type is promoted to `ptr` whenever the wrapper fires.
-          aIsFnTy = isFnTypeTE a
-          wrapTriple =
-            if aIsFnTy
-              wrapIfFnRef (eerState ar) a areg
-            else (areg, eerState ar, "")
-          wrappedAreg = match wrapTriple | (v, _, _) -> v
-          swrap = match wrapTriple | (_, s, _) -> s
-          wrapInstrs = match wrapTriple | (_, _, i) -> i
-          let (dst, st2) = esFresh swrap
-          -- Arg type: use `ptr` when we wrapped a function-typed arg, else
-          -- `i64` (this codegen still coerces scalar args uniformly to i64).
-          argTyStr =
-            if aIsFnTy
-              "ptr"
-            else "i64"
-          callInstr = strConcat "  " (strConcat dst (strConcat " = call i64 @" (strConcat fnName (strConcat "(" (strConcat argTyStr (strConcat " " (strConcat wrappedAreg ")")))))))
-          prefix = strJoin2 (eerInstrs fr) (eerInstrs ar)
-          preWithWrap =
-            if strLen wrapInstrs == 0
-              prefix
-            else
-              if strLen prefix == 0
-                wrapInstrs
-              else strConcat prefix (strConcat "\n" wrapInstrs)
-          all =
-            if strLen preWithWrap == 0
-              callInstr
-            else strConcat preWithWrap (strConcat "\n" callInstr)
-          MkEER st2 all dst
-    | TELam paramName paramTy body lamTy ->
-      emitLamLift state paramName paramTy body lamTy
-    -- Phase 5: TETuple is binary (fst, snd) in the ll-lang Typed IR. Lower
-    -- as a 2-cell cons chain with LIST_CONS_TAG — same ABI as list spine
-    -- cells and as constructor multi-arg tail chains:
-    --   head: { tag=-1, payload=fst_i64, tail=tailCell }
-    --   tail: { tag=-1, payload=snd_i64, tail=null }
-    -- Destructure via node_payload_safe / node_tail_safe exactly like a list.
-    | TETuple fst snd _ ->
-      fr = emitTypedExpr state fst
-      sr = emitTypedExpr (eerState fr) snd
-      fTy = llvmTypeOfTE fst
-      sTy = llvmTypeOfTE snd
-      fc = coerceValue (eerState sr) fTy "i64" (eerReg fr)
-      sc = coerceValue (eerState fc) sTy "i64" (eerReg sr)
-      tailCell = emitAllocNode (eerState sc) listConsTagStr (eerReg sc) "null"
-      headCell = emitAllocNode (eerState tailCell) listConsTagStr (eerReg fc) (eerReg tailCell)
-      allFs = strJoin2 (eerInstrs fr) (eerInstrs sr)
-      allCs = strJoin2 (eerInstrs fc) (eerInstrs sc)
-      allNodes = strJoin2 (eerInstrs tailCell) (eerInstrs headCell)
-      all = strJoin2 (strJoin2 allFs allCs) allNodes
-      MkEER (eerState headCell) all (eerReg headCell)
-    | _ -> MkEER state "" "0"
+          strConcat vi (strConcat "\n" tuplePrep)
+      if strLen bi == 0
+        withVal
+      else
+        strConcat withVal (strConcat "\n" bi)
+    | EApp f a ->
+      fi = emitExprInstrs f ctr sidx
+      fc = emitExprNextCtr f ctr sidx
+      fs = emitExprNextSidx f ctr sidx
+      ai = emitExprInstrs a fc fs
+      ac = emitExprNextCtr a fc fs
+      areg = emitExprReg a fc fs
+      fnName = extractFnName f
+      dst = ssaName ac
+      callInstr = strConcat "  " (strConcat dst (strConcat " = call i64 @" (strConcat fnName (strConcat "(i64 " (strConcat areg ")")))))
+      prefix = strJoin2 fi ai
+      if strLen prefix == 0
+        callInstr
+      else strConcat prefix (strConcat "\n" callInstr)
+    | ECons h t ->
+      hi = emitExprInstrs h ctr sidx
+      hc = emitExprNextCtr h ctr sidx
+      hs = emitExprNextSidx h ctr sidx
+      ti = emitExprInstrs t hc hs
+      tc = emitExprNextCtr t hc hs
+      hreg = emitExprReg h ctr sidx
+      treg = emitExprReg t hc hs
+      dst = ssaName tc
+      consInstr = strConcat "  " (strConcat dst (strConcat " = call ptr @__ll_alloc(i64 -1, i64 " (strConcat hreg (strConcat ", ptr " (strConcat treg ")")))))
+      prefix = strJoin2 hi ti
+      if strLen prefix == 0
+        consInstr
+      else
+        strConcat prefix (strConcat "\n" consInstr)
+    | ETuple a b ->
+      ai = emitExprInstrs a ctr sidx
+      ac = emitExprNextCtr a ctr sidx
+      as = emitExprNextSidx a ctr sidx
+      bi = emitExprInstrs b ac as
+      bc = emitExprNextCtr b ac as
+      areg = emitExprReg a ctr sidx
+      breg = emitExprReg b ac as
+      tailDst = ssaName bc
+      headDst = ssaName (bc + 1)
+      tailInstr = strConcat "  " (strConcat tailDst (strConcat " = call ptr @__ll_alloc(i64 -1, i64 " (strConcat breg ", ptr null)")))
+      headInstr = strConcat "  " (strConcat headDst (strConcat " = call ptr @__ll_alloc(i64 -1, i64 " (strConcat areg (strConcat ", ptr " (strConcat tailDst ")")))))
+      prefix = strJoin2 ai bi
+      withTail =
+        if strLen prefix == 0
+          tailInstr
+        else
+          strConcat prefix (strConcat "\n" tailInstr)
+      strConcat withTail (strConcat "\n" headInstr)
+    | _ -> ""
 
--- Phase 4: Is this TypedExpr's type a function type? Used by wrapIfFnRef to
--- decide whether to wrap a TEVar argument in a closure.
-isFnTypeTE(te TypedExpr) =
-  match typedExprType te
-    | TyFn _ _ -> true
-    | _ -> false
+-- ---- emitExprReg -----------------------------------------------------------
+-- Returns the LLVM register or value that holds the result of expression e.
 
--- Phase 4: Wrap a function-typed SSA value in a closure `{@name, null}` if
--- the value is a raw global (`@name`). Returns (wrappedReg, state', instrs).
--- Heuristic: string-equality check whether `value` starts with `@`. For now
--- we wrap only TEVar arguments, identified by their argExpr shape — those
--- are the only cases that currently produce bare `%name` SSA values pointing
--- at a global function (the stdlib HOFs like listMap).
---
--- Since the current `.lll` emitter returns `%name` (not `@name`) for a bare
--- TEVar, this wrapper only fires when `argExpr` is a TEVar referencing a
--- name that is known (at call site) to be a top-level function — we fall
--- back to leaving the value untouched if we can't tell. This matches the
--- F# `wrapIfFnRef` heuristic but with reduced precision.
-wrapIfFnRef(state EmitState)(argExpr TypedExpr)(argVal Str) =
-  match argExpr
-    | TEVar n _ ->
-      -- The current TEVar emit returns `%n`. For a top-level fn it should
-      -- be `@n`. Since we can't reliably tell here without a global-fn
-      -- registry, emit a make_closure wrapping the `@n` reference — this
-      -- is correct whenever n IS a top-level fn name. The stdlib doesn't
-      -- let function-typed locals shadow globals, so this is safe.
-      let (tmp, st2) = esFresh state
-      fnRef = strConcat "@" n
-      instr = strConcat "  " (strConcat tmp (strConcat " = call ptr @make_closure(ptr " (strConcat fnRef ", ptr null)")))
-      (tmp, st2, instr)
-    | _ -> (argVal, state, "")
+emitExprReg(e Expr)(ctr Int)(sidx Int) =
+  match e
+    | EInt n  -> intToStr n
+    | EFloat s -> s
+    | EBool b ->
+      if b
+        "1"
+      else "0"
+    | EChar c -> intToStr (charToInt c)
+    | EStr _  ->
+      idxStr = intToStr sidx
+      sv = getStrVal e
+      lenStr = intToStr (strLen sv + 1)
+      strConcat "getelementptr inbounds ([" (strConcat lenStr (strConcat " x i8], [" (strConcat lenStr (strConcat " x i8]* @.str." (strConcat idxStr ", i64 0, i64 0")))))
+    | EVar n  -> strConcat "%" n
+    | ECon _  -> "0"
+    | ENil    -> "null"
+    | EBinOp op l r ->
+      lc = emitExprNextCtr l ctr sidx
+      ls = emitExprNextSidx l ctr sidx
+      rc = emitExprNextCtr r lc ls
+      ssaName rc
+    | EIf cond thenE elseE ->
+      cc = emitExprNextCtr cond ctr sidx
+      cs = emitExprNextSidx cond ctr sidx
+      tc1 = cc + 1
+      tc = emitExprNextCtr thenE tc1 cs
+      ts = emitExprNextSidx thenE tc1 cs
+      ec1 = tc + 1
+      ec = emitExprNextCtr elseE ec1 ts
+      ssaName ec
+    | ELet name valE bodyE ->
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      emitExprReg bodyE (vc + 1) vs
+    | ELetTuple _ _ valE bodyE ->
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      emitExprReg bodyE (vc + 6) vs
+    | EApp f a ->
+      fc = emitExprNextCtr f ctr sidx
+      fs = emitExprNextSidx f ctr sidx
+      ac = emitExprNextCtr a fc fs
+      ssaName ac
+    | ECons h t ->
+      hc = emitExprNextCtr h ctr sidx
+      hs = emitExprNextSidx h ctr sidx
+      tc = emitExprNextCtr t hc hs
+      ssaName tc
+    | ETuple a b ->
+      ac = emitExprNextCtr a ctr sidx
+      as = emitExprNextSidx a ctr sidx
+      bc = emitExprNextCtr b ac as
+      ssaName (bc + 1)
+    | _ -> "0"
 
--- Phase 4.1: helpers for captureful closure env building.
+-- ---- emitExprNextCtr -------------------------------------------------------
 
--- Given a list of capture names (in index order), resolve each to its SSA
--- value in the *outer* varEnv. Falls back to `%<name>` for names not in the
--- varEnv — matches the existing convention used by TDFn params / alias binds.
-outerCaptureReg(state EmitState)(name Str) =
-  match esGetVar state name
-    | Some reg -> reg
-    | None     -> strConcat "%" name
+emitExprNextCtr(e Expr)(ctr Int)(sidx Int) =
+  match e
+    | EInt _  -> ctr
+    | EFloat _ -> ctr
+    | EBool _ -> ctr
+    | EChar _ -> ctr
+    | EStr _  -> ctr
+    | EVar _  -> ctr
+    | ECon _  -> ctr
+    | ENil    -> ctr
+    | EBinOp op l r ->
+      lc = emitExprNextCtr l ctr sidx
+      ls = emitExprNextSidx l ctr sidx
+      rc = emitExprNextCtr r lc ls
+      rc + 1
+    | EIf cond thenE elseE ->
+      cc = emitExprNextCtr cond ctr sidx
+      cs = emitExprNextSidx cond ctr sidx
+      tc1 = cc + 1
+      tc = emitExprNextCtr thenE tc1 cs
+      ts = emitExprNextSidx thenE tc1 cs
+      ec1 = tc + 1
+      ec = emitExprNextCtr elseE ec1 ts
+      ec + 1
+    | ELet name valE bodyE ->
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      emitExprNextCtr bodyE (vc + 1) vs
+    | ELetTuple _ _ valE bodyE ->
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      emitExprNextCtr bodyE (vc + 6) vs
+    | EApp f a ->
+      fc = emitExprNextCtr f ctr sidx
+      fs = emitExprNextSidx f ctr sidx
+      ac = emitExprNextCtr a fc fs
+      ac + 1
+    | ECons h t ->
+      hc = emitExprNextCtr h ctr sidx
+      hs = emitExprNextSidx h ctr sidx
+      tc = emitExprNextCtr t hc hs
+      tc + 1
+    | ETuple a b ->
+      ac = emitExprNextCtr a ctr sidx
+      as = emitExprNextSidx a ctr sidx
+      bc = emitExprNextCtr b ac as
+      bc + 2
+    | _ -> ctr
 
--- Emit the env-store sequence at the use site. For a capture list of length
--- N, allocates `N * 8` bytes via @malloc, then stores each capture (coerced
--- to i64) at offset `i * 8`. Returns (instrs, envReg, state').
---
--- Passing captureList :: List[Str] only — we assume each capture has i64
--- ABI at the env layer (matches F# port: all captures stored as i64).
--- Any non-i64 captures are cast at load time inside the lambda body.
-emitEnvStores(state EmitState)(captures List[Str]) =
-  match captures
-    | [] -> ("", "null", state)
-    | _ ->
-      nCaps = listLen captures
-      envBytes = nCaps * 8
-      let (envTmp, st1) = esFresh state
-      mallocInstr = strConcat "  " (strConcat envTmp (strConcat " = call ptr @malloc(i64 " (strConcat (intToStr envBytes) ")")))
-      let (storeInstrs, st2) = emitEnvStoreEach st1 envTmp 0 captures
-      combined =
-        if strLen storeInstrs == 0
-          mallocInstr
-        else strConcat mallocInstr (strConcat "\n" storeInstrs)
-      (combined, envTmp, st2)
+-- ---- emitExprNextSidx ------------------------------------------------------
 
--- Walk captures, emitting `getelementptr` + `store i64` for each index.
--- Returns (instrs, state').
-emitEnvStoreEach(state EmitState)(envTmp Str)(idx Int)(captures List[Str]) =
-  match captures
-    | [] -> ("", state)
-    | name :: rest ->
-      srcReg = outerCaptureReg state name
-      let (slotPtr, st1) = esFresh state
-      gep = strConcat "  " (strConcat slotPtr (strConcat " = getelementptr inbounds i64, ptr " (strConcat envTmp (strConcat ", i64 " (intToStr idx)))))
-      storeInstr = strConcat "  store i64 " (strConcat srcReg (strConcat ", ptr " slotPtr))
-      one = strConcat gep (strConcat "\n" storeInstr)
-      let (restInstrs, st2) = emitEnvStoreEach st1 envTmp (idx + 1) rest
-      combined =
-        if strLen restInstrs == 0
-          one
-        else strConcat one (strConcat "\n" restInstrs)
-      (combined, st2)
-
--- Emit the env-load prelude inside the lambda body. For each capture at
--- index `i`, emit:
---   %__cap_slot_i = getelementptr inbounds i64, ptr %__env, i64 i
---   %__cap_i      = load i64, ptr %__cap_slot_i
---   %<name>       = add i64 %__cap_i, 0     -- alias for TEVar lookup
--- Also populates the sub-state's varEnv so TEVar consults the capture.
--- Returns (instrs, state').
-emitEnvLoadPrelude(state EmitState)(idx Int)(captures List[Str]) =
-  match captures
-    | [] -> ("", state)
-    | name :: rest ->
-      let (slotPtr, st1) = esFresh state
-      gep = strConcat "  " (strConcat slotPtr (strConcat " = getelementptr inbounds i64, ptr %__env, i64 " (intToStr idx)))
-      let (loadReg, st2) = esFresh st1
-      loadInstr = strConcat "  " (strConcat loadReg (strConcat " = load i64, ptr " slotPtr))
-      aliasInstr = strConcat "  %" (strConcat name (strConcat " = add i64 " (strConcat loadReg ", 0")))
-      -- Bind the capture in varEnv so TEVar uses `%<name>` (via the alias).
-      st3 = esSetVar st2 name (strConcat "%" name)
-      one = strConcat gep (strConcat "\n" (strConcat loadInstr (strConcat "\n" aliasInstr)))
-      let (restInstrs, st4) = emitEnvLoadPrelude st3 (idx + 1) rest
-      combined =
-        if strLen restInstrs == 0
-          one
-        else strConcat one (strConcat "\n" restInstrs)
-      (combined, st4)
-
--- Phase 4 / 4.1: Lift a TELam to a top-level `@__lam_N` and return a closure.
--- Captureless: emit `@__lam_N(paramTy %arg0_abi)`, return closure with null env.
--- Captureful:  emit `@__lam_N(ptr %__env, paramTy %arg0_abi)` whose prologue
---              loads each capture from the env slot and rebinds it inside
---              the lambda body. The use-site `@malloc`s the env buffer and
---              stores each capture's i64-coerced value at the matching slot.
-emitLamLift(state EmitState)(paramName Str)(paramTy TypeExpr)(body TypedExpr)(lamTy TypeExpr) =
-  let (lamName, st1) = esFreshLambdaName state
-  paramTyStr = emitLLVMType paramTy
-  bodyTyStr = emitLLVMType (typedExprType body)
-  -- ABI-uniform: scalar param becomes i64, ptr stays ptr, ret same.
-  paramAbi =
-    if paramTyStr == "ptr"
-      "ptr"
-    else "i64"
-  retAbi =
-    if bodyTyStr == "void"
-      "void"
-    else if bodyTyStr == "ptr"
-      "ptr"
-    else "i64"
-  -- Compute free vars of the lambda body, excluding the param name.
-  captures = freeVars [paramName] body
-  hasCaptures =
-    match captures
-      | [] -> false
-      | _ -> true
-  -- Function signature: prepend `ptr %__env` when captureful.
-  argsSig =
-    if hasCaptures
-      strConcat "ptr %__env, " (strConcat paramAbi " %arg0_abi")
-    else strConcat paramAbi " %arg0_abi"
-  -- Fresh sub-state for lambda body emission. Temp/label counters reset to 0
-  -- inside the lambda's own SSA namespace.
-  subSt = esResetForFunc st1
-  -- Emit env-load prelude FIRST (so captures are visible to the param bind
-  -- and the body). Empty string when no captures.
-  let (capPrelude, subSt0) = emitEnvLoadPrelude subSt 0 captures
-  -- Entry prelude: coerce %arg0_abi back to its natural type, bound as %<name>.
-  preludePair =
-    if paramAbi == paramTyStr
-      -- No coercion needed. Just alias.
-      (strConcat "  %" (strConcat paramName (strConcat " = add i64 %arg0_abi, 0" "")), subSt0)
-    else
-      coRes = coerceValue subSt0 paramAbi paramTyStr "%arg0_abi"
-      bindInstr =
-        if paramTyStr == "ptr"
-          strConcat "  %" (strConcat paramName (strConcat " = getelementptr i8, ptr " (strConcat (eerReg coRes) ", i64 0")))
-        else strConcat "  %" (strConcat paramName (strConcat " = add i64 " (strConcat (eerReg coRes) ", 0")))
-      full =
-        if strLen (eerInstrs coRes) == 0
-          bindInstr
-        else strConcat (eerInstrs coRes) (strConcat "\n" bindInstr)
-      (full, eerState coRes)
-  paramBindInstrs = match preludePair | (p, _) -> p
-  subSt1b = match preludePair | (_, s) -> s
-  -- Combine capture prelude + param bind.
-  preludeInstrs =
-    if strLen capPrelude == 0
-      paramBindInstrs
-    else strConcat capPrelude (strConcat "\n" paramBindInstrs)
-  -- Also bind the param in varEnv for TEVar resolution inside body.
-  subSt2 = esSetVar subSt1b paramName (strConcat "%" paramName)
-  bodyRes = emitTypedExpr subSt2 body
-  bodyInstrs = eerInstrs bodyRes
-  bodyReg = eerReg bodyRes
-  retTriple =
-    if retAbi == bodyTyStr
-      ("", bodyReg, eerState bodyRes)
-    else
-      cRes = coerceValue (eerState bodyRes) bodyTyStr retAbi bodyReg
-      (eerInstrs cRes, eerReg cRes, eerState cRes)
-  retInstrs = match retTriple | (i, _, _) -> i
-  retReg = match retTriple | (_, r, _) -> r
-  subSt3 = match retTriple | (_, _, s) -> s
-  fullInstrs1 =
-    if strLen bodyInstrs == 0
-      preludeInstrs
-    else strConcat preludeInstrs (strConcat "\n" bodyInstrs)
-  fullInstrs =
-    if strLen retInstrs == 0
-      fullInstrs1
-    else strConcat fullInstrs1 (strConcat "\n" retInstrs)
-  retStmt =
-    if retAbi == "void"
-      "  ret void"
-    else strConcat "  ret " (strConcat retAbi (strConcat " " retReg))
-  defText = strConcat "define " (strConcat retAbi (strConcat " @" (strConcat lamName (strConcat "(" (strConcat argsSig (strConcat ") {\nentry:\n" (strConcat fullInstrs (strConcat "\n" (strConcat retStmt "\n}")))))))))
-  outerLamCtr = esLambdaCtr subSt3
-  outerLifted = listAppend (esLiftedLambdas subSt3) [defText]
-  stLifted =
-    match st1
-      | MkEmitState c s p g l t n _ _ ve -> MkEmitState c s p g l t n outerLamCtr outerLifted ve
-  -- Use site: if captureful, allocate + populate the env buffer, then build
-  -- the closure referencing both the fn and the env. If captureless, pass
-  -- `null` for env. `@make_closure` returns a fat pointer `{fn, env}`.
-  let (envInstrs, envReg, stEnv) = emitEnvStores stLifted captures
-  let (cloTmp, stUse) = esFresh stEnv
-  callInstr = strConcat "  " (strConcat cloTmp (strConcat " = call ptr @make_closure(ptr @" (strConcat lamName (strConcat ", ptr " (strConcat envReg ")")))))
-  allInstrs =
-    if strLen envInstrs == 0
-      callInstr
-    else strConcat envInstrs (strConcat "\n" callInstr)
-  MkEER stUse allInstrs cloTmp
-
--- Phase 4.1: env-branching call for a closure-typed SSA value. Given a fat
--- pointer `%closure` (from @make_closure), extract (fn, env), branch on
--- `env != null`, and emit either the bare-fn call or the env-call. Produces
--- a phi-node combining both result values.
---
---   %fn      = load ptr from closure[0]
---   %env     = load ptr from closure[1]
---   %nonnull = icmp ne ptr %env, null
---   br i1 %nonnull, label %env_call, label %bare_call
--- bare_call:
---   %r0 = call <retty> %fn(<args>)
---   br label %call_end
--- env_call:
---   %r1 = call <retty> %fn(ptr %env, <args>)
---   br label %call_end
--- call_end:
---   %result = phi <retty> [%r0, %bare_call], [%r1, %env_call]
---
--- `argSig`/`argExprList` are rendered as `i64 %arg0` etc. by caller.
--- `retTy` is the LLVM type of the expected return value ("i64"/"ptr"/etc.).
-emitClosureCall(state EmitState)(closureReg Str)(retTy Str)(argSig Str) =
-  let (fnReg, st1)      = esFresh state
-  let (envReg, st2)     = esFresh st1
-  let (nonnull, st3)    = esFresh st2
-  let (envSlot, st3b)   = esFresh st3
-  let (bareLbl, st4)    = esFreshLabel "bare_call_" st3b
-  let (envLbl, st5)     = esFreshLabel "env_call_" st4
-  let (endLbl, st6)     = esFreshLabel "call_end_" st5
-  let (bareRes, st7)    = esFresh st6
-  let (envRes, st8)     = esFresh st7
-  let (phiRes, st9)     = esFresh st8
-  loadFn  = strConcat "  " (strConcat fnReg (strConcat " = load ptr, ptr " closureReg))
-  gepEnv  = strConcat "  " (strConcat envSlot (strConcat " = getelementptr inbounds i8, ptr " (strConcat closureReg ", i64 8")))
-  loadEnv = strConcat "  " (strConcat envReg (strConcat " = load ptr, ptr " envSlot))
-  cmp     = strConcat "  " (strConcat nonnull (strConcat " = icmp ne ptr " (strConcat envReg ", null")))
-  brInstr = strConcat "  br i1 " (strConcat nonnull (strConcat ", label %" (strConcat envLbl (strConcat ", label %" bareLbl))))
-  bareCall = strConcat "  " (strConcat bareRes (strConcat " = call " (strConcat retTy (strConcat " " (strConcat fnReg (strConcat "(" (strConcat argSig ")")))))))
-  bareBr = strConcat "  br label %" endLbl
-  bareBlk = strConcat bareLbl (strConcat ":\n" (strConcat bareCall (strConcat "\n" bareBr)))
-  envCall = strConcat "  " (strConcat envRes (strConcat " = call " (strConcat retTy (strConcat " " (strConcat fnReg (strConcat "(ptr " (strConcat envReg (strConcat ", " (strConcat argSig ")")))))))))
-  envBr = strConcat "  br label %" endLbl
-  envBlk  = strConcat envLbl (strConcat ":\n" (strConcat envCall (strConcat "\n" envBr)))
-  phiInstr = strConcat "  " (strConcat phiRes (strConcat " = phi " (strConcat retTy (strConcat " [" (strConcat bareRes (strConcat ", %" (strConcat bareLbl (strConcat "], [" (strConcat envRes (strConcat ", %" (strConcat envLbl "]")))))))))))
-  phiStr  = strConcat endLbl (strConcat ":\n" phiInstr)
-  parts = [loadFn; gepEnv; loadEnv; cmp; brInstr; bareBlk; envBlk; phiStr]
-  all = joinWith "\n" parts
-  MkEER st9 all phiRes
-
--- Helper for TEList lowering: build a reverse cons chain from a list of
--- TypedExprs. (Placed after emitTypedExpr since it recurses into it.)
-emitTypedListLit(state EmitState)(items List[TypedExpr]) =
-  match items
-    | [] -> MkEER state "" "null"
-    | x :: rest ->
-      tailRes = emitTypedListLit state rest
-      hr = emitTypedExpr (eerState tailRes) x
-      hTy = llvmTypeOfTE x
-      hc = coerceValue (eerState hr) hTy "i64" (eerReg hr)
-      alloc = emitAllocNode (eerState hc) listConsTagStr (eerReg hc) (eerReg tailRes)
-      all = strJoin2 (eerInstrs tailRes) (strJoin2 (strJoin2 (eerInstrs hr) (eerInstrs hc)) (eerInstrs alloc))
-      MkEER (eerState alloc) all (eerReg alloc)
+emitExprNextSidx(e Expr)(ctr Int)(sidx Int) =
+  match e
+    | EInt _  -> sidx
+    | EFloat _ -> sidx
+    | EBool _ -> sidx
+    | EChar _ -> sidx
+    | EStr _  -> sidx + 1
+    | EVar _  -> sidx
+    | ECon _  -> sidx
+    | ENil    -> sidx
+    | EBinOp op l r ->
+      lc = emitExprNextCtr l ctr sidx
+      ls = emitExprNextSidx l ctr sidx
+      emitExprNextSidx r lc ls
+    | EIf cond thenE elseE ->
+      cc = emitExprNextCtr cond ctr sidx
+      cs = emitExprNextSidx cond ctr sidx
+      tc1 = cc + 1
+      tc = emitExprNextCtr thenE tc1 cs
+      ts = emitExprNextSidx thenE tc1 cs
+      ec1 = tc + 1
+      emitExprNextSidx elseE ec1 ts
+    | ELet name valE bodyE ->
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      emitExprNextSidx bodyE (vc + 1) vs
+    | ELetTuple _ _ valE bodyE ->
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      emitExprNextSidx bodyE (vc + 6) vs
+    | EApp f a ->
+      fc = emitExprNextCtr f ctr sidx
+      fs = emitExprNextSidx f ctr sidx
+      emitExprNextSidx a fc fs
+    | ECons h t ->
+      hc = emitExprNextCtr h ctr sidx
+      hs = emitExprNextSidx h ctr sidx
+      emitExprNextSidx t hc hs
+    | ETuple a b ->
+      ac = emitExprNextCtr a ctr sidx
+      as = emitExprNextSidx a ctr sidx
+      emitExprNextSidx b ac as
+    | _ -> sidx
 
 -- ---- emitExprGlobs ---------------------------------------------------------
--- Walks the expression and accumulates every string-literal global declaration
--- (@.str.<n> = private unnamed_addr constant [...]). Threads the same
--- EmitState so indices line up with what emitExpr produced.
+-- Returns all string global declarations needed for expression e.
 
-emitExprGlobs(state EmitState)(e Expr) =
+emitExprGlobs(e Expr)(ctr Int)(sidx Int) =
   match e
-    | EStr s ->
-      let (idx, st2) = esNextStr state
-      (strGlobalDecl idx s, st2)
-    | EBinOp _ l r ->
-      let (lg, st2) = emitExprGlobs state l
-      let (rg, st3) = emitExprGlobs st2 r
-      (strJoin2 lg rg, st3)
+    | EStr s  -> strGlobalDecl sidx s
+    | EBinOp op l r ->
+      lg = emitExprGlobs l ctr sidx
+      lc = emitExprNextCtr l ctr sidx
+      ls = emitExprNextSidx l ctr sidx
+      rg = emitExprGlobs r lc ls
+      strJoin2 lg rg
     | EIf cond thenE elseE ->
-      let (cg, st2) = emitExprGlobs state cond
-      let (tg, st3) = emitExprGlobs st2 thenE
-      let (eg, st4) = emitExprGlobs st3 elseE
-      (strJoin2 cg (strJoin2 tg eg), st4)
-    | ELet _ valE bodyE ->
-      let (vg, st2) = emitExprGlobs state valE
-      let (bg, st3) = emitExprGlobs st2 bodyE
-      (strJoin2 vg bg, st3)
+      cg = emitExprGlobs cond ctr sidx
+      cc = emitExprNextCtr cond ctr sidx
+      cs = emitExprNextSidx cond ctr sidx
+      tg = emitExprGlobs thenE (cc + 1) cs
+      tc = emitExprNextCtr thenE (cc + 1) cs
+      ts = emitExprNextSidx thenE (cc + 1) cs
+      eg = emitExprGlobs elseE (tc + 1) ts
+      strJoin2 cg (strJoin2 tg eg)
+    | ELet name valE bodyE ->
+      vg = emitExprGlobs valE ctr sidx
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      bg = emitExprGlobs bodyE (vc + 1) vs
+      strJoin2 vg bg
+    | ELetTuple _ _ valE bodyE ->
+      vg = emitExprGlobs valE ctr sidx
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      bg = emitExprGlobs bodyE (vc + 6) vs
+      strJoin2 vg bg
     | EApp f a ->
-      let (fg, st2) = emitExprGlobs state f
-      let (ag, st3) = emitExprGlobs st2 a
-      (strJoin2 fg ag, st3)
-    | _ -> ("", state)
+      fg = emitExprGlobs f ctr sidx
+      fc = emitExprNextCtr f ctr sidx
+      fs = emitExprNextSidx f ctr sidx
+      ag = emitExprGlobs a fc fs
+      strJoin2 fg ag
+    | ECons h t ->
+      hg = emitExprGlobs h ctr sidx
+      hc = emitExprNextCtr h ctr sidx
+      hs = emitExprNextSidx h ctr sidx
+      tg = emitExprGlobs t hc hs
+      strJoin2 hg tg
+    | ETuple a b ->
+      ag = emitExprGlobs a ctr sidx
+      ac = emitExprNextCtr a ctr sidx
+      as = emitExprNextSidx a ctr sidx
+      bg = emitExprGlobs b ac as
+      strJoin2 ag bg
+    | _ -> ""
 
 -- ---- Param helpers ---------------------------------------------------------
 
@@ -1752,303 +583,21 @@ emitParam(p Param) =
 emitParams(ps List[Param]) =
   joinWith ", " (listMap emitParam ps)
 
--- Typed-path param emission: use positional %arg<i> names (matches F# emitParam).
-emitTypedParam(idx Int)(p Param) =
-  match p
-    | MkParam _ ty -> strConcat (emitLLVMType ty) (strConcat " %arg" (intToStr idx))
-
--- Emit params as "ty %arg0, ty %arg1, ...". Recursion threads the index.
-emitTypedParamsFrom(idx Int)(ps List[Param]) =
-  match ps
-    | [] -> ""
-    | p :: [] -> emitTypedParam idx p
-    | p :: rest -> strConcat (emitTypedParam idx p) (strConcat ", " (emitTypedParamsFrom (idx + 1) rest))
-
-emitTypedParamsWithIdx(ps List[Param]) =
-  emitTypedParamsFrom 0 ps
-
 paramReturnType(retTy Maybe[TypeExpr]) =
   match retTy
     | Some t -> emitLLVMType t
     | None   -> "i64"
 
--- ---- litToConst / evalConst / constToLlvm ---------------------------------
--- Port of F# helpers for TDLet globals with literal / constant-folded RHS.
-
--- Const value: tag + Int/Float(Str)/Bool/Char
-ConstVal =
-  | CInt Int
-  | CFloat Str    -- keep as Str since ll-lang Float is stored Str
-  | CBool Bool
-  | CChar Int
-
--- Try to extract a ConstVal from a literal-bearing TypedExpr node.
-litToConst(te TypedExpr) =
-  match te
-    | TEInt n _ -> Some (CInt n)
-    | TEFloat s _ -> Some (CFloat s)
-    | TEBool b _ -> Some (CBool b)
-    | TEChar c _ -> Some (CChar (charToInt c))
-    | _ -> None
-
--- Fold a constant expression (literal only for now — arith folding is
--- deferred to Phase 3+ along with richer eval).
-evalConst(te TypedExpr) =
-  litToConst te
-
--- Render a ConstVal against a target LLVM type. Returns Maybe[Str].
-constToLlvm(llvmTy Str)(cv ConstVal) =
-  match cv
-    | CInt n ->
-      if llvmTy == "i64"
-        Some (intToStr n)
-      else if llvmTy == "i8"
-        Some (intToStr n)
-      else None
-    | CChar c ->
-      if llvmTy == "i64"
-        Some (intToStr c)
-      else if llvmTy == "i8"
-        Some (intToStr c)
-      else None
-    | CFloat s ->
-      if llvmTy == "double"
-        Some s
-      else None
-    | CBool b ->
-      if llvmTy == "i1"
-        boolLit =
-          if b
-            "1"
-          else "0"
-        Some boolLit
-      else None
-
--- ---- String pool construction ---------------------------------------------
--- Walk a TypedExpr and return all string literals reachable from it
--- (in left-to-right encounter order). Caller dedupes.
-
-collectTypedExprStringLits(te TypedExpr) =
-  match te
-    | TEStr s _ -> [s]
-    | TEApp f a _ -> listAppend (collectTypedExprStringLits f) (collectTypedExprStringLits a)
-    | TELam _ _ body _ -> collectTypedExprStringLits body
-    | TeLet _ v b _ -> listAppend (collectTypedExprStringLits v) (collectTypedExprStringLits b)
-    | TEIf c t e _ ->
-      listAppend (collectTypedExprStringLits c) (listAppend (collectTypedExprStringLits t) (collectTypedExprStringLits e))
-    | TEBinOp _ l r _ -> listAppend (collectTypedExprStringLits l) (collectTypedExprStringLits r)
-    | TECons h t _ -> listAppend (collectTypedExprStringLits h) (collectTypedExprStringLits t)
-    | TEList xs _ -> listFold (\acc x. listAppend acc (collectTypedExprStringLits x)) [] xs
-    | TETuple a b _ -> listAppend (collectTypedExprStringLits a) (collectTypedExprStringLits b)
-    | TEMatch scrut _ bodies _ ->
-      listAppend (collectTypedExprStringLits scrut)
-        (listFold (\acc b. listAppend acc (collectTypedExprStringLits b)) [] bodies)
-    | _ -> []
-
-collectTypedDeclStringLits(d TypedDecl) =
-  match d
-    | TDFn _ _ body -> collectTypedExprStringLits body
-    | TDLet _ _ e -> collectTypedExprStringLits e
-    | _ -> []
-
--- Dedupe a list of strings, preserving first-occurrence order.
-dedupStrList(xs List[Str]) =
-  listFold
-    (\acc x.
-      if listAny (\y. x == y) acc
-        acc
-      else listAppend acc [x]
-    )
-    []
-    xs
-
--- Build the pool map: literal -> index. Index assigned left-to-right.
-buildStringPoolMap(lits List[Str]) =
-  result = listFold
-    (\st lit.
-      match st
-        | (m, i) -> (mapInsert strCmp lit i m, i + 1)
-    )
-    (Leaf, 0)
-    lits
-  match result
-    | (m, _) -> m
-
--- Build the pool declarations string ("@.str0 = ... \n @.str1 = ... \n ...").
-buildStringPoolDecls(lits List[Str]) =
-  result = listFold
-    (\st lit.
-      match st
-        | (acc, i) ->
-          d = strPoolDecl i lit
-          nextAcc =
-            if strLen acc == 0
-              d
-            else strConcat acc (strConcat "\n" d)
-          (nextAcc, i + 1)
-    )
-    ("", 0)
-    lits
-  match result
-    | (s, _) -> s
-
--- Full string pool: returns the literal->index map alongside the unique list,
--- the caller folds the declarations separately via buildStringPoolDecls.
-buildStringPoolLits(decls List[TypedDecl]) =
-  allLits = listFold (\acc d. listAppend acc (collectTypedDeclStringLits d)) [] decls
-  dedupStrList allLits
-
--- ---- collectNullaryGlobals ------------------------------------------------
--- Scan a list of TypedDecls for zero-arg TDFn. These names, when referenced
--- via a bare TEVar elsewhere, must lower to `call <ty> @name()` because the
--- parser desugars `name = expr` as TDFn("name", [], ..., expr).
-
-collectNullaryGlobals(decls List[TypedDecl]) =
-  listFold
-    (\acc d.
-      match d
-        | TDFn sig _ _ ->
-          match sig
-            | MkTypedFnSig name params _ ->
-              match params
-                | [] -> mapInsert strCmp name 1 acc
-                | _ -> acc
-        | _ -> acc
-    )
-    Leaf
-    decls
-
--- ---- Typed-decl emission --------------------------------------------------
--- Emit a single TypedDecl. Threads the shared pool + nullary-globals state.
-
--- isEntryMain: function named "main" with zero params (after parser desugar
--- top-level `main = body` becomes `TDFn "main" [] ... body`).
-isEntryMain(sig TypedFnSig) =
-  match sig
-    | MkTypedFnSig name params _ ->
-      if name == "main"
-        match params
-          | [] -> true
-          | _ -> false
-      else false
-
--- Phase 4: emitTypedFn returns (defText, updatedState) so the lambda counter
--- and liftedLambdas buffer survive across decls in a module. The driver
--- (emitTypedDeclsWith) threads the state through each decl; the final state's
--- liftedLambdas are appended to the module output.
-emitTypedFnWith(state EmitState)(sig TypedFnSig)(body TypedExpr) =
-  match sig
-    | MkTypedFnSig name params retTy ->
-      retType = emitLLVMType retTy
-      paramStr = emitTypedParamsWithIdx params
-      isMain = isEntryMain sig
-      initSt = esResetForFunc state
-      bodyRes = emitTypedExpr initSt body
-      bodyInstrs = eerInstrs bodyRes
-      retReg = eerReg bodyRes
-      if isMain
-        -- Entry-point main: force i32 return, cast body value.
-        bodyTy = llvmTypeOfTE body
-        castRes = emitCastToMainI32 (eerState bodyRes) bodyTy retReg
-        castInstrs = eerInstrs castRes
-        fullInstrs =
-          if strLen bodyInstrs == 0
-            castInstrs
-          else if strLen castInstrs == 0
-            bodyInstrs
-          else strConcat bodyInstrs (strConcat "\n" castInstrs)
-        retValue = eerReg castRes
-        instrBlock =
-          if strLen fullInstrs == 0
-            ""
-          else strConcat "\n" fullInstrs
-        defText = strConcat "define i32 @main() {\nentry:" (strConcat instrBlock (strConcat "\n  ret i32 " (strConcat retValue "\n}")))
-        (defText, eerState castRes)
-      else if retType == "void"
-        instrBlock =
-          if strLen bodyInstrs == 0
-            ""
-          else strConcat "\n" bodyInstrs
-        defText = strConcat "define void @" (strConcat name (strConcat "(" (strConcat paramStr (strConcat ") {\nentry:" (strConcat instrBlock "\n  ret void\n}")))))
-        (defText, eerState bodyRes)
-      else
-        -- Regular typed function.
-        instrBlock =
-          if strLen bodyInstrs == 0
-            ""
-          else strConcat "\n" bodyInstrs
-        defText = strConcat "define " (strConcat retType (strConcat " @" (strConcat name (strConcat "(" (strConcat paramStr (strConcat ") {\nentry:" (strConcat instrBlock (strConcat "\n  ret " (strConcat retType (strConcat " " (strConcat retReg "\n}")))))))))))
-        (defText, eerState bodyRes)
-
--- Legacy non-state-threading wrapper (Phase 3 callers unchanged).
-emitTypedFn(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(sig TypedFnSig)(body TypedExpr) =
-  initSt = emitStateWithTags pool globs tags 1
-  let (defText, _) = emitTypedFnWith initSt sig body
-  defText
-
--- Phase 4: state-threading decl emitter. Returns (defText, updatedState).
-emitTypedDeclWith(state EmitState)(d TypedDecl) =
-  match d
-    | TDFn sig _ body -> emitTypedFnWith state sig body
-    | TDLet name sch e ->
-      ty = match sch | MkScheme _ b -> emitLLVMType b
-      -- Try to evaluate the RHS as a constant.
-      value =
-        match evalConst e
-          | Some cv ->
-            match constToLlvm ty cv
-              | Some v -> v
-              | None -> defaultLLVMValue ty
-          | None ->
-            -- String-literal RHS: emit as a pointer to pool string.
-            match e
-              | TEStr s _ ->
-                if ty == "ptr"
-                  match mapLookup strCmp s (esStrPool state)
-                    | Some idx ->
-                      totalLen = strLen s + 1
-                      strConcat "getelementptr inbounds ([" (strConcat (intToStr totalLen) (strConcat " x i8], ptr @.str" (strConcat (intToStr idx) ", i64 0, i64 0)")))
-                    | None -> defaultLLVMValue ty
-                else defaultLLVMValue ty
-              | _ -> defaultLLVMValue ty
-      defText =
-        if ty == "void"
-          strConcat "; let " (strConcat name " : void")
-        else
-          strConcat "@" (strConcat name (strConcat " = global " (strConcat ty (strConcat " " value))))
-      (defText, state)
-    | TDExternal sig _ ->
-      defText =
-        match sig
-          | MkTypedFnSig name params retTy ->
-            retType = emitLLVMType retTy
-            argTys = joinWith ", " (listMap (\p. match p | MkParam _ t -> emitLLVMType t) params)
-            strConcat "declare " (strConcat retType (strConcat " @" (strConcat name (strConcat "(" (strConcat argTys ")")))))
-      (defText, state)
-    | TDOpaque name -> (strConcat "; opaque type " name, state)
-    | TDType name _ _ -> (strConcat "; type " (strConcat name " (opaque in LLVM backend)"), state)
-    | TDImport _ -> ("", state)
-    | TDTag _ -> ("", state)
-    | TDUnit _ -> ("", state)
-
--- Legacy wrapper (Phase 3 callers unchanged). Discards lambda-counter update.
-emitTypedDecl(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(d TypedDecl) =
-  initSt = emitStateWithTags pool globs tags 1
-  let (defText, _) = emitTypedDeclWith initSt d
-  defText
-
--- ---- Untyped-decl emitter (POC; unchanged from Phase 1) --------------------
+-- ---- Declaration emitter ---------------------------------------------------
 
 emitDecl(d Decl)(strIdx Int) =
   match d
     | DFn name params retTy body ->
       retType = paramReturnType retTy
       paramStr = emitParams params
-      initSt = MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 [] Leaf
-      res = emitExpr initSt body
-      bodyInstrs = eerInstrs res
-      retReg = eerReg res
-      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 [] Leaf) body
+      bodyInstrs = emitExprInstrs body 0 strIdx
+      retReg = emitExprReg body 0 strIdx
+      globs = emitExprGlobs body 0 strIdx
       globSection =
         if strLen globs == 0
           ""
@@ -2062,19 +611,27 @@ emitDecl(d Decl)(strIdx Int) =
       strConcat "; type " name
     | DImport parts ->
       strConcat "; import " (joinWith "." parts)
+    | DImportUrl url ->
+      strConcat "; import-url " url
     | DLet name body ->
-      initSt = MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 [] Leaf
-      res = emitExpr initSt body
-      reg = eerReg res
-      let (globs, _) = emitExprGlobs (MkEmitState 0 strIdx Leaf Leaf 0 Leaf 1 0 [] Leaf) body
+      bodyInstrs = emitExprInstrs body 0 strIdx
+      reg = emitExprReg body 0 strIdx
+      globs = emitExprGlobs body 0 strIdx
       globSection =
         if strLen globs == 0
           ""
         else strConcat globs "\n"
       strConcat globSection (strConcat "@" (strConcat name (strConcat " = global i64 " reg)))
     | DExport inner -> emitDecl inner strIdx
-    | DExternal name _ _ ->
-      strConcat "; external: " name
+    | DExternal extName extParams extRetTy ->
+      retType = emitLLVMType extRetTy
+      paramTypes =
+        listMap (\p.
+          match p
+            | MkParam _ ty -> emitLLVMType ty
+        ) extParams
+      paramStr = joinWith ", " paramTypes
+      strConcat "declare " (strConcat retType (strConcat " @" (strConcat extName (strConcat "(" (strConcat paramStr ")")))))
     | DOpaque name ->
       strConcat "; opaque: " name
 
@@ -2102,615 +659,8 @@ emitModule(m Module) =
       body = emitDecls decls 0
       strConcat prelude (strConcat header (strConcat "\n\n" body))
 
--- Uniquely-named alias so callers that import multiple codegens can pick
--- LLVM's emitter without bare-name shadowing.
-emitModuleLlvm(m Module) = emitModule m
-
--- Phase 2: full typed-module emission pipeline.
---   Pre-pass: buildStringPool, collectNullaryGlobals
---   Emit pass: emitTypedDecl per decl, threaded through shared state
---
--- Output shape matches F# emitModule:
---   "; Generated by lllc (ll-lang LLVM backend)\n; Module: <name>\n\n"
---   + string decls + body
-emitTypedDecls(pool RBMap[Str][Int])(globs RBMap[Str][Int])(tags RBMap[Str][Int])(ds List[TypedDecl]) =
-  match ds
-    | [] -> ""
-    | d :: rest ->
-      first = emitTypedDecl pool globs tags d
-      remaining = emitTypedDecls pool globs tags rest
-      if strLen first == 0
-        remaining
-      else if strLen remaining == 0
-        first
-      else strConcat first (strConcat "\n\n" remaining)
-
--- Phase 4: state-threading decls emitter. Returns (bodyText, finalState).
--- The finalState's liftedLambdas buffer holds every `@__lam_N` definition
--- produced during emission, ready to be appended at module scope.
-emitTypedDeclsWith(state EmitState)(ds List[TypedDecl]) =
-  match ds
-    | [] -> ("", state)
-    | d :: rest ->
-      let (first, st1) = emitTypedDeclWith state d
-      let (remaining, st2) = emitTypedDeclsWith st1 rest
-      combined =
-        if strLen first == 0
-          remaining
-        else if strLen remaining == 0
-          first
-        else strConcat first (strConcat "\n\n" remaining)
-      (combined, st2)
-
--- Render the lifted-lambda side-buffer as a concatenated text block.
-renderLiftedLambdas(defs List[Str]) =
-  match defs
-    | [] -> ""
-    | d :: [] -> d
-    | d :: rest -> strConcat d (strConcat "\n\n" (renderLiftedLambdas rest))
-
-emitTypedModule(tm TypedModule) =
-  pathStr = joinWith "." (typedModPath tm)
-  decls = typedModDecls tm
-  lits = buildStringPoolLits decls
-  pool = buildStringPoolMap lits
-  poolDecls = buildStringPoolDecls lits
-  globs = collectNullaryGlobals decls
-  let (tags, _) = seedCtorsDecls Leaf 1 decls
-  header = strConcat "; Generated by lllc (ll-lang LLVM backend)\n; Module: " pathStr
-  stringBlock =
-    if strLen poolDecls == 0
-      ""
-    else strConcat poolDecls "\n\n"
-  initSt = emitStateForFunc pool globs tags 1 0 []
-  let (body, finalSt) = emitTypedDeclsWith initSt decls
-  lamBlock = renderLiftedLambdas (esLiftedLambdas finalSt)
-  bodyWithLambdas =
-    if strLen lamBlock == 0
-      body
-    else strConcat body (strConcat "\n\n" lamBlock)
-  -- Prepend runtime block (ADT allocator + node_* declares).
-  strConcat llvmRuntimeBlock (strConcat "\n" (strConcat header (strConcat "\n\n" (strConcat stringBlock (strConcat bodyWithLambdas "\n")))))
-
--- Render one module's body with shared ctor-tag table (no runtime block).
-emitTypedModuleBody(tags RBMap[Str][Int])(tm TypedModule) =
-  pathStr = joinWith "." (typedModPath tm)
-  decls = typedModDecls tm
-  lits = buildStringPoolLits decls
-  pool = buildStringPoolMap lits
-  poolDecls = buildStringPoolDecls lits
-  globs = collectNullaryGlobals decls
-  header = strConcat "; Module: " pathStr
-  stringBlock =
-    if strLen poolDecls == 0
-      ""
-    else strConcat poolDecls "\n\n"
-  initSt = emitStateForFunc pool globs tags 1 0 []
-  let (body, finalSt) = emitTypedDeclsWith initSt decls
-  lamBlock = renderLiftedLambdas (esLiftedLambdas finalSt)
-  bodyWithLambdas =
-    if strLen lamBlock == 0
-      body
-    else strConcat body (strConcat "\n\n" lamBlock)
-  strConcat header (strConcat "\n\n" (strConcat stringBlock (strConcat bodyWithLambdas "\n")))
-
--- Walk a list of modules accumulating textual output.
-emitTypedProjectBodies(tags RBMap[Str][Int])(tms List[TypedModule]) =
-  match tms
-    | [] -> ""
-    | tm :: rest ->
-      first = emitTypedModuleBody tags tm
-      remaining = emitTypedProjectBodies tags rest
-      if strLen remaining == 0
-        first
-      else strConcat first (strConcat "\n" remaining)
-
--- Project-scope emit: seed ctor tags across all modules first, then emit
--- each module. Runtime block is emitted once at the top.
-emitTypedProject(tms List[TypedModule]) =
-  let (tags, _) = seedCtorsModules tms
-  runtimeHeader = strConcat llvmRuntimeBlock "\n"
-  moduleBodies = emitTypedProjectBodies tags tms
-  strConcat runtimeHeader moduleBodies
-
--- Alias: project-scope ctor tag seed, exposed under the name the plan refers
--- to. Calls the already-existing seedCtorsModules; returns just the tag map
--- (callers rarely need the next-tag counter outside the seed).
-seedCtorTagsFromModules(tms List[TypedModule]) =
-  let (tags, _) = seedCtorsModules tms
-  tags
-
--- ---- Phase 5: multi-module decl dedup ----------------------------------
--- When multiple typed modules declare the same external ABI (e.g. identical
--- `declare` lines from overlapping FFI imports) or re-export the same type
--- decl, we emit each once. Dedup is by TDExternal name + TDType name only.
--- TDFn / TDLet / TDOpaque don't collide because each module defines its own
--- namespace. Import decls are elided (no codegen output).
-
-declIdentKey(d TypedDecl) =
-  match d
-    | TDFn sig _ _ ->
-      match sig | MkTypedFnSig n _ _ -> strConcat "fn:" n
-    | TDLet n _ _ -> strConcat "let:" n
-    | TDExternal sig _ ->
-      match sig | MkTypedFnSig n _ _ -> strConcat "ext:" n
-    | TDOpaque n -> strConcat "opaque:" n
-    | TDType n _ _ -> strConcat "type:" n
-    | TDTag n -> strConcat "tag:" n
-    | TDUnit n -> strConcat "unit:" n
-    | TDImport _ -> "import:"
-
--- Which decl kinds collide across modules? Only externals and types — fn/let
--- live in per-module namespaces (differentiated by module path in the
--- rewriteNonEntryMain step below).
-declKindCollides(d TypedDecl) =
-  match d
-    | TDExternal _ _ -> true
-    | TDType _ _ _  -> true
-    | TDOpaque _    -> true
-    | _             -> false
-
--- Filter a list of decls, dropping any duplicate TDExternal / TDType entries
--- already present in `seen`. Returns (filteredDecls, updatedSeen).
-dedupeDeclList(seen List[Str])(decls List[TypedDecl]) =
-  match decls
-    | [] -> ([], seen)
-    | d :: rest ->
-      key = declIdentKey d
-      isDup =
-        if declKindCollides d
-          fvContains key seen
-        else false
-      if isDup
-        dedupeDeclList seen rest
-      else
-        seen2 =
-          if declKindCollides d
-            fvInsert key seen
-          else seen
-        let (tailDecls, seen3) = dedupeDeclList seen2 rest
-        (d :: tailDecls, seen3)
-
--- Walk modules, deduping across-module collisions. Preserves per-module
--- decl order; drops repeats on the 2nd+ module. Returns the transformed
--- list of typed modules.
-dedupeModuleDecls(tms List[TypedModule]) =
-  dedupeModulesFrom [] tms
-
-dedupeModulesFrom(seen List[Str])(tms List[TypedModule]) =
-  match tms
-    | [] -> []
-    | tm :: rest ->
-      path = typedModPath tm
-      env  = typedModEnv tm
-      let (deduped, seen2) = dedupeDeclList seen (typedModDecls tm)
-      MkTypedModule path deduped env :: dedupeModulesFrom seen2 rest
-
--- ---- Phase 5: rewrite `main` in non-entry modules ----------------------
--- When multiple .lll files each declare `main`, we keep the entry module's
--- `main` as-is (the driver picks the single entry explicitly) and rename
--- the others to `__ll_main_<suffix>`. The suffix is derived from the module
--- path: e.g. module `Std.Test` becomes `@__ll_main_Std_Test`. This keeps
--- the symbol resolvable in case it's referenced from elsewhere via the
--- module-path convention; the driver picks a single top-level `@main`.
-
-pathToSuffix(path List[Str]) =
-  match path
-    | [] -> "anon"
-    | _  -> joinWith "_" path
-
-rewriteFnNameInSig(sig TypedFnSig)(newName Str) =
-  match sig
-    | MkTypedFnSig _ params retTy -> MkTypedFnSig newName params retTy
-
-rewriteMainInDecl(suffix Str)(d TypedDecl) =
-  match d
-    | TDFn sig sch body ->
-      match sig
-        | MkTypedFnSig "main" params _ ->
-          -- Only rewrite zero-arg `main` (entry-point shape). Preserve
-          -- multi-arg user fns named `main` (non-entry) as-is.
-          match params
-            | [] ->
-              newName = strConcat "__ll_main_" suffix
-              TDFn (rewriteFnNameInSig sig newName) sch body
-            | _ -> d
-    | _ -> d
-
-rewriteMainInDecls(suffix Str)(ds List[TypedDecl]) =
-  listMap (rewriteMainInDecl suffix) ds
-
--- Rewrite `main` in every module EXCEPT the entry module (matched by path).
--- `entryPath` is the path list (e.g. ["Main"]) of the module whose main()
--- should stay. All others get `main` renamed with their path-suffixed name.
-rewriteNonEntryMain(entryPath List[Str])(tms List[TypedModule]) =
-  match tms
-    | [] -> []
-    | tm :: rest ->
-      path = typedModPath tm
-      decls = typedModDecls tm
-      env = typedModEnv tm
-      newDecls =
-        if pathEquals path entryPath
-          decls
-        else rewriteMainInDecls (pathToSuffix path) decls
-      MkTypedModule path newDecls env :: rewriteNonEntryMain entryPath rest
-
--- Shallow equality of path segments.
-pathEquals(a List[Str])(b List[Str]) =
-  match a
-    | [] ->
-      match b | [] -> true | _ -> false
-    | x :: restA ->
-      match b
-        | [] -> false
-        | y :: restB ->
-          if x == y
-            pathEquals restA restB
-          else false
-
--- ---- Phase 5: top-level multi-file entry -------------------------------
--- Full project pipeline:
---   1. Seed ctor tags project-scope (all modules share the same tag table).
---   2. Dedupe cross-module declare/type decls.
---   3. Rewrite `main` in non-entry modules to `@__ll_main_<suffix>`.
---   4. Emit the runtime block + each module's bodies.
---
--- `entryPath` selects which module's `main` stays as `@main`. Pass `[]` to
--- disable main-rewriting entirely (every module's `main` flows through —
--- caller's responsibility to avoid duplicate-symbol errors at link time).
-emitProjectModules(entryPath List[Str])(tms List[TypedModule]) =
-  deduped = dedupeModuleDecls tms
-  rewritten =
-    match entryPath
-      | [] -> deduped
-      | _  -> rewriteNonEntryMain entryPath deduped
-  tags = seedCtorTagsFromModules rewritten
-  runtimeHeader = strConcat llvmRuntimeBlock "\n"
-  moduleBodies = emitTypedProjectBodies tags rewritten
-  strConcat runtimeHeader moduleBodies
-
--- ---- Phase 6: external declares -----------------------------------------
--- Post-hoc scan of the emitted IR text. For every `call <retty> @name(...)`
--- that is not matched by a `define @name` or `declare @name` already in the
--- text, emit a `declare <retty> @name(<argTys>)` at module-top. For names
--- present in `runtimeExternalSigs`, use the canonical C-ABI signature
--- regardless of what the call-site parse yields (some runtime helpers are
--- called with mismatched LLVM argument types across HOF use-sites).
-
--- Canonical runtime-primitive signatures. Returns Maybe[(retTy, argTys)].
--- Mirrors F# `runtimeExternalSigs` in CodegenLLVM.fs.
-runtimeExternalSig(name Str) =
-  if name == "listFold"
-    Some ("i64", "ptr, i64, ptr")
-  else if name == "listFilter"
-    Some ("ptr", "ptr, ptr")
-  else if name == "listMap"
-    Some ("ptr", "ptr, ptr")
-  else if name == "listAny"
-    Some ("i1", "ptr, ptr")
-  else if name == "listAll"
-    Some ("i1", "ptr, ptr")
-  else if name == "listFind"
-    Some ("i64", "ptr, ptr")
-  else if name == "listFindIndex"
-    Some ("i64", "ptr, ptr")
-  else if name == "listFindIndexFrom"
-    Some ("i64", "ptr, i64, ptr")
-  else if name == "listPartition"
-    Some ("ptr", "ptr, ptr")
-  else if name == "listHead"
-    Some ("ptr", "ptr")
-  else if name == "listTail"
-    Some ("ptr", "ptr")
-  else if name == "listReverse"
-    Some ("ptr", "ptr")
-  else if name == "listAppend"
-    Some ("ptr", "ptr, ptr")
-  else if name == "listConcat"
-    Some ("ptr", "ptr")
-  else if name == "listLen"
-    Some ("i64", "ptr")
-  else if name == "listIsEmpty"
-    Some ("i1", "ptr")
-  else if name == "make_closure"
-    Some ("ptr", "ptr, ptr")
-  else if name == "malloc"
-    Some ("ptr", "i64")
-  else if name == "strConcat"
-    Some ("ptr", "ptr, ptr")
-  else if name == "strLen"
-    Some ("i64", "ptr")
-  else if name == "strEq"
-    Some ("i1", "ptr, ptr")
-  else if name == "intToStr"
-    Some ("ptr", "i64")
-  else if name == "printfn"
-    Some ("void", "ptr")
-  else if name == "print"
-    Some ("void", "ptr")
-  else if name == "readFile"
-    Some ("ptr", "ptr")
-  else if name == "writeFile"
-    Some ("void", "ptr, ptr")
-  else if name == "readLine"
-    Some ("ptr", "i64")
-  else if name == "flushStdout"
-    Some ("void", "i64")
-  else if name == "timeMs"
-    Some ("i64", "")
-  else if name == "ll_getArgs"
-    Some ("ptr", "")
-  else if name == "__ll_alloc"
-    Some ("ptr", "i64, i64, ptr")
-  else if name == "node_tag_safe"
-    Some ("i64", "ptr")
-  else if name == "node_payload_safe"
-    Some ("i64", "ptr")
-  else if name == "node_tail_safe"
-    Some ("ptr", "ptr")
-  else None
-
--- Skip leading whitespace — returns the substring starting at the first
--- non-space character.
-skipWs(s Str) =
-  if strLen s == 0
-    s
-  else if strStartsWith " " s
-    skipWs (strSlice s 1 ((strLen s) - 1))
-  else if strStartsWith "\t" s
-    skipWs (strSlice s 1 ((strLen s) - 1))
-  else s
-
--- Extract identifier starting at position 0 of `s`, up to (but not
--- including) the first non-identifier character. Identifier chars:
--- alnum + `_` + `.`. Returns (ident, rest).
-takeIdent(s Str) =
-  takeIdentFrom s 0
-
-takeIdentFrom(s Str)(i Int) =
-  slen = strLen s
-  if i >= slen
-    (s, "")
-  else
-    ch = strSlice s i 1
-    isAlnum = isIdentChar ch
-    if isAlnum
-      takeIdentFrom s (i + 1)
-    else
-      (strSlice s 0 i, strSlice s i (slen - i))
-
-isIdentChar(ch Str) =
-  if strLen ch == 0
-    false
-  else
-    c = charAt ch 0
-    if c == '_'
-      true
-    else if c == '.'
-      true
-    else if charIsAlpha c
-      true
-    else if charIsDigit c
-      true
-    else false
-
-charAt(s Str)(i Int) =
-  match strChars (strSlice s i 1)
-    | c :: _ -> c
-    | [] -> ' '
-
--- If `line` (trimmed) matches `define <ty> @name(...)` or `declare <ty>
--- @name(...)`, return Some name. Otherwise None.
-parseDefineOrDeclareName(line Str) =
-  t = skipWs line
-  if strStartsWith "define " t
-    afterKw = strSlice t 7 ((strLen t) - 7)
-    parseDefOrDeclAfterKw afterKw
-  else if strStartsWith "declare " t
-    afterKw = strSlice t 8 ((strLen t) - 8)
-    parseDefOrDeclAfterKw afterKw
-  else None
-
-parseDefOrDeclAfterKw(s Str) =
-  -- Skip return type token.
-  afterWs = skipWs s
-  -- Find first '@' - everything before it is the return type + spaces.
-  atIdx = strIndexOf "@" afterWs
-  if atIdx < 0
-    None
-  else
-    afterAt = strSlice afterWs (atIdx + 1) ((strLen afterWs) - atIdx - 1)
-    let (name, _) = takeIdent afterAt
-    if strLen name == 0
-      None
-    else Some name
-
--- If `line` contains `call <retty> @name(<args>)`, return Some (name, retTy,
--- argTys). Handles both `%t = call ...` and bare `call ...` forms.
-parseCallLine(line Str) =
-  callIdx = strIndexOf "call " line
-  if callIdx < 0
-    None
-  else
-    afterCall = strSlice line (callIdx + 5) ((strLen line) - callIdx - 5)
-    afterCallWs = skipWs afterCall
-    -- Return type: everything up to next space (skip over `tail` / `musttail`
-    -- markers if present — treat first non-keyword token as retty).
-    parseCallAfterKw afterCallWs
-
-parseCallAfterKw(s Str) =
-  spIdx = strIndexOf " " s
-  if spIdx < 0
-    None
-  else
-    retTy = strSlice s 0 spIdx
-    rest = strSlice s (spIdx + 1) ((strLen s) - spIdx - 1)
-    restWs = skipWs rest
-    -- Skip modifier keywords like `noalias` / `fastcc` by looking for `@`.
-    atIdx = strIndexOf "@" restWs
-    if atIdx < 0
-      None
-    else
-      afterAt = strSlice restWs (atIdx + 1) ((strLen restWs) - atIdx - 1)
-      let (name, afterName) = takeIdent afterAt
-      if strLen name == 0
-        None
-      else
-        -- afterName should start with '(' — find matching ')' (flat scan,
-        -- no nested-paren support; call args never contain `)`).
-        if strStartsWith "(" afterName
-          inner = strSlice afterName 1 ((strLen afterName) - 1)
-          closeIdx = strIndexOf ")" inner
-          if closeIdx < 0
-            None
-          else
-            argsRaw = strSlice inner 0 closeIdx
-            argTys = extractArgTypes argsRaw
-            Some (name, retTy, argTys)
-        else None
-
--- Given a raw args string like "ptr %a, i64 %b, ptr null", return the
--- argument-types part: "ptr, i64, ptr". Each arg is split at the first
--- space; the leading token is the type.
-extractArgTypes(raw Str) =
-  trimmed = skipWs raw
-  if strLen trimmed == 0
-    ""
-  else
-    parts = strSplit "," trimmed
-    joinWith ", " (listMap extractOneArgType parts)
-
-extractOneArgType(p Str) =
-  t = skipWs p
-  spIdx = strIndexOf " " t
-  if spIdx < 0
-    t
-  else strSlice t 0 spIdx
-
--- Walk a list of IR lines, collecting defined/declared function names.
-scanDefinedNames(lines List[Str]) =
-  scanDefinedNamesAcc lines []
-
-scanDefinedNamesAcc(lines List[Str])(acc List[Str]) =
-  match lines
-    | [] -> acc
-    | line :: rest ->
-      match parseDefineOrDeclareName line
-        | Some n -> scanDefinedNamesAcc rest (fvInsert n acc)
-        | None -> scanDefinedNamesAcc rest acc
-
--- Wrapper ADT so we can carry (name, retTy, argTys) triples through a List
--- (nested tuple-in-type-param is not supported by the parser; see the
--- PhiIncoming wrapper earlier in this file for the same workaround).
-ExternSig = MkExternSig Str Str Str
-
--- Walk a list of IR lines, collecting unique `(name, retTy, argTys)` triples
--- for every `call ... @name(...)` not already in `defined`. Order-preserving;
--- repeated calls collapse to the first-seen triple.
-scanCallSites(lines List[Str])(defined List[Str]) =
-  scanCallSitesAcc lines defined [] []
-
-scanCallSitesAcc(lines List[Str])(defined List[Str])(seenNames List[Str])(acc List[ExternSig]) =
-  match lines
-    | [] -> acc
-    | line :: rest ->
-      match parseCallLine line
-        | Some (n, r, a) ->
-          if fvContains n defined
-            scanCallSitesAcc rest defined seenNames acc
-          else if fvContains n seenNames
-            scanCallSitesAcc rest defined seenNames acc
-          else
-            scanCallSitesAcc rest defined (fvInsert n seenNames) (listAppend acc [MkExternSig n r a])
-        | None -> scanCallSitesAcc rest defined seenNames acc
-
--- Render one declare line, preferring the canonical runtimeExternalSig
--- over the call-site-derived retTy/argTys.
-renderExternalDecl(sig ExternSig) =
-  match sig
-    | MkExternSig name retTy argTys ->
-      match runtimeExternalSig name
-        | Some (r, a) -> strConcat "declare " (strConcat r (strConcat " @" (strConcat name (strConcat "(" (strConcat a ")")))))
-        | None -> strConcat "declare " (strConcat retTy (strConcat " @" (strConcat name (strConcat "(" (strConcat argTys ")")))))
-
-renderExternalDecls(sigs List[ExternSig]) =
-  match sigs
-    | [] -> ""
-    | _ -> joinWith "\n" (listMap renderExternalDecl sigs)
-
--- Full pipeline: scan the emitted IR, figure out which calls have no
--- matching declare/define, and prepend the missing declares.
-prependExternalDecls(llvmText Str) =
-  lines = strSplit "\n" llvmText
-  defined = scanDefinedNames lines
-  sigs = scanCallSites lines defined
-  match sigs
-    | [] -> llvmText
-    | _ ->
-      decls = renderExternalDecls sigs
-      banner = "; --- auto-generated declares (lll CodegenLLVM) ---"
-      closer = "; --- end auto-generated declares ---"
-      block = strConcat banner (strConcat "\n" (strConcat decls (strConcat "\n" closer)))
-      strConcat block (strConcat "\n" llvmText)
-
--- ---- Phase 6: module-line dedup -----------------------------------------
--- Strip duplicate `declare` and `define <sig>` line occurrences that arise
--- when multiple modules concatenate and both declare/define the same
--- runtime-helper symbol. Order-preserving: first occurrence wins.
-
-isDefineOrDeclareLine(line Str) =
-  t = skipWs line
-  if strStartsWith "declare " t
-    true
-  else if strStartsWith "define " t
-    true
-  else false
-
--- Dedup lines by keying on the parsed fn-name for declare/define lines.
--- Non-declare/define lines pass through unchanged.
-dedupeDeclareLines(llvmText Str) =
-  lines = strSplit "\n" llvmText
-  kept = dedupeDeclareLinesAcc lines [] []
-  joinWith "\n" kept
-
-dedupeDeclareLinesAcc(lines List[Str])(seen List[Str])(acc List[Str]) =
-  match lines
-    | [] -> acc
-    | line :: rest ->
-      if isDefineOrDeclareLine line
-        match parseDefineOrDeclareName line
-          | Some n ->
-            if fvContains n seen
-              dedupeDeclareLinesAcc rest seen acc
-            else
-              dedupeDeclareLinesAcc rest (fvInsert n seen) (listAppend acc [line])
-          | None -> dedupeDeclareLinesAcc rest seen (listAppend acc [line])
-      else
-        dedupeDeclareLinesAcc rest seen (listAppend acc [line])
-
--- ---- Phase 6: project driver --------------------------------------------
--- Ties everything together: seed ctors, rewrite non-entry `main`, dedupe
--- cross-module decls, emit bodies, append lifted lambdas, dedupe textual
--- declare/define lines, prepend auto-declares. Mirrors F#'s
--- `emitProjectModules + prependExternalDecls` pipeline.
-
-emitProjectLlvm(tms List[TypedModule]) =
-  match tms
-    | [] -> ""
-    | _ ->
-      -- Pick the last module as the entry by convention (matches F#).
-      entryPath = lastModulePath tms
-      raw = emitProjectModules entryPath tms
-      deduped = dedupeDeclareLines raw
-      prependExternalDecls deduped
-
--- Path of the last module in the list.
-lastModulePath(tms List[TypedModule]) =
-  match tms
-    | [] -> []
-    | tm :: [] -> typedModPath tm
-    | _ :: rest -> lastModulePath rest
+emitModuleLLVM(m Module) =
+  emitModule m
 
 -- ---- Test helpers ----------------------------------------------------------
 
@@ -2720,74 +670,117 @@ checkContains(label Str)(got Str)(needle Str) =
   else
     printfn (strConcat "FAIL " (strConcat label (strConcat "\n  missing: " (strConcat needle (strConcat "\n  in: " got)))))
 
--- Phase 4 self-check: freeVars behaviour on a simple TELam.
--- Kept out of `main` to avoid coupling to a test harness; exported so the
--- driver (or a separate smoke test) can invoke it.
-phase4FreeVarsSelfCheck =
-  -- \x. x + y  ->  free vars = {y} (with "+" treated as builtin TEBinOp)
-  body = TEBinOp "+" (TEVar "x" (TyName "Int")) (TEVar "y" (TyName "Int")) (TyName "Int")
-  lam = TELam "x" (TyName "Int") body (TyFn (TyName "Int") (TyName "Int"))
-  fvs = freeVars [] lam
-  match fvs
-    | "y" :: [] -> "OK freeVars \\x. x+y = {y}"
-    | _ -> "FAIL freeVars: expected {y}"
-
--- Phase 4.1 self-check: captureful emitLamLift emits both the @malloc for the
--- env struct and the `call ptr @make_closure(...)` with a non-null env.
-phase41CaptureSelfCheck =
-  body = TEBinOp "+" (TEVar "x" (TyName "Int")) (TEVar "y" (TyName "Int")) (TyName "Int")
-  lam = TELam "x" (TyName "Int") body (TyFn (TyName "Int") (TyName "Int"))
-  -- Seed outer varEnv so `y` resolves to a real SSA register (%y_outer).
-  st0 = esSetVar emitStateInit "y" "%y_outer"
-  res = emitTypedExpr st0 lam
-  instrs = eerInstrs res
-  hasMalloc = strContains "@malloc(i64" instrs
-  hasMakeClosure = strContains "@make_closure" instrs
-  hasEnvStore = strContains "store i64 %y_outer" instrs
-  if hasMalloc
-    if hasMakeClosure
-      if hasEnvStore
-        "OK captureful closure emits malloc+make_closure+store"
-      else "FAIL missing env store"
-    else "FAIL missing make_closure"
-  else "FAIL missing malloc"
-
--- Phase 5 self-check: TETuple lowers to two __ll_alloc calls (head + tail
--- cons cells) with LIST_CONS_TAG (-1).
-phase5TupleSelfCheck =
-  tup = TETuple (TEInt 1 (TyName "Int")) (TEInt 2 (TyName "Int")) (TyApp (TyName "Tuple") (TyName "Int"))
-  res = emitTypedExpr emitStateInit tup
-  instrs = eerInstrs res
-  hasAlloc = strContains "__ll_alloc(" instrs
-  hasConsTag = strContains "i64 -1" instrs
-  if hasAlloc
-    if hasConsTag
-      "OK TETuple emits cons-tag __ll_alloc calls"
-    else "FAIL missing cons tag"
-  else "FAIL missing __ll_alloc"
-
--- Phase 6 self-check: prependExternalDecls scans a mini IR text, finds the
--- call to `@printfn` (declared nowhere), and emits a `declare void @printfn(ptr)`
--- banner on top.
-phase6DeclareSelfCheck =
-  mini = "define i32 @main() {\nentry:\n  call void @printfn(ptr null)\n  ret i32 0\n}\n"
-  patched = prependExternalDecls mini
-  hasBanner = strContains "auto-generated declares" patched
-  hasDecl = strContains "declare void @printfn(ptr)" patched
-  if hasBanner
-    if hasDecl
-      "OK prependExternalDecls emits canonical printfn declare"
-    else "FAIL missing printfn declare"
-  else "FAIL missing banner"
-
--- Phase 6 self-check: dedupeDeclareLines collapses repeated declares.
-phase6DedupeSelfCheck =
-  doubled = "declare ptr @malloc(i64)\ndeclare ptr @malloc(i64)\n; body\n"
-  kept = dedupeDeclareLines doubled
-  count = listLen (strSplit "declare ptr @malloc(i64)" kept)
-  -- After split: N occurrences yield N+1 fragments. We expect 1 declare → 2 parts.
-  if count == 2
-    "OK dedupeDeclareLines collapses duplicate malloc declare"
-  else strConcat "FAIL dedupe count=" (intToStr count)
-
 -- ---- Tests -----------------------------------------------------------------
+
+codegenLLVMCheck(label Str)(got Str)(expected Str) =
+  if got == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  got:      " (strConcat got (strConcat "\n  expected: " expected)))))
+
+main =
+  -- 1. emitLLVMType Int
+  _ = codegenLLVMCheck "1 TyName Int" (emitLLVMType (TyName "Int")) "i64"
+
+  -- 2. emitLLVMType Float
+  _ = codegenLLVMCheck "2 TyName Float" (emitLLVMType (TyName "Float")) "double"
+
+  -- 3. emitLLVMType Bool
+  _ = codegenLLVMCheck "3 TyName Bool" (emitLLVMType (TyName "Bool")) "i1"
+
+  -- 4. emitLLVMType Str
+  _ = codegenLLVMCheck "4 TyName Str" (emitLLVMType (TyName "Str")) "i8*"
+
+  -- 5. emitLLVMType TyFn
+  _ = codegenLLVMCheck "5 TyFn" (emitLLVMType (TyFn (TyName "Int") (TyName "Bool"))) "i8*"
+
+  -- 6. emitExprReg EInt
+  _ = codegenLLVMCheck "6 EInt reg" (emitExprReg (EInt 42) 0 0) "42"
+
+  -- 7. emitExprReg EBool true
+  _ = codegenLLVMCheck "7 EBool true reg" (emitExprReg (EBool true) 0 0) "1"
+
+  -- 8. emitExprReg EBool false
+  _ = codegenLLVMCheck "8 EBool false reg" (emitExprReg (EBool false) 0 0) "0"
+
+  -- 9. emitExprReg EVar
+  _ = codegenLLVMCheck "9 EVar reg" (emitExprReg (EVar "x") 0 0) "%x"
+
+  -- 10. emitExprInstrs EBinOp +
+  binopInstrs = emitExprInstrs (EBinOp "+" (EInt 1) (EInt 2)) 0 0
+  _ = checkContains "10 EBinOp + instrs" binopInstrs "add i64"
+  _ = checkContains "10 EBinOp + result reg" binopInstrs "%t0"
+
+  -- 11. emitExprInstrs EBinOp cmp
+  cmpInstrs = emitExprInstrs (EBinOp "==" (EInt 3) (EInt 3)) 0 0
+  _ = checkContains "11 EBinOp == instrs" cmpInstrs "icmp eq i64"
+
+  -- 12. DFn emitDecl basic
+  idParams = MkParam "x" (TyName "Int") :: []
+  idOut = emitDecl (DFn "id" idParams None (EVar "x")) 0
+  _ = checkContains "12 DFn define" idOut "define i64 @id("
+  _ = checkContains "12 DFn param" idOut "i64 %x"
+  _ = checkContains "12 DFn ret" idOut "ret i64 %x"
+
+  -- 13. DType emitDecl
+  dtypeOut = emitDecl (DType "Color" [] (MkCon "Red" [] :: [])) 0
+  _ = codegenLLVMCheck "13 DType comment" dtypeOut "; type Color"
+
+  -- 14. DFn with BinOp body
+  addParams = MkParam "a" (TyName "Int") :: MkParam "b" (TyName "Int") :: []
+  addOut = emitDecl (DFn "add" addParams None (EBinOp "+" (EVar "a") (EVar "b"))) 0
+  _ = checkContains "14 DFn add define" addOut "define i64 @add("
+  _ = checkContains "14 DFn add body" addOut "add i64"
+  _ = checkContains "14 DFn add ret" addOut "ret i64"
+
+  -- 15. emitModule header
+  modDecls = DFn "id" idParams None (EVar "x") :: []
+  modOut = emitModule (MkModule ("Test" :: "LLVM" :: []) modDecls)
+  _ = checkContains "15 module prelude" modOut "ll-lang LLVM IR output"
+  _ = checkContains "15 module target" modOut "x86_64-unknown-linux-gnu"
+  _ = checkContains "15 module name" modOut "module Test.LLVM"
+  _ = checkContains "15 module fn" modOut "define i64 @id("
+
+  -- 16. DExternal emits LLVM declare
+  extParams = MkParam "url" (TyName "Str") :: []
+  extOut = emitDecl (DExternal "httpGet" extParams (TyName "Str")) 0
+  _ = codegenLLVMCheck "16 DExternal declare" extOut "declare i8* @httpGet(i8*)"
+
+  -- 17. User-defined named type emits ptr
+  _ = codegenLLVMCheck "17 TyName user type" (emitLLVMType (TyName "Color")) "ptr"
+
+  -- 18. TyApp emits ptr in opaque pointer mode
+  _ = codegenLLVMCheck "18 TyApp ptr" (emitLLVMType (TyApp (TyName "List") (TyName "Int"))) "ptr"
+
+  -- 19. DImportUrl comment emission
+  importUrlOut = emitDecl (DImportUrl "https://example.com/mod.lll") 0
+  _ = codegenLLVMCheck "19 DImportUrl comment" importUrlOut "; import-url https://example.com/mod.lll"
+
+  -- 20. float arithmetic uses fadd double
+  faddInstrs = emitExprInstrs (EBinOp "+" (EFloat "1.5") (EFloat "2.5")) 0 0
+  _ = checkContains "20 float add instrs" faddInstrs "fadd double"
+
+  -- 21. float comparison uses fcmp predicate
+  fcmpInstrs = emitExprInstrs (EBinOp "==" (EFloat "1.0") (EFloat "1.0")) 0 0
+  _ = checkContains "21 float cmp instrs" fcmpInstrs "fcmp oeq double"
+
+  -- 22. cons lowering allocates runtime node
+  consInstrs = emitExprInstrs (ECons (EInt 1) ENil) 0 0
+  _ = checkContains "22 cons alloc call" consInstrs "call ptr @__ll_alloc(i64 -1, i64 1, ptr null)"
+
+  -- 23. tuple lowering emits two linked alloc calls
+  tupleInstrs = emitExprInstrs (ETuple (EInt 7) (EInt 9)) 0 0
+  _ = checkContains "23 tuple tail alloc" tupleInstrs "call ptr @__ll_alloc(i64 -1, i64 9, ptr null)"
+  _ = checkContains "23 tuple head alloc" tupleInstrs "call ptr @__ll_alloc(i64 -1, i64 7, ptr %t0)"
+
+  -- 24. let-tuple destructures tuple payload slots into named locals
+  letTupleInstrs =
+    emitExprInstrs
+      (ELetTuple "a" "b" (ETuple (EInt 3) (EInt 4)) (EBinOp "+" (EVar "a") (EVar "b")))
+      0
+      0
+  _ = checkContains "24 let-tuple gep" letTupleInstrs "getelementptr inbounds { i64, i64, ptr }"
+  _ = checkContains "24 let-tuple bind a" letTupleInstrs "%a = add i64"
+  _ = checkContains "24 let-tuple bind b" letTupleInstrs "%b = add i64"
+
+  0

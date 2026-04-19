@@ -230,7 +230,8 @@ block.
 ```
 
 - `TDExternal` is backend-mapped to platform-native symbols via
-  shared target tables in `Platform.fs` and `tryGetExternalTarget`.
+  `FFI.lll` sidecar maps discovered from active SDK/vendor packages
+  (resolved in `Platform.fs` via `tryGetExternalTarget`).
 
 Current mapping coverage:
 
@@ -243,9 +244,11 @@ Current mapping coverage:
 | C# (`CodegenCSharp.fs`) | `console_log`, `JSON_parse` |
 | LLVM (`CodegenLLVM.fs`) | `console_log` |
 
-- Unknown `TDExternal` names are now rejected during compile validation before emit:
+- Unknown `TDExternal` names are rejected during compile validation before emit:
   compilation fails with `E026 UnknownExternalMapping target:<target> name:<name>`.
   This is no longer treated as a silent omission.
+- Conflicting sidecar mappings for the same `(target, externalName)` are rejected as
+  platform registry errors (`E001 PlatformRegistryError ...`), so resolution stays deterministic.
 
 The emitted helper shape follows each backend's existing calling convention.
 

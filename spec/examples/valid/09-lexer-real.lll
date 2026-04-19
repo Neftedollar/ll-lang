@@ -93,8 +93,8 @@ tokenize(src Str) = lexChars (strChars src)
 
 -- Render a token as a short tag for the demo output.
 tokenName(t Token) =
-  | TIdent s -> "id:" + s
-  | TInt s -> "int:" + s
+  | TIdent s -> strConcat "id:" s
+  | TInt s -> strConcat "int:" s
   | TLet -> "kw:let"
   | TFn -> "kw:fn"
   | TIf -> "kw:if"
@@ -108,12 +108,12 @@ tokenName(t Token) =
   | TGt -> ">"
   | TLParen -> "("
   | TRParen -> ")"
-  | TUnknown s -> "?:" + s
+  | TUnknown s -> strConcat "?:" s
 
 joinNames(ts List[Token]) =
   listFold (\acc t. if strLen acc == 0
     tokenName t
-  else acc + " " + tokenName t) "" ts
+  else strConcat (strConcat acc " ") (tokenName t)) "" ts
 
 main() =
   src = "fn add(a)(b) = a + b"

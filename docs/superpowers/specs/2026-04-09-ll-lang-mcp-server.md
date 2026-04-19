@@ -1,6 +1,6 @@
 # ll-lang MCP Server — Design Spec
 
-> **Non-normative design document.** This spec may include planned tool/CLI surface that differs from the shipped MCP server. Treat it as roadmap text; for current behavior, rely on `docs/user-guide/09-mcp.md` and `src/LLLangTool/Mcp.fs`.
+> **Non-normative design document.** This spec may include planned tool/CLI surface that differs from the shipped MCP server. Treat it as roadmap text; for current behavior, rely on `docs/user-guide/09-mcp.md` and `lllcself/src/Mcp.lll`.
 
 **Status:** draft, implementation deferred
 **Date:** 2026-04-09

@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.6.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.5" />
+    <Content Include="xunit.runner.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\LLLangCompiler\LLLangCompiler.fsproj" />
+    <ProjectReference Include="..\..\src\LLLangTool\LLLangTool.fsproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="TestCompat.fs" />
+    <Compile Include="LexerTests.fs" />
+    <Compile Include="ParserTests.fs" />
+    <Compile Include="ParserParityTests.fs" />
+    <Compile Include="ElaboratorTests.fs" />
+    <Compile Include="HMInferTests.fs" />
+    <Compile Include="CodegenTests.fs" />
+    <Compile Include="StdlibTests.fs" />
+    <Compile Include="RealLexerTests.fs" />
+    <Compile Include="ArithmeticParserTests.fs" />
+    <Compile Include="TypeParserTests.fs" />
+    <Compile Include="FnParserTests.fs" />
+    <Compile Include="ExprParserTests.fs" />
+    <Compile Include="ModuleParserTests.fs" />
+    <Compile Include="JsonParserTests.fs" />
+    <Compile Include="ElaboratorRealTests.fs" />
+    <Compile Include="PipelineRealTests.fs" />
+    <Compile Include="HMInferRealTests.fs" />
+    <Compile Include="CodegenRealTests.fs" />
+    <Compile Include="BootstrapTestCollections.fs" />
+    <Compile Include="BootstrapCompilerTests.fs" />
+    <Compile Include="ModuleSystemTests.fs" />
+    <Compile Include="PlatformTests.fs" />
+    <Compile Include="PlatformSdkBuildTests.fs" />
+    <Compile Include="PlatformParityMatrixTests.fs" />
+    <Compile Include="BootstrapPlatformCompilerEmitTests.fs" />
+    <Compile Include="ReverseTranspilerTests.fs" />
+    <Compile Include="McpTests.fs" />
+    <Compile Include="CodegenTSTests.fs" />
+    <Compile Include="CodegenPyTests.fs" />
+    <Compile Include="CodegenJavaTests.fs" />
+    <Compile Include="CodegenCSharpTests.fs" />
+    <Compile Include="CodegenLLVMTests.fs" />
+    <Compile Include="StdlibMapTests.fs" />
+    <Compile Include="StdlibStateParsecTests.fs" />
+    <Compile Include="StdlibJsonTests.fs" />
+  </ItemGroup>
+</Project>

@@ -166,7 +166,7 @@ checkExpr(env Env)(e Expr) =
     if envHas env name
       []
     else
-      msg = "E002 UnboundVar " + name
+      msg = strConcat "E002 UnboundVar " name
       [msg]
   | EAdd l r -> listAppend (checkExpr env l) (checkExpr env r)
   | EApp f x -> listAppend (checkExpr env f) (checkExpr env x)
@@ -328,7 +328,7 @@ missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) =
       if isCovered
         tail
       else
-        msg = "E003 NonExhaustiveMatch " + ty + " missing " + c
+        msg = strConcat (strConcat (strConcat "E003 NonExhaustiveMatch " ty) " missing ") c
         listAppend [msg] tail
     | _ -> []
 
@@ -394,7 +394,7 @@ showErrs(errs List[Str]) =
     "ok"
   else listFold (\acc s. if strLen acc == 0
     s
-  else acc + "\n" + s) "" errs
+  else strConcat (strConcat acc "\n") s) "" errs
 
 -- ---------- Hardcoded test module ---------------------------------------
 

@@ -217,9 +217,9 @@ unifyName(a Str)(t2 TypeExpr) =
     | TyName b ->
       if a == b
         OkR (emptySubst 0)
-      else ErrR ("E001 TypeMismatch " + a + " vs " + b)
+      else ErrR (strConcat (strConcat "E001 TypeMismatch " a) (strConcat " vs " b))
     | TyVar v -> OkR (singletonSubst v (TyName a))
-    | _ -> ErrR ("E001 TypeMismatch TyName " + a)
+    | _ -> ErrR (strConcat "E001 TypeMismatch TyName " a)
 
 -- `TyVar a` vs t2: same var name -> empty subst; otherwise occurs-check
 -- then bind `a := t2`. The `TyVar b` (different name) arm skips the
@@ -232,7 +232,7 @@ unifyVar(a Str)(t2 TypeExpr) =
       else OkR (singletonSubst a t2)
     | _ ->
       if occursIn a t2
-        ErrR ("E008 InfiniteType " + a + " in " + showType t2)
+        ErrR (strConcat (strConcat "E008 InfiniteType " a) (strConcat " in " (showType t2)))
       else OkR (singletonSubst a t2)
 
 -- `TyFn a1 r1` vs t2: only succeeds against another `TyFn`. Unifies
@@ -285,8 +285,8 @@ showType(t TypeExpr) =
     | TyName n -> n
     | TyVar v -> v
     | TyFn a r ->
-      inner = showType a + " -> " + showType r
-      "(" + inner + ")"
+      inner = strConcat (strConcat (showType a) " -> ") (showType r)
+      strConcat (strConcat "(" inner) ")"
 
 -- Return the first key in a `Subst` (for the `t3` "ok bound a" line).
 -- Returns the empty string if the subst is empty — the test cases that
@@ -311,17 +311,17 @@ substFirstKey(s Subst) =
 -- `ErrR` message prefix so the E008 (occurs check) line for t17 is
 -- distinguishable from the E001 (type mismatch) lines for t2/t5.
 runTest(label Str)(t1 TypeExpr)(t2 TypeExpr) =
-  header = label + " unify " + showType t1 + " " + showType t2
+  header = strConcat (strConcat (strConcat (strConcat label " unify ") (showType t1)) " ") (showType t2)
   match unify t1 t2
     | OkR s ->
       key = substFirstKey s
       if strLen key == 0
-        header + " ok"
-      else header + " ok bound " + key
+        strConcat header " ok"
+      else strConcat (strConcat header " ok bound ") key
     | ErrR m ->
       if strContains "E008" m
-        header + " infinite"
-      else header + " mismatch"
+        strConcat header " infinite"
+      else strConcat header " mismatch"
 
 -- Join a list of strings with newline separators. Used to fold the five
 -- test result lines into a single `printfn` argument because ll-lang's
@@ -330,7 +330,7 @@ runTest(label Str)(t1 TypeExpr)(t2 TypeExpr) =
 joinLines(xs List[Str]) =
   listFold (\acc s. if strLen acc == 0
     s
-  else acc + "\n" + s) "" xs
+  else strConcat (strConcat acc "\n") s) "" xs
 
 -- ---------- TypeScheme / Env (Phase 7.7b, schemes in 7.7d) --------------
 
@@ -571,7 +571,7 @@ Expr =
 -- `src/LLLangCompiler/Types.fs` (which uses a mutable ref cell; we stay
 -- purely functional by threading the counter explicitly).
 freshVar(n Int) =
-  (TyVar ("$" + intToStr n), n + 1)
+  (TyVar (strConcat "$" (intToStr n)), n + 1)
 
 -- ---------- InferResult carrier (Phase 7.7b) ----------------------------
 
@@ -624,7 +624,7 @@ inferVar(env Env)(n Int)(name Str) =
     | Some sch ->
       let (t, n1) = instantiate n sch
       OkR (MkInferResult t (emptySubst 0) n1)
-    | _ -> ErrR ("E002 UnboundVar " + name)
+    | _ -> ErrR (strConcat "E002 UnboundVar " name)
 
 -- `EAdd`: destructure the left-hand result, pass to `inferAddR`.
 inferAdd(env Env)(n Int)(l Expr)(r Expr) =
@@ -915,12 +915,12 @@ inferMatchBranchJoin(sAcc Subst)(beta TypeExpr)(r InferResult) =
 -- (`E001 TypeMismatch ...`, `E002 UnboundVar ...`, `E008 InfiniteType
 -- ...`) instead of the old `TyName "ERROR"` sentinel.
 runInferTest(label Str)(desc Str)(env Env)(e Expr) =
-  header = label + " infer " + desc + " : "
+  header = strConcat (strConcat (strConcat label " infer ") desc) " : "
   match inferExpr env 0 e
     | OkR r ->
       match r
-        | MkInferResult t _ _ -> header + showType t
-    | ErrR m -> header + "ERROR " + m
+        | MkInferResult t _ _ -> strConcat header (showType t)
+    | ErrR m -> strConcat (strConcat header "ERROR ") m
 
 -- ---------- main --------------------------------------------------------
 

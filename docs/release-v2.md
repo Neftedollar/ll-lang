@@ -9,11 +9,11 @@ This document is the binding checklist for `v2` readiness. A gate is either
 
 | # | Gate | Status | How to verify |
 |---|------|--------|---------------|
-| G1.1 | Self-hosted compiler compiles `20-bootstrap-compiler.lll` without errors | BLOCK | `lllc run spec/examples/valid/20-bootstrap-compiler.lll` |
-| G1.2 | `compiler₁.fs == compiler₂.fs` (fixpoint byte-identical) | BLOCK | See `docs/compiler-dev/fixpoint-snapshots/` |
-| G1.3 | All `stdlib/src/*.lll` compile without errors under `lllc run` | BLOCK | `for f in stdlib/src/*.lll; do lllc run "$f"; done` |
-| G1.4 | `spec/examples/valid/24-pipeline-v2.lll` passes all 4 tests | BLOCK | `lllc run spec/examples/valid/24-pipeline-v2.lll` |
-| G1.5 | `spec/examples/valid/25-llm-repair-workflow.lll` passes all 7 tests | BLOCK | `lllc run spec/examples/valid/25-llm-repair-workflow.lll` |
+| G1.1 | Self-hosted compiler compiles `20-bootstrap-compiler.lll` without errors | PASS | `bash tools/check-fixpoint.sh spec/examples/valid/20-bootstrap-compiler.lll` |
+| G1.2 | `compiler₁.fs == compiler₂.fs` (fixpoint byte-identical) | BLOCK | prelude format gap: self-hosted emits `open LLLang.Prelude`; stage0 inlines it. Deferred to M5/M6 alignment. |
+| G1.3 | All `stdlib/src/*.lll` compile without errors under `lllc run` | PASS | `for f in stdlib/src/*.lll; do lllc run "$f"; done` — all 33 modules OK |
+| G1.4 | `spec/examples/valid/24-pipeline-v2.lll` passes all 4 tests | PASS | `lllc run spec/examples/valid/24-pipeline-v2.lll` |
+| G1.5 | `spec/examples/valid/25-llm-repair-workflow.lll` passes all 7 tests | PASS | `lllc run spec/examples/valid/25-llm-repair-workflow.lll` |
 
 ## G2 — Milestone completion
 
@@ -24,7 +24,7 @@ This document is the binding checklist for `v2` readiness. A gate is either
 | G2.2 | M2 (project & deps) all items `[x]` | PASS | roadmap §M2 |
 | G2.3 | M3 (stdlib foundation) all items `[x]` | PASS | roadmap §M3 |
 | G2.4 | M4 (syntax ergonomics) all items `[x]` | PASS | roadmap §M4 |
-| G2.5 | M5 (self-host transition) — policy items `[x]`; "compile itself" `[ ]` | PARTIAL | M5 gap: file I/O FFI |
+| G2.5 | M5 (self-host transition) — policy items `[x]`; "compile itself" `[ ]` | PARTIAL | file I/O FFI added (PR #127); remaining: byte-identical fixpoint (let rec + prelude alignment) |
 | G2.6 | M6 (LLM operating system) all items `[x]` | PASS | roadmap §M6 |
 | G2.7 | M7 (benchmarks & release gates) all items `[x]` | PARTIAL | this doc |
 
@@ -32,18 +32,18 @@ This document is the binding checklist for `v2` readiness. A gate is either
 
 | # | Gate | Status | How to verify |
 |---|------|--------|---------------|
-| G3.1 | All `spec/examples/valid/*.lll` parse and elaborate without errors | BLOCK | `dotnet test --filter Category=Corpus` |
-| G3.2 | All `spec/examples/invalid/*.lll` trigger the expected error code | BLOCK | `dotnet test --filter Category=Corpus` |
-| G3.3 | xUnit test suite green (`dotnet test`) | BLOCK | `dotnet test` |
-| G3.4 | No `fn`, `type`, `in`, `then`, `with` keywords in ll-lang docs code blocks | BLOCK | audit `docs/user-guide/` |
+| G3.1 | All `spec/examples/valid/*.lll` run without errors | PASS | `for f in spec/examples/valid/*.lll; do lllc run "$f"; done` — 0 failures |
+| G3.2 | All `spec/examples/invalid/*.lll` trigger the expected error code | BLOCK | manual audit: xUnit Category=Corpus filter not implemented |
+| G3.3 | xUnit test suite green (`dotnet test`) | BLOCK | 752 pass, 1 pre-existing failure: `BootstrapPlatformCompilerEmitTests` (C# backend type-erasure issue with `RBMap<object,object>`) |
+| G3.4 | No `fn`, `type`, `in`, `then`, `with` keywords in ll-lang docs code blocks | PASS | audited `docs/user-guide/` — fixed stale `fn` in 07-error-codes.md |
 
 ## G4 — Stdlib correctness
 
 | # | Gate | Status | How to verify |
 |---|------|--------|---------------|
-| G4.1 | All stdlib modules with `main` pass their self-tests | BLOCK | run each stdlib module |
-| G4.2 | `Std.Compiler` 11-test suite passes | BLOCK | `lllc run stdlib/src/Compiler.lll` |
-| G4.3 | `Std.CompilerLoader` 12-test suite passes | BLOCK | `lllc run stdlib/src/CompilerLoader.lll` |
+| G4.1 | All stdlib modules with `main` pass their self-tests | PASS | All 33 stdlib modules run cleanly; `Std.Test` FAILs are expected (testing failure-detection) |
+| G4.2 | `Std.Compiler` 11-test suite passes | PASS | `lllc run stdlib/src/Compiler.lll` — 11/11 OK |
+| G4.3 | `Std.CompilerLoader` 12-test suite passes | PASS | `lllc run stdlib/src/CompilerLoader.lll` — 12/12 OK |
 
 ## G5 — Benchmark thresholds
 
@@ -64,13 +64,13 @@ Current benchmark results: see `benchmarks/results/token-benchmark.md`.
 | G6.2 | `docs/llm-best-practices.md` uses only v2 syntax | PASS | audit |
 | G6.3 | `docs/prompt-packs/v2-minimal.md` exists | PASS | `ls docs/prompt-packs/` |
 | G6.4 | `spec/error-codes.md` lists all codes with `EXXX line:col Name` format | BLOCK | `cat spec/error-codes.md` |
-| G6.5 | `docs/user-guide/09-mcp.md` matches actual MCP tool inventory | PASS | compare with `src/LLLangTool/Mcp.fs` |
+| G6.5 | `docs/user-guide/09-mcp.md` matches actual MCP tool inventory | PASS | compare with `lllcself/src/Mcp.lll` |
 
 ## G7 — MCP contract
 
 | # | Gate | Status | How to verify |
 |---|------|--------|---------------|
-| G7.1 | All 11 MCP tools respond to valid input | BLOCK | `lllc mcp` smoke test |
+| G7.1 | All 28 MCP tools respond to valid input | BLOCK | `lllc mcp` integration contract |
 | G7.2 | `check_source` returns `{"ok":true}` on valid ll-lang | BLOCK | MCP test |
 | G7.3 | `lookup_error` for each registered code returns `"found":true` | BLOCK | MCP test |
 

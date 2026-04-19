@@ -461,7 +461,7 @@ skipNewlines(toks List[Token]) =
 -- the first non-dot token it stops.
 parseModuleNameTail(acc Str)(toks List[Token]) =
   | TDot :: TUpper seg :: rest ->
-    acc2 = acc + "." + seg
+    acc2 = strConcat (strConcat acc ".") seg
     parseModuleNameTail acc2 rest
   | _ -> (acc, toks)
 
@@ -902,14 +902,14 @@ parseAtom(toks List[Token]) =
 showTypeArg(a TypeArg) =
   | TAVar s -> s
   | TACon s -> s
-  | TAApp head args -> head + showBrackArgs args
+  | TAApp head args -> strConcat head (showBrackArgs args)
 
 -- Render a list of bracket-form args as `[a1][a2]...`. One bracket
 -- group per arg, matching the surface input shape `Result[A][E]`. Lives
 -- separately from `showArgs` (which renders comma-joined parens for
 -- ctor-arg lists).
 showBrackArgs(args List[TypeArg]) =
-  listFold (\acc a. acc + "[" + showTypeArg a + "]") "" args
+  listFold (\acc a. strConcat (strConcat acc "[") (strConcat (showTypeArg a) "]")) "" args
 
 -- Render a list of args as `(a1, a2)` or empty string for no args.
 showArgs(args List[TypeArg]) =
@@ -918,37 +918,37 @@ showArgs(args List[TypeArg]) =
   else
     inner = listFold (\acc a. if strLen acc == 0
       showTypeArg a
-    else acc + ", " + showTypeArg a) "" args
-    "(" + inner + ")"
+    else strConcat (strConcat acc ", ") (showTypeArg a)) "" args
+    strConcat (strConcat "(" inner) ")"
 
 showCtor(c Ctor) =
-  | MkCtor name args -> name + showArgs args
+  | MkCtor name args -> strConcat name (showArgs args)
 
 showCtors(cs List[Ctor]) =
   listFold (\acc c. if strLen acc == 0
     showCtor c
-  else acc + " | " + showCtor c) "" cs
+  else strConcat (strConcat acc " | ") (showCtor c)) "" cs
 
 -- Render the type-param list as ` (A) (B)` with a leading space, or empty.
 showTypeParams(ps List[Str]) =
-  listFold (\acc p. acc + " (" + p + ")") "" ps
+  listFold (\acc p. strConcat (strConcat acc " (") (strConcat p ")")) "" ps
 
 showTypeDecl(d TypeDecl) =
   | MkTypeDecl name prms ctors ->
-    head = name + showTypeParams prms
-    head + " = " + showCtors ctors
+    head = strConcat name (showTypeParams prms)
+    strConcat (strConcat head " = ") (showCtors ctors)
 
 -- Fn-decl pretty printer, matching the shape used by 13-fnparser-real.lll.
 showTypeRef(t TypeRef) =
   | TR s -> s
 
 showParam(p Param) =
-  | MkParam n t -> "(" + n + ": " + showTypeRef t + ")"
+  | MkParam n t -> strConcat (strConcat (strConcat "(" n) ": ") (strConcat (showTypeRef t) ")")
 
 showFnParams(ps List[Param]) =
   if listIsEmpty ps
     " ()"
-  else listFold (\acc p. acc + " " + showParam p) "" ps
+  else listFold (\acc p. strConcat (strConcat acc " ") (showParam p)) "" ps
 
 showReturn(r Maybe[TypeRef]) =
   match r
@@ -963,11 +963,11 @@ showPat(p Pat) =
   | PVar s -> s
   | PWild -> "_"
   | PNil -> "[]"
-  | PCons h t -> "(" + showPat h + " :: " + showPat t + ")"
+  | PCons h t -> strConcat (strConcat (strConcat (strConcat "(" (showPat h)) " :: ") (showPat t)) ")"
 
 -- Render a single `| pat -> body` arm; helper for `showArms`.
 showArm(p Pat)(body Expr) =
-  "| " + showPat p + " -> " + showExpr body
+  strConcat (strConcat (strConcat "| " (showPat p)) " -> ") (showExpr body)
 
 -- Walk the two parallel lists in lockstep to produce `| pat -> body`
 -- chunks joined by single spaces. The invariant `length pats == length
@@ -981,7 +981,7 @@ showArms(pats List[Pat])(bodies List[Expr]) =
           tail = showArms ps bs
           if strLen tail == 0
             head
-          else head + " " + tail
+          else strConcat (strConcat head " ") tail
         | _ -> ""
     | _ -> ""
 
@@ -989,37 +989,37 @@ showArms(pats List[Pat])(bodies List[Expr]) =
 -- so the runtime test can substring-match each body.
 showExpr(e Expr) =
   | EInt n -> intToStr n
-  | EStr s -> "\"" + s + "\""
+  | EStr s -> strConcat (strConcat "\"" s) "\""
   | EVar s -> s
-  | ETagged inner t -> "(" + showExpr inner + "[" + t + "])"
-  | EAdd l r -> "(" + showExpr l + " + " + showExpr r + ")"
-  | ESub l r -> "(" + showExpr l + " - " + showExpr r + ")"
-  | EMul l r -> "(" + showExpr l + " * " + showExpr r + ")"
-  | EDiv l r -> "(" + showExpr l + " / " + showExpr r + ")"
-  | EApp f x -> "(" + showExpr f + " " + showExpr x + ")"
-  | ELam n body -> "(fun " + n + " -> " + showExpr body + ")"
+  | ETagged inner t -> strConcat (strConcat (strConcat (strConcat "(" (showExpr inner)) "[") t) "])"
+  | EAdd l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " + ") (showExpr r)) ")"
+  | ESub l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " - ") (showExpr r)) ")"
+  | EMul l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " * ") (showExpr r)) ")"
+  | EDiv l r -> strConcat (strConcat (strConcat (strConcat "(" (showExpr l)) " / ") (showExpr r)) ")"
+  | EApp f x -> strConcat (strConcat (strConcat (strConcat "(" (showExpr f)) " ") (showExpr x)) ")"
+  | ELam n body -> strConcat (strConcat (strConcat (strConcat "(fun " n) " -> ") (showExpr body)) ")"
   | ELetIn n e1 e2 ->
-    p1 = "(let " + n + " = "
-    p2 = p1 + showExpr e1 + " in "
-    p2 + showExpr e2 + ")"
+    p1 = strConcat (strConcat "(let " n) " = "
+    p2 = strConcat (strConcat p1 (showExpr e1)) " in "
+    strConcat (strConcat p2 (showExpr e2)) ")"
   | EIf c a b ->
-    p1 = "(if " + showExpr c
-    p2 = p1 + " " + showExpr a
-    p2 + " else " + showExpr b + ")"
+    p1 = strConcat "(if " (showExpr c)
+    p2 = strConcat (strConcat p1 " ") (showExpr a)
+    strConcat (strConcat (strConcat p2 " else ") (showExpr b)) ")"
   | EMatch scrut pats bodies ->
-    head = "(match " + showExpr scrut
-    head + " " + showArms pats bodies + ")"
+    head = strConcat "(match " (showExpr scrut)
+    strConcat (strConcat (strConcat head " ") (showArms pats bodies)) ")"
 
 showFnDecl(d FnDecl) =
   | MkFn name prms ret body ->
-    headPart = name + showFnParams prms
-    arrowPart = headPart + " -> " + showReturn ret
-    arrowPart + " = " + showExpr body
+    headPart = strConcat name (showFnParams prms)
+    arrowPart = strConcat (strConcat headPart " -> ") (showReturn ret)
+    strConcat (strConcat arrowPart " = ") (showExpr body)
 
 -- Let-decl pretty printer (Phase 7.5a): `let <name> = <show expr>`.
 showLetDecl(d LetDecl) =
   | MkLet name body ->
-    "let " + name + " = " + showExpr body
+    strConcat (strConcat (strConcat "let " name) " = ") (showExpr body)
 
 -- Phase 7.5e: `DTag` / `DImport` / `DExport` pretty-printer arms. The
 -- `DExport inner` wrapper recurses back into `showDecl` so the inner
@@ -1031,22 +1031,22 @@ showDecl(d Decl) =
   | DType td -> showTypeDecl td
   | DLet ld -> showLetDecl ld
   | DFn fd -> showFnDecl fd
-  | DTag name -> "tag " + name
-  | DImport path -> "import " + path
-  | DExport inner -> "export " + showDecl inner
+  | DTag name -> strConcat "tag " name
+  | DImport path -> strConcat "import " path
+  | DExport inner -> strConcat "export " (showDecl inner)
 
 -- Render a list of decls joined by `\n`, matching the input layout.
 showDecls(ds List[Decl]) =
   listFold (\acc d. if strLen acc == 0
     showDecl d
-  else acc + "\n" + showDecl d) "" ds
+  else strConcat (strConcat acc "\n") (showDecl d)) "" ds
 
 showModule(m Module) =
   | MkModule name decls ->
-    header = "module " + name
+    header = strConcat "module " name
     if listIsEmpty decls
       header
-    else header + "\n" + showDecls decls
+    else strConcat (strConcat header "\n") (showDecls decls)
 
 -- ---------- Elaborator (Phase 7.6 integration) --------------------------
 --
@@ -1106,7 +1106,7 @@ checkExpr(env Env)(e Expr) =
     if envHas env name
       []
     else
-      msg = "E002 UnboundVar " + name
+      msg = strConcat "E002 UnboundVar " name
       [msg]
   | ETagged inner _ -> checkExpr env inner
   | EAdd l r -> listAppend (checkExpr env l) (checkExpr env r)
@@ -1273,7 +1273,7 @@ missingCtorErrs(ty Str)(required List[Str])(covered List[Str]) =
       if isCovered
         tail
       else
-        msg = "E003 NonExhaustiveMatch " + ty + " missing " + c
+        msg = strConcat (strConcat (strConcat "E003 NonExhaustiveMatch " ty) " missing ") c
         listAppend [msg] tail
     | _ -> []
 
@@ -1345,7 +1345,7 @@ showErrs(errs List[Str]) =
     "no errors"
   else listFold (\acc s. if strLen acc == 0
     s
-  else acc + "\n" + s) "" errs
+  else strConcat (strConcat acc "\n") s) "" errs
 
 -- ---------- Driver -------------------------------------------------------
 --

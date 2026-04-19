@@ -55,15 +55,15 @@ demo7 =
   fixed = "module Demo\nresult = 42\n"
   errs1 = collectAllErrors broken
   errs2 = collectAllErrors fixed
-  (listIsEmpty errs1 == false) == (listIsEmpty errs2 == false)
+  (listIsEmpty errs1 == false) == listIsEmpty errs2
 
 -- ---- Tests ---------------------------------------------------------------
 
 checkBool(label Str)(ok Bool) =
   if ok
-    printfn ("OK " + label)
+    printfn (strConcat "OK " label)
   else
-    printfn ("FAIL " + label)
+    printfn (strConcat "FAIL " label)
 
 main =
   _ = checkBool "1 valid program no errors" demo1
