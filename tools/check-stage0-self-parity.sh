@@ -28,7 +28,7 @@ result_kind() {
     echo "fail"
     return
   fi
-  if rg -q '"ok":false' "$file"; then
+  if grep -q '"ok":false' "$file"; then
     echo "fail"
     return
   fi
