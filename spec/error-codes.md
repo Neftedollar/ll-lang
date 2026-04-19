@@ -61,7 +61,7 @@ A non-`Std.*` import was used in single-file mode (no `lll.toml` project file fo
 
 Compact: `E025 0:0 NoProjectForImport import:App.Utils`
 
-Repair: either run in project mode (`lllc build`) or restrict imports to `import Std.*` in single-file mode.
+Repair: either run in project mode (`lllc check [dir]` / `lllc build [dir]`) or use the canonical self-hosted single-file checker (`lllc self check <file>`).
 
 ### E026 UnknownExternalMapping
 An `external` declaration has no mapping for the selected compile target.

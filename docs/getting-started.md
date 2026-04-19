@@ -58,7 +58,8 @@ Key rules:
 ```bash
 lllc run hello.lll          # compile + execute via temporary F# project
 lllc build hello.lll        # compile → hello.fs
-lllc check hello.lll        # type-check only (no codegen output)
+lllc self check hello.lll   # canonical single-file type-check (LLL path)
+lllc check .                # project type-check (reads lll.toml)
 ```
 
 ---

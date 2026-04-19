@@ -24,6 +24,9 @@ jobs:
       - name: Build
         run: dotnet clean --nologo && dotnet build --nologo -warnaserror
         working-directory: .
+      - name: Self-hosted Check Smoke (single-file)
+        run: dotnet run --project src/LLLangTool -- self check "${{ github.workspace }}/lllcself/src/Main.lll"
+        working-directory: .
       - name: Test (release-core)
         run: dotnet test --no-build --verbosity normal --filter "FullyQualifiedName!~ReverseTranspilerTests&FullyQualifiedName!~CodegenLLVMTests"
         working-directory: .

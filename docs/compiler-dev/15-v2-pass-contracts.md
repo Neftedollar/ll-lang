@@ -242,17 +242,17 @@ Each pass has a minimal smoke fixture that can be used to validate the boundary 
 
 | Phase | Fixture shape | Validation command |
 |-------|--------------|-------------------|
-| `Compiler.Syntax.Lexer` | a `.lll` source file with at least one of each token class | `lllc check <file>` succeeds; token stream matches snapshot |
+| `Compiler.Syntax.Lexer` | a `.lll` source file with at least one of each token class | `lllc self check <file>` succeeds; token stream matches snapshot |
 | `Compiler.Syntax.Parser` | `spec/examples/valid/01-minimal.lll` through `spec/examples/valid/19-*.lll` | xUnit test: parse each valid corpus example without error |
 | `Compiler.Frontend.Elaborator` | all `spec/examples/valid/*.lll` corpus examples | `dotnet test` elaboration tests pass |
 | `Compiler.Types` | property: `applyType (generalize env t) [] == t` for closed types | unit tests on substitution identity, composition, ftv |
 | `Compiler.Typed` | any `TypedModule` produced by inference must round-trip through `exprId` lookup | xUnit: `TypedModule.Dispatch` keys are all `ExprId` values in the typed tree |
-| `Compiler.Infer` | `spec/examples/valid/20-bootstrap-compiler.lll` infers without error | `lllc check spec/examples/valid/20-bootstrap-compiler.lll` |
+| `Compiler.Infer` | `spec/examples/valid/20-bootstrap-compiler.lll` infers without error | `lllc self check spec/examples/valid/20-bootstrap-compiler.lll` |
 | `Compiler.Lower` | a program with nested match and lambda must lower to a form with no `EMatch` or `ELam` in the IR | unit test on lowered IR structure |
 | `Compiler.Backend.<Target>` | `spec/examples/valid/*.lll` must emit + build successfully for each stable target | `dotnet test` codegen tests; `lllc build --target <t>` exits 0 |
 | `Compiler.Project.Manifest` | a valid `lll.toml` and a malformed one | unit test: valid parses without error; malformed returns structured error |
 | `Compiler.Project.Loader` | a two-module project with one import | integration test: topo order is `[dep, importer]` |
-| `Compiler.Cli` | `lllc build`, `lllc check`, `lllc run` on a minimal project | end-to-end: exit 0 and expected output |
+| `Compiler.Cli` | `lllc build`, `lllc self check`, `lllc run` on a minimal project | end-to-end: exit 0 and expected output |
 
 **Invariants checked at each boundary:**
 

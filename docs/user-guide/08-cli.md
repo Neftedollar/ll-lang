@@ -2,15 +2,16 @@
 
 `lllc` (the `LLLangTool` project) drives the compiler for both single-file and multi-file project builds.
 
-1.0 note: `build/check/run/new/install/self/mcp` are stable CLI surface. `reverse`
-is available as experimental tooling.
+1.0 note: `build/run/new/install/self/mcp` and `check [dir]` are stable CLI
+surface. `reverse` is available as experimental tooling.
 
 ```
 Usage:
   lllc build [--target fs|ts|py|java|cs|llvm] <file.lll>   compile single file
   lllc build [--target fs|ts|py|java|cs|llvm] [dir]        compile project (reads lll.toml)
-  lllc check [--target fs|ts|py|java|cs|llvm] <file.lll>   type-check single file (no codegen)
   lllc check [--target fs|ts|py|java|cs|llvm] [dir]        type-check project (no codegen)
+  lllc self check <file.lll>                                 canonical single-file type-check (LLL path)
+  lllc check [--target fs|ts|py|java|cs|llvm] <file.lll>    legacy stage0 single-file check (compatibility path)
   lllc run   [--target fs|ts|py|java|cs|llvm] <file.lll>   compile and run single file
   lllc self  <cmd> <file> [arg]                             run self-hosted lllc tool layer
   lllc new   <name>         scaffold new project
@@ -78,14 +79,21 @@ dotnet run   --project bin/myapp.fsproj
 
 ---
 
-## `lllc check <file.lll>` — single-file type-check
+## `lllc self check <file.lll>` — canonical single-file type-check
 
 ```bash
-lllc check hello.lll
-lllc check --target ts hello.lll
+lllc self check hello.lll
 ```
 
-Runs lex → parse → elaborate → infer and target-specific external mapping validation (E026), without writing generated target files.
+Runs the self-hosted LLL checker path (import-aware closure + compile pipeline)
+without writing generated target files.
+
+## `lllc check <file.lll>` — legacy stage0 single-file check
+
+This compatibility path is retained for bootstrap/recovery scenarios.
+
+- Not the canonical single-file checker in the current self-host migration.
+- May diverge on import resolution behavior versus `lllc self check`.
 
 ---
 

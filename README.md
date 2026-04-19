@@ -23,7 +23,7 @@ Working end-to-end compiler with a large automated xUnit suite (see CI badge), w
 Current release line: **1.0.0**.
 
 **Release contract (1.0):**
-- **Stable:** core compiler + `lllc build/check/run/new/install/mcp` + targets `fs/ts/py/java/cs`
+- **Stable:** core compiler + `lllc build/run/new/install/mcp/self` + `lllc check [dir]` + targets `fs/ts/py/java/cs`
 - **Experimental:** `lllc reverse` and `--target llvm` (subset backend, non-blocking for 1.0)
 - Full contract: [`docs/release-contract-1.0.md`](docs/release-contract-1.0.md)
 
@@ -93,8 +93,9 @@ lllc build --target java <file.lll> # compile → <file>.java (Java 21)
 lllc build --target cs <file.lll>   # compile → <file>.cs  (C#)
 lllc build --target llvm <file.lll> # compile → <file>.ll  (LLVM IR)
 lllc build [dir]                    # compile project (reads lll.toml)
-lllc check <file.lll>               # type-check single file (no codegen)
 lllc check [dir]                    # type-check project (no codegen)
+lllc self check <file.lll>          # canonical single-file type-check (LLL path)
+lllc check <file.lll>               # legacy stage0 single-file check (compatibility path)
 lllc run   <file.lll>               # compile and run via temporary F# project
 lllc new   <name>                   # scaffold new project
 lllc install                        # resolve direct+transitive deps into vendor/ + rewrite ll.sum
