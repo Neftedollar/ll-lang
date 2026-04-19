@@ -278,6 +278,49 @@ emitExprInstrs(e Expr)(ctr Int)(sidx Int) =
       if strLen bi == 0
         viAlias
       else strConcat viAlias (strConcat "\n" bi)
+    | ELetTuple a b valE bodyE ->
+      vi = emitExprInstrs valE ctr sidx
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      vreg = emitExprReg valE ctr sidx
+      p1 = ssaName vc
+      v1 = ssaName (vc + 1)
+      tailPtr = ssaName (vc + 2)
+      tailVal = ssaName (vc + 3)
+      p2 = ssaName (vc + 4)
+      v2 = ssaName (vc + 5)
+      instP1 = strConcat "  " (strConcat p1 (strConcat " = getelementptr inbounds { i64, i64, ptr }, ptr " (strConcat vreg ", i32 0, i32 1")))
+      instV1 = strConcat "  " (strConcat v1 (strConcat " = load i64, ptr " p1))
+      instTailPtr = strConcat "  " (strConcat tailPtr (strConcat " = getelementptr inbounds { i64, i64, ptr }, ptr " (strConcat vreg ", i32 0, i32 2")))
+      instTailLoad = strConcat "  " (strConcat tailVal (strConcat " = load ptr, ptr " tailPtr))
+      instP2 = strConcat "  " (strConcat p2 (strConcat " = getelementptr inbounds { i64, i64, ptr }, ptr " (strConcat tailVal ", i32 0, i32 1")))
+      instV2 = strConcat "  " (strConcat v2 (strConcat " = load i64, ptr " p2))
+      bindA = strConcat "  %" (strConcat a (strConcat " = add i64 " (strConcat v1 ", 0")))
+      bindB = strConcat "  %" (strConcat b (strConcat " = add i64 " (strConcat v2 ", 0")))
+      tuplePrep =
+        strConcat instP1
+          (strConcat "\n"
+            (strConcat instV1
+              (strConcat "\n"
+                (strConcat instTailPtr
+                  (strConcat "\n"
+                    (strConcat instTailLoad
+                      (strConcat "\n"
+                        (strConcat instP2
+                          (strConcat "\n"
+                            (strConcat instV2
+                              (strConcat "\n"
+                                (strConcat bindA (strConcat "\n" bindB))))))))))))
+      bi = emitExprInstrs bodyE (vc + 6) vs
+      withVal =
+        if strLen vi == 0
+          tuplePrep
+        else
+          strConcat vi (strConcat "\n" tuplePrep)
+      if strLen bi == 0
+        withVal
+      else
+        strConcat withVal (strConcat "\n" bi)
     | EApp f a ->
       fi = emitExprInstrs f ctr sidx
       fc = emitExprNextCtr f ctr sidx
@@ -366,6 +409,10 @@ emitExprReg(e Expr)(ctr Int)(sidx Int) =
       vc = emitExprNextCtr valE ctr sidx
       vs = emitExprNextSidx valE ctr sidx
       emitExprReg bodyE (vc + 1) vs
+    | ELetTuple _ _ valE bodyE ->
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      emitExprReg bodyE (vc + 6) vs
     | EApp f a ->
       fc = emitExprNextCtr f ctr sidx
       fs = emitExprNextSidx f ctr sidx
@@ -413,6 +460,10 @@ emitExprNextCtr(e Expr)(ctr Int)(sidx Int) =
       vc = emitExprNextCtr valE ctr sidx
       vs = emitExprNextSidx valE ctr sidx
       emitExprNextCtr bodyE (vc + 1) vs
+    | ELetTuple _ _ valE bodyE ->
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      emitExprNextCtr bodyE (vc + 6) vs
     | EApp f a ->
       fc = emitExprNextCtr f ctr sidx
       fs = emitExprNextSidx f ctr sidx
@@ -458,6 +509,10 @@ emitExprNextSidx(e Expr)(ctr Int)(sidx Int) =
       vc = emitExprNextCtr valE ctr sidx
       vs = emitExprNextSidx valE ctr sidx
       emitExprNextSidx bodyE (vc + 1) vs
+    | ELetTuple _ _ valE bodyE ->
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      emitExprNextSidx bodyE (vc + 6) vs
     | EApp f a ->
       fc = emitExprNextCtr f ctr sidx
       fs = emitExprNextSidx f ctr sidx
@@ -498,6 +553,12 @@ emitExprGlobs(e Expr)(ctr Int)(sidx Int) =
       vc = emitExprNextCtr valE ctr sidx
       vs = emitExprNextSidx valE ctr sidx
       bg = emitExprGlobs bodyE (vc + 1) vs
+      strJoin2 vg bg
+    | ELetTuple _ _ valE bodyE ->
+      vg = emitExprGlobs valE ctr sidx
+      vc = emitExprNextCtr valE ctr sidx
+      vs = emitExprNextSidx valE ctr sidx
+      bg = emitExprGlobs bodyE (vc + 6) vs
       strJoin2 vg bg
     | EApp f a ->
       fg = emitExprGlobs f ctr sidx
@@ -714,5 +775,15 @@ main =
   tupleInstrs = emitExprInstrs (ETuple (EInt 7) (EInt 9)) 0 0
   _ = checkContains "23 tuple tail alloc" tupleInstrs "call ptr @__ll_alloc(i64 -1, i64 9, ptr null)"
   _ = checkContains "23 tuple head alloc" tupleInstrs "call ptr @__ll_alloc(i64 -1, i64 7, ptr %t0)"
+
+  -- 24. let-tuple destructures tuple payload slots into named locals
+  letTupleInstrs =
+    emitExprInstrs
+      (ELetTuple "a" "b" (ETuple (EInt 3) (EInt 4)) (EBinOp "+" (EVar "a") (EVar "b")))
+      0
+      0
+  _ = checkContains "24 let-tuple gep" letTupleInstrs "getelementptr inbounds { i64, i64, ptr }"
+  _ = checkContains "24 let-tuple bind a" letTupleInstrs "%a = add i64"
+  _ = checkContains "24 let-tuple bind b" letTupleInstrs "%b = add i64"
 
   0
