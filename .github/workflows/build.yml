@@ -29,6 +29,9 @@ jobs:
           LLLC_BOOTSTRAP_SELF_PRESET=safe ./tools/lllc-bootstrap.sh check "$tmp_dir/Smoke.lll" | rg '"ok":true'
           LLLC_BOOTSTRAP_SELF_PRESET=safe ./tools/lllc-bootstrap.sh compile "$tmp_dir/Smoke.lll" | rg 'module Smoke'
         working-directory: .
+      - name: Stage0 vs Self Parity Gate
+        run: ./tools/check-stage0-self-parity.sh
+        working-directory: .
       - name: LLVM Smoke Chain
         run: ./tools/check-llvm-smoke.sh
         working-directory: .

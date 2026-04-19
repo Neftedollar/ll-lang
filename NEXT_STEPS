@@ -20,7 +20,8 @@
 ## Self-hosting path (toward full LLL toolchain)
 - [x] Define canonical plan to switch default compile/check/run path from stage0 F# to self-hosted pipeline.
   - [x] Added cutover doc: `docs/compiler-dev/23-selfhost-default-cutover-plan.md` (issue #175).
-- [ ] Add parity gate: same diagnostics and output between stage0 and self-hosted for corpus.
+- [x] Add parity gate: same diagnostics and output between stage0 and self-hosted for corpus.
+  - [x] Added `tools/check-stage0-self-parity.sh` + CI gate step (issue #176).
 - [x] Introduce rollout flag strategy (safe cutover, fallback only for blockers).
   - [x] Added launcher routing flags in `tools/lllc-bootstrap.sh` + CI safe preset smoke (issue #175).
 

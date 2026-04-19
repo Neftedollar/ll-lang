@@ -32,6 +32,23 @@ Rollback is immediate by setting:
 LLLC_BOOTSTRAP_SELF_PRESET=off
 ```
 
+## Parity Contract (current gate)
+
+Current parity gate script:
+
+```bash
+./tools/check-stage0-self-parity.sh
+```
+
+Compares `lllc check` (stage0 route) vs `lllc self check` on corpus files using:
+
+- exit code parity (`stage0_code == self_code`)
+- success-shape sanity:
+  - stage0 success output starts with `Checked ...`
+  - self success output contains `"ok":true`
+
+First mismatch is printed with both outputs for debugging.
+
 ## Phases
 
 1. Phase A (`safe` opt-in):
