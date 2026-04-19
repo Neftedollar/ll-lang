@@ -3,6 +3,7 @@ module Std.CodegenLLVM
 import Std.Parser
 import Std.Maybe
 import Std.Map
+import Std.Str
 import Std.CompilerTypes
 import Std.CompilerTyped
 
@@ -1356,39 +1357,63 @@ emitTypedExpr(state EmitState)(te TypedExpr) =
       ar = emitTypedExpr (eerState fr) a
       fnName = extractTypedFnName f
       areg = eerReg ar
-      -- Phase 4 `wrapIfFnRef`: if the arg is function-typed, wrap bare
-      -- global references in a closure `{@name, null}` so HOFs see a
-      -- uniform Closure* value. Non-fn args pass through. The call-site
-      -- arg type is promoted to `ptr` whenever the wrapper fires.
-      aIsFnTy = isFnTypeTE a
-      wrapTriple =
-        if aIsFnTy
-          wrapIfFnRef (eerState ar) a areg
-        else (areg, eerState ar, "")
-      wrappedAreg = match wrapTriple | (v, _, _) -> v
-      swrap = match wrapTriple | (_, s, _) -> s
-      wrapInstrs = match wrapTriple | (_, _, i) -> i
-      let (dst, st2) = esFresh swrap
-      -- Arg type: use `ptr` when we wrapped a function-typed arg, else `i64`
-      -- (this codegen still coerces scalar args uniformly to i64).
-      argTyStr =
-        if aIsFnTy
-          "ptr"
-        else "i64"
-      callInstr = strConcat "  " (strConcat dst (strConcat " = call i64 @" (strConcat fnName (strConcat "(" (strConcat argTyStr (strConcat " " (strConcat wrappedAreg ")")))))))
-      prefix = strJoin2 (eerInstrs fr) (eerInstrs ar)
-      preWithWrap =
-        if strLen wrapInstrs == 0
-          prefix
-        else
-          if strLen prefix == 0
-            wrapInstrs
-          else strConcat prefix (strConcat "\n" wrapInstrs)
-      all =
-        if strLen preWithWrap == 0
-          callInstr
-        else strConcat preWithWrap (strConcat "\n" callInstr)
-      MkEER st2 all dst
+      -- Phase 6: if `f` is a TEVar bound in the local varEnv (i.e. an SSA
+      -- closure pointer — e.g. a parameter of type `fn T -> U`), route the
+      -- call through emitClosureCall so we handle both bare-fn and enveloped
+      -- forms via runtime branching. Top-level fn refs (not in varEnv) keep
+      -- the direct-call fast path to preserve stdlib HOF + example parity.
+      localClosureReg =
+        match f
+          | TEVar n _ -> esGetVar (eerState ar) n
+          | _ -> None
+      match localClosureReg
+        | Some closReg ->
+          argTyStr =
+            if isFnTypeTE a
+              "ptr"
+            else "i64"
+          argSig = strConcat argTyStr (strConcat " " areg)
+          ccRes = emitClosureCall (eerState ar) closReg "i64" argSig
+          prefix = strJoin2 (eerInstrs fr) (eerInstrs ar)
+          all =
+            if strLen prefix == 0
+              eerInstrs ccRes
+            else strConcat prefix (strConcat "\n" (eerInstrs ccRes))
+          MkEER (eerState ccRes) all (eerReg ccRes)
+        | None ->
+          -- Phase 4 `wrapIfFnRef`: if the arg is function-typed, wrap bare
+          -- global references in a closure `{@name, null}` so HOFs see a
+          -- uniform Closure* value. Non-fn args pass through. The call-site
+          -- arg type is promoted to `ptr` whenever the wrapper fires.
+          aIsFnTy = isFnTypeTE a
+          wrapTriple =
+            if aIsFnTy
+              wrapIfFnRef (eerState ar) a areg
+            else (areg, eerState ar, "")
+          wrappedAreg = match wrapTriple | (v, _, _) -> v
+          swrap = match wrapTriple | (_, s, _) -> s
+          wrapInstrs = match wrapTriple | (_, _, i) -> i
+          let (dst, st2) = esFresh swrap
+          -- Arg type: use `ptr` when we wrapped a function-typed arg, else
+          -- `i64` (this codegen still coerces scalar args uniformly to i64).
+          argTyStr =
+            if aIsFnTy
+              "ptr"
+            else "i64"
+          callInstr = strConcat "  " (strConcat dst (strConcat " = call i64 @" (strConcat fnName (strConcat "(" (strConcat argTyStr (strConcat " " (strConcat wrappedAreg ")")))))))
+          prefix = strJoin2 (eerInstrs fr) (eerInstrs ar)
+          preWithWrap =
+            if strLen wrapInstrs == 0
+              prefix
+            else
+              if strLen prefix == 0
+                wrapInstrs
+              else strConcat prefix (strConcat "\n" wrapInstrs)
+          all =
+            if strLen preWithWrap == 0
+              callInstr
+            else strConcat preWithWrap (strConcat "\n" callInstr)
+          MkEER st2 all dst
     | TELam paramName paramTy body lamTy ->
       emitLamLift state paramName paramTy body lamTy
     -- Phase 5: TETuple is binary (fst, snd) in the ll-lang Typed IR. Lower
@@ -2345,6 +2370,348 @@ emitProjectModules(entryPath List[Str])(tms List[TypedModule]) =
   moduleBodies = emitTypedProjectBodies tags rewritten
   strConcat runtimeHeader moduleBodies
 
+-- ---- Phase 6: external declares -----------------------------------------
+-- Post-hoc scan of the emitted IR text. For every `call <retty> @name(...)`
+-- that is not matched by a `define @name` or `declare @name` already in the
+-- text, emit a `declare <retty> @name(<argTys>)` at module-top. For names
+-- present in `runtimeExternalSigs`, use the canonical C-ABI signature
+-- regardless of what the call-site parse yields (some runtime helpers are
+-- called with mismatched LLVM argument types across HOF use-sites).
+
+-- Canonical runtime-primitive signatures. Returns Maybe[(retTy, argTys)].
+-- Mirrors F# `runtimeExternalSigs` in CodegenLLVM.fs.
+runtimeExternalSig(name Str) =
+  if name == "listFold"
+    Some ("i64", "ptr, i64, ptr")
+  else if name == "listFilter"
+    Some ("ptr", "ptr, ptr")
+  else if name == "listMap"
+    Some ("ptr", "ptr, ptr")
+  else if name == "listAny"
+    Some ("i1", "ptr, ptr")
+  else if name == "listAll"
+    Some ("i1", "ptr, ptr")
+  else if name == "listFind"
+    Some ("i64", "ptr, ptr")
+  else if name == "listFindIndex"
+    Some ("i64", "ptr, ptr")
+  else if name == "listFindIndexFrom"
+    Some ("i64", "ptr, i64, ptr")
+  else if name == "listPartition"
+    Some ("ptr", "ptr, ptr")
+  else if name == "listHead"
+    Some ("ptr", "ptr")
+  else if name == "listTail"
+    Some ("ptr", "ptr")
+  else if name == "listReverse"
+    Some ("ptr", "ptr")
+  else if name == "listAppend"
+    Some ("ptr", "ptr, ptr")
+  else if name == "listConcat"
+    Some ("ptr", "ptr")
+  else if name == "listLen"
+    Some ("i64", "ptr")
+  else if name == "listIsEmpty"
+    Some ("i1", "ptr")
+  else if name == "make_closure"
+    Some ("ptr", "ptr, ptr")
+  else if name == "malloc"
+    Some ("ptr", "i64")
+  else if name == "strConcat"
+    Some ("ptr", "ptr, ptr")
+  else if name == "strLen"
+    Some ("i64", "ptr")
+  else if name == "strEq"
+    Some ("i1", "ptr, ptr")
+  else if name == "intToStr"
+    Some ("ptr", "i64")
+  else if name == "printfn"
+    Some ("void", "ptr")
+  else if name == "print"
+    Some ("void", "ptr")
+  else if name == "readFile"
+    Some ("ptr", "ptr")
+  else if name == "writeFile"
+    Some ("void", "ptr, ptr")
+  else if name == "readLine"
+    Some ("ptr", "i64")
+  else if name == "flushStdout"
+    Some ("void", "i64")
+  else if name == "timeMs"
+    Some ("i64", "")
+  else if name == "ll_getArgs"
+    Some ("ptr", "")
+  else if name == "__ll_alloc"
+    Some ("ptr", "i64, i64, ptr")
+  else if name == "node_tag_safe"
+    Some ("i64", "ptr")
+  else if name == "node_payload_safe"
+    Some ("i64", "ptr")
+  else if name == "node_tail_safe"
+    Some ("ptr", "ptr")
+  else None
+
+-- Skip leading whitespace — returns the substring starting at the first
+-- non-space character.
+skipWs(s Str) =
+  if strLen s == 0
+    s
+  else if strStartsWith " " s
+    skipWs (strSlice s 1 ((strLen s) - 1))
+  else if strStartsWith "\t" s
+    skipWs (strSlice s 1 ((strLen s) - 1))
+  else s
+
+-- Extract identifier starting at position 0 of `s`, up to (but not
+-- including) the first non-identifier character. Identifier chars:
+-- alnum + `_` + `.`. Returns (ident, rest).
+takeIdent(s Str) =
+  takeIdentFrom s 0
+
+takeIdentFrom(s Str)(i Int) =
+  slen = strLen s
+  if i >= slen
+    (s, "")
+  else
+    ch = strSlice s i 1
+    isAlnum = isIdentChar ch
+    if isAlnum
+      takeIdentFrom s (i + 1)
+    else
+      (strSlice s 0 i, strSlice s i (slen - i))
+
+isIdentChar(ch Str) =
+  if strLen ch == 0
+    false
+  else
+    c = charAt ch 0
+    if c == '_'
+      true
+    else if c == '.'
+      true
+    else if charIsAlpha c
+      true
+    else if charIsDigit c
+      true
+    else false
+
+charAt(s Str)(i Int) =
+  match strChars (strSlice s i 1)
+    | c :: _ -> c
+    | [] -> ' '
+
+-- If `line` (trimmed) matches `define <ty> @name(...)` or `declare <ty>
+-- @name(...)`, return Some name. Otherwise None.
+parseDefineOrDeclareName(line Str) =
+  t = skipWs line
+  if strStartsWith "define " t
+    afterKw = strSlice t 7 ((strLen t) - 7)
+    parseDefOrDeclAfterKw afterKw
+  else if strStartsWith "declare " t
+    afterKw = strSlice t 8 ((strLen t) - 8)
+    parseDefOrDeclAfterKw afterKw
+  else None
+
+parseDefOrDeclAfterKw(s Str) =
+  -- Skip return type token.
+  afterWs = skipWs s
+  -- Find first '@' - everything before it is the return type + spaces.
+  atIdx = strIndexOf "@" afterWs
+  if atIdx < 0
+    None
+  else
+    afterAt = strSlice afterWs (atIdx + 1) ((strLen afterWs) - atIdx - 1)
+    let (name, _) = takeIdent afterAt
+    if strLen name == 0
+      None
+    else Some name
+
+-- If `line` contains `call <retty> @name(<args>)`, return Some (name, retTy,
+-- argTys). Handles both `%t = call ...` and bare `call ...` forms.
+parseCallLine(line Str) =
+  callIdx = strIndexOf "call " line
+  if callIdx < 0
+    None
+  else
+    afterCall = strSlice line (callIdx + 5) ((strLen line) - callIdx - 5)
+    afterCallWs = skipWs afterCall
+    -- Return type: everything up to next space (skip over `tail` / `musttail`
+    -- markers if present — treat first non-keyword token as retty).
+    parseCallAfterKw afterCallWs
+
+parseCallAfterKw(s Str) =
+  spIdx = strIndexOf " " s
+  if spIdx < 0
+    None
+  else
+    retTy = strSlice s 0 spIdx
+    rest = strSlice s (spIdx + 1) ((strLen s) - spIdx - 1)
+    restWs = skipWs rest
+    -- Skip modifier keywords like `noalias` / `fastcc` by looking for `@`.
+    atIdx = strIndexOf "@" restWs
+    if atIdx < 0
+      None
+    else
+      afterAt = strSlice restWs (atIdx + 1) ((strLen restWs) - atIdx - 1)
+      let (name, afterName) = takeIdent afterAt
+      if strLen name == 0
+        None
+      else
+        -- afterName should start with '(' — find matching ')' (flat scan,
+        -- no nested-paren support; call args never contain `)`).
+        if strStartsWith "(" afterName
+          inner = strSlice afterName 1 ((strLen afterName) - 1)
+          closeIdx = strIndexOf ")" inner
+          if closeIdx < 0
+            None
+          else
+            argsRaw = strSlice inner 0 closeIdx
+            argTys = extractArgTypes argsRaw
+            Some (name, retTy, argTys)
+        else None
+
+-- Given a raw args string like "ptr %a, i64 %b, ptr null", return the
+-- argument-types part: "ptr, i64, ptr". Each arg is split at the first
+-- space; the leading token is the type.
+extractArgTypes(raw Str) =
+  trimmed = skipWs raw
+  if strLen trimmed == 0
+    ""
+  else
+    parts = strSplit "," trimmed
+    joinWith ", " (listMap extractOneArgType parts)
+
+extractOneArgType(p Str) =
+  t = skipWs p
+  spIdx = strIndexOf " " t
+  if spIdx < 0
+    t
+  else strSlice t 0 spIdx
+
+-- Walk a list of IR lines, collecting defined/declared function names.
+scanDefinedNames(lines List[Str]) =
+  scanDefinedNamesAcc lines []
+
+scanDefinedNamesAcc(lines List[Str])(acc List[Str]) =
+  match lines
+    | [] -> acc
+    | line :: rest ->
+      match parseDefineOrDeclareName line
+        | Some n -> scanDefinedNamesAcc rest (fvInsert n acc)
+        | None -> scanDefinedNamesAcc rest acc
+
+-- Wrapper ADT so we can carry (name, retTy, argTys) triples through a List
+-- (nested tuple-in-type-param is not supported by the parser; see the
+-- PhiIncoming wrapper earlier in this file for the same workaround).
+ExternSig = MkExternSig Str Str Str
+
+-- Walk a list of IR lines, collecting unique `(name, retTy, argTys)` triples
+-- for every `call ... @name(...)` not already in `defined`. Order-preserving;
+-- repeated calls collapse to the first-seen triple.
+scanCallSites(lines List[Str])(defined List[Str]) =
+  scanCallSitesAcc lines defined [] []
+
+scanCallSitesAcc(lines List[Str])(defined List[Str])(seenNames List[Str])(acc List[ExternSig]) =
+  match lines
+    | [] -> acc
+    | line :: rest ->
+      match parseCallLine line
+        | Some (n, r, a) ->
+          if fvContains n defined
+            scanCallSitesAcc rest defined seenNames acc
+          else if fvContains n seenNames
+            scanCallSitesAcc rest defined seenNames acc
+          else
+            scanCallSitesAcc rest defined (fvInsert n seenNames) (listAppend acc [MkExternSig n r a])
+        | None -> scanCallSitesAcc rest defined seenNames acc
+
+-- Render one declare line, preferring the canonical runtimeExternalSig
+-- over the call-site-derived retTy/argTys.
+renderExternalDecl(sig ExternSig) =
+  match sig
+    | MkExternSig name retTy argTys ->
+      match runtimeExternalSig name
+        | Some (r, a) -> strConcat "declare " (strConcat r (strConcat " @" (strConcat name (strConcat "(" (strConcat a ")")))))
+        | None -> strConcat "declare " (strConcat retTy (strConcat " @" (strConcat name (strConcat "(" (strConcat argTys ")")))))
+
+renderExternalDecls(sigs List[ExternSig]) =
+  match sigs
+    | [] -> ""
+    | _ -> joinWith "\n" (listMap renderExternalDecl sigs)
+
+-- Full pipeline: scan the emitted IR, figure out which calls have no
+-- matching declare/define, and prepend the missing declares.
+prependExternalDecls(llvmText Str) =
+  lines = strSplit "\n" llvmText
+  defined = scanDefinedNames lines
+  sigs = scanCallSites lines defined
+  match sigs
+    | [] -> llvmText
+    | _ ->
+      decls = renderExternalDecls sigs
+      banner = "; --- auto-generated declares (lll CodegenLLVM) ---"
+      closer = "; --- end auto-generated declares ---"
+      block = strConcat banner (strConcat "\n" (strConcat decls (strConcat "\n" closer)))
+      strConcat block (strConcat "\n" llvmText)
+
+-- ---- Phase 6: module-line dedup -----------------------------------------
+-- Strip duplicate `declare` and `define <sig>` line occurrences that arise
+-- when multiple modules concatenate and both declare/define the same
+-- runtime-helper symbol. Order-preserving: first occurrence wins.
+
+isDefineOrDeclareLine(line Str) =
+  t = skipWs line
+  if strStartsWith "declare " t
+    true
+  else if strStartsWith "define " t
+    true
+  else false
+
+-- Dedup lines by keying on the parsed fn-name for declare/define lines.
+-- Non-declare/define lines pass through unchanged.
+dedupeDeclareLines(llvmText Str) =
+  lines = strSplit "\n" llvmText
+  kept = dedupeDeclareLinesAcc lines [] []
+  joinWith "\n" kept
+
+dedupeDeclareLinesAcc(lines List[Str])(seen List[Str])(acc List[Str]) =
+  match lines
+    | [] -> acc
+    | line :: rest ->
+      if isDefineOrDeclareLine line
+        match parseDefineOrDeclareName line
+          | Some n ->
+            if fvContains n seen
+              dedupeDeclareLinesAcc rest seen acc
+            else
+              dedupeDeclareLinesAcc rest (fvInsert n seen) (listAppend acc [line])
+          | None -> dedupeDeclareLinesAcc rest seen (listAppend acc [line])
+      else
+        dedupeDeclareLinesAcc rest seen (listAppend acc [line])
+
+-- ---- Phase 6: project driver --------------------------------------------
+-- Ties everything together: seed ctors, rewrite non-entry `main`, dedupe
+-- cross-module decls, emit bodies, append lifted lambdas, dedupe textual
+-- declare/define lines, prepend auto-declares. Mirrors F#'s
+-- `emitProjectModules + prependExternalDecls` pipeline.
+
+emitProjectLlvm(tms List[TypedModule]) =
+  match tms
+    | [] -> ""
+    | _ ->
+      -- Pick the last module as the entry by convention (matches F#).
+      entryPath = lastModulePath tms
+      raw = emitProjectModules entryPath tms
+      deduped = dedupeDeclareLines raw
+      prependExternalDecls deduped
+
+-- Path of the last module in the list.
+lastModulePath(tms List[TypedModule]) =
+  match tms
+    | [] -> []
+    | tm :: [] -> typedModPath tm
+    | _ :: rest -> lastModulePath rest
+
 -- ---- Test helpers ----------------------------------------------------------
 
 checkContains(label Str)(got Str)(needle Str) =
@@ -2398,5 +2765,29 @@ phase5TupleSelfCheck =
       "OK TETuple emits cons-tag __ll_alloc calls"
     else "FAIL missing cons tag"
   else "FAIL missing __ll_alloc"
+
+-- Phase 6 self-check: prependExternalDecls scans a mini IR text, finds the
+-- call to `@printfn` (declared nowhere), and emits a `declare void @printfn(ptr)`
+-- banner on top.
+phase6DeclareSelfCheck =
+  mini = "define i32 @main() {\nentry:\n  call void @printfn(ptr null)\n  ret i32 0\n}\n"
+  patched = prependExternalDecls mini
+  hasBanner = strContains "auto-generated declares" patched
+  hasDecl = strContains "declare void @printfn(ptr)" patched
+  if hasBanner
+    if hasDecl
+      "OK prependExternalDecls emits canonical printfn declare"
+    else "FAIL missing printfn declare"
+  else "FAIL missing banner"
+
+-- Phase 6 self-check: dedupeDeclareLines collapses repeated declares.
+phase6DedupeSelfCheck =
+  doubled = "declare ptr @malloc(i64)\ndeclare ptr @malloc(i64)\n; body\n"
+  kept = dedupeDeclareLines doubled
+  count = listLen (strSplit "declare ptr @malloc(i64)" kept)
+  -- After split: N occurrences yield N+1 fragments. We expect 1 declare → 2 parts.
+  if count == 2
+    "OK dedupeDeclareLines collapses duplicate malloc declare"
+  else strConcat "FAIL dedupe count=" (intToStr count)
 
 -- ---- Tests -----------------------------------------------------------------
