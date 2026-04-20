@@ -250,7 +250,7 @@ parseArmBody(toks List[Token]) =
     | KwIf :: rest -> parseIf rest
     | KwLet :: rest -> parseLetIn rest
     | Ident _ :: Eq :: _ -> parseLetIn toks2
-    | _ -> parseCompare toks2
+    | _ -> parseChoice toks2
 
 skipArrow(toks List[Token]) =
   match toks
@@ -340,7 +340,50 @@ parseExpr(toks List[Token]) =
     | KwLet :: rest -> parseLetIn rest
     | Ident _ :: Eq :: _ -> parseLetIn toks
     | Backslash :: rest -> parseLam rest
-    | _ -> parseCompare toks
+    -- TODO(selfhost:operators): keep this precedence order locked with language-spec.
+    | _ -> parseChoice toks
+
+-- Choice operator `<|>` (loosest): left-associative
+parseChoice(toks List[Token]) =
+  let (e, rest) = parseBind toks
+  parseChoiceTail e rest
+
+parseChoiceTail(lhs Expr)(toks List[Token]) =
+  match toks
+    | Choice :: rest ->
+      let (r, rest2) = parseBind rest
+      parseChoiceTail (EBinOp "<|>" lhs r) rest2
+    | _ -> (lhs, toks)
+
+-- Bind operators `>>=` and `>>`: left-associative
+parseBind(toks List[Token]) =
+  let (e, rest) = parsePipe toks
+  parseBindTail e rest
+
+parseBindTail(lhs Expr)(toks List[Token]) =
+  match toks
+    | Bind :: rest ->
+      let (r, rest2) = parsePipe rest
+      parseBindTail (EBinOp ">>=" lhs r) rest2
+    | ThenThen :: rest ->
+      let (r, rest2) = parsePipe rest
+      parseBindTail (EBinOp ">>" lhs r) rest2
+    | _ -> (lhs, toks)
+
+-- Pipe operators `->` and `|>`: left-associative
+parsePipe(toks List[Token]) =
+  let (e, rest) = parseCompare toks
+  parsePipeTail e rest
+
+parsePipeTail(lhs Expr)(toks List[Token]) =
+  match toks
+    | Arrow :: rest ->
+      let (r, rest2) = parseCompare rest
+      parsePipeTail (EBinOp "|>" lhs r) rest2
+    | PipeForward :: rest ->
+      let (r, rest2) = parseCompare rest
+      parsePipeTail (EBinOp "|>" lhs r) rest2
+    | _ -> (lhs, toks)
 
 -- Comparison operators (==, !=, <, >, <=, >=)
 parseCompare(toks List[Token]) =
@@ -778,6 +821,18 @@ main =
   -- 18. function decl: add(a Int)(b Int) = a + b
   toks18 = Ident "add" :: LParen :: Ident "a" :: TypeId "Int" :: RParen :: LParen :: Ident "b" :: TypeId "Int" :: RParen :: Eq :: Ident "a" :: Plus :: Ident "b" :: Eof :: []
   _ = parserCheckDecl "18 DFn" toks18 "DFn add body=(EBinOp(+ EVar a EVar b))"
+  -- 19. Pipe: 1 |> inc
+  _ = parserCheckExpr "19 pipe forward" (IntLit 1 :: PipeForward :: Ident "inc" :: Eof :: []) "EBinOp(|> EInt 1 EVar inc)"
+  -- 20. Pipe alias: 1 -> inc
+  _ = parserCheckExpr "20 pipe arrow" (IntLit 1 :: Arrow :: Ident "inc" :: Eof :: []) "EBinOp(|> EInt 1 EVar inc)"
+  -- 21. Bind: m >>= f
+  _ = parserCheckExpr "21 bind" (Ident "m" :: Bind :: Ident "f" :: Eof :: []) "EBinOp(>>= EVar m EVar f)"
+  -- 22. Sequence: a >> b
+  _ = parserCheckExpr "22 then then" (Ident "a" :: ThenThen :: Ident "b" :: Eof :: []) "EBinOp(>> EVar a EVar b)"
+  -- 23. Choice: a <|> b
+  _ = parserCheckExpr "23 choice" (Ident "a" :: Choice :: Ident "b" :: Eof :: []) "EBinOp(<|> EVar a EVar b)"
+  -- 24. Mixed precedence: 1 |> inc >>= f <|> alt
+  toks24 = IntLit 1 :: PipeForward :: Ident "inc" :: Bind :: Ident "f" :: Choice :: Ident "alt" :: Eof :: []
+  _ = parserCheckExpr "24 mixed precedence" toks24 "EBinOp(<|> EBinOp(>>= EBinOp(|> EInt 1 EVar inc) EVar f) EVar alt)"
 
   printfn "Done"
-

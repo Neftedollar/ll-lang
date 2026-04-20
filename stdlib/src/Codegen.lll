@@ -111,6 +111,7 @@ mapOp(op Str) =
     "="
   else if op == "!="
     "<>"
+  -- TODO(selfhost:backend): lower symbolic operators (|>, >>=, >>, <|>) per target semantics.
   else op
 
 -- ---- Type emission ---------------------------------------------------------

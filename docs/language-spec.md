@@ -234,14 +234,26 @@ main() =
   0
 ```
 
-Current fixed-operator semantics:
+Operator contract (versioned):
 
-- `x |> f` pipes `x` into `f`
-- `m >>= f` lowers as built-in bind-style chaining
-- `a >> b` sequences and returns `b`
-- `a <|> b` is built-in choice syntax
+- **Operator Contract Version:** `1.0.0`
+- **Status:** stable for `1.x` self-host parser surface
+- **Change policy:** any new symbolic operator or precedence change requires a
+  spec version bump.
 
-These operators are fixed language forms, not user-defined operator declarations.
+| Operator | Role | Associativity | Precedence (low -> high) |
+|---|---|---|---|
+| `<|>` | choice | left | 1 |
+| `>>=` | bind | left | 2 |
+| `>>` | sequence (discard left) | left | 2 |
+| `|>` / `->` | pipe (`->` is legacy alias in expression context) | left | 3 |
+| `==` `!=` `<` `>` `<=` `>=` | comparisons | left | 4 |
+| `::` | list cons | right | 5 |
+| `+` `-` | additive arithmetic | left | 6 |
+| `*` `/` | multiplicative arithmetic | left | 7 |
+| application by juxtaposition | function application | left | 8 |
+
+These operators are fixed language forms, not a user-defined operator framework.
 
 ### 2.7 Patterns
 

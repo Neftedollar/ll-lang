@@ -1,0 +1,27 @@
+module Example.OperatorsPrecedence
+
+Maybe A = Some A | None
+
+inc(x Int) = x + 1
+dbl(x Int) = x * 2
+toSome(x Int) = Some x
+
+pipeChain(x Int) =
+  x |> inc |> dbl
+
+legacyPipeAlias(x Int) =
+  x -> inc -> dbl
+
+bindChain(m Maybe[Int]) =
+  m >>= toSome >>= toSome
+
+seqChain(a Maybe[Int])(b Maybe[Int])(c Maybe[Int]) =
+  a >> b >> c
+
+choiceChain(a Maybe[Int])(b Maybe[Int])(c Maybe[Int]) =
+  a <|> b <|> c
+
+mixed(x Int)(alt Maybe[Int]) =
+  x |> toSome >>= toSome <|> alt
+
+sample = mixed 1 None

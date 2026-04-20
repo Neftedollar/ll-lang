@@ -151,6 +151,7 @@ checkExpr(env Env)(e Expr) =
     | EApp f x ->
       listAppend (checkExpr env f) (checkExpr env x)
     | EBinOp _ l r ->
+      -- TODO(selfhost:resolver): resolve and validate symbolic operators against a canonical table.
       listAppend (checkExpr env l) (checkExpr env r)
     | EIf cnd thn els ->
       listAppend (listAppend (checkExpr env cnd) (checkExpr env thn)) (checkExpr env els)

@@ -24,7 +24,7 @@ export Token =
   | IntLit Int | FloatLit Str | StrLit Str | CharLit Char
   -- Operators
   | Arrow | Backslash | Dot | Comma | Colon | ColonColon
-  | Eq | Bar
+  | Eq | Bar | PipeForward | Bind | ThenThen | Choice
   | LBrack | RBrack | LParen | RParen
   | Plus | Minus | Star | Slash | Caret
   | Lt | Gt | Le | Ge | EqEq | Neq
@@ -252,16 +252,36 @@ lexNeq(cs List[Char]) =
     | '=' :: rest -> listAppend [Neq] (lexChars rest)
     | _ -> lexChars cs
 
--- Handle `<` vs `<=`.
-lexLtOrLe(cs List[Char]) =
+-- Handle `<` vs `<=` vs `<|>`.
+lexLtOrLeOrChoice(cs List[Char]) =
   match cs
-    | '=' :: rest -> listAppend [Le] (lexChars rest)
+    | c :: rest ->
+      if c == '='
+        listAppend [Le] (lexChars rest)
+      else if c == '|'
+        match rest
+          | c2 :: rest2 ->
+            if c2 == '>'
+              listAppend [Choice] (lexChars rest2)
+            else listAppend [Lt] (lexChars cs)
+          | _ -> listAppend [Lt] (lexChars cs)
+      else listAppend [Lt] (lexChars cs)
     | _ -> listAppend [Lt] (lexChars cs)
 
--- Handle `>` vs `>=`.
-lexGtOrGe(cs List[Char]) =
+-- Handle `>` vs `>=` vs `>>` vs `>>=`.
+lexGtOrGeOrBind(cs List[Char]) =
   match cs
-    | '=' :: rest -> listAppend [Ge] (lexChars rest)
+    | c :: rest ->
+      if c == '='
+        listAppend [Ge] (lexChars rest)
+      else if c == '>'
+        match rest
+          | c2 :: rest2 ->
+            if c2 == '='
+              listAppend [Bind] (lexChars rest2)
+            else listAppend [ThenThen] (lexChars rest)
+          | _ -> listAppend [ThenThen] (lexChars rest)
+      else listAppend [Gt] (lexChars cs)
     | _ -> listAppend [Gt] (lexChars cs)
 
 -- Handle `-` vs `->` vs `--` (comment).
@@ -290,6 +310,15 @@ lexUnderOrIdent(cs List[Char]) =
       else listAppend [Underscore] (lexChars cs)
     | _ -> listAppend [Underscore] (lexChars cs)
 
+-- Handle `|` vs `|>`.
+lexBarOrPipeForward(cs List[Char]) =
+  match cs
+    | c :: rest ->
+      if c == '>'
+        listAppend [PipeForward] (lexChars rest)
+      else listAppend [Bar] (lexChars cs)
+    | _ -> listAppend [Bar] (lexChars cs)
+
 -- ---- Main lexer loop ---------------------------------------------------
 
 lexChars(cs List[Char]) =
@@ -317,9 +346,9 @@ lexChars(cs List[Char]) =
       else if c == '!'
         lexNeq rest
       else if c == '<'
-        lexLtOrLe rest
+        lexLtOrLeOrChoice rest
       else if c == '>'
-        lexGtOrGe rest
+        lexGtOrGeOrBind rest
       else if c == ':'
         lexColonOrCons rest
       else if c == '('
@@ -331,7 +360,7 @@ lexChars(cs List[Char]) =
       else if c == ']'
         listAppend [RBrack] (lexChars rest)
       else if c == '|'
-        listAppend [Bar] (lexChars rest)
+        lexBarOrPipeForward rest
       else if c == '+'
         listAppend [Plus] (lexChars rest)
       else if c == '*'
@@ -383,6 +412,10 @@ showToken(t Token) =
     | ColonColon -> "ColonColon"
     | Eq       -> "Eq"
     | Bar      -> "Bar"
+    | PipeForward -> "PipeForward"
+    | Bind     -> "Bind"
+    | ThenThen -> "ThenThen"
+    | Choice   -> "Choice"
     | LBrack   -> "LBrack"
     | RBrack   -> "RBrack"
     | LParen   -> "LParen"
@@ -451,8 +484,12 @@ main =
   _ = checkTokens "9 arrow" "->" "Arrow Eof"
   _ = checkTokens "10 backslash" "\\" "Backslash Eof"
   _ = checkTokens "11 pipe" "|" "Bar Eof"
-  _ = checkTokens "12 equals" "=" "Eq Eof"
-  _ = checkTokens "13 let" "let" "KwLet Eof"
-  _ = checkTokens "14 module" "module" "KwModule Eof"
-  _ = checkTokens "15 import" "import" "KwImport Eof"
+  _ = checkTokens "12 pipe-forward" "|>" "PipeForward Eof"
+  _ = checkTokens "13 bind" ">>=" "Bind Eof"
+  _ = checkTokens "14 then-then" ">>" "ThenThen Eof"
+  _ = checkTokens "15 choice" "<|>" "Choice Eof"
+  _ = checkTokens "16 equals" "=" "Eq Eof"
+  _ = checkTokens "17 let" "let" "KwLet Eof"
+  _ = checkTokens "18 module" "module" "KwModule Eof"
+  _ = checkTokens "19 import" "import" "KwImport Eof"
   printfn "Done"
