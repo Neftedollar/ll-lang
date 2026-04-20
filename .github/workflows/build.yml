@@ -18,6 +18,9 @@ jobs:
       - name: Self-host CLI E2E
         run: ./tools/check-selfhost-e2e.sh
         working-directory: .
+      - name: Self-host Multi-module Readiness
+        run: ./tools/check-selfhost-multimodule.sh
+        working-directory: .
       - name: Self-routing Smoke (safe preset)
         run: |
           tmp_dir="$(mktemp -d)"
@@ -40,4 +43,7 @@ jobs:
         working-directory: .
       - name: Nullability Suppression Guard
         run: ./tools/check-no-fs3261-suppression.sh
+        working-directory: .
+      - name: Release Readiness Contract
+        run: ./tools/check-release-readiness.sh
         working-directory: .

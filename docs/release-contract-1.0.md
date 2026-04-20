@@ -32,8 +32,16 @@ the team designs a long-term architecture.
 `1.0` release readiness requires:
 
 - `release-core` CI lane green.
+- `Self-host CI` (`.github/workflows/build.yml`) green.
 - User-facing docs aligned with stable vs experimental labels.
 - `tools/check-doc-contract.sh` green.
+- `tools/check-release-readiness.sh` green.
+
+Readiness references:
+
+- [Release Readiness Evidence](./release/readiness-evidence.md)
+- [Stage0-Only Matrix](./release/stage0-only-matrix.md)
+- [CI Exceptions Policy](./release/ci-exceptions-policy.md)
 
 Experimental CI lanes are informative and do not block `1.0`.
 

@@ -3,6 +3,12 @@
 This document is the binding checklist for `v2` readiness. A gate is either
 **PASS** or **BLOCK**. No partial states. All PASS before the tag is cut.
 
+## Readiness references
+
+- [Release Readiness Evidence](./release/readiness-evidence.md)
+- [Stage0-Only Matrix](./release/stage0-only-matrix.md)
+- [CI Exceptions Policy](./release/ci-exceptions-policy.md)
+
 ---
 
 ## G1 — Self-hosted compiler gates
