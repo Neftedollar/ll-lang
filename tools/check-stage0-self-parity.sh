@@ -17,6 +17,7 @@ CORPUS=(
   "spec/examples/valid/21-multi-param-types.lll"
   "spec/examples/valid/24-pipeline-v2.lll"
   "spec/examples/valid/25-llm-repair-workflow.lll"
+  "spec/examples/valid/26-operators-precedence.lll"
 )
 # Note: 09-lexer-real is currently excluded because self `check` diverges
 # (tracked by parity workstream #176).

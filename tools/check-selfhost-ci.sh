@@ -79,6 +79,7 @@ FILES=(
   "$ROOT_DIR/spec/examples/valid/20z-bootstrap-input-unterminated-char.lll"
   "$ROOT_DIR/spec/examples/valid/21-multi-param-types.lll"
   "$ROOT_DIR/spec/examples/valid/23-external-opaque.lll"
+  "$ROOT_DIR/spec/examples/valid/26-operators-precedence.lll"
   "$ROOT_DIR/spec/examples/valid/30-file-io-external.lll"
   "$ROOT_DIR/spec/examples/valid/hello.lll"
 )

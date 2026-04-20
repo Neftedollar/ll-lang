@@ -74,7 +74,7 @@ OP_UNDERSCORE  ::= "_"
    Level 1 (loosest): <|>   — parser choice / applicative alternative
    Level 2:           >>= >> — monadic bind, sequence
    Level 3:           -> |>  — left-to-right pipe (both spellings are equivalent)
-   Level 4:           < > <= >= == !=  — comparisons (non-associative)
+   Level 4:           < > <= >= == !=  — comparisons (left-associative)
    Level 5:           ::   — list cons (right-associative)
    Level 6:           + -  — additive arithmetic
    Level 7:           * /  — multiplicative arithmetic
@@ -100,8 +100,8 @@ bind-expr   ::= pipe-expr ((OP_BIND | OP_SEQ) pipe-expr)*
 (* Level 3: pipe — left-associative; both "->" and "|>" are accepted *)
 pipe-expr   ::= cmp-expr ((OP_PIPE | OP_PIPE_FWD) cmp-expr)*
 
-(* Level 4: comparison — non-associative *)
-cmp-expr    ::= cons-expr ((OP_LT | OP_GT | OP_LE | OP_GE | OP_EQ2 | OP_NEQ) cons-expr)?
+(* Level 4: comparison — left-associative *)
+cmp-expr    ::= cons-expr ((OP_LT | OP_GT | OP_LE | OP_GE | OP_EQ2 | OP_NEQ) cons-expr)*
 
 (* Level 5: list cons — right-associative *)
 cons-expr   ::= arith-expr (OP_CONS cons-expr)?
@@ -275,9 +275,8 @@ export-decl  ::= "export" decl
       - type-expr context: type arrow
       - after pattern in match arm: branch arrow
       "|>" is an alias for "->" in expr context only.
-   3. ">>=", ">>", "<|>" are binary operators desugared to curried function application
-      in the AST: `a >>= b` → `EApp(EApp(EVar ">>=", a), b)`.
-      They are NOT special forms — they look up `>>=`, `>>`, `<|>` in scope.
+   3. ">>=", ">>", "<|>", "|>" are parsed as EBinOp forms and lowered later.
+      They are NOT special forms — typing/lowering resolves operator semantics.
       Stdlib modules `Std.State`, `Std.Parsec`, etc. supply the implementations.
    4. "[" disambiguation:
       - tag suffix on a literal: `42[m]` — exactly one IDENT/TYPEID then "]"

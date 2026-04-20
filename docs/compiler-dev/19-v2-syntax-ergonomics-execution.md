@@ -57,15 +57,16 @@ starts.
 
 | Operator | ASCII spelling | Role | Associativity | Precedence level |
 |----------|---------------|------|---------------|-----------------|
-| pipe     | `->`          | left-to-right function application | left  | 1 (lowest) |
+| choice   | `<\|>`        | applicative/parser choice           | left  | 1 (lowest) |
 | bind     | `>>=`         | monadic sequencing                  | left  | 2 |
 | sequence | `>>`          | discard-result sequencing           | left  | 2 |
-| choice   | `<\|>`        | applicative/parser choice           | left  | 3 |
+| pipe     | `|>` / `->`   | left-to-right function application  | left  | 3 |
+| compare  | `<` `>` `<=` `>=` `==` `!=` | ordered/equality comparison | left | 4 |
+| cons     | `::`          | list cons                            | right | 5 |
 | add      | `+`           | integer/float addition              | left  | 6 |
 | subtract | `-`           | integer/float subtraction           | left  | 6 |
 | multiply | `*`           | integer/float multiplication        | left  | 7 |
 | divide   | `/`           | integer/float division              | left  | 7 |
-| compare  | `<` `>` `<=` `>=` `==` `!=` | ordered/equality comparison | none | 4 |
 
 **User-defined operator frameworks are out of scope for `v2`.** No new symbolic
 operators may be added without a spec change targeting a later milestone.
@@ -97,11 +98,11 @@ Higher number = tighter binding.
 
 | Level | Operators | Notes |
 |-------|-----------|-------|
-| 1     | `->` (pipe) | loosest; entire pipeline chains at this level |
+| 1     | `<\|>` | loosest; choice chains at the top level |
 | 2     | `>>=` `>>` | monadic/sequencing forms |
-| 3     | `<\|>` | choice; above sequencing, below arithmetic |
-| 4     | `<` `>` `<=` `>=` `==` `!=` | non-associative comparisons |
-| 5     | (reserved) | |
+| 3     | `|>` `->` | pipeline forms (`->` retained as alias in expr context) |
+| 4     | `<` `>` `<=` `>=` `==` `!=` | comparisons |
+| 5     | `::` | right-associative list cons |
 | 6     | `+` `-` | additive arithmetic |
 | 7     | `*` `/` | multiplicative arithmetic |
 | 8     | juxtaposition | function application (tightest) |
