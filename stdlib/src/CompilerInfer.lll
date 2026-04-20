@@ -89,6 +89,12 @@ scheme1(v Str)(t TypeExpr) = MkScheme [v] t
 -- Polymorphic scheme with two quantified variables.
 scheme2(v1 Str)(v2 Str)(t TypeExpr) = MkScheme [v1; v2] t
 
+-- TODO(selfhost:typing): evolve these fixed operator schemes into trait-driven dispatch.
+tyPipeOp = TyFn (TyName "a") (TyFn (TyFn (TyName "a") (TyName "b")) (TyName "b"))
+tyBindOp = TyFn (tyMaybe (TyName "a")) (TyFn (TyFn (TyName "a") (tyMaybe (TyName "b"))) (tyMaybe (TyName "b")))
+tyThenThenOp = TyFn (tyMaybe (TyName "a")) (TyFn (tyMaybe (TyName "b")) (tyMaybe (TyName "b")))
+tyChoiceOp = TyFn (tyMaybe (TyName "a")) (TyFn (tyMaybe (TyName "a")) (tyMaybe (TyName "a")))
+
 -- Build the base environment with prelude entries.
 -- Each entry is name -> Scheme.
 baseEnv() =
@@ -156,7 +162,12 @@ baseEnv() =
   e18 = typeEnvInsert "maybeMap" (scheme2 "a" "b" (TyFn (TyFn (TyName "a") (TyName "b")) (TyFn (tyMaybe (TyName "a")) (tyMaybe (TyName "b"))))) e17j
   e18a = typeEnvInsert "maybeBind" (scheme2 "a" "b" (TyFn (tyMaybe (TyName "a")) (TyFn (TyFn (TyName "a") (tyMaybe (TyName "b"))) (tyMaybe (TyName "b"))))) e18
   e18b = typeEnvInsert "maybeWithDefault" (scheme1 "a" (TyFn (TyName "a") (TyFn (tyMaybe (TyName "a")) (TyName "a")))) e18a
-  e18b
+  -- fixed symbolic operators for parser ergonomics
+  e18c = typeEnvInsert "|>" (scheme2 "a" "b" tyPipeOp) e18b
+  e18d = typeEnvInsert ">>=" (scheme2 "a" "b" tyBindOp) e18c
+  e18e = typeEnvInsert ">>" (scheme2 "a" "b" tyThenThenOp) e18d
+  e18f = typeEnvInsert "<|>" (scheme1 "a" tyChoiceOp) e18e
+  e18f
 
 -- ---- Pattern type inference -------------------------------------------
 -- Returns (env_bindings, TypeExpr, errors)
@@ -535,4 +546,3 @@ main =
   _ = inferCheck "12 lambda arith" (runInfer (ELam "n" (EBinOp "+" (EVar "n") (EInt 1)))) "Int -> Int"
 
   printfn "Done"
-

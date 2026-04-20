@@ -31,13 +31,13 @@
 - [ ] Add docs section: “FFI on LLL path only”.
 
 ## Language ergonomics for compiler-writing
-- [ ] Evaluate built-in operator set (`|>`, `>>=`, `<|>`, `>>`) and lock precedence/associativity.
-- [ ] Add parser parity tests for new surface syntax.
-- [ ] Add TODO markers with fixed categories where blocked:
-  - [ ] `TODO(selfhost:operators)`
-  - [ ] `TODO(selfhost:typing)`
-  - [ ] `TODO(selfhost:resolver)`
-  - [ ] `TODO(selfhost:backend)`
+- [x] Evaluate built-in operator set (`|>`, `>>=`, `<|>`, `>>`) and lock precedence/associativity. (#178)
+- [x] Add parser parity tests for new surface syntax. (#178)
+- [x] Add TODO markers with fixed categories where blocked:
+  - [x] `TODO(selfhost:operators)`
+  - [x] `TODO(selfhost:typing)`
+  - [x] `TODO(selfhost:resolver)`
+  - [x] `TODO(selfhost:backend)`
 
 ## Release readiness checkpoints
 - [ ] Full test suite green (no ignored critical paths except explicitly documented reverse tests).

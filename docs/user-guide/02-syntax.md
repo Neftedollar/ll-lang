@@ -102,6 +102,22 @@ parameters:
 add = \a b. a + b
 ```
 
+## Fixed operators
+
+ll-lang uses a fixed symbolic operator set (no user-defined operators).
+
+| Operator | Meaning | Associativity | Precedence (low -> high) |
+|---|---|---|---|
+| `<|>` | choice | left | 1 |
+| `>>=` | bind | left | 2 |
+| `>>` | sequence | left | 2 |
+| `|>` / `->` | pipe (`->` kept as expression-level compatibility alias) | left | 3 |
+| `== != < > <= >=` | comparisons | left | 4 |
+| `::` | list cons | right | 5 |
+| `+ -` | arithmetic add/sub | left | 6 |
+| `* /` | arithmetic mul/div | left | 7 |
+| application (`f x`) | function application | left | 8 |
+
 ## `if` / `else`
 
 `if` is an expression — both arms must have the same type. Body is indented
