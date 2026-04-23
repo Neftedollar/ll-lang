@@ -58,6 +58,21 @@ checkCompact(src Str) =
     p4 = strConcat p3 (intToStr secondary)
     strConcat p4 "}"
 
+checkCompactWithVisible(src Str)(visibleNames List[Str]) =
+  tokens = tokenize src
+  ast = parseModule tokens
+  errors = elaborateWithNames visibleNames ast
+  if listIsEmpty errors
+    "{\"ok\":true,\"stage\":\"ok\",\"primary_error\":\"\",\"secondary_count\":0}"
+  else
+    msg = firstErrorMessage errors
+    secondary = listLen errors - 1
+    p1 = "{\"ok\":false,\"stage\":\"elaborator\",\"primary_error\":\""
+    p2 = strConcat p1 msg
+    p3 = strConcat p2 "\",\"secondary_count\":"
+    p4 = strConcat p3 (intToStr secondary)
+    strConcat p4 "}"
+
 renderCompact(src Str) =
   src
 
@@ -98,7 +113,28 @@ declKind(d Decl)(name Str) =
       else ""
     | DOpaque _ -> ""
     | DImport _ -> ""
+    | DImportUrl _ -> ""
+    | DFixity _ _ _ -> ""
     | DExport inner -> declKind inner name
+
+declVisibleNames(d Decl) =
+  match d
+    | DFn n _ _ _ -> [n]
+    | DLet n _ -> [n]
+    | DType _ _ ctors ->
+      listMap (\ctor.
+        match ctor
+          | MkCon name _ -> name
+      ) ctors
+    | DImport _ -> []
+    | DImportUrl _ -> []
+    | DFixity _ _ _ -> []
+    | DExport inner -> declVisibleNames inner
+    | DExternal n _ _ -> [n]
+    | DOpaque _ -> []
+
+collectVisibleNames(decls List[Decl]) =
+  listFold (\acc d. listAppend acc (declVisibleNames d)) [] decls
 
 findDeclKind(decls List[Decl])(name Str) =
   match decls
@@ -113,7 +149,7 @@ lookupSymbol(src Str)(name Str) =
   tokens = tokenize src
   ast = parseModule tokens
   match ast
-    | MkModule _ decls ->
+    | MkModule _ _ decls ->
       kind = findDeclKind decls name
       if strLen kind == 0
         p1 = "{\"found\":false,\"name\":\""
@@ -126,25 +162,194 @@ lookupSymbol(src Str)(name Str) =
         p4 = strConcat p3 kind
         strConcat p4 "\"}"
 
+FixityOrigin = MkFixityOrigin Str FixityAssoc Int Str
+-- op, assoc, precedence, source module path
+
+foOp(fx FixityOrigin) =
+  match fx
+    | MkFixityOrigin op _ _ _ -> op
+
+foAssoc(fx FixityOrigin) =
+  match fx
+    | MkFixityOrigin _ assoc _ _ -> assoc
+
+foPrec(fx FixityOrigin) =
+  match fx
+    | MkFixityOrigin _ _ prec _ -> prec
+
+foSrc(fx FixityOrigin) =
+  match fx
+    | MkFixityOrigin _ _ _ src -> src
+
+assocEq(a FixityAssoc)(b FixityAssoc) =
+  match a
+    | FixityNone -> b == FixityNone
+    | FixityLeft -> b == FixityLeft
+    | FixityRight -> b == FixityRight
+    | FixityInvalid -> b == FixityInvalid
+
+assocName(a FixityAssoc) =
+  match a
+    | FixityNone -> "none"
+    | FixityLeft -> "left"
+    | FixityRight -> "right"
+    | FixityInvalid -> "invalid"
+
+compareCharLists(a List[Char])(b List[Char]) =
+  match a
+    | [] ->
+      match b
+        | [] -> 0
+        | _ :: _ -> -1
+    | ca :: restA ->
+      match b
+        | [] -> 1
+        | cb :: restB ->
+          ia = charToInt ca
+          ib = charToInt cb
+          if ia < ib
+            -1
+          else if ia > ib
+            1
+          else
+            compareCharLists restA restB
+
+compareStr(a Str)(b Str) =
+  compareCharLists (strChars a) (strChars b)
+
+fixityOriginLe(a FixityOrigin)(b FixityOrigin) =
+  srcCmp = compareStr (foSrc a) (foSrc b)
+  if srcCmp < 0
+    true
+  else if srcCmp > 0
+    false
+  else
+    precA = foPrec a
+    precB = foPrec b
+    if precA < precB
+      true
+    else if precA > precB
+      false
+    else
+      assocCmp = compareStr (assocName (foAssoc a)) (assocName (foAssoc b))
+      if assocCmp < 0
+        true
+      else if assocCmp > 0
+        false
+      else
+        opCmp = compareStr (foOp a) (foOp b)
+        opCmp <= 0
+
+joinPathSegments(parts List[Str]) =
+  match parts
+    | [] -> ""
+    | p :: [] -> p
+    | p :: rest -> strConcat p (strConcat "." (joinPathSegments rest))
+
+moduleNameForFixity(path List[Str]) =
+  nm = joinPathSegments path
+  if strLen nm == 0
+    "<anonymous>"
+  else
+    nm
+
+fixityOriginsFromSource(src Str) =
+  tokens = tokenize src
+  ast = parseModule tokens
+  match ast
+    | MkModule path fixities _ ->
+      srcName = moduleNameForFixity path
+      listMap (\fx.
+        match fx
+          | MkFixity assoc prec op -> MkFixityOrigin op assoc prec srcName
+      ) fixities
+
+fixityConflictMessage(a FixityOrigin)(b FixityOrigin) =
+  left =
+    if fixityOriginLe a b
+      a
+    else
+      b
+  right =
+    if fixityOriginLe a b
+      b
+    else
+      a
+  op = foOp left
+  sa = foSrc left
+  sb = foSrc right
+  aa = assocName (foAssoc left)
+  ab = assocName (foAssoc right)
+  pa = intToStr (foPrec left)
+  pb = intToStr (foPrec right)
+  p1 = "E031 FixityConflict op:"
+  p2 = strConcat p1 op
+  p3 = strConcat p2 " sources:"
+  p4 = strConcat p3 sa
+  p5 = strConcat p4 "("
+  p6 = strConcat p5 aa
+  p7 = strConcat p6 ","
+  p8 = strConcat p7 pa
+  p9 = strConcat p8 ") vs "
+  p10 = strConcat p9 sb
+  p11 = strConcat p10 "("
+  p12 = strConcat p11 ab
+  p13 = strConcat p12 ","
+  p14 = strConcat p13 pb
+  strConcat p14 ")"
+
+fixityConflictsWithSeen(fx FixityOrigin)(seen List[FixityOrigin]) =
+  match seen
+    | [] -> []
+    | s :: rest ->
+      tail = fixityConflictsWithSeen fx rest
+      if foOp fx == foOp s
+        sameAssoc = assocEq (foAssoc fx) (foAssoc s)
+        samePrec = foPrec fx == foPrec s
+        if sameAssoc
+          if samePrec
+            tail
+          else
+            fixityConflictMessage s fx :: tail
+        else
+          fixityConflictMessage s fx :: tail
+      else
+        tail
+
+collectFixityConflictsAcc(origins List[FixityOrigin])(seen List[FixityOrigin])(errs List[Str]) =
+  match origins
+    | [] -> errs
+    | fx :: rest ->
+      curErrs = fixityConflictsWithSeen fx seen
+      collectFixityConflictsAcc rest (fx :: seen) (listAppend errs curErrs)
+
+collectFixityConflicts(origins List[FixityOrigin]) =
+  collectFixityConflictsAcc origins [] []
+
+checkProjectFixityConflicts(srcs List[Str]) =
+  origins = listConcat (listMap fixityOriginsFromSource srcs)
+  collectFixityConflicts origins
+
 -- ---- Multi-file type-checking ----------------------------------------
 -- Compile a list of source texts in dependency order (caller must topo-sort).
 -- Threads the type environment across files so later files see earlier types.
 -- Returns: (all-type-errors, final-env).
 -- Elaboration errors are immediately fatal per file (returns that file's errors).
 
-compileFiles(srcs List[Str])(env RBMap[Str][Scheme]) =
+compileFiles(srcs List[Str])(visibleNames List[Str])(env RBMap[Str][Scheme]) =
   match srcs
     | [] -> ([], env)
     | src :: rest ->
       tokens = tokenize src
       ast = parseModule tokens
-      elabErrs = elaborate ast
+      elabErrs = elaborateWithNames visibleNames ast
       if listIsEmpty elabErrs
         match ast
-          | MkModule _ decls ->
+          | MkModule _ _ decls ->
+            visible2 = listAppend visibleNames (collectVisibleNames decls)
             let (typeErrs, env2) = inferModuleStep env decls
             if listIsEmpty typeErrs
-              compileFiles rest env2
+              compileFiles rest visible2 env2
             else
               (typeErrs, env2)
       else
@@ -152,8 +357,37 @@ compileFiles(srcs List[Str])(env RBMap[Str][Scheme]) =
 
 -- Entry: compile ordered source texts starting from the base env.
 compileProject(srcs List[Str]) =
-  let (errs, _) = compileFiles srcs (baseEnv ())
-  errs
+  conflictErrs = checkProjectFixityConflicts srcs
+  if listIsEmpty conflictErrs
+    let (errs, _) = compileFiles srcs [] (baseEnv ())
+    errs
+  else
+    conflictErrs
+
+-- ---- Multi-file elaboration-only check ------------------------------------
+-- Same visibility threading as compileFiles, but without HM inference.
+
+elaborateFiles(srcs List[Str])(visibleNames List[Str]) =
+  match srcs
+    | [] -> []
+    | src :: rest ->
+      tokens = tokenize src
+      ast = parseModule tokens
+      elabErrs = elaborateWithNames visibleNames ast
+      if listIsEmpty elabErrs
+        match ast
+          | MkModule _ _ decls ->
+            visible2 = listAppend visibleNames (collectVisibleNames decls)
+            elaborateFiles rest visible2
+      else
+        listMap errMsg elabErrs
+
+checkProjectElab(srcs List[Str]) =
+  conflictErrs = checkProjectFixityConflicts srcs
+  if listIsEmpty conflictErrs
+    elaborateFiles srcs []
+  else
+    conflictErrs
 
 -- ---- Inference-aware pipeline ----------------------------------------
 
@@ -171,7 +405,7 @@ compileWithInfer(src Str) =
   elabErrs = elaborate ast
   if listIsEmpty elabErrs
     match ast
-      | MkModule _ decls ->
+      | MkModule _ _ decls ->
         typeErrs = inferModule decls
         if listIsEmpty typeErrs
           emitModule ast
@@ -187,7 +421,7 @@ collectAllErrors(src Str) =
   elabErrs = elaborate ast
   if listIsEmpty elabErrs
     match ast
-      | MkModule _ decls -> inferModule decls
+      | MkModule _ _ decls -> inferModule decls
   else
     listMap errMsg elabErrs
 
@@ -198,7 +432,7 @@ nextBlockerFull(src Str) =
   elabErrs = elaborate ast
   if listIsEmpty elabErrs
     match ast
-      | MkModule _ decls ->
+      | MkModule _ _ decls ->
         typeErrs = inferModule decls
         if listIsEmpty typeErrs
           "{\"ok\":true,\"stage\":\"none\",\"message\":\"\"}"

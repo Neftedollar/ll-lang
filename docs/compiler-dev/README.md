@@ -89,6 +89,9 @@ depend on `xunit 2.6.3` and `Microsoft.NET.Test.Sdk 17.8.0`.
 
 - **Parser stack:** strict mode uses `FParsecParser`; legacy recursive-descent
   parser is retained for parity/fallback diagnostics.
+- **Operator defaults (self-host path):** canonical baseline fixities are
+  declared in `stdlib/src/Operators.lll` (`Std.Operators`) and consumed by the
+  table-driven self-host parser/resolver flow.
 - **No mutable global state.** Inference uses a small `InferState` record
   passed through the tree walk.
 - **Errors are collected, not raised.** Compiler functions return

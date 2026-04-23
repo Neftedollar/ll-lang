@@ -15,7 +15,7 @@ algebraic data types, traits, semantic tags, and unit algebra.
 4. [Tags and units](04-tags-and-units.md) — tags, phantom types, unit algebra
 5. [Traits](05-traits.md) — declarations, impls, constrained generics, dispatch
 6. [Modules](06-modules.md) — module headers, imports, project mode (`lll.toml`)
-7. [Error codes](07-error-codes.md) — compact diagnostics (`E001..E008`, `E026`)
+7. [Error codes](07-error-codes.md) — compact diagnostics (`E001..E008`, `E020`, `E024..E031`)
 8. [CLI](08-cli.md) — build/check/run/new/install/self commands (+ experimental reverse)
 9. [MCP server](09-mcp.md) — `lllc mcp` tools for LLM clients
 10. [Compilation targets](10-targets.md) — `--target fs|ts|py|java|cs|llvm`
@@ -29,6 +29,7 @@ Compiler phases 1 to 10 are complete. Current stable surface includes:
 - End-to-end pipeline (`lexer -> parser -> elaborator -> HM infer -> codegen`)
 - Multi-file projects with `lll.toml` and target selection
 - Self-hosted stdlib/compiler bootstrap flow
+- Canonical default operator fixities from `Std.Operators`
 - MCP server for structured LLM tooling
 - Targets: F#, TypeScript, Python, Java, C#
 

@@ -21,6 +21,10 @@ The table:
 | `E007` | PlatformMismatch    | Platform module unavailable on selected target |
 | `E008` | InfiniteType        | Unification would produce an infinite type (occurs check) |
 | `E026` | UnknownExternalMapping | Unknown external declaration for selected target |
+| `E027` | InvalidFixityAssoc | Invalid fixity associativity for current phase |
+| `E028` | InvalidFixityPrecedence | Fixity precedence outside supported range |
+| `E029` | DuplicateFixity | Duplicate fixity declaration for same operator |
+| `E030` | ReservedOperatorFixity | Fixity declaration targets reserved/unsupported operator |
 
 Below: the minimal program that reproduces each error, sourced from
 `spec/examples/invalid/`.
@@ -213,6 +217,83 @@ E026 2:1 UnknownExternalMapping target:python name:host_log
 
 **Fix:** add a backend mapping for that external, or switch to a known external
 name.
+
+## E027 — InvalidFixityAssoc
+
+```lll
+-- expect: E027
+module Invalid.E027
+
+infixl +
+ok(a Int)(b Int) = a == b
+```
+
+The declaration is malformed (`infixl` missing precedence and operator position).
+
+**Compact output example:**
+```
+E027 3:1 InvalidFixityAssoc assoc:invalid
+```
+
+**Fix:** use canonical syntax, e.g. `infixl 4 ==`.
+
+## E028 — InvalidFixityPrecedence
+
+```lll
+-- expect: E028
+module Invalid.E028
+
+infixl 12 +
+add(a Int)(b Int) = a + b
+```
+
+Precedence must be in range `1..9`.
+
+**Compact output example:**
+```
+E028 3:1 InvalidFixityPrecedence value:12
+```
+
+**Fix:** choose a precedence inside `1..9`.
+
+## E029 — DuplicateFixity
+
+```lll
+-- expect: E029
+module Invalid.E029
+
+infixl 6 +
+infixl 7 +
+add(a Int)(b Int) = a + b
+```
+
+Only one fixity declaration is allowed per operator in a module.
+
+**Compact output example:**
+```
+E029 4:1 DuplicateFixity op:+
+```
+
+**Fix:** keep exactly one declaration for `+`.
+
+## E030 — ReservedOperatorFixity
+
+```lll
+-- expect: E030
+module Invalid.E030
+
+infixl 6 =
+x = 1
+```
+
+`=` is reserved and not part of the supported fixity surface.
+
+**Compact output example:**
+```
+E030 3:1 ReservedOperatorFixity op:=
+```
+
+**Fix:** declare fixity only for supported expression operators.
 
 ## Testing expected errors
 

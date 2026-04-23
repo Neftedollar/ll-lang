@@ -1,0 +1,7 @@
+-- expect: E031
+module Invalid.E031Swapped
+
+import FxConflictB
+import FxConflictA
+
+value = 1 + 2

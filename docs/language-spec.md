@@ -254,6 +254,9 @@ Operator contract (versioned):
 | application by juxtaposition | function application | left | 8 |
 
 These operators are fixed language forms, not a user-defined operator framework.
+The canonical default fixity set lives in `Std.Operators` and is loaded by
+default prelude wiring in self-host checks/builds. Parser precedence in `1.x`
+must stay aligned with that canonical table.
 
 ### 2.7 Patterns
 
@@ -294,6 +297,10 @@ The stable `1.x` error-code set covered by the release contract is:
 - `E024` `ModuleCycle`
 - `E025` `NoProjectForImport`
 - `E026` `UnknownExternalMapping`
+- `E027` `InvalidFixityAssoc`
+- `E028` `InvalidFixityPrecedence`
+- `E029` `DuplicateFixity`
+- `E030` `ReservedOperatorFixity`
 
 ### 2.9 Module and project system
 

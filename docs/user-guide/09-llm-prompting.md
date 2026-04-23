@@ -18,10 +18,10 @@ The entire keyword set fits on one line:
 
 ```
 let  tag  unit  trait  impl  import  export  module
-external  opaque  if  else  true  false  match
+external  opaque  infix  infixl  infixr  if  else  true  false  match
 ```
 
-That is 15 keywords. There is no `fn`, `type`, `in`, `then`, `with`. A model
+That is 18 keywords. There is no `fn`, `type`, `in`, `then`, `with`. A model
 does not need to guess which of several equivalent syntaxes a user prefers —
 there is only one canonical form.
 
@@ -51,8 +51,8 @@ type-class-driven `map` that dispatches on its argument. This removes the
 
 ### Unique-dispatch, stable error codes
 
-Every diagnostic uses one of eight fixed codes (`E001`–`E008` plus `E020`,
-`E024`–`E026`). Each code maps to exactly one checker stage:
+Every diagnostic uses stable fixed codes (`E001`–`E008`, `E020`, `E024`–`E030`).
+Each code maps to exactly one checker stage:
 
 | Code | Stage        | Typical fix                                    |
 |------|--------------|------------------------------------------------|
@@ -67,6 +67,10 @@ Every diagnostic uses one of eight fixed codes (`E001`–`E008` plus `E020`,
 | E024 | Module cycle | Break the import cycle                         |
 | E025 | No project   | Add `lll.toml` or use only `Std.*` imports     |
 | E026 | External map | Map `external` name in Platform SDK            |
+| E027 | Fixity assoc | Fix malformed fixity declaration form          |
+| E028 | Fixity prec  | Keep precedence in range `1..9`                |
+| E029 | Fixity dup   | Keep one fixity declaration per operator       |
+| E030 | Fixity op    | Use only supported expression operators        |
 
 Because the number → meaning map is fixed, an LLM system prompt can ship
 with a cheat sheet ("if you see E00N, do X") and the model will apply

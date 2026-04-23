@@ -70,6 +70,34 @@ Compact: `E026 5:1 UnknownExternalMapping target:typescript name:httpGet`
 
 Repair: add the function to the target's Platform SDK or provide a companion implementation file.
 
+### E027 InvalidFixityAssoc
+Malformed fixity declaration with invalid associativity metadata.
+
+Compact: `E027 3:1 InvalidFixityAssoc assoc:invalid`
+
+Repair: use one of canonical forms: `infixl <prec> <op>`, `infixr <prec> <op>`, `infix <prec> <op>`.
+
+### E028 InvalidFixityPrecedence
+Fixity precedence value is outside the accepted range.
+
+Compact: `E028 3:1 InvalidFixityPrecedence value:12`
+
+Repair: choose precedence in range `1..9`.
+
+### E029 DuplicateFixity
+The same operator has multiple fixity declarations in one module.
+
+Compact: `E029 4:1 DuplicateFixity op:+`
+
+Repair: keep a single fixity declaration per operator per module.
+
+### E030 ReservedOperatorFixity
+Fixity declaration references a reserved/unsupported operator.
+
+Compact: `E030 3:1 ReservedOperatorFixity op:=`
+
+Repair: use one of the currently supported expression operators only.
+
 ## Invalid example convention
 
 Every file in `spec/examples/invalid/` declares its expected error on line 1:

@@ -35,6 +35,28 @@ check_file() {
   fi
 }
 
+check_invalid_file() {
+  local file="$1"
+  local expected_code="$2"
+  local output
+
+  echo "==> check invalid $file (expect $expected_code)"
+  output="$(LLLC_SELF_MAIN="$SELF_MAIN" "$BOOTSTRAP_BIN" self check "$file" 2>&1 || true)"
+  printf '%s\n' "$output"
+
+  printf '%s' "$output" | grep -q '"ok":false' || fail "invalid fixture unexpectedly succeeded: $file"
+  printf '%s' "$output" | grep -q "\"primary_error\":\"$expected_code " || fail "invalid fixture missing expected code $expected_code: $file"
+  printf '%s' "$output" | grep -q '"secondary_count":0' || fail "invalid fixture produced non-deterministic secondary diagnostics: $file"
+  if [[ "$expected_code" == "E031" ]]; then
+    printf '%s' "$output" | grep -Fq 'FixityConflict op:+' || fail "E031 missing operator context (+): $file"
+    printf '%s' "$output" | grep -Fq 'FxConflictA' || fail "E031 missing source module FxConflictA: $file"
+    printf '%s' "$output" | grep -Fq 'FxConflictB' || fail "E031 missing source module FxConflictB: $file"
+    printf '%s' "$output" | grep -Fq '(left,6)' || fail "E031 missing competing fixity (left,6): $file"
+    printf '%s' "$output" | grep -Fq '(right,7)' || fail "E031 missing competing fixity (right,7): $file"
+    printf '%s' "$output" | grep -Fq 'sources:FxConflictA(left,6) vs FxConflictB(right,7)' || fail "E031 is not deterministic/canonical: $file"
+  fi
+}
+
 FILES=(
   "$ROOT_DIR/lllcself/src/Main.lll"
   "$ROOT_DIR/lllcself/src/Mcp.lll"
@@ -80,6 +102,8 @@ FILES=(
   "$ROOT_DIR/spec/examples/valid/21-multi-param-types.lll"
   "$ROOT_DIR/spec/examples/valid/23-external-opaque.lll"
   "$ROOT_DIR/spec/examples/valid/26-operators-precedence.lll"
+  "$ROOT_DIR/spec/examples/valid/27-fixity-decls.lll"
+  "$ROOT_DIR/stdlib/src/Operators.lll"
   "$ROOT_DIR/spec/examples/valid/30-file-io-external.lll"
   "$ROOT_DIR/spec/examples/valid/hello.lll"
 )
@@ -89,4 +113,19 @@ for file in "${FILES[@]}"; do
   check_file "$file"
 done
 
-echo "check-selfhost-ci: OK (${#FILES[@]} files)"
+INVALID_CASES=(
+  "$ROOT_DIR/spec/examples/invalid/E027-invalid-fixity-assoc.lll|E027"
+  "$ROOT_DIR/spec/examples/invalid/E028-invalid-fixity-precedence.lll|E028"
+  "$ROOT_DIR/spec/examples/invalid/E029-duplicate-fixity.lll|E029"
+  "$ROOT_DIR/spec/examples/invalid/E030-reserved-fixity-operator.lll|E030"
+  "$ROOT_DIR/spec/examples/invalid/E031-fixity-conflict-imports.lll|E031"
+  "$ROOT_DIR/spec/examples/invalid/E031-fixity-conflict-imports-swapped.lll|E031"
+)
+
+for case in "${INVALID_CASES[@]}"; do
+  IFS='|' read -r file expected_code <<<"$case"
+  [[ -f "$file" ]] || fail "missing invalid fixture in self-host suite: $file"
+  check_invalid_file "$file" "$expected_code"
+done
+
+echo "check-selfhost-ci: OK (${#FILES[@]} valid files, ${#INVALID_CASES[@]} invalid files)"

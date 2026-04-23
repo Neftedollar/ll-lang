@@ -1,0 +1,28 @@
+module Std.Operators
+
+FixityAssocSpec =
+  | AssocNone
+  | AssocLeft
+  | AssocRight
+
+OpFixity = MkOpFixity Str FixityAssocSpec Int
+
+defaultOperatorFixities =
+  MkOpFixity "<|>" AssocLeft 1 ::
+  MkOpFixity ">>=" AssocLeft 2 ::
+  MkOpFixity ">>" AssocLeft 2 ::
+  MkOpFixity "|>" AssocLeft 3 ::
+  MkOpFixity "->" AssocLeft 3 ::
+  MkOpFixity "==" AssocNone 4 ::
+  MkOpFixity "!=" AssocNone 4 ::
+  MkOpFixity "<" AssocNone 4 ::
+  MkOpFixity ">" AssocNone 4 ::
+  MkOpFixity "<=" AssocNone 4 ::
+  MkOpFixity ">=" AssocNone 4 ::
+  MkOpFixity "::" AssocRight 5 ::
+  MkOpFixity "+" AssocLeft 6 ::
+  MkOpFixity "-" AssocLeft 6 ::
+  MkOpFixity "*" AssocLeft 7 ::
+  MkOpFixity "/" AssocLeft 7 ::
+  MkOpFixity "^" AssocRight 8 ::
+  []

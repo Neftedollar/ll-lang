@@ -1,0 +1,6 @@
+-- expect: E027
+module Invalid.E027
+
+infixl +
+
+same(a Int)(b Int) = a == b

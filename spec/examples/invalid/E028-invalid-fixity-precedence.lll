@@ -1,0 +1,6 @@
+-- expect: E028
+module Invalid.E028
+
+infixl 12 +
+
+add(a Int)(b Int) = a + b
