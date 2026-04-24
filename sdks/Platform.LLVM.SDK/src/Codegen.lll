@@ -455,7 +455,7 @@ emitModulePath(parts List[Str]) =
 
 emitModule(m Module) =
   match m
-    | MkModule path decls ->
+    | MkModule path _fixities decls ->
       pathStr = emitModulePath path
       header = strConcat "; module " pathStr
       prelude = "; ll-lang LLVM IR output\n; target triple: x86_64-unknown-linux-gnu\n"
@@ -494,13 +494,13 @@ main() =
 
   -- 5. emitModule contains "define i64 @main"
   mainDecl = DFn "main" [] None (EInt 0)
-  m5 = MkModule ("Test" :: []) (mainDecl :: [])
+  m5 = MkModule ("Test" :: []) [] (mainDecl :: [])
   out5 = emitModule m5
   _ = checkContains "5 emitModule main" out5 "define i64 @main"
 
   -- 6. Complete module has entry: and ret i64
   fnDecl = DFn "add" addParams None (EBinOp "+" (EVar "a") (EVar "b"))
-  m6 = MkModule ("Test" :: []) (fnDecl :: mainDecl :: [])
+  m6 = MkModule ("Test" :: []) [] (fnDecl :: mainDecl :: [])
   out6 = emitModule m6
   _ = checkContains "6 entry label" out6 "entry:"
   _ = checkContains "6 ret i64" out6 "ret i64"

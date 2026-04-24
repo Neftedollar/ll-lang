@@ -114,6 +114,29 @@ mapOp(op Str) =
   -- TODO(selfhost:backend): lower symbolic operators (|>, >>=, >>, <|>) per target semantics.
   else op
 
+isFixedSymbolicOp(op Str) =
+  if op == "|>"
+    true
+  else if op == ">>="
+    true
+  else if op == ">>"
+    true
+  else if op == "<|>"
+    true
+  else false
+
+lowerFixedSymbolicOp(op Str)(l Expr)(r Expr) =
+  if op == "|>"
+    EApp r l
+  else if op == ">>="
+    EApp (EApp (EVar "llMaybeBind") l) r
+  else if op == ">>"
+    EApp (EApp (EVar "llMaybeThen") l) r
+  else if op == "<|>"
+    EApp (EApp (EVar "llMaybeChoice") l) r
+  else
+    EBinOp op l r
+
 -- ---- Type emission ---------------------------------------------------------
 
 isTypeParam(s Str) =
@@ -229,7 +252,10 @@ emitExpr(e Expr) =
     | EList items ->
       strConcat "[" (strConcat (joinWith "; " (listMap emitExpr items)) "]")
     | EBinOp op l r ->
-      strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat (mapOp op) (strConcat " " (strConcat (emitExpr r) ")")))))
+      if isFixedSymbolicOp op
+        emitExpr (lowerFixedSymbolicOp op l r)
+      else
+        strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat (mapOp op) (strConcat " " (strConcat (emitExpr r) ")")))))
     | ETuple a b ->
       strConcat "(" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) ")")))
     | ECons h t ->
@@ -411,6 +437,9 @@ emitDecl(d Decl) =
     | DOpaque name ->
       -- opaque types: emit as F# object alias
       strConcat "type " (strConcat name " = obj")
+    | DFixity _ _ _ ->
+      -- parser contract declaration only; backend precedence stays fixed.
+      ""
 
 emitDecls(ds List[Decl]) =
   joinWith "\n\n" (listMap emitDecl ds)
@@ -418,7 +447,7 @@ emitDecls(ds List[Decl]) =
 -- ---- Prelude ---------------------------------------------------------------
 
 emitPrelude =
-  "open LLLang.Prelude"
+  "open LLLang.Prelude\n\nlet llMaybeBind m f =\n    match m with\n    | Some v -> f v\n    | None -> None\n\nlet llMaybeThen m n =\n    match m with\n    | Some _ -> n\n    | None -> None\n\nlet llMaybeChoice a b =\n    match a with\n    | Some _ -> a\n    | None -> b"
 
 -- ---- Module emission -------------------------------------------------------
 
@@ -427,7 +456,7 @@ emitModulePath(parts List[Str]) =
 
 emitModule(m Module) =
   match m
-    | MkModule path decls ->
+    | MkModule path _fixities decls ->
       header = strConcat "module " (emitModulePath path)
       prelude = emitPrelude
       body = emitDecls decls
@@ -449,6 +478,12 @@ checkContains(label Str)(got Str)(needle Str) =
     printfn (strConcat "OK " label)
   else
     printfn (strConcat "FAIL " (strConcat label (strConcat "\n  missing: " (strConcat needle (strConcat "\n  in: " got)))))
+
+checkNotContains(label Str)(got Str)(needle Str) =
+  if strContains needle got
+    printfn (strConcat "FAIL " (strConcat label (strConcat "\n  unexpected: " (strConcat needle (strConcat "\n  in: " got)))))
+  else
+    printfn (strConcat "OK " label)
 
 main =
   -- 1. EInt
@@ -497,7 +532,7 @@ main =
   -- 12. Full module emit
   idParams = MkParam "x" (TyName "Int") :: []
   modDecls = DType "Color" [] colorCtors :: DFn "id" idParams None (EVar "x") :: []
-  m = MkModule ("Test" :: "Mod" :: []) modDecls
+  m = MkModule ("Test" :: "Mod" :: []) [] modDecls
   out = emitModule m
   _ = checkContains "12 module header" out "module Test.Mod"
   _ = checkContains "12 module type" out "type Color"
@@ -536,5 +571,18 @@ main =
 
   -- 22. DOpaque: emits obj alias
   _ = codegenCheck "22 DOpaque obj alias" (emitDecl (DOpaque "HttpClient")) "type HttpClient = obj"
+
+  -- 23. fixed symbolic operators are lowered (no raw token leakage)
+  pipeOut = emitExpr (EBinOp "|>" (EInt 1) (EVar "inc"))
+  _ = codegenCheck "23 |> lowers to app" pipeOut "(inc 1L)"
+  bindOut = emitExpr (EBinOp ">>=" (EVar "m") (EVar "f"))
+  _ = checkNotContains "23 >>= raw removed" bindOut ">>="
+  _ = checkContains "23 >>= lowers to helper" bindOut "llMaybeBind"
+  thenOut = emitExpr (EBinOp ">>" (EVar "m") (EVar "n"))
+  _ = checkNotContains "23 >> raw removed" thenOut ">>"
+  _ = checkContains "23 >> lowers to helper" thenOut "llMaybeThen"
+  choiceOut = emitExpr (EBinOp "<|>" (EVar "a") (EVar "b"))
+  _ = checkNotContains "23 <|> raw removed" choiceOut "<|>"
+  _ = checkContains "23 <|> lowers to helper" choiceOut "llMaybeChoice"
 
   0

@@ -186,13 +186,27 @@ emitDecl(d Decl) =
       strConcat "export " (emitDecl inner)
     | DLet name body ->
       strConcat "let " (strConcat name (strConcat " = " (emitExpr body)))
+    | DImportUrl url ->
+      strConcat "import \"" (strConcat url "\"")
+    | DExternal name _ _ ->
+      strConcat "external " name
+    | DOpaque name ->
+      strConcat "opaque " name
+    | DFixity assoc prec op ->
+      assocName = match assoc
+        | FixityLeft -> "infixl"
+        | FixityRight -> "infixr"
+        | FixityNone -> "infix"
+      p1 = strConcat assocName " "
+      p2 = strConcat p1 (intToStr prec)
+      strConcat (strConcat p2 " ") op
 
 emitDecls(ds List[Decl]) =
   joinWith "\n\n" (listMap emitDecl ds)
 
 renderModule(m Module) =
   match m
-    | MkModule path decls ->
+    | MkModule path _fixities decls ->
       match path
         | [] -> emitDecls decls
         | _ ->

@@ -1,0 +1,7 @@
+-- expect: E031
+module Invalid.E031Custom
+
+import FxCustomConflictA
+import FxCustomConflictB
+
+value = 1

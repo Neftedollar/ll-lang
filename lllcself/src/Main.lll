@@ -1,6 +1,8 @@
 module Lllcself.Main
 
 import Std.Compiler
+import Std.Bool
+import Std.Maybe
 import Std.Reverse
 import Std.CompilerLoader
 import Std.Parser
@@ -15,6 +17,7 @@ import Std.CodegenLLVM
 import Lllcself.Mcp
 
 external dirList(path Str) List[Str]
+external dirExists(path Str) Bool
 external processRun(cmd Str)(args List[Str]) Str
 external processRunEx(cmd Str)(args List[Str])(cwd Str)(timeoutSec Int) Str
 
@@ -143,7 +146,7 @@ listAppendLocal(a List[A])(b List[A]) =
     | [] -> b
     | x :: rest -> x :: listAppendLocal rest b
 
-listAnyLocal(p A -> Bool)(xs List[A]) =
+listAnyLocal(p)(xs) =
   match xs
     | [] -> false
     | x :: rest ->
@@ -152,7 +155,7 @@ listAnyLocal(p A -> Bool)(xs List[A]) =
       else
         listAnyLocal p rest
 
-listFindLocal(p A -> Bool)(xs List[A]) =
+listFindLocal(p)(xs) =
   match xs
     | [] -> None
     | x :: rest ->
@@ -167,7 +170,7 @@ listLastLocal(xs List[A]) =
     | x :: [] -> Some x
     | _ :: rest -> listLastLocal rest
 
-listFilterLocal(p A -> Bool)(xs List[A]) =
+listFilterLocal(p)(xs) =
   match xs
     | [] -> []
     | x :: rest ->
@@ -177,11 +180,20 @@ listFilterLocal(p A -> Bool)(xs List[A]) =
       else
         tail
 
-listMapLocal(f A -> B)(xs List[A]) =
+listMapLocal(f)(xs) =
   match xs
     | [] -> []
     | x :: rest ->
       f x :: listMapLocal f rest
+
+listContainsLocal(target Str)(xs List[Str]) =
+  match xs
+    | [] -> false
+    | x :: rest ->
+      if x == target
+        true
+      else
+        listContainsLocal target rest
 
 strLowerChar(c Char) =
   n = charToInt c
@@ -255,45 +267,6 @@ compileSourceForTarget(target Str)(src Str) =
   else
     compact
 
-filterLllFiles(paths List[Str]) =
-  listFilterLocal (\p. strEndsWith ".lll" p) paths
-
-loadProjectFiles(root Str) =
-  srcDir = pathJoin root "src"
-  if dirExists srcDir
-    files = filterLllFiles (dirList srcDir)
-    listMapLocal (\p.
-      src = readFile p
-      MkLoadedFile p (modulePathFromSource src) (importsFromSource src)
-    ) files
-  else
-    []
-
-projectLoadErrorJson(msg Str) =
-  p1 = "{\"ok\":false,\"stage\":\"project\",\"primary_error\":"
-  p2 = strConcat p1 (jsonStr msg)
-  strConcat p2 ",\"secondary_count\":0}"
-
-SourcePair = MkSourcePair Str Str
-
-spPath(p SourcePair) =
-  match p
-    | MkSourcePair path _ -> path
-
-spSrc(p SourcePair) =
-  match p
-    | MkSourcePair _ src -> src
-
-ClosureState = MkClosureState (List[LoadedFile]) (List[SourcePair])
-
-csLoaded(st ClosureState) =
-  match st
-    | MkClosureState loaded _ -> loaded
-
-csPairs(st ClosureState) =
-  match st
-    | MkClosureState _ pairs -> pairs
-
 moduleNameFromSourceLines(lines List[Str]) =
   match lines
     | [] -> "Main"
@@ -325,6 +298,157 @@ modulePathFromSource(src Str) =
 
 importsFromSource(src Str) =
   importNamesFromSourceLines (strSplit "\n" src)
+
+filterLllFiles(paths List[Str]) =
+  match paths
+    | [] -> []
+    | p :: rest ->
+      tail = filterLllFiles rest
+      if strEndsWith ".lll" p
+        p :: tail
+      else
+        tail
+
+toLoadedFilePath(p Str) =
+  src = readFile p
+  MkLoadedFile p (modulePathFromSource src) (importsFromSource src)
+
+loadProjectFiles(root Str) =
+  srcDir = pathJoin root "src"
+  if dirExists srcDir
+    files = filterLllFiles (dirList srcDir)
+    listMapLocal toLoadedFilePath files
+  else
+    []
+
+projectLoadErrorJson(msg Str) =
+  p1 = "{\"ok\":false,\"stage\":\"project\",\"primary_error\":"
+  p2 = strConcat p1 (jsonStr msg)
+  strConcat p2 ",\"secondary_count\":0}"
+
+SourcePair = MkSourcePair Str Str
+
+spPath(p SourcePair) =
+  match p
+    | MkSourcePair path _ -> path
+
+spSrc(p SourcePair) =
+  match p
+    | MkSourcePair _ src -> src
+
+isIdentStartLocal(c Char) =
+  if charIsAlpha c
+    true
+  else
+    c == '_'
+
+isIdentContLocal(c Char) =
+  if isIdentStartLocal c
+    true
+  else
+    charIsDigit c
+
+takeIdentLocal(cs List[Char]) =
+  match cs
+    | [] -> []
+    | c :: rest ->
+      if isIdentContLocal c
+        c :: takeIdentLocal rest
+      else
+        []
+
+leadingIdentLocal(s Str) =
+  t = trimLeft s
+  chars = strChars t
+  match chars
+    | [] -> None
+    | c :: _ ->
+      if isIdentStartLocal c
+        Some (strFromChars (takeIdentLocal chars))
+      else
+        None
+
+prefixedLeadingIdent(prefix Str)(line Str) =
+  if strStartsWith prefix line
+    rest = trimLeft (strSlice line (strLen prefix) (strLen line - strLen prefix))
+    leadingIdentLocal rest
+  else
+    None
+
+collectVisibleNameFromLine(line Str) =
+  t = trimLeft line
+  if strLen t == 0
+    None
+  else if strStartsWith "--" t
+    None
+  else if strStartsWith "module " t
+    None
+  else if strStartsWith "import " t
+    None
+  else if strStartsWith "|" t
+    None
+  else
+    nExport = prefixedLeadingIdent "export " t
+    if isSome nExport
+      nExport
+    else
+      nExternal = prefixedLeadingIdent "external " t
+      if isSome nExternal
+        nExternal
+      else
+        nOpaque = prefixedLeadingIdent "opaque " t
+        if isSome nOpaque
+          nOpaque
+        else
+          nLead = leadingIdentLocal t
+          if isSome nLead
+            if strContains "=" t
+              nLead
+            else if strContains "(" t
+              nLead
+            else
+              None
+          else
+            None
+
+appendUniqueLocal(name Str)(acc List[Str]) =
+  if listContainsLocal name acc
+    acc
+  else
+    name :: acc
+
+appendUniqueListLocal(xs List[Str])(acc List[Str]) =
+  match xs
+    | [] -> acc
+    | x :: rest ->
+      appendUniqueListLocal rest (appendUniqueLocal x acc)
+
+collectVisibleNamesFromSource(src Str) =
+  lines = strSplit "\n" src
+  names = listFilterMap collectVisibleNameFromLine lines
+  listReverse (appendUniqueListLocal names [])
+
+collectVisibleNamesFromPairs(selfPath Str)(pairs List[SourcePair]) =
+  match pairs
+    | [] -> []
+    | pair :: rest ->
+      tail = collectVisibleNamesFromPairs selfPath rest
+      p = spPath pair
+      if p == selfPath
+        tail
+      else
+        src = spSrc pair
+        appendUniqueListLocal (collectVisibleNamesFromSource src) tail
+
+ClosureState = MkClosureState (List[LoadedFile]) (List[SourcePair])
+
+csLoaded(st ClosureState) =
+  match st
+    | MkClosureState loaded _ -> loaded
+
+csPairs(st ClosureState) =
+  match st
+    | MkClosureState _ pairs -> pairs
 
 resolveImportPath(baseDir Str)(stdlibDir Str)(importName Str) =
   parts = strSplit "." importName
@@ -359,7 +483,7 @@ collectImportClosure(baseDir Str)(stdlibDir Str)(queue List[Str])(seen List[Str]
   match queue
     | [] -> MkClosureState loaded pairs
     | p :: rest ->
-      if listAnyLocal (\x. x == p) seen
+      if listContainsLocal p seen
         collectImportClosure baseDir stdlibDir rest seen loaded pairs
       else
         if fileExists p == false
@@ -376,30 +500,40 @@ collectImportClosure(baseDir Str)(stdlibDir Str)(queue List[Str])(seen List[Str]
 
 checkCompactWithImports(path Str)(src Str) =
   base = checkCompact src
-  if compactIsOk base
+  baseDir = pathDir path
+  stdlibDir = findStdlibDirFrom baseDir
+  startQueue = path :: []
+  state = collectImportClosure baseDir stdlibDir startQueue [] [] []
+  loadedRev = csLoaded state
+  pairs = csPairs state
+  loaded = listReverse loadedRev
+  if listLen loaded <= 1
     base
   else
-    baseDir = pathDir path
-    stdlibDir = findStdlibDirFrom baseDir
-    startQueue = path :: []
-    state = collectImportClosure baseDir stdlibDir startQueue [] [] []
-    loadedRev = csLoaded state
-    pairs = csPairs state
-    loaded = listReverse loadedRev
-    if listLen loaded <= 1
-      base
-    else
-      loadRes = loadProject loaded
-      match loadRes
-        | LoaderErr _ -> base
-        | LoaderOk ordered ->
-          orderedSrcs =
-            listFilterMap (\lf. lookupSourceByPath (lfPath lf) pairs) ordered
-          errs = compileProject orderedSrcs
-          if listIsEmpty errs
-            okCompactJson
+    loadRes = loadProject loaded
+    match loadRes
+      | LoaderErr _ -> base
+      | LoaderOk ordered ->
+        orderedSrcs =
+          listFilterMap (\lf. lookupSourceByPath (lfPath lf) pairs) ordered
+        preludeOperatorsPath = pathJoin stdlibDir "Operators.lll"
+        fixitySrcs =
+          if fileExists preludeOperatorsPath
+            preludeSrc = readFile preludeOperatorsPath
+            listAppendLocal orderedSrcs (preludeSrc :: [])
           else
-            base
+            orderedSrcs
+        fixityConflicts = checkProjectFixityConflicts fixitySrcs
+        if listIsEmpty fixityConflicts
+          visibleNames = collectVisibleNamesFromPairs path pairs
+          checkCompactWithVisible src visibleNames
+        else
+          msg = match fixityConflicts | e :: _ -> e | [] -> "resolver fixity conflict"
+          p1 = "{\"ok\":false,\"stage\":\"resolver\",\"primary_error\":\""
+          p2 = strConcat p1 msg
+          p3 = strConcat p2 "\",\"secondary_count\":"
+          p4 = strConcat p3 (intToStr (listLen fixityConflicts - 1))
+          strConcat p4 "}"
 
 runCheckFile(path Str) =
   if fileExists path
@@ -617,7 +751,7 @@ runModWhy(root Str)(dep Str) =
     listFilterMap (\lf.
       src = readFile (lfPath lf)
       imps = importsFromSource src
-      if listAnyLocal (\i. i == dep) imps
+      if listContainsLocal dep imps
         Some (joinWith "." (lfModule lf))
       else
         None

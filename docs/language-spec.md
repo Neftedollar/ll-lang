@@ -253,7 +253,11 @@ Operator contract (versioned):
 | `*` `/` | multiplicative arithmetic | left | 7 |
 | application by juxtaposition | function application | left | 8 |
 
-These operators are fixed language forms, not a user-defined operator framework.
+These are the canonical baseline operators from `Std.Operators`.
+Projects may add custom symbolic operators via `infix`/`infixl`/`infixr`
+declarations, subject to `E030` safety constraints (reserved token collisions,
+malformed/comment-like forms, and readability guardrails). Parser precedence in
+`1.x` starts from the canonical table and extends with validated declarations.
 
 ### 2.7 Patterns
 
@@ -294,6 +298,10 @@ The stable `1.x` error-code set covered by the release contract is:
 - `E024` `ModuleCycle`
 - `E025` `NoProjectForImport`
 - `E026` `UnknownExternalMapping`
+- `E027` `InvalidFixityAssoc`
+- `E028` `InvalidFixityPrecedence`
+- `E029` `DuplicateFixity`
+- `E030` `ReservedOperatorFixity`
 
 ### 2.9 Module and project system
 

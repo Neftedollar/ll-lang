@@ -1,0 +1,5 @@
+module FxCustomConflictB
+
+infixr 7 %%
+
+b = 2

@@ -434,6 +434,8 @@ inferDecl(st InferState)(decl Decl) =
       inferWithEnv (typeEnvInsert name sch (inferEnv st)) st
     | DOpaque typeName ->
       st
+    | DFixity _ _ _ ->
+      st
     | DImport _ -> st
     | DImportUrl _ -> st
     | DExport inner -> inferDecl st inner

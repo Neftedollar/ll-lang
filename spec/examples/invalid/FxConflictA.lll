@@ -1,0 +1,5 @@
+module FxConflictA
+
+infixl 6 +
+
+a = 1

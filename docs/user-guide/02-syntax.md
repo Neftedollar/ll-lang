@@ -10,7 +10,8 @@ both full-line (`-- header`) and trailing (`x + 1 -- increment`) forms are
 accepted. ASCII only. No semicolons, no braces.
 
 **Active keywords:** `let`, `tag`, `unit`, `trait`, `impl`, `import`, `export`,
-`module`, `external`, `opaque`, `if`, `else`, `true`, `false`, `match`.
+`module`, `external`, `opaque`, `infix`, `infixl`, `infixr`, `if`, `else`,
+`true`, `false`, `match`.
 There is no `fn`, `type`, `in`, `then`, or `with` keyword.
 
 ## Module header
@@ -102,9 +103,12 @@ parameters:
 add = \a b. a + b
 ```
 
-## Fixed operators
+## Operators and fixity
 
-ll-lang uses a fixed symbolic operator set (no user-defined operators).
+ll-lang ships with a canonical baseline operator table from `Std.Operators`
+and also supports custom symbolic operators through fixity declarations.
+Baseline defaults are loaded by prelude wiring, so projects get standard
+precedence/associativity without local declarations.
 
 | Operator | Meaning | Associativity | Precedence (low -> high) |
 |---|---|---|---|
@@ -117,6 +121,23 @@ ll-lang uses a fixed symbolic operator set (no user-defined operators).
 | `+ -` | arithmetic add/sub | left | 6 |
 | `* /` | arithmetic mul/div | left | 7 |
 | application (`f x`) | function application | left | 8 |
+
+### Fixity declarations
+
+You can declare parser-contract metadata using:
+
+```lll
+infixl 6 +
+infixr 5 ::
+infix 4 ==
+infixl 6 %%
+```
+
+Custom operators must stay symbolic and pass safety checks. Reserved single
+tokens (`=`, `|`, `:`, `.`), malformed (`?`), comment-like (`--`) and overlong
+forms are rejected with `E030`. Diagnostics `E027`..`E031` cover assoc,
+precedence, duplicate declarations, reserved/unsafe operators, and import
+conflicts.
 
 ## `if` / `else`
 

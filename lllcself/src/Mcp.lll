@@ -510,6 +510,7 @@ declKind(d Decl) =
     | DLet _ _ -> "let"
     | DExternal _ _ _ -> "external"
     | DOpaque _ -> "opaque"
+    | DFixity _ _ _ -> "fixity"
 
 declName(d Decl) =
   match d
@@ -521,6 +522,7 @@ declName(d Decl) =
     | DLet n _ -> n
     | DExternal n _ _ -> n
     | DOpaque n -> n
+    | DFixity _ _ op -> op
 
 declImports(decls List[Decl]) =
   match decls
@@ -538,7 +540,7 @@ declImports(decls List[Decl]) =
 mkGraphModule(path Str)(src Str) =
   m = parseModule (tokenize src)
   match m
-    | MkModule modPath decls ->
+    | MkModule modPath _fixities decls ->
       MkGraphModule path (joinDot modPath) (declImports decls)
 
 graphModuleJson(m GraphModule) =
@@ -692,7 +694,7 @@ findSymbolInModules(name Str)(mods List[GraphModule]) =
       src = fileReadAll (gmPath m)
       pm = parseModule (tokenize src)
       match pm
-        | MkModule _ decls ->
+        | MkModule _ _ decls ->
           syms = collectSymbolsWithPath (gmPath m) src decls
           match findByNameInJsons syms name
             | Some s -> Some s
@@ -910,7 +912,7 @@ unusedExternalDiagsFromUnique(src Str)(uniq List[Str]) =
 ffiInspectFromSource(path Str)(src Str) =
   m = parseModule (tokenize src)
   match m
-    | MkModule modPath decls ->
+    | MkModule modPath _fixities decls ->
       moduleName = joinDot modPath
       entries = collectFfiDeclEntries path moduleName src decls
       scopeVal =
@@ -931,7 +933,7 @@ ffiInspectFromSource(path Str)(src Str) =
 ffiValidateFromSource(path Str)(src Str) =
   m = parseModule (tokenize src)
   match m
-    | MkModule modPath decls ->
+    | MkModule modPath _fixities decls ->
       moduleName = joinDot modPath
       entries = collectFfiDeclEntries path moduleName src decls
       scopeVal =
@@ -1151,12 +1153,31 @@ handleFormatFile(params JsonVal) =
 declToJson(d Decl) =
   MJObj [MJStr "kind"; MJStr (declKind d); MJStr "name"; MJStr (declName d)]
 
+fixityAssocJson(a FixityAssoc) =
+  match a
+    | FixityLeft -> MJStr "infixl"
+    | FixityRight -> MJStr "infixr"
+    | FixityNone -> MJStr "infix"
+    | FixityInvalid -> MJStr "invalid"
+
+fixityToJson(fx FixityDecl) =
+  match fx
+    | MkFixity assoc prec op ->
+      MJObj [MJStr "assoc"; fixityAssocJson assoc; MJStr "precedence"; MJNum prec; MJStr "operator"; MJStr op]
+
 handleParseSource(params JsonVal) =
   source = jsonGetStr (jsonGet params "source")
   m = parseModule (tokenize source)
   match m
-    | MkModule modPath decls ->
-      MJObj [MJStr "ok"; MJBool true; MJStr "module"; MJStr (joinDot modPath); MJStr "decl_count"; MJNum (listLen decls); MJStr "decls"; MJArr (listMap declToJson decls)]
+    | MkModule modPath fixities decls ->
+      MJObj [
+        MJStr "ok"; MJBool true;
+        MJStr "module"; MJStr (joinDot modPath);
+        MJStr "fixity_count"; MJNum (listLen fixities);
+        MJStr "fixities"; MJArr (listMap fixityToJson fixities);
+        MJStr "decl_count"; MJNum (listLen decls);
+        MJStr "decls"; MJArr (listMap declToJson decls)
+      ]
 
 typedDeclJson(d Decl) =
   n = declName d
@@ -1170,7 +1191,7 @@ handleTypedAst(params JsonVal) =
   else
     m = parseModule (tokenize source)
     match m
-      | MkModule modPath decls ->
+      | MkModule modPath _fixities decls ->
         d = diagnoseFromCompact (checkCompact source)
         ok = jsonGetBool (jsonGet d "ok")
         stageStr = jsonGetStr (jsonGet d "stage")
@@ -1248,13 +1269,13 @@ handleSymbols(params JsonVal) =
   if strLen src > 0
     m = parseModule (tokenize src)
     match m
-      | MkModule _ decls ->
+      | MkModule _ _ decls ->
         MJObj [MJStr "ok"; MJBool true; MJStr "symbols"; MJArr (collectSymbols src decls)]
   else
     if strLen path > 0
       m = parseModule (tokenize (readFile path))
       match m
-        | MkModule _ decls ->
+        | MkModule _ _ decls ->
           MJObj [MJStr "ok"; MJBool true; MJStr "symbols"; MJArr (collectSymbolsWithPath path (readFile path) decls)]
     else
       root = resolveRoot params
@@ -1264,7 +1285,7 @@ handleSymbols(params JsonVal) =
           srcM = fileReadAll (gmPath gm)
           pm = parseModule (tokenize srcM)
           match pm
-            | MkModule _ ds ->
+            | MkModule _ _ ds ->
               MJObj [MJStr "path"; MJStr (gmPath gm); MJStr "module"; MJStr (gmName gm); MJStr "symbols"; MJArr (collectSymbolsWithPath (gmPath gm) srcM ds)]
         ) mods
       MJObj [MJStr "ok"; MJBool true; MJStr "root"; MJStr root; MJStr "modules"; MJArr grouped]
@@ -1276,7 +1297,7 @@ handleDefinition(params JsonVal) =
   if strLen src > 0
     m = parseModule (tokenize src)
     match m
-      | MkModule _ decls ->
+      | MkModule _ _ decls ->
         syms = collectSymbols src decls
         match findByNameInJsons syms name
           | Some s -> MJObj [MJStr "found"; MJBool true; MJStr "definition"; s]
@@ -1286,7 +1307,7 @@ handleDefinition(params JsonVal) =
       srcFile = readFile path
       m = parseModule (tokenize srcFile)
       match m
-        | MkModule _ decls ->
+        | MkModule _ _ decls ->
           syms = collectSymbolsWithPath path srcFile decls
           match findByNameInJsons syms name
             | Some s -> MJObj [MJStr "found"; MJBool true; MJStr "definition"; s]
@@ -1635,7 +1656,12 @@ errorCodes = [
   MkTriple "E020" "ModulePathMismatch" "Module header does not match file location";
   MkTriple "E024" "ModuleCycle" "Import graph has a cycle";
   MkTriple "E025" "NoProjectForImport" "Non-std import in single-file mode";
-  MkTriple "E026" "UnknownExternalMapping" "External declaration has no mapping for selected target"
+  MkTriple "E026" "UnknownExternalMapping" "External declaration has no mapping for selected target";
+  MkTriple "E027" "InvalidFixityAssoc" "Malformed fixity declaration (invalid associativity token)";
+  MkTriple "E028" "InvalidFixityPrecedence" "Fixity precedence must be in range 1..9";
+  MkTriple "E029" "DuplicateFixity" "Operator has more than one fixity declaration in module";
+  MkTriple "E030" "ReservedOperatorFixity" "Fixity declaration uses a reserved/unsupported/unsafe operator shape";
+  MkTriple "E031" "FixityConflict" "Imported modules declare conflicting fixities for the same operator"
 ]
 
 handleListErrors(params JsonVal) =

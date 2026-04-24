@@ -56,7 +56,7 @@ case "$SELF_PRESET" in
     SELF_COMMANDS_DEFAULT="compile,check"
     ;;
   all)
-    SELF_COMMANDS_DEFAULT="compile,check,run"
+    SELF_COMMANDS_DEFAULT="compile,check,run,mcp"
     ;;
   *)
     fail "invalid LLLC_BOOTSTRAP_SELF_PRESET='$SELF_PRESET' (expected: off|safe|all)"

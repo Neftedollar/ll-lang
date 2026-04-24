@@ -381,7 +381,7 @@ emitModulePath(parts List[Str]) =
 
 emitModule(m Module) =
   match m
-    | MkModule path decls ->
+    | MkModule path _fixities decls ->
       header = strConcat "module " (emitModulePath path)
       prelude = emitPrelude
       body = emitDecls decls
@@ -442,7 +442,7 @@ main =
   -- 12. Full module emit
   idParams = MkParam "x" (TyName "Int") :: []
   modDecls = DType "Color" [] colorCtors :: DFn "id" idParams None (EVar "x") :: []
-  m = MkModule ("Test" :: "Mod" :: []) modDecls
+  m = MkModule ("Test" :: "Mod" :: []) [] modDecls
   out = emitModule m
   _ = checkContains "12 module header" out "module Test.Mod"
   _ = checkContains "12 module type" out "type Color"

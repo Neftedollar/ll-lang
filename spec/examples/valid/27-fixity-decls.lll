@@ -1,0 +1,11 @@
+module Example.FixityDecls
+
+infixl 6 +
+infixr 5 ::
+infix 4 ==
+
+sum(a Int)(b Int) = a + b
+same(a Int)(b Int) = a == b
+prepend(x Int)(xs List[Int]) = x :: xs
+
+sample = sum 1 2

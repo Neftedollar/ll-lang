@@ -1,0 +1,7 @@
+-- expect: E029
+module Invalid.E029
+
+infixl 6 +
+infixl 7 +
+
+sum(a Int)(b Int) = a + b

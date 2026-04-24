@@ -1,0 +1,7 @@
+module Example.CustomSymbolicFixity
+
+infixl 6 %%
+infixr 5 <~>
+infix 4 <=>
+
+value = 1

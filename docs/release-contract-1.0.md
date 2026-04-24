@@ -14,7 +14,7 @@ The following surface is covered by `1.0` compatibility guarantees:
 - Stable targets: `fs` (default), `ts`, `py`, `java`, `cs`.
 - Project mode (`lll.toml`, multi-file topo build, module checks).
 - Published error-code contract (`E001`, `E002`, `E003`, `E004`, `E005`,
-  `E007`, `E008`, `E020`, `E024`, `E025`, `E026`).
+  `E007`, `E008`, `E020`, `E024`, `E025`, `E026`, `E027`, `E028`, `E029`, `E030`).
 
 ## Experimental (Not Covered by 1.0 Guarantees)
 

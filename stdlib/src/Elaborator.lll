@@ -101,9 +101,11 @@ declName(d Decl) =
     | DLet name _ -> Some name
     | DType name _ _ -> Some name
     | DImport _ -> None
+    | DImportUrl _ -> None
     | DExport inner -> declName inner
     | DExternal name _ _ -> Some name
     | DOpaque _ -> None
+    | DFixity _ _ _ -> None
 
 addDeclName(acc List[Str])(d Decl) =
   match declName d
@@ -121,9 +123,11 @@ collectDecl(d Decl)(env Env) =
     | DLet name _ -> envAdd name env
     | DType _ _ ctors -> envAddAll (conNames ctors) env
     | DImport _ -> env
+    | DImportUrl _ -> env
     | DExport inner -> collectDecl inner env
     | DExternal name _ _ -> envAdd name env
     | DOpaque _ -> env
+    | DFixity _ _ _ -> env
 
 collectDecls(decls List[Decl])(env Env) =
   listFold (\acc d. collectDecl d acc) env decls
@@ -204,9 +208,11 @@ checkDecl(env Env)(d Decl) =
       checkExpr env body
     | DType _ _ _ -> []
     | DImport _ -> []
+    | DImportUrl _ -> []
     | DExport inner -> checkDecl env inner
     | DExternal _ _ _ -> []
     | DOpaque _ -> []
+    | DFixity _ _ _ -> []
 
 checkDecls(env Env)(decls List[Decl]) =
   listFold (\acc d. listAppend acc (checkDecl env d)) [] decls
@@ -220,6 +226,158 @@ checkDuplicates(decls List[Decl]) =
   names = collectDeclNames decls
   dups = findDuplicates names
   listMap (\name. makeDupError name) dups
+
+-- ---- Fixity declaration checks ---------------------------------------------
+
+fixityAssocName(a FixityAssoc) =
+  match a
+    | FixityLeft -> "infixl"
+    | FixityRight -> "infixr"
+    | FixityNone -> "infix"
+    | FixityInvalid -> "invalid"
+
+isValidFixityAssoc(a FixityAssoc) =
+  match a
+    | FixityLeft -> true
+    | FixityRight -> true
+    | FixityNone -> true
+    | FixityInvalid -> false
+
+isFixitySymbolChar(c Char) =
+  if c == '!'
+    true
+  else if c == '$'
+    true
+  else if c == '%'
+    true
+  else if c == '&'
+    true
+  else if c == '*'
+    true
+  else if c == '+'
+    true
+  else if c == '-'
+    true
+  else if c == '.'
+    true
+  else if c == '/'
+    true
+  else if c == ':'
+    true
+  else if c == '<'
+    true
+  else if c == '='
+    true
+  else if c == '>'
+    true
+  else if c == '?'
+    true
+  else if c == '@'
+    true
+  else if c == '^'
+    true
+  else if c == '|'
+    true
+  else if c == '~'
+    true
+  else false
+
+isFixitySymbolList(cs List[Char]) =
+  match cs
+    | [] -> true
+    | c :: rest ->
+      if isFixitySymbolChar c
+        isFixitySymbolList rest
+      else false
+
+containsDashDash(cs List[Char]) =
+  match cs
+    | a :: b :: rest ->
+      if a == '-'
+        if b == '-'
+          true
+        else
+          containsDashDash (b :: rest)
+      else
+        containsDashDash (b :: rest)
+    | _ -> false
+
+isReservedFixityOp(op Str) =
+  if op == "="
+    true
+  else if op == "|"
+    true
+  else if op == ":"
+    true
+  else if op == "."
+    true
+  else false
+
+fixityOpViolation(op Str) =
+  chars = strChars op
+  if op == "?"
+    Some "malformed-operator"
+  else if strLen op == 0
+    Some "empty-operator"
+  else if isReservedFixityOp op
+    Some "reserved-token"
+  else if isFixitySymbolList chars == false
+    Some "non-symbol-char"
+  else if containsDashDash chars
+    Some "comment-prefix"
+  else if strLen op > 8
+    Some "too-long"
+  else
+    None
+
+isValidFixityPrec(prec Int) =
+  if prec < 1
+    false
+  else if prec > 9
+    false
+  else true
+
+findDupFixityOpsAcc(xs List[Str])(seen List[Str]) =
+  match xs
+    | [] -> []
+    | x :: rest ->
+      if listContains x seen
+        x :: findDupFixityOpsAcc rest seen
+      else
+        findDupFixityOpsAcc rest (x :: seen)
+
+findDupFixityOps(xs List[Str]) =
+  findDupFixityOpsAcc xs []
+
+collectFixityOps(fixities List[FixityDecl]) =
+  match fixities
+    | [] -> []
+    | fx :: rest ->
+      tail = collectFixityOps rest
+      match fx
+        | MkFixity _ _ op -> op :: tail
+
+checkFixityDecl(fx FixityDecl) =
+  match fx
+    | MkFixity assoc prec op ->
+      if isValidFixityAssoc assoc == false
+        assocName = fixityAssocName assoc
+        [MkError (strConcat "E027 InvalidFixityAssoc assoc:" assocName)]
+      else if isValidFixityPrec prec == false
+        p1 = "E028 InvalidFixityPrecedence value:"
+        [MkError (strConcat p1 (intToStr prec))]
+      else
+        match fixityOpViolation op
+          | Some reason ->
+            p1 = strConcat "E030 ReservedOperatorFixity op:" op
+            [MkError (strConcat p1 (strConcat " reason:" reason))]
+          | None -> []
+
+checkFixityDecls(fixities List[FixityDecl]) =
+  perDeclErrs = listFold (\acc fx. listAppend acc (checkFixityDecl fx)) [] fixities
+  dupOps = findDupFixityOps (collectFixityOps fixities)
+  dupErrs = listMap (\op. MkError (strConcat "E029 DuplicateFixity op:" op)) dupOps
+  listAppend perDeclErrs dupErrs
 
 -- ---- Stdlib builtin names -------------------------------------------------
 -- All names provided by the F# prelude (Codegen.fsharpPrelude*).
@@ -241,6 +399,8 @@ builtinNames =
   "readFile" :: "writeFile" :: "fileExists" ::
   "exit" :: "getArgs" ::
   "maybeMap" :: "maybeBind" :: "maybeWithDefault" ::
+  "Some" :: "None" ::
+  "Bool" ::
   "true" :: "false" ::
   []
 
@@ -335,6 +495,7 @@ checkExhaustDecl(typeMap List[TypeEntry])(d Decl) =
     | DFn _ _ _ body -> checkExhaustExpr typeMap body
     | DLet _ body -> checkExhaustExpr typeMap body
     | DExport inner -> checkExhaustDecl typeMap inner
+    | DFixity _ _ _ -> []
     | _ -> []
 
 checkExhaustDecls(typeMap List[TypeEntry])(decls List[Decl]) =
@@ -342,16 +503,21 @@ checkExhaustDecls(typeMap List[TypeEntry])(decls List[Decl]) =
 
 -- ---- Top-level elaboration -------------------------------------------------
 
-elaborate(m Module) =
+elaborateWithNames(visibleNames List[Str])(m Module) =
   match m
-    | MkModule _ decls ->
-      builtinEnv = envAddAll builtinNames emptyEnv
+    | MkModule _ fixities decls ->
+      seedEnv = envAddAll visibleNames emptyEnv
+      builtinEnv = envAddAll builtinNames seedEnv
       env = collectDecls decls builtinEnv
       dupErrs = checkDuplicates decls
+      fixityErrs = checkFixityDecls fixities
       bodyErrs = checkDecls env decls
       typeMap = buildTypeMap decls
       exhaustErrs = checkExhaustDecls typeMap decls
-      listAppend dupErrs (listAppend bodyErrs exhaustErrs)
+      listAppend dupErrs (listAppend fixityErrs (listAppend bodyErrs exhaustErrs))
+
+elaborate(m Module) =
+  elaborateWithNames [] m
 
 -- ---- Test helpers ----------------------------------------------------------
 

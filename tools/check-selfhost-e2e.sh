@@ -63,6 +63,24 @@ grep -Eq 'module Smoke|let add' "$tmp_root/cmd.out" || fail "single-file fs comp
 run_self_capture "compile ts (single file)" compile --target ts "$main_file"
 grep -Eq 'function|const|type' "$tmp_root/cmd.out" || fail "single-file ts compile output mismatch"
 
+ops_fixture="$ROOT_DIR/spec/examples/valid/26-operators-precedence.lll"
+[[ -f "$ops_fixture" ]] || fail "missing operators fixture: $ops_fixture"
+
+check_no_raw_operator_tokens() {
+  local file="$1"
+  local target="$2"
+  for token in " |> " " >>= " " >> " " <|> "; do
+    if grep -Fq "$token" "$file"; then
+      fail "raw operator token leaked in target $target output: '$token'"
+    fi
+  done
+}
+
+for target in ts py java cs; do
+  run_self_capture "compile $target operators fixture" compile --target "$target" "$ops_fixture"
+  check_no_raw_operator_tokens "$tmp_root/cmd.out" "$target"
+done
+
 project_name="sampleapp"
 (
   cd "$tmp_root"
@@ -117,6 +135,12 @@ self_main = sys.argv[2]
 root_dir = sys.argv[3]
 env = os.environ.copy()
 env["LLLC_SELF_MAIN"] = self_main
+fixity_fixture = os.path.join(root_dir, "spec/examples/valid/27-fixity-decls.lll")
+with open(fixity_fixture, "r", encoding="utf-8") as f:
+    fixity_source = f.read()
+custom_fixity_fixture = os.path.join(root_dir, "spec/examples/valid/28-custom-symbolic-fixity.lll")
+with open(custom_fixity_fixture, "r", encoding="utf-8") as f:
+    custom_fixity_source = f.read()
 p = subprocess.Popen(
     [lllc, "mcp"],
     stdin=subprocess.PIPE,
@@ -132,6 +156,8 @@ wire = "\n".join(
         json.dumps({"jsonrpc": "2.0", "method": "initialized", "params": {}}),
         json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}),
         json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "ffi_inspect", "arguments": {"path": os.path.join(root_dir, "spec/examples/valid/23-external-opaque.lll")}}}),
+        json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "parse_source", "arguments": {"source": fixity_source}}}),
+        json.dumps({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "parse_source", "arguments": {"source": custom_fixity_source}}}),
     ]
 ) + "\n"
 
@@ -148,6 +174,8 @@ except subprocess.TimeoutExpired as ex:
 ok_init = False
 ok_tools = False
 ok_ffi = False
+ok_parse_fixity = False
+ok_parse_custom_fixity = False
 for line in stdout.splitlines():
     line = line.strip()
     if not line:
@@ -169,10 +197,44 @@ for line in stdout.splitlines():
             and int(res.get("external_count", 0)) >= 1
         ):
             ok_ffi = True
-if not (ok_init and ok_tools and ok_ffi):
+    if obj.get("id") == 4 and "result" in obj:
+        res = obj["result"]
+        if (
+            isinstance(res, dict)
+            and res.get("ok") is True
+            and int(res.get("fixity_count", 0)) >= 1
+            and isinstance(res.get("fixities"), list)
+            and any(
+                isinstance(fx, dict)
+                and fx.get("assoc") == "infixl"
+                and int(fx.get("precedence", -1)) == 6
+                and fx.get("operator") == "+"
+                for fx in res["fixities"]
+            )
+        ):
+            ok_parse_fixity = True
+    if obj.get("id") == 5 and "result" in obj:
+        res = obj["result"]
+        if (
+            isinstance(res, dict)
+            and res.get("ok") is True
+            and int(res.get("fixity_count", 0)) >= 3
+            and isinstance(res.get("fixities"), list)
+            and any(
+                isinstance(fx, dict)
+                and fx.get("assoc") == "infixl"
+                and int(fx.get("precedence", -1)) == 6
+                and fx.get("operator") == "%%"
+                for fx in res["fixities"]
+            )
+        ):
+            ok_parse_custom_fixity = True
+if not (ok_init and ok_tools and ok_ffi and ok_parse_fixity and ok_parse_custom_fixity):
+    if stdout.strip():
+        print(stdout, file=sys.stderr)
     if stderr.strip():
         print(stderr, file=sys.stderr)
-    raise SystemExit("MCP handshake/tools-list/ffi-inspect failed")
+    raise SystemExit("MCP handshake/tools-list/ffi-inspect/parse-source-fixity failed")
 PY
 
 echo "check-selfhost-e2e: OK"
