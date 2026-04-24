@@ -634,6 +634,8 @@ emitDecl(d Decl)(strIdx Int) =
       strConcat "declare " (strConcat retType (strConcat " @" (strConcat extName (strConcat "(" (strConcat paramStr ")")))))
     | DOpaque name ->
       strConcat "; opaque: " name
+    | DFixity _ _ _ ->
+      ""
 
 emitDecls(ds List[Decl])(strIdx Int) =
   match ds
@@ -652,7 +654,7 @@ emitModulePath(parts List[Str]) =
 
 emitModule(m Module) =
   match m
-    | MkModule path decls ->
+    | MkModule path _fixities decls ->
       pathStr = emitModulePath path
       header = strConcat "; module " pathStr
       prelude = "; ll-lang LLVM IR output\n; target triple: x86_64-unknown-linux-gnu\n"
@@ -735,7 +737,7 @@ main =
 
   -- 15. emitModule header
   modDecls = DFn "id" idParams None (EVar "x") :: []
-  modOut = emitModule (MkModule ("Test" :: "LLVM" :: []) modDecls)
+  modOut = emitModule (MkModule ("Test" :: "LLVM" :: []) [] modDecls)
   _ = checkContains "15 module prelude" modOut "ll-lang LLVM IR output"
   _ = checkContains "15 module target" modOut "x86_64-unknown-linux-gnu"
   _ = checkContains "15 module name" modOut "module Test.LLVM"

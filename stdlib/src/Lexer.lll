@@ -16,6 +16,7 @@ export Token =
   | KwLet | KwTag | KwUnit
   | KwTrait | KwImpl | KwImport | KwExport | KwModule
   | KwExternal | KwOpaque
+  | KwInfix | KwInfixL | KwInfixR
   | KwIf | KwElse | KwTrue | KwFalse
   | KwMatch
   -- Identifiers
@@ -113,6 +114,9 @@ classifyIdent(s Str) =
     | "module"   -> KwModule
     | "external" -> KwExternal
     | "opaque"   -> KwOpaque
+    | "infix"    -> KwInfix
+    | "infixl"   -> KwInfixL
+    | "infixr"   -> KwInfixR
     | "if"     -> KwIf
     | "else"   -> KwElse
     | "true"   -> KwTrue
@@ -393,6 +397,11 @@ showToken(t Token) =
     | KwImport -> "KwImport"
     | KwExport -> "KwExport"
     | KwModule -> "KwModule"
+    | KwExternal -> "KwExternal"
+    | KwOpaque -> "KwOpaque"
+    | KwInfix -> "KwInfix"
+    | KwInfixL -> "KwInfixL"
+    | KwInfixR -> "KwInfixR"
     | KwIf     -> "KwIf"
     | KwElse   -> "KwElse"
     | KwTrue   -> "KwTrue"
@@ -492,4 +501,9 @@ main =
   _ = checkTokens "17 let" "let" "KwLet Eof"
   _ = checkTokens "18 module" "module" "KwModule Eof"
   _ = checkTokens "19 import" "import" "KwImport Eof"
+  _ = checkTokens "20 external" "external" "KwExternal Eof"
+  _ = checkTokens "21 opaque" "opaque" "KwOpaque Eof"
+  _ = checkTokens "22 infix" "infix" "KwInfix Eof"
+  _ = checkTokens "23 infixl" "infixl" "KwInfixL Eof"
+  _ = checkTokens "24 infixr" "infixr" "KwInfixR Eof"
   printfn "Done"

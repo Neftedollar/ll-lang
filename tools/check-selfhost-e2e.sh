@@ -63,6 +63,24 @@ grep -Eq 'module Smoke|let add' "$tmp_root/cmd.out" || fail "single-file fs comp
 run_self_capture "compile ts (single file)" compile --target ts "$main_file"
 grep -Eq 'function|const|type' "$tmp_root/cmd.out" || fail "single-file ts compile output mismatch"
 
+ops_fixture="$ROOT_DIR/spec/examples/valid/26-operators-precedence.lll"
+[[ -f "$ops_fixture" ]] || fail "missing operators fixture: $ops_fixture"
+
+check_no_raw_operator_tokens() {
+  local file="$1"
+  local target="$2"
+  for token in " |> " " >>= " " >> " " <|> "; do
+    if grep -Fq "$token" "$file"; then
+      fail "raw operator token leaked in target $target output: '$token'"
+    fi
+  done
+}
+
+for target in ts py java cs; do
+  run_self_capture "compile $target operators fixture" compile --target "$target" "$ops_fixture"
+  check_no_raw_operator_tokens "$tmp_root/cmd.out" "$target"
+done
+
 project_name="sampleapp"
 (
   cd "$tmp_root"
