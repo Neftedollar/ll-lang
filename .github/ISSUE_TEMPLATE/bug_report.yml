@@ -1,0 +1,83 @@
+name: Bug Report
+description: Report a beta bug in the compiler, CLI, docs, or install flow.
+title: "[Bug]: "
+labels:
+  - beta-feedback
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing ll-lang. Please include the smallest repro you can so we can route this quickly.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Where did the bug show up?
+      options:
+        - Compiler
+        - CLI / bootstrap installer
+        - MCP server / editor integration
+        - Docs / onboarding
+        - Generated output
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How badly does this block you?
+      options:
+        - Critical - blocked from continuing
+        - High - major workflow break
+        - Medium - workaround exists
+        - Low - nuisance / polish
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: Describe the bug in one or two short paragraphs.
+      placeholder: I expected `lllc check` to succeed, but it failed with...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal repro
+      description: Paste the smallest command sequence, config, or source file that reproduces the issue.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+      placeholder: The command should complete successfully and emit...
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Logs or diagnostics
+      description: Include stack traces, error codes, screenshots, or terminal output if useful.
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, shell, ll-lang version/commit, and any editor or model involved.
+      placeholder: Ubuntu 24.04, zsh 5.9, main@abc123, Claude Code
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Why this matters
+      description: Tell us what you were trying to accomplish and what this blocked.
+      placeholder: I was evaluating ll-lang for...
+    validations:
+      required: false
