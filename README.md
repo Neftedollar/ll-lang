@@ -6,7 +6,7 @@
 
 > **A statically-typed functional language designed for LLM code generation.** Token-efficient syntax, compiled = works, errors formatted for LLMs to read directly.
 
-Landing page: https://neftedollar.github.io/ll-lang/ · Why ll-lang: [docs/why-ll-lang.md](docs/why-ll-lang.md) · Language spec: [docs/language-spec.md](docs/language-spec.md)
+Landing page: https://neftedollar.com/ll-lang/ · Why ll-lang: [docs/why-ll-lang.md](docs/why-ll-lang.md) · Language spec: [docs/language-spec.md](docs/language-spec.md)
 
 ```
 module Hello
@@ -82,7 +82,7 @@ lllc run hello.lll
 
 ### Try it in your browser
 
-**[→ Open the ll-lang Playground](https://neftedollar.github.io/ll-lang/playground/)**
+**[→ Open the ll-lang Playground](https://neftedollar.com/ll-lang/playground/)**
 
 Write ll-lang code and run it instantly — no install needed.
 

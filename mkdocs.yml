@@ -1,6 +1,6 @@
 site_name: ll-lang
 site_description: Statically-typed functional language for LLM code generation
-site_url: https://neftedollar.github.io/ll-lang/
+site_url: https://neftedollar.com/ll-lang/
 repo_url: https://github.com/Neftedollar/ll-lang
 repo_name: Neftedollar/ll-lang
 
