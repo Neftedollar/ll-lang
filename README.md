@@ -2,7 +2,11 @@
 
 [![Self-host CI](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml/badge.svg)](https://github.com/Neftedollar/ll-lang/actions/workflows/build.yml)
 
+![ll-lang hero: TypeScript versus ll-lang token comparison](docs/assets/hero/hero-story.gif)
+
 > **A statically-typed functional language designed for LLM code generation.** Token-efficient syntax, compiled = works, errors formatted for LLMs to read directly.
+
+Landing page: https://neftedollar.github.io/ll-lang/ · Why ll-lang: [docs/why-ll-lang.md](docs/why-ll-lang.md) · Language spec: [docs/language-spec.md](docs/language-spec.md)
 
 ```
 module Hello
@@ -60,6 +64,31 @@ Current release line: **1.0.0**.
 | **10** | **Multi-platform codegen** — `lllc build --target ts\|py\|java\|cs\|llvm`; TypeScript DU + Python @dataclass + Java sealed interfaces + C# records + LLVM IR (`llvm` is experimental subset in 1.0) | ✅ |
 
 ## Getting Started
+
+[Leave beta feedback →](https://github.com/Neftedollar/ll-lang/discussions)
+
+### One-line install (Linux / macOS)
+
+```sh
+curl -sSL https://raw.githubusercontent.com/Neftedollar/ll-lang/main/install.sh | sh
+```
+
+Downloads the pinned `lllc` binary, verifies sha256, and installs to `~/.local/bin/lllc`.
+No .NET, no Docker, no cloning required.
+
+```bash
+lllc run hello.lll
+```
+
+### Try it in your browser
+
+**[→ Open the ll-lang Playground](https://neftedollar.github.io/ll-lang/playground/)**
+
+Write ll-lang code and run it instantly — no install needed.
+
+---
+
+### From source (bootstrap path)
 
 Bootstrap path (default) does not require .NET.
 
