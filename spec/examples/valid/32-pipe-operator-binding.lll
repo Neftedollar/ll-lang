@@ -1,0 +1,7 @@
+module Example.PipeAliasNormalization
+
+inc(x Int) Int = x + 1
+
+dbl(x Int) Int = x * 2
+
+sample = 2 |> inc |> dbl

@@ -29,16 +29,17 @@ showErrors(errs List[ElabError]) =
 compile(src Str) =
   tokens = tokenize src
   ast = parseModule tokens
-  elabErrs = elaborate ast
+  normAst = normalizeModule ast
+  elabErrs = elaborate normAst
   if listIsEmpty elabErrs
-    emitModule ast
+    emitModule normAst
   else
     showErrors elabErrs
 
 collectErrors(src Str) =
   tokens = tokenize src
   ast = parseModule tokens
-  elaborate ast
+  elaborate (normalizeModule ast)
 
 firstErrorMessage(errs List[ElabError]) =
   match errs
@@ -61,7 +62,7 @@ checkCompact(src Str) =
 checkCompactWithVisible(src Str)(visibleNames List[Str]) =
   tokens = tokenize src
   ast = parseModule tokens
-  errors = elaborateWithNames visibleNames ast
+  errors = elaborateWithNames visibleNames (normalizeModule ast)
   if listIsEmpty errors
     "{\"ok\":true,\"stage\":\"ok\",\"primary_error\":\"\",\"secondary_count\":0}"
   else
@@ -342,9 +343,10 @@ compileFiles(srcs List[Str])(visibleNames List[Str])(env RBMap[Str][Scheme]) =
     | src :: rest ->
       tokens = tokenize src
       ast = parseModule tokens
-      elabErrs = elaborateWithNames visibleNames ast
+      normAst = normalizeModule ast
+      elabErrs = elaborateWithNames visibleNames normAst
       if listIsEmpty elabErrs
-        match ast
+        match normAst
           | MkModule _ _ decls ->
             visible2 = listAppend visibleNames (collectVisibleNames decls)
             let (typeErrs, env2) = inferModuleStep env decls
@@ -373,9 +375,10 @@ elaborateFiles(srcs List[Str])(visibleNames List[Str]) =
     | src :: rest ->
       tokens = tokenize src
       ast = parseModule tokens
-      elabErrs = elaborateWithNames visibleNames ast
+      normAst = normalizeModule ast
+      elabErrs = elaborateWithNames visibleNames normAst
       if listIsEmpty elabErrs
-        match ast
+        match normAst
           | MkModule _ _ decls ->
             visible2 = listAppend visibleNames (collectVisibleNames decls)
             elaborateFiles rest visible2
@@ -402,13 +405,14 @@ showTypeErrors(errs List[Str]) =
 compileWithInfer(src Str) =
   tokens = tokenize src
   ast = parseModule tokens
-  elabErrs = elaborate ast
+  normAst = normalizeModule ast
+  elabErrs = elaborate normAst
   if listIsEmpty elabErrs
-    match ast
+    match normAst
       | MkModule _ _ decls ->
         typeErrs = inferModule decls
         if listIsEmpty typeErrs
-          emitModule ast
+          emitModule normAst
         else
           showTypeErrors typeErrs
   else
@@ -418,9 +422,10 @@ compileWithInfer(src Str) =
 collectAllErrors(src Str) =
   tokens = tokenize src
   ast = parseModule tokens
-  elabErrs = elaborate ast
+  normAst = normalizeModule ast
+  elabErrs = elaborate normAst
   if listIsEmpty elabErrs
-    match ast
+    match normAst
       | MkModule _ _ decls -> inferModule decls
   else
     listMap errMsg elabErrs
@@ -429,9 +434,10 @@ collectAllErrors(src Str) =
 nextBlockerFull(src Str) =
   tokens = tokenize src
   ast = parseModule tokens
-  elabErrs = elaborate ast
+  normAst = normalizeModule ast
+  elabErrs = elaborate normAst
   if listIsEmpty elabErrs
-    match ast
+    match normAst
       | MkModule _ _ decls ->
         typeErrs = inferModule decls
         if listIsEmpty typeErrs

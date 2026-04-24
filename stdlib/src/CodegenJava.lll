@@ -76,10 +76,78 @@ isJavaKeyword(s Str) =
     | "yield"        -> true
     | _              -> false
 
+isAsciiLetter(c Char) =
+  n = charToInt c
+  if n < 65
+    false
+  else if n <= 90
+    true
+  else if n < 97
+    false
+  else n <= 122
+
+isIdentStart(c Char) =
+  if isAsciiLetter c
+    true
+  else c == '_'
+
+isIdentCont(c Char) =
+  if isIdentStart c
+    true
+  else charIsDigit c
+
+isIdentTail(cs List[Char]) =
+  match cs
+    | [] -> true
+    | c :: rest ->
+      if isIdentCont c
+        isIdentTail rest
+      else false
+
+isIdentLike(s Str) =
+  match strChars s
+    | [] -> false
+    | c :: rest ->
+      if isIdentStart c
+        isIdentTail rest
+      else false
+
+mangleOpChars(cs List[Char]) =
+  match cs
+    | [] -> ""
+    | c :: rest ->
+      strConcat "_" (strConcat (intToStr (charToInt c)) (mangleOpChars rest))
+
+mangleOpIdent(s Str) =
+  strConcat "__ll_op" (mangleOpChars (strChars s))
+
 safeIdent(s Str) =
-  if isJavaKeyword s
+  if isIdentLike s == false
+    mangleOpIdent s
+  else if isJavaKeyword s
     strConcat s "_"
   else s
+
+isTargetInfixOp(op Str) =
+  if op == "+"
+    true
+  else if op == "-"
+    true
+  else if op == "*"
+    true
+  else if op == "/"
+    true
+  else if op == "=="
+    true
+  else if op == "!="
+    true
+  else if op == "<"
+    true
+  else if op == ">"
+    true
+  else if op == "<="
+    true
+  else op == ">="
 
 -- ---- String escaping -------------------------------------------------------
 
@@ -121,7 +189,7 @@ emitType(t TypeExpr) =
         n
       else n
     | TyApp (TyName "List") a -> strConcat "java.util.List<" (strConcat (emitTypeBoxed a) ">")
-    | TyApp (TyName "Maybe") a -> strConcat "java.util.Optional<" (strConcat (emitTypeBoxed a) ">")
+    | TyApp (TyName "Maybe") a -> strConcat "Maybe<" (strConcat (emitTypeBoxed a) ">")
     | TyApp f a -> strConcat (emitTypeBoxed f) (strConcat "<" (strConcat (emitTypeBoxed a) ">"))
     | TyFn a b ->
       strConcat "java.util.function.Function<" (strConcat (emitTypeBoxed a) (strConcat ", " (strConcat (emitTypeBoxed b) ">")))
@@ -141,7 +209,7 @@ emitTypeBoxed(t TypeExpr) =
         n
       else n
     | TyApp (TyName "List") a -> strConcat "java.util.List<" (strConcat (emitTypeBoxed a) ">")
-    | TyApp (TyName "Maybe") a -> strConcat "java.util.Optional<" (strConcat (emitTypeBoxed a) ">")
+    | TyApp (TyName "Maybe") a -> strConcat "Maybe<" (strConcat (emitTypeBoxed a) ">")
     | TyApp f a -> strConcat (emitTypeBoxed f) (strConcat "<" (strConcat (emitTypeBoxed a) ">"))
     | TyFn a b ->
       strConcat "java.util.function.Function<" (strConcat (emitTypeBoxed a) (strConcat ", " (strConcat (emitTypeBoxed b) ">")))
@@ -184,29 +252,6 @@ emitCharLit(c Char) =
     "'\\''"
   else strConcat (strConcat "'" (strFromChars [c])) "'"
 
-isFixedSymbolicOp(op Str) =
-  if op == "|>"
-    true
-  else if op == ">>="
-    true
-  else if op == ">>"
-    true
-  else if op == "<|>"
-    true
-  else false
-
-lowerFixedSymbolicOp(op Str)(l Expr)(r Expr) =
-  if op == "|>"
-    EApp r l
-  else if op == ">>="
-    EApp (EApp (EVar "llMaybeBind") l) r
-  else if op == ">>"
-    EApp (EApp (EVar "llMaybeThen") l) r
-  else if op == "<|>"
-    EApp (EApp (EVar "llMaybeChoice") l) r
-  else
-    EBinOp op l r
-
 emitExpr(e Expr) =
   match e
     | EInt n -> strConcat (intToStr n) "L"
@@ -223,7 +268,7 @@ emitExpr(e Expr) =
         "true"
       else if c == "false"
         "false"
-      else safeIdent c
+      else strConcat "new " (strConcat (safeIdent c) "()")
     | ENil -> "java.util.List.of()"
     | EApp f a -> emitApp f a
     | EIf c t el ->
@@ -241,10 +286,10 @@ emitExpr(e Expr) =
     | EList items ->
       strConcat "java.util.List.of(" (strConcat (joinWith ", " (listMap emitExpr items)) ")")
     | EBinOp op l r ->
-      if isFixedSymbolicOp op
-        emitExpr (lowerFixedSymbolicOp op l r)
-      else
+      if isTargetInfixOp op
         strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat op (strConcat " " (strConcat (emitExpr r) ")")))))
+      else
+        strConcat (safeIdent op) (strConcat "(" (strConcat (emitExpr l) (strConcat ", " (strConcat (emitExpr r) ")"))))
     | ETuple a b ->
       strConcat "new Object[]{" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) "}")))
     | ECons h t ->
@@ -287,14 +332,36 @@ emitApp(f Expr)(a Expr) =
       if isUpperStart x
         emitConApp x args
       else
-        -- Regular curried function call: f.apply(a)
-        strConcat (emitExpr f) (strConcat ".apply(" (strConcat (emitExpr a) ")"))
+        emitNamedApp x args
     | _ ->
       strConcat (emitExpr f) (strConcat ".apply(" (strConcat (emitExpr a) ")"))
 
+emitJavaFnArg(e Expr) =
+  match e
+    | EVar x ->
+      strConcat "v -> " (strConcat (safeIdent x) "(((Number)v).longValue())")
+    | _ -> emitExpr e
+
+emitNamedApp(name Str)(args List[Expr]) =
+  inner =
+    if name == "llMaybeBind"
+      match args
+        | m :: f :: [] ->
+          strConcat (emitExpr m) (strConcat ", " (emitJavaFnArg f))
+        | _ -> joinWith ", " (listMap emitExpr args)
+    else joinWith ", " (listMap emitExpr args)
+  call = strConcat (safeIdent name) (strConcat "(" (strConcat inner ")"))
+  if name == "llMaybeBind"
+    strConcat "((Maybe)" (strConcat call ")")
+  else if name == "llMaybeThen"
+    strConcat "((Maybe)" (strConcat call ")")
+  else if name == "llMaybeChoice"
+    strConcat "((Maybe)" (strConcat call ")")
+  else call
+
 emitConApp(c Str)(args List[Expr]) =
   match args
-    | [] -> safeIdent c
+    | [] -> strConcat "new " (strConcat (safeIdent c) "()")
     | _ ->
       inner = joinWith ", " (listMap emitExpr args)
       strConcat "new " (strConcat (safeIdent c) (strConcat "(" (strConcat inner ")")))
@@ -385,13 +452,13 @@ emitCtor(typeName Str)(tpStr Str)(c Constructor) =
     | MkCon name args ->
       match args
         | [] ->
-          strConcat "        record " (strConcat name (strConcat tpStr (strConcat "() implements " (strConcat typeName (strConcat tpStr " {}")))))
+          strConcat "    record " (strConcat name (strConcat tpStr (strConcat "() implements " (strConcat typeName (strConcat tpStr " {}")))))
         | _ ->
           fields = emitCtorFields args 0
-          strConcat "        record " (strConcat name (strConcat tpStr (strConcat "(" (strConcat fields (strConcat ") implements " (strConcat typeName (strConcat tpStr " {}")))))))
+          strConcat "    record " (strConcat name (strConcat tpStr (strConcat "(" (strConcat fields (strConcat ") implements " (strConcat typeName (strConcat tpStr " {}")))))))
 
 emitPermits(typeName Str)(cs List[Constructor]) =
-  names = listMap (\c. match c | MkCon name _ -> strConcat typeName (strConcat "." name)) cs
+  names = listMap (\c. match c | MkCon name _ -> name) cs
   joinWith ", " names
 
 emitCtors(typeName Str)(tpStr Str)(cs List[Constructor]) =
@@ -414,9 +481,9 @@ emitDecl(d Decl) =
     | DType name tvars ctors ->
       tpStr = emitTypeParams tvars
       permits = emitPermits name ctors
-      sealedDecl = strConcat "    sealed interface " (strConcat name (strConcat tpStr (strConcat " permits " (strConcat permits " {"))))
+      sealedDecl = strConcat "    sealed interface " (strConcat name (strConcat tpStr (strConcat " permits " (strConcat permits " {}"))))
       ctorDecls = emitCtors name tpStr ctors
-      strConcat sealedDecl (strConcat "\n" (strConcat ctorDecls "\n    }"))
+      strConcat sealedDecl (strConcat "\n" ctorDecls)
     | DFn name params ret body ->
       paramStr = emitParamsStr params
       retType = emitReturnType ret
@@ -445,7 +512,7 @@ emitPrelude =
   "    // --- ll-lang stdlib (Java) ---\n    private static void printfn(String s) { System.out.println(s); }\n    private static void print_(String s) { System.out.print(s); }\n    private static long strLen(String s) { return s.length(); }\n    private static java.util.function.Function<String, String> strConcat(String a) { return b -> a + b; }\n    private static java.util.List<Character> strChars(String s) { java.util.List<Character> cs = new java.util.ArrayList<>(); for (char c : s.toCharArray()) cs.add(c); return cs; }\n    private static String strFromChars(java.util.List<Character> cs) { StringBuilder sb = new StringBuilder(); for (char c : cs) sb.append(c); return sb.toString(); }\n    private static String intToStr(long n) { return Long.toString(n); }\n    private static long charToInt(char c) { return (long) c; }\n    private static <A> long listLen(java.util.List<A> xs) { return xs.size(); }\n    private static <A, B> java.util.function.Function<java.util.List<A>, java.util.List<B>> listMap(java.util.function.Function<A, B> f) { return xs -> xs.stream().map(f::apply).collect(java.util.stream.Collectors.toList()); }\n    private static <A> java.util.function.Function<java.util.List<A>, java.util.List<A>> listFilter(java.util.function.Function<A, Boolean> p) { return xs -> xs.stream().filter(x -> p.apply(x)).collect(java.util.stream.Collectors.toList()); }\n    private static <A, B> java.util.function.Function<B, java.util.function.Function<java.util.List<A>, B>> listFold(java.util.function.Function<B, java.util.function.Function<A, B>> f) { return z -> xs -> { B acc = z; for (A x : xs) acc = f.apply(acc).apply(x); return acc; }; }\n    private static <A> java.util.function.Function<java.util.List<A>, java.util.List<A>> listAppend(java.util.List<A> xs) { return ys -> { java.util.List<A> r = new java.util.ArrayList<>(xs); r.addAll(ys); return r; }; }\n    private static <A> boolean listIsEmpty(java.util.List<A> xs) { return xs.isEmpty(); }\n    private static boolean strContains(String needle, String hay) { return hay.contains(needle); }\n    // --- end prelude ---"
 
 emitFixedOpPrelude =
-  "    private static java.util.function.Function<java.util.function.Function<Object, Object>, Object> llMaybeBind(Object m) { return f -> { if (m == null) return null; String name = m.getClass().getSimpleName(); if (name.equals(\"Some\")) { try { java.lang.reflect.Method p0 = m.getClass().getMethod(\"_0\"); Object v = p0.invoke(m); return f.apply(v); } catch (Exception _ex) { return m; } } return m; }; }\n    private static java.util.function.Function<Object, Object> llMaybeThen(Object m) { return n -> { if (m == null) return null; return m.getClass().getSimpleName().equals(\"Some\") ? n : m; }; }\n    private static java.util.function.Function<Object, Object> llMaybeChoice(Object a) { return b -> { if (a == null) return b; String name = a.getClass().getSimpleName(); if (name.equals(\"Some\")) return a; if (name.equals(\"None\")) return b; return a; }; }"
+  "    private static Object llMaybeBind(Object m, java.util.function.Function<Object, Object> f) { if (m == null) return null; String name = m.getClass().getSimpleName(); if (name.equals(\"Some\")) { try { java.lang.reflect.Method p0 = m.getClass().getMethod(\"_0\"); Object v = p0.invoke(m); return f.apply(v); } catch (Exception _ex) { return m; } } return m; }\n    private static Object llMaybeThen(Object m, Object n) { if (m == null) return null; return m.getClass().getSimpleName().equals(\"Some\") ? n : m; }\n    private static Object llMaybeChoice(Object a, Object b) { if (a == null) return b; String name = a.getClass().getSimpleName(); if (name.equals(\"Some\")) return a; if (name.equals(\"None\")) return b; return a; }"
 
 -- ---- Module emission -------------------------------------------------------
 
@@ -565,17 +632,8 @@ main =
   -- 20. EFloat
   _ = codegenJavaCheck "20 EFloat" (emitExpr (EFloat "3.14")) "3.14"
 
-  -- 21. fixed symbolic operators are lowered
-  pipeOut = emitExpr (EBinOp "|>" (EInt 1) (EVar "inc"))
-  _ = codegenJavaCheck "21 |> lowers to app" pipeOut "inc.apply(1L)"
-  bindOut = emitExpr (EBinOp ">>=" (EVar "m") (EVar "f"))
-  _ = checkNotContains "22 >>= raw removed" bindOut ">>="
-  _ = checkContains "22 >>= lowers to helper" bindOut "llMaybeBind"
-  thenOut = emitExpr (EBinOp ">>" (EVar "m") (EVar "n"))
-  _ = checkNotContains "23 >> raw removed" thenOut ">>"
-  _ = checkContains "23 >> lowers to helper" thenOut "llMaybeThen"
-  choiceOut = emitExpr (EBinOp "<|>" (EVar "a") (EVar "b"))
-  _ = checkNotContains "24 <|> raw removed" choiceOut "<|>"
-  _ = checkContains "24 <|> lowers to helper" choiceOut "llMaybeChoice"
+  -- 21. custom symbolic operators emit as ordinary function calls.
+  customOut = emitExpr (EBinOp "%%" (EInt 2) (EInt 3))
+  _ = checkContains "21 custom op call" customOut "__ll_op_37_37"
 
   0

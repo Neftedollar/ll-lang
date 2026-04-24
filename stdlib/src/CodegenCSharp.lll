@@ -100,10 +100,78 @@ isCSharpKeyword(s Str) =
     | "with"       -> true
     | _            -> false
 
+isAsciiLetter(c Char) =
+  n = charToInt c
+  if n < 65
+    false
+  else if n <= 90
+    true
+  else if n < 97
+    false
+  else n <= 122
+
+isIdentStart(c Char) =
+  if isAsciiLetter c
+    true
+  else c == '_'
+
+isIdentCont(c Char) =
+  if isIdentStart c
+    true
+  else charIsDigit c
+
+isIdentTail(cs List[Char]) =
+  match cs
+    | [] -> true
+    | c :: rest ->
+      if isIdentCont c
+        isIdentTail rest
+      else false
+
+isIdentLike(s Str) =
+  match strChars s
+    | [] -> false
+    | c :: rest ->
+      if isIdentStart c
+        isIdentTail rest
+      else false
+
+mangleOpChars(cs List[Char]) =
+  match cs
+    | [] -> ""
+    | c :: rest ->
+      strConcat "_" (strConcat (intToStr (charToInt c)) (mangleOpChars rest))
+
+mangleOpIdent(s Str) =
+  strConcat "__ll_op" (mangleOpChars (strChars s))
+
 safeIdent(s Str) =
-  if isCSharpKeyword s
+  if isIdentLike s == false
+    mangleOpIdent s
+  else if isCSharpKeyword s
     strConcat s "_"
   else s
+
+isTargetInfixOp(op Str) =
+  if op == "+"
+    true
+  else if op == "-"
+    true
+  else if op == "*"
+    true
+  else if op == "/"
+    true
+  else if op == "=="
+    true
+  else if op == "!="
+    true
+  else if op == "<"
+    true
+  else if op == ">"
+    true
+  else if op == "<="
+    true
+  else op == ">="
 
 safeTypeIdent(s Str) =
   match strChars s
@@ -220,29 +288,6 @@ emitCharLit(c Char) =
     "'\\''"
   else strConcat (strConcat "'" (strFromChars [c])) "'"
 
-isFixedSymbolicOp(op Str) =
-  if op == "|>"
-    true
-  else if op == ">>="
-    true
-  else if op == ">>"
-    true
-  else if op == "<|>"
-    true
-  else false
-
-lowerFixedSymbolicOp(op Str)(l Expr)(r Expr) =
-  if op == "|>"
-    EApp r l
-  else if op == ">>="
-    EApp (EApp (EVar "llMaybeBind") l) r
-  else if op == ">>"
-    EApp (EApp (EVar "llMaybeThen") l) r
-  else if op == "<|>"
-    EApp (EApp (EVar "llMaybeChoice") l) r
-  else
-    EBinOp op l r
-
 emitExpr(e Expr) =
   match e
     | EInt n -> strConcat (intToStr n) "L"
@@ -259,7 +304,7 @@ emitExpr(e Expr) =
         "true"
       else if c == "false"
         "false"
-      else strConcat "new LLLang." (strConcat (safeTypeIdent c) "()")
+      else strConcat "new " (strConcat (safeTypeIdent c) "()")
     | ENil -> "new System.Collections.Generic.List<object>()"
     | EApp f a -> emitApp f a
     | EIf c t el ->
@@ -278,10 +323,10 @@ emitExpr(e Expr) =
     | EList items ->
       strConcat "new System.Collections.Generic.List<object> { " (strConcat (joinWith ", " (listMap emitExpr items)) " }")
     | EBinOp op l r ->
-      if isFixedSymbolicOp op
-        emitExpr (lowerFixedSymbolicOp op l r)
-      else
+      if isTargetInfixOp op
         strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat op (strConcat " " (strConcat (emitExpr r) ")")))))
+      else
+        strConcat (safeIdent op) (strConcat "(" (strConcat (emitExpr l) (strConcat ", " (strConcat (emitExpr r) ")"))))
     | ETuple a b ->
       strConcat "(" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) ")")))
     | ECons h t ->
@@ -322,16 +367,39 @@ emitApp(f Expr)(a Expr) =
       if isUpperStart x
         emitConApp x args
       else
-        strConcat (emitExpr f) (strConcat "(" (strConcat (emitExpr a) ")"))
+        emitNamedApp x args
     | _ ->
       strConcat (emitExpr f) (strConcat "(" (strConcat (emitExpr a) ")"))
 
+emitCSharpFnArg(e Expr) =
+  match e
+    | EVar x ->
+      strConcat "v => " (strConcat (safeIdent x) "((long)v!)")
+    | _ -> emitExpr e
+
+emitNamedApp(name Str)(args List[Expr]) =
+  inner =
+    if name == "llMaybeBind"
+      match args
+        | m :: f :: [] ->
+          strConcat (emitExpr m) (strConcat ", " (emitCSharpFnArg f))
+        | _ -> joinWith ", " (listMap emitExpr args)
+    else joinWith ", " (listMap emitExpr args)
+  call = strConcat (safeIdent name) (strConcat "(" (strConcat inner ")"))
+  if name == "llMaybeBind"
+    strConcat "((Maybe)" (strConcat call "!)")
+  else if name == "llMaybeThen"
+    strConcat "((Maybe)" (strConcat call "!)")
+  else if name == "llMaybeChoice"
+    strConcat "((Maybe)" (strConcat call "!)")
+  else call
+
 emitConApp(c Str)(args List[Expr]) =
   match args
-    | [] -> strConcat "new LLLang." (strConcat (safeTypeIdent c) "()")
+    | [] -> strConcat "new " (strConcat (safeTypeIdent c) "()")
     | _ ->
       inner = joinWith ", " (listMap emitExpr args)
-      strConcat "new LLLang." (strConcat (safeTypeIdent c) (strConcat "(" (strConcat inner ")")))
+      strConcat "new " (strConcat (safeTypeIdent c) (strConcat "(" (strConcat inner ")")))
 
 emitMatchArms(scrut Str)(pats List[Pattern])(bodies List[Expr]) =
   match pats
@@ -466,10 +534,10 @@ emitDecls(ds List[Decl]) =
 -- ---- Prelude ---------------------------------------------------------------
 
 emitPrelude =
-  "    // --- ll-lang stdlib (C#) ---\n    public static object? printfn(string s) { System.Console.WriteLine(s); return null; }\n    public static object? print(string s) { System.Console.Write(s); return null; }\n    public static long strLen(string s) => s.Length;\n    public static System.Func<object, string> strConcat(string a) => b => a + (b?.ToString() ?? \"\");\n    public static System.Collections.Generic.List<char> strChars(string s) => new(s.ToCharArray());\n    public static string strFromChars(System.Collections.Generic.IEnumerable<char> cs) => new string(new System.Collections.Generic.List<char>(cs).ToArray());\n    public static string intToStr(long n) => n.ToString();\n    public static long charToInt(char c) => c;\n    public static char intToChar(long n) => (char)n;\n    public static bool strContains(string needle) => hay => hay.Contains(needle);\n    public static long listLen<T>(System.Collections.Generic.List<T> xs) => xs.Count;\n    public static System.Func<System.Collections.Generic.List<A>, System.Collections.Generic.List<B>> listMap<A, B>(System.Func<A, B> f) => xs => { var r = new System.Collections.Generic.List<B>(xs.Count); foreach (var x in xs) r.Add(f(x)); return r; };\n    public static System.Func<System.Collections.Generic.List<A>, System.Collections.Generic.List<A>> listFilter<A>(System.Func<A, bool> p) => xs => { var r = new System.Collections.Generic.List<A>(); foreach (var x in xs) if (p(x)) r.Add(x); return r; };\n    public static System.Func<B, System.Func<System.Collections.Generic.List<A>, B>> listFold<A, B>(System.Func<B, System.Func<A, B>> f) => z => xs => { var acc = z; foreach (var x in xs) acc = f(acc)(x); return acc; };\n    public static System.Func<System.Collections.Generic.List<T>, System.Collections.Generic.List<T>> listAppend<T>(System.Collections.Generic.List<T> xs) => ys => { var r = new System.Collections.Generic.List<T>(xs.Count + ys.Count); r.AddRange(xs); r.AddRange(ys); return r; };\n    public static bool listIsEmpty<T>(System.Collections.Generic.List<T> xs) => xs.Count == 0;\n    // --- end prelude ---"
+  "    // --- ll-lang stdlib (C#) ---\n    public static object? printfn(string s) { System.Console.WriteLine(s); return null; }\n    public static object? print(string s) { System.Console.Write(s); return null; }\n    public static long strLen(string s) => s.Length;\n    public static System.Func<object, string> strConcat(string a) => b => a + (b?.ToString() ?? \"\");\n    public static System.Collections.Generic.List<char> strChars(string s) => new(s.ToCharArray());\n    public static string strFromChars(System.Collections.Generic.IEnumerable<char> cs) => new string(new System.Collections.Generic.List<char>(cs).ToArray());\n    public static string intToStr(long n) => n.ToString();\n    public static long charToInt(char c) => c;\n    public static char intToChar(long n) => (char)n;\n    public static System.Func<string, bool> strContains(string needle) => hay => hay.Contains(needle);\n    public static long listLen<T>(System.Collections.Generic.List<T> xs) => xs.Count;\n    public static System.Func<System.Collections.Generic.List<A>, System.Collections.Generic.List<B>> listMap<A, B>(System.Func<A, B> f) => xs => { var r = new System.Collections.Generic.List<B>(xs.Count); foreach (var x in xs) r.Add(f(x)); return r; };\n    public static System.Func<System.Collections.Generic.List<A>, System.Collections.Generic.List<A>> listFilter<A>(System.Func<A, bool> p) => xs => { var r = new System.Collections.Generic.List<A>(); foreach (var x in xs) if (p(x)) r.Add(x); return r; };\n    public static System.Func<B, System.Func<System.Collections.Generic.List<A>, B>> listFold<A, B>(System.Func<B, System.Func<A, B>> f) => z => xs => { var acc = z; foreach (var x in xs) acc = f(acc)(x); return acc; };\n    public static System.Func<System.Collections.Generic.List<T>, System.Collections.Generic.List<T>> listAppend<T>(System.Collections.Generic.List<T> xs) => ys => { var r = new System.Collections.Generic.List<T>(xs.Count + ys.Count); r.AddRange(xs); r.AddRange(ys); return r; };\n    public static bool listIsEmpty<T>(System.Collections.Generic.List<T> xs) => xs.Count == 0;\n    // --- end prelude ---"
 
 emitFixedOpPrelude =
-  "    public static System.Func<System.Func<object?, object?>, object?> llMaybeBind(object? m) => f => {\n        if (m is null) return null;\n        var name = m.GetType().Name;\n        if (name == \"Some\") {\n            var p0 = m.GetType().GetProperty(\"_0\");\n            var v = p0 is null ? null : p0.GetValue(m);\n            return f(v);\n        }\n        return m;\n    };\n    public static System.Func<object?, object?> llMaybeThen(object? m) => n => {\n        if (m is null) return null;\n        return m.GetType().Name == \"Some\" ? n : m;\n    };\n    public static System.Func<object?, object?> llMaybeChoice(object? a) => b => {\n        if (a is null) return b;\n        var name = a.GetType().Name;\n        if (name == \"Some\") return a;\n        if (name == \"None\") return b;\n        return a;\n    };"
+  "    public static object? llMaybeBind(object? m, System.Func<object?, object?> f) {\n        if (m is null) return null;\n        var name = m.GetType().Name;\n        if (name == \"Some\") {\n            var p0 = m.GetType().GetProperty(\"_0\");\n            var v = p0 is null ? null : p0.GetValue(m);\n            return f(v);\n        }\n        return m;\n    }\n    public static object? llMaybeThen(object? m, object? n) {\n        if (m is null) return null;\n        return m.GetType().Name == \"Some\" ? n : m;\n    }\n    public static object? llMaybeChoice(object? a, object? b) {\n        if (a is null) return b;\n        var name = a.GetType().Name;\n        if (name == \"Some\") return a;\n        if (name == \"None\") return b;\n        return a;\n    }"
 
 -- ---- Module emission -------------------------------------------------------
 
@@ -589,17 +657,8 @@ main =
   -- 20. EChar
   _ = codegenCSharpCheck "20 EChar newline" (emitExpr (EChar '\n')) "'\\n'"
 
-  -- 21. fixed symbolic operators are lowered
-  pipeOut = emitExpr (EBinOp "|>" (EInt 1) (EVar "inc"))
-  _ = codegenCSharpCheck "21 |> lowers to app" pipeOut "inc(1L)"
-  bindOut = emitExpr (EBinOp ">>=" (EVar "m") (EVar "f"))
-  _ = checkNotContains "22 >>= raw removed" bindOut ">>="
-  _ = checkContains "22 >>= lowers to helper" bindOut "llMaybeBind"
-  thenOut = emitExpr (EBinOp ">>" (EVar "m") (EVar "n"))
-  _ = checkNotContains "23 >> raw removed" thenOut ">>"
-  _ = checkContains "23 >> lowers to helper" thenOut "llMaybeThen"
-  choiceOut = emitExpr (EBinOp "<|>" (EVar "a") (EVar "b"))
-  _ = checkNotContains "24 <|> raw removed" choiceOut "<|>"
-  _ = checkContains "24 <|> lowers to helper" choiceOut "llMaybeChoice"
+  -- 21. custom symbolic operators emit as ordinary function calls.
+  customOut = emitExpr (EBinOp "%%" (EInt 2) (EInt 3))
+  _ = checkContains "21 custom op call" customOut "__ll_op_37_37"
 
   0

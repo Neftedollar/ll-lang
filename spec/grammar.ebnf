@@ -213,10 +213,19 @@ let-decl ::= IDENT "=" expr
 
 (* --- function declaration ---------------------------------- *)
 (* Keyword-free: name followed by one or more param groups, optional return type, body.
+   Symbolic operator implementations use a parenthesized head and still lower
+   as a normal DFn named by the operator token. Fixity remains a separate decl.
    If a name has no params, it is a value binding (same form as let-decl above).
    Disambiguation: a lone `name = expr` is a value binding; `name(p T) = expr` is a fn. *)
 fn-decl ::= IDENT constraint* param+ type-expr? "=" expr
           | IDENT constraint* param+ type-expr? "=" NEWLINE INDENT expr DEDENT
+          | OP_LPAREN symbolic-op OP_RPAREN param+ type-expr? "=" expr
+          | OP_LPAREN symbolic-op OP_RPAREN param+ type-expr? "=" NEWLINE INDENT expr DEDENT
+
+symbolic-op ::= OP_PLUS | OP_MINUS | OP_STAR | OP_SLASH | OP_CARET
+              | OP_LT | OP_GT | OP_LE | OP_GE | OP_EQ2 | OP_NEQ
+              | OP_PIPE | OP_PIPE_FWD | OP_BIND | OP_SEQ | OP_CHOICE
+              | OP_CONS | OP_EQ | OP_BAR | OP_COLON | OP_DOT | OP_CUSTOM
 
 param      ::= OP_LPAREN IDENT type-expr? OP_RPAREN   (* typed param; type optional (inferred) *)
 constraint ::= OP_LBRACK IDENT ":" TYPEID OP_RBRACK   (* [F: Functor] *)

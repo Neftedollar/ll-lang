@@ -197,13 +197,59 @@ checkArms(env Env)(pats List[Pattern])(bodies List[Expr]) =
     | [] -> []
     | p :: restPats -> checkArmsCons env p restPats bodies
 
+isValueIdentStart(c Char) =
+  n = charToInt c
+  if n >= 97
+    if n <= 122
+      true
+    else c == '_'
+  else c == '_'
+
+isValueIdentCont(c Char) =
+  if isValueIdentStart c
+    true
+  else if charIsDigit c
+    true
+  else if charIsAlpha c
+    true
+  else false
+
+isValueIdentTail(cs List[Char]) =
+  match cs
+    | [] -> true
+    | c :: rest ->
+      if isValueIdentCont c
+        isValueIdentTail rest
+      else false
+
+isValueIdentName(name Str) =
+  match strChars name
+    | [] -> false
+    | c :: rest ->
+      if isValueIdentStart c
+        isValueIdentTail rest
+      else false
+
+checkDeclName(name Str) =
+  if isValueIdentName name
+    []
+  else if isCoreAliasOp name
+    p1 = strConcat "E030 ReservedOperatorFixity op:" name
+    [MkError (strConcat p1 " reason:core-alias")]
+  else
+    match fixityOpViolation name
+      | Some reason ->
+        p1 = strConcat "E030 ReservedOperatorFixity op:" name
+        [MkError (strConcat p1 (strConcat " reason:" reason))]
+      | None -> []
+
 -- ---- Declaration checking --------------------------------------------------
 
 checkDecl(env Env)(d Decl) =
   match d
-    | DFn _ params _ body ->
+    | DFn name params _ body ->
       bodyEnv = envAddAll (paramNames params) env
-      checkExpr bodyEnv body
+      listAppend (checkDeclName name) (checkExpr bodyEnv body)
     | DLet _ body ->
       checkExpr env body
     | DType _ _ _ -> []
@@ -313,6 +359,15 @@ isReservedFixityOp(op Str) =
     true
   else false
 
+isCoreAliasOp(op Str) =
+  if op == "|>"
+    true
+  else if op == ">>="
+    true
+  else if op == ">>"
+    true
+  else op == "<|>"
+
 fixityOpViolation(op Str) =
   chars = strChars op
   if op == "?"
@@ -399,6 +454,7 @@ builtinNames =
   "readFile" :: "writeFile" :: "fileExists" ::
   "exit" :: "getArgs" ::
   "maybeMap" :: "maybeBind" :: "maybeWithDefault" ::
+  "llMaybeBind" :: "llMaybeThen" :: "llMaybeChoice" ::
   "Some" :: "None" ::
   "Bool" ::
   "true" :: "false" ::

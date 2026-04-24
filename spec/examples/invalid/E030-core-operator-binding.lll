@@ -1,0 +1,3 @@
+module Invalid.CoreOperatorBinding
+
+(|>)(x Int)(f Int -> Int) Int = f x

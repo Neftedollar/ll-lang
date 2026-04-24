@@ -40,8 +40,55 @@ isTsKeyword(s Str) =
     | "object"   -> true
     | _          -> false
 
+isAsciiLetter(c Char) =
+  n = charToInt c
+  if n < 65
+    false
+  else if n <= 90
+    true
+  else if n < 97
+    false
+  else n <= 122
+
+isIdentStart(c Char) =
+  if isAsciiLetter c
+    true
+  else c == '_'
+
+isIdentCont(c Char) =
+  if isIdentStart c
+    true
+  else charIsDigit c
+
+isIdentTail(cs List[Char]) =
+  match cs
+    | [] -> true
+    | c :: rest ->
+      if isIdentCont c
+        isIdentTail rest
+      else false
+
+isIdentLike(s Str) =
+  match strChars s
+    | [] -> false
+    | c :: rest ->
+      if isIdentStart c
+        isIdentTail rest
+      else false
+
+mangleOpChars(cs List[Char]) =
+  match cs
+    | [] -> ""
+    | c :: rest ->
+      strConcat "_" (strConcat (intToStr (charToInt c)) (mangleOpChars rest))
+
+mangleOpIdent(s Str) =
+  strConcat "__ll_op" (mangleOpChars (strChars s))
+
 safeIdent(s Str) =
-  if isTsKeyword s
+  if isIdentLike s == false
+    mangleOpIdent s
+  else if isTsKeyword s
     strConcat "_ll_" s
   else s
 
@@ -65,28 +112,26 @@ mapOp(op Str) =
     "!=="
   else op
 
-isFixedSymbolicOp(op Str) =
-  if op == "|>"
+isTargetInfixOp(op Str) =
+  if op == "+"
     true
-  else if op == ">>="
+  else if op == "-"
     true
-  else if op == ">>"
+  else if op == "*"
     true
-  else if op == "<|>"
+  else if op == "/"
     true
-  else false
-
-lowerFixedSymbolicOp(op Str)(l Expr)(r Expr) =
-  if op == "|>"
-    EApp r l
-  else if op == ">>="
-    EApp (EApp (EVar "llMaybeBind") l) r
-  else if op == ">>"
-    EApp (EApp (EVar "llMaybeThen") l) r
-  else if op == "<|>"
-    EApp (EApp (EVar "llMaybeChoice") l) r
-  else
-    EBinOp op l r
+  else if op == "=="
+    true
+  else if op == "!="
+    true
+  else if op == "<"
+    true
+  else if op == ">"
+    true
+  else if op == "<="
+    true
+  else op == ">="
 
 emitType(t TypeExpr) =
   match t
@@ -163,10 +208,10 @@ emitExpr(e Expr) =
     | EList items ->
       strConcat "[" (strConcat (joinWith ", " (listMap emitExpr items)) "]")
     | EBinOp op l r ->
-      if isFixedSymbolicOp op
-        emitExpr (lowerFixedSymbolicOp op l r)
-      else
+      if isTargetInfixOp op
         strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat (mapOp op) (strConcat " " (strConcat (emitExpr r) ")")))))
+      else
+        emitExpr (EApp (EApp (EVar op) l) r)
     | ETuple a b ->
       strConcat "[" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) "] as const")))
     | ECons h t ->
@@ -456,15 +501,6 @@ main =
   _ = checkContains "8 module header" out "Module: Test.Mod"
   _ = checkContains "8 module type" out "type Color"
   _ = checkContains "8 module fn" out "const id"
-  pipeOut = emitExpr (EBinOp "|>" (EInt 1) (EVar "inc"))
-  _ = codegenTSCheck "9 |> lowers to app" pipeOut "(inc)(1)"
-  bindOut = emitExpr (EBinOp ">>=" (EVar "m") (EVar "f"))
-  _ = checkNotContains "10 >>= raw removed" bindOut ">>="
-  _ = checkContains "10 >>= lowers to helper" bindOut "llMaybeBind"
-  thenOut = emitExpr (EBinOp ">>" (EVar "m") (EVar "n"))
-  _ = checkNotContains "11 >> raw removed" thenOut ">>"
-  _ = checkContains "11 >> lowers to helper" thenOut "llMaybeThen"
-  choiceOut = emitExpr (EBinOp "<|>" (EVar "a") (EVar "b"))
-  _ = checkNotContains "12 <|> raw removed" choiceOut "<|>"
-  _ = checkContains "12 <|> lowers to helper" choiceOut "llMaybeChoice"
+  customOut = emitExpr (EBinOp "%%" (EInt 2) (EInt 3))
+  _ = checkContains "9 custom op call" customOut "__ll_op_37_37"
   0

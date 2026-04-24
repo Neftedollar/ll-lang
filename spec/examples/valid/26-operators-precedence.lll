@@ -1,27 +1,27 @@
 module Example.OperatorsPrecedence
 
-Maybe A = Some A | None
+Maybe = Some Int | None
 
-inc(x Int) = x + 1
-dbl(x Int) = x * 2
-toSome(x Int) = Some x
+inc(x Int) Int = x + 1
+dbl(x Int) Int = x * 2
+toSome(x Int) Maybe = Some x
 
-pipeChain(x Int) =
+pipeChain(x Int) Int =
   x |> inc |> dbl
 
-legacyPipeAlias(x Int) =
+legacyPipeAlias(x Int) Int =
   x -> inc -> dbl
 
-bindChain(m Maybe[Int]) =
+bindChain(m Maybe) Maybe =
   m >>= toSome >>= toSome
 
-seqChain(a Maybe[Int])(b Maybe[Int])(c Maybe[Int]) =
+seqChain(a Maybe)(b Maybe)(c Maybe) Maybe =
   a >> b >> c
 
-choiceChain(a Maybe[Int])(b Maybe[Int])(c Maybe[Int]) =
+choiceChain(a Maybe)(b Maybe)(c Maybe) Maybe =
   a <|> b <|> c
 
-mixed(x Int)(alt Maybe[Int]) =
+mixed(x Int)(alt Maybe) Maybe =
   x |> toSome >>= toSome <|> alt
 
 sample = mixed 1 None

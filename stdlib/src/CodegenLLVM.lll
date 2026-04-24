@@ -45,6 +45,56 @@ emitLLVMType(t TypeExpr) =
 ssaName(n Int) =
   strConcat "%t" (intToStr n)
 
+isAsciiLetter(c Char) =
+  n = charToInt c
+  if n < 65
+    false
+  else if n <= 90
+    true
+  else if n < 97
+    false
+  else n <= 122
+
+isIdentStart(c Char) =
+  if isAsciiLetter c
+    true
+  else c == '_'
+
+isIdentCont(c Char) =
+  if isIdentStart c
+    true
+  else charIsDigit c
+
+isIdentTail(cs List[Char]) =
+  match cs
+    | [] -> true
+    | c :: rest ->
+      if isIdentCont c
+        isIdentTail rest
+      else false
+
+isIdentLike(s Str) =
+  match strChars s
+    | [] -> false
+    | c :: rest ->
+      if isIdentStart c
+        isIdentTail rest
+      else false
+
+mangleOpChars(cs List[Char]) =
+  match cs
+    | [] -> ""
+    | c :: rest ->
+      strConcat "_" (strConcat (intToStr (charToInt c)) (mangleOpChars rest))
+
+mangleOpIdent(s Str) =
+  strConcat "__ll_op" (mangleOpChars (strChars s))
+
+safeIdent(s Str) =
+  if isIdentLike s == false
+    mangleOpIdent s
+  else s
+
 -- ---- String literal encoding -----------------------------------------------
 
 encodeLLVMChar(c Char) =
@@ -155,6 +205,27 @@ isCmpOp(op Str) =
               true
             else false
 
+isTargetInfixOp(op Str) =
+  if op == "+"
+    true
+  else if op == "-"
+    true
+  else if op == "*"
+    true
+  else if op == "/"
+    true
+  else if op == "=="
+    true
+  else if op == "!="
+    true
+  else if op == "<"
+    true
+  else if op == ">"
+    true
+  else if op == "<="
+    true
+  else op == ">="
+
 isFloatExpr(e Expr) =
   match e
     | EFloat _ -> true
@@ -211,16 +282,19 @@ emitExprInstrs(e Expr)(ctr Int)(sidx Int) =
       dst = ssaName rc
       floatOp = isFloatBinOp l r
       instrBody =
-        if isCmpOp op
-          if floatOp
-            strConcat (llvmFloatCmpOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+        if isTargetInfixOp op
+          if isCmpOp op
+            if floatOp
+              strConcat (llvmFloatCmpOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+            else
+              strConcat (llvmCmpOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
           else
-            strConcat (llvmCmpOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+            if floatOp
+              strConcat (llvmFloatOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+            else
+              strConcat (llvmIntOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
         else
-          if floatOp
-            strConcat (llvmFloatOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
-          else
-            strConcat (llvmIntOp op) (strConcat " " (strConcat lreg (strConcat ", " rreg)))
+          strConcat "call i64 @" (strConcat (safeIdent op) (strConcat "(i64 " (strConcat lreg (strConcat ", i64 " (strConcat rreg ")")))))
       instr = strConcat "  " (strConcat dst (strConcat " = " instrBody))
       prefix = strJoin2 li ri
       if strLen prefix == 0
@@ -295,8 +369,8 @@ emitExprInstrs(e Expr)(ctr Int)(sidx Int) =
       instTailLoad = strConcat "  " (strConcat tailVal (strConcat " = load ptr, ptr " tailPtr))
       instP2 = strConcat "  " (strConcat p2 (strConcat " = getelementptr inbounds { i64, i64, ptr }, ptr " (strConcat tailVal ", i32 0, i32 1")))
       instV2 = strConcat "  " (strConcat v2 (strConcat " = load i64, ptr " p2))
-      bindA = strConcat "  %" (strConcat a (strConcat " = add i64 " (strConcat v1 ", 0")))
-      bindB = strConcat "  %" (strConcat b (strConcat " = add i64 " (strConcat v2 ", 0")))
+      bindA = strConcat "  %" (strConcat (safeIdent a) (strConcat " = add i64 " (strConcat v1 ", 0")))
+      bindB = strConcat "  %" (strConcat (safeIdent b) (strConcat " = add i64 " (strConcat v2 ", 0")))
       tuplePrep =
         s1 = strJoin2 instP1 instV1
         s2 = strJoin2 s1 instTailPtr
@@ -324,7 +398,7 @@ emitExprInstrs(e Expr)(ctr Int)(sidx Int) =
       areg = emitExprReg a fc fs
       fnName = extractFnName f
       dst = ssaName ac
-      callInstr = strConcat "  " (strConcat dst (strConcat " = call i64 @" (strConcat fnName (strConcat "(i64 " (strConcat areg ")")))))
+      callInstr = strConcat "  " (strConcat dst (strConcat " = call i64 @" (strConcat (safeIdent fnName) (strConcat "(i64 " (strConcat areg ")")))))
       prefix = strJoin2 fi ai
       if strLen prefix == 0
         callInstr
@@ -382,7 +456,7 @@ emitExprReg(e Expr)(ctr Int)(sidx Int) =
       sv = getStrVal e
       lenStr = intToStr (strLen sv + 1)
       strConcat "getelementptr inbounds ([" (strConcat lenStr (strConcat " x i8], [" (strConcat lenStr (strConcat " x i8]* @.str." (strConcat idxStr ", i64 0, i64 0")))))
-    | EVar n  -> strConcat "%" n
+    | EVar n  -> strConcat "%" (safeIdent n)
     | ECon _  -> "0"
     | ENil    -> "null"
     | EBinOp op l r ->
@@ -578,7 +652,7 @@ emitExprGlobs(e Expr)(ctr Int)(sidx Int) =
 
 emitParam(p Param) =
   match p
-    | MkParam name ty -> strConcat (emitLLVMType ty) (strConcat " %" name)
+    | MkParam name ty -> strConcat (emitLLVMType ty) (strConcat " %" (safeIdent name))
 
 emitParams(ps List[Param]) =
   joinWith ", " (listMap emitParam ps)
@@ -606,7 +680,7 @@ emitDecl(d Decl)(strIdx Int) =
         if strLen bodyInstrs == 0
           strConcat "  ret " (strConcat retType (strConcat " " retReg))
         else strConcat bodyInstrs (strConcat "\n  ret " (strConcat retType (strConcat " " retReg)))
-      strConcat globSection (strConcat "define " (strConcat retType (strConcat " @" (strConcat name (strConcat "(" (strConcat paramStr (strConcat ") {\nentry:\n" (strConcat bodySection "\n}"))))))))
+      strConcat globSection (strConcat "define " (strConcat retType (strConcat " @" (strConcat (safeIdent name) (strConcat "(" (strConcat paramStr (strConcat ") {\nentry:\n" (strConcat bodySection "\n}"))))))))
     | DType name _ _ ->
       strConcat "; type " name
     | DImport parts ->
@@ -621,7 +695,7 @@ emitDecl(d Decl)(strIdx Int) =
         if strLen globs == 0
           ""
         else strConcat globs "\n"
-      strConcat globSection (strConcat "@" (strConcat name (strConcat " = global i64 " reg)))
+      strConcat globSection (strConcat "@" (strConcat (safeIdent name) (strConcat " = global i64 " reg)))
     | DExport inner -> emitDecl inner strIdx
     | DExternal extName extParams extRetTy ->
       retType = emitLLVMType extRetTy
@@ -631,7 +705,7 @@ emitDecl(d Decl)(strIdx Int) =
             | MkParam _ ty -> emitLLVMType ty
         ) extParams
       paramStr = joinWith ", " paramTypes
-      strConcat "declare " (strConcat retType (strConcat " @" (strConcat extName (strConcat "(" (strConcat paramStr ")")))))
+      strConcat "declare " (strConcat retType (strConcat " @" (strConcat (safeIdent extName) (strConcat "(" (strConcat paramStr ")")))))
     | DOpaque name ->
       strConcat "; opaque: " name
     | DFixity _ _ _ ->

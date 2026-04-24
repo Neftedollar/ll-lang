@@ -50,8 +50,55 @@ isPyKeyword(s Str) =
     | "type"     -> true
     | _          -> false
 
+isAsciiLetter(c Char) =
+  n = charToInt c
+  if n < 65
+    false
+  else if n <= 90
+    true
+  else if n < 97
+    false
+  else n <= 122
+
+isIdentStart(c Char) =
+  if isAsciiLetter c
+    true
+  else c == '_'
+
+isIdentCont(c Char) =
+  if isIdentStart c
+    true
+  else charIsDigit c
+
+isIdentTail(cs List[Char]) =
+  match cs
+    | [] -> true
+    | c :: rest ->
+      if isIdentCont c
+        isIdentTail rest
+      else false
+
+isIdentLike(s Str) =
+  match strChars s
+    | [] -> false
+    | c :: rest ->
+      if isIdentStart c
+        isIdentTail rest
+      else false
+
+mangleOpChars(cs List[Char]) =
+  match cs
+    | [] -> ""
+    | c :: rest ->
+      strConcat "_" (strConcat (intToStr (charToInt c)) (mangleOpChars rest))
+
+mangleOpIdent(s Str) =
+  strConcat "__ll_op" (mangleOpChars (strChars s))
+
 safeIdent(s Str) =
-  if isPyKeyword s
+  if isIdentLike s == false
+    mangleOpIdent s
+  else if isPyKeyword s
     strConcat "_ll_" s
   else s
 
@@ -72,28 +119,26 @@ mapOp(op Str) =
     "//"
   else op
 
-isFixedSymbolicOp(op Str) =
-  if op == "|>"
+isTargetInfixOp(op Str) =
+  if op == "+"
     true
-  else if op == ">>="
+  else if op == "-"
     true
-  else if op == ">>"
+  else if op == "*"
     true
-  else if op == "<|>"
+  else if op == "/"
     true
-  else false
-
-lowerFixedSymbolicOp(op Str)(l Expr)(r Expr) =
-  if op == "|>"
-    EApp r l
-  else if op == ">>="
-    EApp (EApp (EVar "llMaybeBind") l) r
-  else if op == ">>"
-    EApp (EApp (EVar "llMaybeThen") l) r
-  else if op == "<|>"
-    EApp (EApp (EVar "llMaybeChoice") l) r
-  else
-    EBinOp op l r
+  else if op == "=="
+    true
+  else if op == "!="
+    true
+  else if op == "<"
+    true
+  else if op == ">"
+    true
+  else if op == "<="
+    true
+  else op == ">="
 
 emitType(t TypeExpr) =
   match t
@@ -170,10 +215,10 @@ emitExpr(e Expr) =
     | EList items ->
       strConcat "[" (strConcat (joinWith ", " (listMap emitExpr items)) "]")
     | EBinOp op l r ->
-      if isFixedSymbolicOp op
-        emitExpr (lowerFixedSymbolicOp op l r)
-      else
+      if isTargetInfixOp op
         strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat (mapOp op) (strConcat " " (strConcat (emitExpr r) ")")))))
+      else
+        strConcat (safeIdent op) (strConcat "(" (strConcat (emitExpr l) (strConcat ", " (strConcat (emitExpr r) ")"))))
     | ETuple a b ->
       strConcat "(" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) ")")))
     | ECons h t ->
@@ -457,16 +502,7 @@ main =
   _ = checkContains "20 module type" out "class Red:"
   _ = checkContains "20 module fn" out "def id("
 
-  pipeOut = emitExpr (EBinOp "|>" (EInt 1) (EVar "inc"))
-  _ = codegenPyCheck "21 |> lowers to app" pipeOut "(inc)(1)"
-  bindOut = emitExpr (EBinOp ">>=" (EVar "m") (EVar "f"))
-  _ = checkNotContains "22 >>= raw removed" bindOut ">>="
-  _ = checkContains "22 >>= lowers to helper" bindOut "llMaybeBind"
-  thenOut = emitExpr (EBinOp ">>" (EVar "m") (EVar "n"))
-  _ = checkNotContains "23 >> raw removed" thenOut ">>"
-  _ = checkContains "23 >> lowers to helper" thenOut "llMaybeThen"
-  choiceOut = emitExpr (EBinOp "<|>" (EVar "a") (EVar "b"))
-  _ = checkNotContains "24 <|> raw removed" choiceOut "<|>"
-  _ = checkContains "24 <|> lowers to helper" choiceOut "llMaybeChoice"
+  customOut = emitExpr (EBinOp "%%" (EInt 2) (EInt 3))
+  _ = checkContains "21 custom op call" customOut "__ll_op_37_37"
 
   0

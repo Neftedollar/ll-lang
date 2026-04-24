@@ -262,7 +262,7 @@ emitForTarget(targetRaw Str)(m Module) =
 compileSourceForTarget(target Str)(src Str) =
   compact = checkCompact src
   if compactIsOk compact
-    m = parseModule (tokenize src)
+    m = normalizeModule (parseModule (tokenize src))
     emitForTarget target m
   else
     compact
