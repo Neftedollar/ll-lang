@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ll-lang Playground</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3e;
+      --accent: #7c6af7;
+      --accent2: #56cfb2;
+      --text: #e2e8f0;
+      --muted: #8892a4;
+      --err: #f87171;
+      --ok: #4ade80;
+      --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.6rem 1.2rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .brand { display: flex; align-items: center; gap: 0.6rem; }
+    .logo { width: 28px; height: 28px; }
+    .brand-name {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .brand-badge {
+      font-size: 0.65rem;
+      font-weight: 600;
+      background: var(--accent);
+      color: #fff;
+      padding: 0.1rem 0.45rem;
+      border-radius: 999px;
+      letter-spacing: 0.05em;
+    }
+    .header-links { display: flex; align-items: center; gap: 1rem; }
+    .header-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.8rem;
+      transition: color 0.15s;
+    }
+    .header-links a:hover { color: var(--text); }
+
+    /* ── toolbar ── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.5rem 1rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    #run-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 0.45rem 1.1rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    #run-btn:hover { opacity: 0.88; }
+    #run-btn:active { opacity: 0.75; }
+    #run-btn svg { width: 13px; height: 13px; }
+
+    .example-select {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.4rem 0.75rem;
+      font-size: 0.82rem;
+      cursor: pointer;
+    }
+
+    .tab-group {
+      display: flex;
+      gap: 0;
+      margin-left: auto;
+    }
+    .tab-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 0.35rem 0.8rem;
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tab-btn:first-child { border-radius: 6px 0 0 6px; }
+    .tab-btn:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+    .tab-btn.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    /* ── main layout ── */
+    main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .pane {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border-right: 1px solid var(--border);
+    }
+    .pane:last-child { border-right: none; }
+
+    .pane-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.4rem 0.9rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    .pane-body {
+      flex: 1;
+      overflow: auto;
+    }
+
+    /* CodeMirror */
+    .CodeMirror {
+      height: 100%;
+      background: var(--bg) !important;
+      color: var(--text) !important;
+      font-family: var(--font-mono) !important;
+      font-size: 13.5px !important;
+      line-height: 1.6 !important;
+    }
+    .CodeMirror-scroll { min-height: 100%; }
+    .CodeMirror-gutters { background: var(--bg) !important; border-right-color: var(--border) !important; }
+    .CodeMirror-linenumber { color: #3a3f52 !important; }
+    .CodeMirror-cursor { border-left-color: var(--accent) !important; }
+    .CodeMirror-selected { background: rgba(124,106,247,0.18) !important; }
+
+    /* right-pane tabs */
+    .output-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+    .output-tab {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      padding: 0.45rem 1rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+    }
+    .output-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+    /* output panels */
+    .output-panel {
+      display: none;
+      flex: 1;
+      overflow: auto;
+      padding: 0.9rem 1rem;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .output-panel.visible { display: block; }
+
+    .output-stdout { color: var(--text); }
+    .output-ts { color: #a8c4e0; }
+
+    .error-block {
+      color: var(--err);
+      background: rgba(248,113,113,0.08);
+      border-left: 3px solid var(--err);
+      padding: 0.5rem 0.75rem;
+      border-radius: 0 4px 4px 0;
+      margin-bottom: 0.4rem;
+    }
+    .ok-block {
+      color: var(--ok);
+    }
+    .empty-state {
+      color: var(--muted);
+      font-style: italic;
+      font-family: -apple-system, sans-serif;
+      font-size: 0.82rem;
+    }
+
+    /* ── status bar ── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.25rem 1rem;
+      font-size: 0.72rem;
+      color: var(--muted);
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    #status-text { flex: 1; }
+    #status-text.ok { color: var(--ok); }
+    #status-text.err { color: var(--err); }
+
+    /* ── install hint ── */
+    .install-hint {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .install-hint code {
+      background: rgba(124,106,247,0.12);
+      color: var(--accent2);
+      padding: 0.05rem 0.4rem;
+      border-radius: 4px;
+    }
+
+    @media (max-width: 700px) {
+      main { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+      .pane { border-right: none; border-bottom: 1px solid var(--border); }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="32" height="32" rx="7" fill="#7c6af7"/>
+      <text x="7" y="23" font-family="monospace" font-size="16" font-weight="800" fill="white">λ</text>
+    </svg>
+    <span class="brand-name">ll-lang</span>
+    <span class="brand-badge">playground</span>
+  </div>
+  <div class="header-links">
+    <a href="https://github.com/Neftedollar/ll-lang" target="_blank" rel="noopener">GitHub ↗</a>
+    <a href="../" target="_blank" rel="noopener">Docs ↗</a>
+    <span class="install-hint">
+      <code>curl -sSL https://raw.githubusercontent.com/Neftedollar/ll-lang/main/install.sh | sh</code>
+    </span>
+  </div>
+</header>
+
+<div class="toolbar">
+  <button id="run-btn">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+    Run
+  </button>
+  <select class="example-select" id="example-select">
+    <option value="">— examples —</option>
+    <option value="hello">Hello, ll-lang!</option>
+    <option value="functions">Basic functions</option>
+    <option value="if-else">If / else</option>
+    <option value="let">Let bindings</option>
+    <option value="fibonacci">Fibonacci</option>
+    <option value="list">List operations</option>
+    <option value="adts">Algebraic data types</option>
+    <option value="pattern-match">Pattern matching</option>
+  </select>
+</div>
+
+<main>
+  <div class="pane" id="editor-pane">
+    <div class="pane-header">
+      <span>ll-lang source</span>
+      <span id="cursor-pos"></span>
+    </div>
+    <div class="pane-body">
+      <textarea id="editor"></textarea>
+    </div>
+  </div>
+
+  <div class="pane" id="output-pane">
+    <div class="output-tabs">
+      <button class="output-tab active" data-tab="stdout">Output</button>
+      <button class="output-tab" data-tab="ts">TypeScript ↗</button>
+    </div>
+    <div id="panel-stdout" class="output-panel output-stdout visible">
+      <span class="empty-state">Press Run (or Ctrl+Enter) to execute your program.</span>
+    </div>
+    <div id="panel-ts" class="output-panel output-ts">
+      <span class="empty-state">Run to see compiled TypeScript output.</span>
+    </div>
+  </div>
+</main>
+
+<div class="status-bar">
+  <span id="status-text">Ready</span>
+  <span>ll-lang v1.2.2</span>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+<script src="lllc-browser.js"></script>
+
+<script>
+// ── Examples ─────────────────────────────────────────────────────────────────
+const EXAMPLES = {
+  hello: `module Hello
+
+main = printfn "Hello, ll-lang!"
+`,
+  functions: `module Functions
+
+-- Curried function: each arg in its own parentheses
+add(a Int)(b Int) = a + b
+
+square(x Int) = x * x
+
+greet(name Str) = printfn (strConcat "Hello, " (strConcat name "!"))
+
+main =
+  _ = printfn (intToStr (add 3 4))
+  _ = printfn (intToStr (square 7))
+  greet "world"
+`,
+  'if-else': `module Conditions
+
+classify(n Int) =
+  if n < 0
+    "negative"
+  else if n == 0
+    "zero"
+  else "positive"
+
+main =
+  _ = printfn (classify (0 - 5))
+  _ = printfn (classify 0)
+  printfn (classify 42)
+`,
+  let: `module LetBindings
+
+hypotenuse(a Int)(b Int) =
+  a2 = a * a
+  b2 = b * b
+  intToStr (a2 + b2)
+
+main =
+  result = hypotenuse 3 4
+  printfn result
+`,
+  fibonacci: `module Fibonacci
+
+fib(n Int) =
+  if n <= 1
+    n
+  else (fib (n - 1)) + (fib (n - 2))
+
+main =
+  _ = printfn (intToStr (fib 0))
+  _ = printfn (intToStr (fib 1))
+  _ = printfn (intToStr (fib 5))
+  _ = printfn (intToStr (fib 10))
+  printfn "done"
+`,
+  list: `module Lists
+
+sum(xs List[Int]) =
+  if listIsEmpty xs
+    0
+  else
+    h = listHead xs
+    t = listTail xs
+    (maybeWithDefault 0 h) + (sum (maybeWithDefault [] t))
+
+main =
+  nums = [1, 2, 3, 4, 5]
+  _ = printfn (intToStr (listLen nums))
+  _ = printfn (intToStr (sum nums))
+  printfn "done"
+`,
+  adts: `module ADTs
+
+-- Algebraic data type
+Color = | Red | Green | Blue
+
+colorName(c Color) =
+  match c
+    | Red -> "red"
+    | Green -> "green"
+    | Blue -> "blue"
+
+main =
+  _ = printfn (colorName Red)
+  _ = printfn (colorName Green)
+  printfn (colorName Blue)
+`,
+  'pattern-match': `module Patterns
+
+-- Maybe-style option type
+Opt[A] = | Some A | None
+
+safeDiv(a Int)(b Int) =
+  if b == 0
+    None
+  else Some (a / b)
+
+showOpt(o Opt[Int]) =
+  match o
+    | Some x -> strConcat "Some(" (strConcat (intToStr x) ")")
+    | None -> "None"
+
+main =
+  _ = printfn (showOpt (safeDiv 10 2))
+  _ = printfn (showOpt (safeDiv 10 0))
+  printfn "done"
+`,
+};
+
+// ── CodeMirror setup ──────────────────────────────────────────────────────────
+// Simple ll-lang syntax highlighting mode
+CodeMirror.defineMode('lllang', function() {
+  const keywords = /^(module|import|export|let|match|if|else|true|false|external|opaque|tag|unit|trait|impl)\b/;
+  const builtins = /^(printfn|print|intToStr|strConcat|strLen|listLen|listMap|listFold|listFilter|listIsEmpty|listHead|listTail|maybeWithDefault|Some|None)\b/;
+  return {
+    startState: () => ({ inString: false }),
+    token(stream, state) {
+      if (state.inString) {
+        if (stream.skipTo('"')) { stream.next(); state.inString = false; }
+        else { stream.skipToEnd(); }
+        return 'string';
+      }
+      if (stream.eatSpace()) return null;
+      if (stream.match('--')) { stream.skipToEnd(); return 'comment'; }
+      if (stream.peek() === '"') { stream.next(); state.inString = true; return 'string'; }
+      if (stream.peek() === "'") {
+        stream.next(); stream.next();
+        if (stream.peek() === "'") stream.next();
+        return 'string';
+      }
+      if (stream.match(/^[0-9]+(\.[0-9]+)?/)) return 'number';
+      if (stream.match(keywords)) return 'keyword';
+      if (stream.match(builtins)) return 'builtin';
+      if (stream.match(/^[A-Z][a-zA-Z0-9_]*/)) return 'variable-2';
+      if (stream.match(/^[a-z_][a-zA-Z0-9_]*/)) return 'def';
+      stream.next();
+      return null;
+    }
+  };
+});
+
+// Theme colours matching our CSS vars
+const cmTheme = 'lllang';
+CodeMirror.defineSimpleMode = undefined; // suppress override warnings
+
+const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
+  mode: 'lllang',
+  lineNumbers: true,
+  matchBrackets: true,
+  autoCloseBrackets: true,
+  tabSize: 2,
+  indentWithTabs: false,
+  extraKeys: {
+    'Ctrl-Enter': run,
+    'Cmd-Enter': run,
+  },
+  theme: 'default',
+});
+
+// Apply dark colours by JS after init (avoids needing a custom theme CSS file)
+editor.getWrapperElement().style.cssText = `
+  height: 100%;
+  background: #0f1117;
+`;
+
+// ── Output panels ─────────────────────────────────────────────────────────────
+const panelStdout = document.getElementById('panel-stdout');
+const panelTs = document.getElementById('panel-ts');
+const outputTabs = document.querySelectorAll('.output-tab');
+const statusText = document.getElementById('status-text');
+
+outputTabs.forEach(btn => {
+  btn.addEventListener('click', () => {
+    outputTabs.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const tab = btn.dataset.tab;
+    panelStdout.classList.toggle('visible', tab === 'stdout');
+    panelTs.classList.toggle('visible', tab === 'ts');
+  });
+});
+
+// ── Run ───────────────────────────────────────────────────────────────────────
+function run() {
+  const source = editor.getValue();
+  const t0 = performance.now();
+  let result;
+  try {
+    result = LllcBrowser.compileAndRun(source);
+  } catch (e) {
+    result = { ok: false, errors: [e.message], output: '', ts: null };
+  }
+  const elapsed = (performance.now() - t0).toFixed(1);
+
+  // Stdout panel
+  if (!result.ok || result.errors.length > 0) {
+    panelStdout.innerHTML = '';
+    result.errors.forEach(err => {
+      const div = document.createElement('div');
+      div.className = 'error-block';
+      div.textContent = err;
+      panelStdout.appendChild(div);
+    });
+    if (result.output) {
+      const pre = document.createElement('pre');
+      pre.textContent = result.output;
+      panelStdout.appendChild(pre);
+    }
+    statusText.textContent = `Error — ${elapsed}ms`;
+    statusText.className = 'err';
+  } else {
+    panelStdout.innerHTML = '';
+    if (result.output) {
+      const pre = document.createElement('pre');
+      pre.textContent = result.output;
+      panelStdout.appendChild(pre);
+    } else {
+      panelStdout.innerHTML = '<span class="ok-block">✓ Compiled and ran in ' + elapsed + 'ms (no output)</span>';
+    }
+    statusText.textContent = `OK — ${elapsed}ms`;
+    statusText.className = 'ok';
+  }
+
+  // TypeScript panel
+  if (result.ts) {
+    panelTs.textContent = result.ts;
+  } else {
+    panelTs.innerHTML = '<span class="empty-state">No TypeScript output (compile error).</span>';
+  }
+}
+
+document.getElementById('run-btn').addEventListener('click', run);
+
+// ── Example selector ─────────────────────────────────────────────────────────
+document.getElementById('example-select').addEventListener('change', function() {
+  const key = this.value;
+  if (key && EXAMPLES[key]) {
+    editor.setValue(EXAMPLES[key]);
+    editor.clearHistory();
+    // Auto-run
+    run();
+  }
+  this.value = '';
+});
+
+// ── Cursor position ───────────────────────────────────────────────────────────
+const cursorPos = document.getElementById('cursor-pos');
+editor.on('cursorActivity', () => {
+  const c = editor.getCursor();
+  cursorPos.textContent = `Ln ${c.line + 1}, Col ${c.ch + 1}`;
+});
+
+// ── Initial load ──────────────────────────────────────────────────────────────
+editor.setValue(EXAMPLES.hello);
+run();
+</script>
+</body>
+</html>
