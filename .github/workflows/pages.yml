@@ -6,6 +6,7 @@ on:
     paths:
       - docs/**
       - mkdocs.yml
+      - playground/**
       - .github/workflows/pages.yml
   workflow_dispatch:
 
@@ -34,6 +35,11 @@ jobs:
           pip install mkdocs-material
       - name: Build site
         run: mkdocs build
+      - name: Copy playground into site
+        run: |
+          mkdir -p site/playground
+          cp playground/index.html site/playground/
+          cp playground/lllc-browser.js site/playground/
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
