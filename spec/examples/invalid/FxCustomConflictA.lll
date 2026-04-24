@@ -1,0 +1,5 @@
+module FxCustomConflictA
+
+infixl 6 %%
+
+a = 1

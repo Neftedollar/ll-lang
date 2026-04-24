@@ -396,6 +396,7 @@ exprOpFromToken(t Token) =
     | Choice -> Some "<|>"
     | ColonColon -> Some "::"
     | Arrow -> Some "->"
+    | SymOp op -> Some op
     | _ -> None
 
 findFixityByOp(op Str)(fixities List[FixityDecl]) =
@@ -437,6 +438,21 @@ nextMinPrecFor(fx FixityDecl) =
   else
     prec + 1
 
+fallbackExprFixity(t Token)(op Str) =
+  match t
+    | SymOp _ -> Some (MkFixity FixityLeft 9 op)
+    | _ -> None
+
+continueInfixWithFixity(op Str)(lhs Expr)(minPrec Int)(fixities List[FixityDecl])(rest List[Token])(fx FixityDecl)(toks List[Token]) =
+  prec = fixityPrec fx
+  if prec < minPrec
+    (lhs, toks)
+  else
+    nextMin = nextMinPrecFor fx
+    let (rhs, rest2) = parseInfixExpr nextMin fixities rest
+    node = infixExpr op lhs rhs
+    parseInfixTail node minPrec fixities rest2
+
 parseInfixTail(lhs Expr)(minPrec Int)(fixities List[FixityDecl])(toks List[Token]) =
   match toks
     | t :: rest ->
@@ -444,16 +460,13 @@ parseInfixTail(lhs Expr)(minPrec Int)(fixities List[FixityDecl])(toks List[Token
         | None -> (lhs, toks)
         | Some op ->
           match resolveExprFixity op fixities
-            | None -> (lhs, toks)
             | Some fx ->
-              prec = fixityPrec fx
-              if prec < minPrec
-                (lhs, toks)
-              else
-                nextMin = nextMinPrecFor fx
-                let (rhs, rest2) = parseInfixExpr nextMin fixities rest
-                node = infixExpr op lhs rhs
-                parseInfixTail node minPrec fixities rest2
+              continueInfixWithFixity op lhs minPrec fixities rest fx toks
+            | None ->
+              match fallbackExprFixity t op
+                | Some fx ->
+                  continueInfixWithFixity op lhs minPrec fixities rest fx toks
+                | None -> (lhs, toks)
     | [] -> (lhs, [])
 
 parseInfixExpr(minPrec Int)(fixities List[FixityDecl])(toks List[Token]) =
@@ -670,6 +683,7 @@ tokenToFixityOp(t Token) =
     | Bar -> Some "|"
     | Colon -> Some ":"
     | Dot -> Some "."
+    | SymOp op -> Some op
     | _ -> None
 
 parseFixityOp(toks List[Token]) =
@@ -1018,10 +1032,13 @@ main =
   _ = parserCheckDecl "5c fixity infixr" (KwInfixR :: IntLit 5 :: ColonColon :: Eof :: []) "DFixity right 5 ::"
   _ = parserCheckDecl "5d fixity infix" (KwInfix :: IntLit 4 :: EqEq :: Eof :: []) "DFixity none 4 =="
   _ = parserCheckDecl "5e malformed fixity" (KwInfixL :: Plus :: Eof :: []) "DFixity invalid 99 ?"
+  _ = parserCheckDecl "5ea custom fixity infixl" (KwInfixL :: IntLit 6 :: SymOp "%%" :: Eof :: []) "DFixity left 6 %%"
   toks5f = KwModule :: TypeId "M" :: Newline :: KwInfixL :: IntLit 6 :: Plus :: Newline :: Ident "add" :: LParen :: Ident "a" :: TypeId "Int" :: RParen :: LParen :: Ident "b" :: TypeId "Int" :: RParen :: Eq :: Ident "a" :: Plus :: Ident "b" :: Eof :: []
   _ = parserCheckModuleFixities "5f module fixity metadata" toks5f 1
   toks5g = KwModule :: TypeId "M" :: Newline :: KwInfixL :: IntLit 7 :: Plus :: Newline :: KwInfixL :: IntLit 6 :: Star :: Newline :: Ident "calc" :: LParen :: Ident "a" :: TypeId "Int" :: RParen :: LParen :: Ident "b" :: TypeId "Int" :: RParen :: LParen :: Ident "c" :: TypeId "Int" :: RParen :: Eq :: Ident "a" :: Plus :: Ident "b" :: Star :: Ident "c" :: Eof :: []
   _ = parserCheckModuleFnBody "5g module fixity changes expression parse" toks5g "calc" "EBinOp(* EBinOp(+ EVar a EVar b) EVar c)"
+  toks5h = KwModule :: TypeId "M" :: Newline :: KwInfixL :: IntLit 6 :: SymOp "%%" :: Newline :: Ident "calc" :: LParen :: Ident "a" :: TypeId "Int" :: RParen :: LParen :: Ident "b" :: TypeId "Int" :: RParen :: Eq :: Ident "a" :: SymOp "%%" :: Ident "b" :: Eof :: []
+  _ = parserCheckModuleFnBody "5h module custom sym fixity parse" toks5h "calc" "EBinOp(%% EVar a EVar b)"
 
   -- 6. Int literal: 42
   _ = parserCheckExpr "6 EInt" (IntLit 42 :: Eof :: []) "EInt 42"
@@ -1041,6 +1058,7 @@ main =
   _ = parserCheckExpr "13 ELam" (Backslash :: Ident "x" :: Dot :: Ident "x" :: Eof :: []) "ELam x.EVar x"
   -- 14. Binary op: 1 + 2
   _ = parserCheckExpr "14 EBinOp" (IntLit 1 :: Plus :: IntLit 2 :: Eof :: []) "EBinOp(+ EInt 1 EInt 2)"
+  _ = parserCheckExpr "14b EBinOp custom fallback" (IntLit 1 :: SymOp "%%" :: IntLit 2 :: Eof :: []) "EBinOp(%% EInt 1 EInt 2)"
   -- 15. Application: f x
   _ = parserCheckExpr "15 EApp" (Ident "f" :: Ident "x" :: Eof :: []) "EApp(EVar f EVar x)"
   -- 16. import decl

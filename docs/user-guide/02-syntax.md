@@ -103,11 +103,12 @@ parameters:
 add = \a b. a + b
 ```
 
-## Fixed operators
+## Operators and fixity
 
-ll-lang uses a fixed symbolic operator set (no user-defined operators yet).
-The canonical defaults are declared in `Std.Operators` and loaded by prelude
-defaults, so projects get the baseline operator table without local declarations.
+ll-lang ships with a canonical baseline operator table from `Std.Operators`
+and also supports custom symbolic operators through fixity declarations.
+Baseline defaults are loaded by prelude wiring, so projects get standard
+precedence/associativity without local declarations.
 
 | Operator | Meaning | Associativity | Precedence (low -> high) |
 |---|---|---|---|
@@ -121,7 +122,7 @@ defaults, so projects get the baseline operator table without local declarations
 | `* /` | arithmetic mul/div | left | 7 |
 | application (`f x`) | function application | left | 8 |
 
-### Fixity declarations (phase A contract)
+### Fixity declarations
 
 You can declare parser-contract metadata using:
 
@@ -129,10 +130,14 @@ You can declare parser-contract metadata using:
 infixl 6 +
 infixr 5 ::
 infix 4 ==
+infixl 6 %%
 ```
 
-Current phase validates declarations and emits diagnostics (`E027`..`E031`)
-for invalid assoc/precedence/duplicates/reserved/conflicting fixities.
+Custom operators must stay symbolic and pass safety checks. Reserved single
+tokens (`=`, `|`, `:`, `.`), malformed (`?`), comment-like (`--`) and overlong
+forms are rejected with `E030`. Diagnostics `E027`..`E031` cover assoc,
+precedence, duplicate declarations, reserved/unsafe operators, and import
+conflicts.
 
 ## `if` / `else`
 

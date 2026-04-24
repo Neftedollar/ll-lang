@@ -1660,7 +1660,7 @@ errorCodes = [
   MkTriple "E027" "InvalidFixityAssoc" "Malformed fixity declaration (invalid associativity token)";
   MkTriple "E028" "InvalidFixityPrecedence" "Fixity precedence must be in range 1..9";
   MkTriple "E029" "DuplicateFixity" "Operator has more than one fixity declaration in module";
-  MkTriple "E030" "ReservedOperatorFixity" "Fixity declaration uses a reserved/unsupported operator";
+  MkTriple "E030" "ReservedOperatorFixity" "Fixity declaration uses a reserved/unsupported/unsafe operator shape";
   MkTriple "E031" "FixityConflict" "Imported modules declare conflicting fixities for the same operator"
 ]
 

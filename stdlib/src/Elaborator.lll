@@ -243,38 +243,92 @@ isValidFixityAssoc(a FixityAssoc) =
     | FixityNone -> true
     | FixityInvalid -> false
 
-isKnownFixityOp(op Str) =
-  if op == "<|>"
+isFixitySymbolChar(c Char) =
+  if c == '!'
     true
-  else if op == ">>="
+  else if c == '$'
     true
-  else if op == ">>"
+  else if c == '%'
     true
-  else if op == "|>"
+  else if c == '&'
     true
-  else if op == "=="
+  else if c == '*'
     true
-  else if op == "!="
+  else if c == '+'
     true
-  else if op == "<"
+  else if c == '-'
     true
-  else if op == ">"
+  else if c == '.'
     true
-  else if op == "<="
+  else if c == '/'
     true
-  else if op == ">="
+  else if c == ':'
     true
-  else if op == "::"
+  else if c == '<'
     true
-  else if op == "+"
+  else if c == '='
     true
-  else if op == "-"
+  else if c == '>'
     true
-  else if op == "*"
+  else if c == '?'
     true
-  else if op == "/"
+  else if c == '@'
+    true
+  else if c == '^'
+    true
+  else if c == '|'
+    true
+  else if c == '~'
     true
   else false
+
+isFixitySymbolList(cs List[Char]) =
+  match cs
+    | [] -> true
+    | c :: rest ->
+      if isFixitySymbolChar c
+        isFixitySymbolList rest
+      else false
+
+containsDashDash(cs List[Char]) =
+  match cs
+    | a :: b :: rest ->
+      if a == '-'
+        if b == '-'
+          true
+        else
+          containsDashDash (b :: rest)
+      else
+        containsDashDash (b :: rest)
+    | _ -> false
+
+isReservedFixityOp(op Str) =
+  if op == "="
+    true
+  else if op == "|"
+    true
+  else if op == ":"
+    true
+  else if op == "."
+    true
+  else false
+
+fixityOpViolation(op Str) =
+  chars = strChars op
+  if op == "?"
+    Some "malformed-operator"
+  else if strLen op == 0
+    Some "empty-operator"
+  else if isReservedFixityOp op
+    Some "reserved-token"
+  else if isFixitySymbolList chars == false
+    Some "non-symbol-char"
+  else if containsDashDash chars
+    Some "comment-prefix"
+  else if strLen op > 8
+    Some "too-long"
+  else
+    None
 
 isValidFixityPrec(prec Int) =
   if prec < 1
@@ -312,10 +366,12 @@ checkFixityDecl(fx FixityDecl) =
       else if isValidFixityPrec prec == false
         p1 = "E028 InvalidFixityPrecedence value:"
         [MkError (strConcat p1 (intToStr prec))]
-      else if isKnownFixityOp op == false
-        [MkError (strConcat "E030 ReservedOperatorFixity op:" op)]
       else
-        []
+        match fixityOpViolation op
+          | Some reason ->
+            p1 = strConcat "E030 ReservedOperatorFixity op:" op
+            [MkError (strConcat p1 (strConcat " reason:" reason))]
+          | None -> []
 
 checkFixityDecls(fixities List[FixityDecl]) =
   perDeclErrs = listFold (\acc fx. listAppend acc (checkFixityDecl fx)) [] fixities

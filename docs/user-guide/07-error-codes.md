@@ -24,7 +24,7 @@ The table:
 | `E027` | InvalidFixityAssoc | Invalid fixity associativity for current phase |
 | `E028` | InvalidFixityPrecedence | Fixity precedence outside supported range |
 | `E029` | DuplicateFixity | Duplicate fixity declaration for same operator |
-| `E030` | ReservedOperatorFixity | Fixity declaration targets reserved/unsupported operator |
+| `E030` | ReservedOperatorFixity | Fixity declaration targets reserved/unsupported/unsafe operator shape |
 
 Below: the minimal program that reproduces each error, sourced from
 `spec/examples/invalid/`.
@@ -287,13 +287,15 @@ x = 1
 ```
 
 `=` is reserved and not part of the supported fixity surface.
+`E030` also covers malformed/unsafe custom symbolic forms.
 
 **Compact output example:**
 ```
-E030 3:1 ReservedOperatorFixity op:=
+E030 3:1 ReservedOperatorFixity op:= reason:reserved-token
 ```
 
-**Fix:** declare fixity only for supported expression operators.
+**Fix:** use symbolic non-reserved operator forms, avoid malformed (`?`),
+comment-like (`--`) and overlong declarations.
 
 ## Testing expected errors
 

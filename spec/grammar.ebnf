@@ -37,7 +37,8 @@ CHAR_LIT  ::= "'" ( [^'\\] | '\\' . ) "'"
 BOOL_LIT  ::= "true" | "false"
 
 (* --- Operators & Punctuation -------------------------------- *)
-(* Fixed operator set — no user-defined operators in v2. *)
+(* Baseline operator set (Std.Operators) plus user symbolic operators declared
+   via infix/infixl/infixr. *)
 OP_PIPE        ::= "->"       (* left-to-right pipe; also used for type arrow and match branch *)
 OP_PIPE_FWD    ::= "|>"       (* alternative pipe spelling — equivalent to "->" in expr context *)
 OP_BIND        ::= ">>="      (* monadic sequencing / bind *)
@@ -66,6 +67,7 @@ OP_GE          ::= ">="
 OP_EQ2         ::= "=="
 OP_NEQ         ::= "!="
 OP_UNDERSCORE  ::= "_"
+OP_CUSTOM      ::= [!$%&*+\-./:<=>?@^|~]+
 
 (* ============================================================
    Expressions — operator precedence (loosest → tightest)
@@ -79,6 +81,9 @@ OP_UNDERSCORE  ::= "_"
    Level 6:           + -  — additive arithmetic
    Level 7:           * /  — multiplicative arithmetic
    Level 8 (tightest): juxtaposition — curried function application
+
+   Parser implementation is table-driven from effective fixity declarations.
+   Levels below describe the canonical baseline defaults.
 
    All binary operators except :: are left-associative.
    The lambda body is the loosest of all; lambda-expr may appear as a

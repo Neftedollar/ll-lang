@@ -253,10 +253,11 @@ Operator contract (versioned):
 | `*` `/` | multiplicative arithmetic | left | 7 |
 | application by juxtaposition | function application | left | 8 |
 
-These operators are fixed language forms, not a user-defined operator framework.
-The canonical default fixity set lives in `Std.Operators` and is loaded by
-default prelude wiring in self-host checks/builds. Parser precedence in `1.x`
-must stay aligned with that canonical table.
+These are the canonical baseline operators from `Std.Operators`.
+Projects may add custom symbolic operators via `infix`/`infixl`/`infixr`
+declarations, subject to `E030` safety constraints (reserved token collisions,
+malformed/comment-like forms, and readability guardrails). Parser precedence in
+`1.x` starts from the canonical table and extends with validated declarations.
 
 ### 2.7 Patterns
 

@@ -1,0 +1,6 @@
+-- expect: E030
+module Invalid.E030TooLong
+
+infixl 6 %%%%%%%%%
+
+x = 1

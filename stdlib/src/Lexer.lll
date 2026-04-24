@@ -29,6 +29,7 @@ export Token =
   | LBrack | RBrack | LParen | RParen
   | Plus | Minus | Star | Slash | Caret
   | Lt | Gt | Le | Ge | EqEq | Neq
+  | SymOp Str
   | Underscore
   -- Layout
   | Newline | Indent | Dedent
@@ -65,6 +66,45 @@ isIdCont(c Char) =
     true
   else c == '_'
 
+isSymOpChar(c Char) =
+  if c == '!'
+    true
+  else if c == '$'
+    true
+  else if c == '%'
+    true
+  else if c == '&'
+    true
+  else if c == '*'
+    true
+  else if c == '+'
+    true
+  else if c == '-'
+    true
+  else if c == '.'
+    true
+  else if c == '/'
+    true
+  else if c == ':'
+    true
+  else if c == '<'
+    true
+  else if c == '='
+    true
+  else if c == '>'
+    true
+  else if c == '?'
+    true
+  else if c == '@'
+    true
+  else if c == '^'
+    true
+  else if c == '|'
+    true
+  else if c == '~'
+    true
+  else false
+
 -- ---- Greedy collect helpers --------------------------------------------
 
 takeIdCont(cs List[Char]) =
@@ -96,6 +136,22 @@ dropDigit(cs List[Char]) =
     | c :: rest ->
       if charIsDigit c
         dropDigit rest
+      else cs
+    | _ -> []
+
+takeSymOp(cs List[Char]) =
+  match cs
+    | c :: rest ->
+      if isSymOpChar c
+        listAppend [c] (takeSymOp rest)
+      else []
+    | _ -> []
+
+dropSymOp(cs List[Char]) =
+  match cs
+    | c :: rest ->
+      if isSymOpChar c
+        dropSymOp rest
       else cs
     | _ -> []
 
@@ -323,6 +379,40 @@ lexBarOrPipeForward(cs List[Char]) =
       else listAppend [Bar] (lexChars cs)
     | _ -> listAppend [Bar] (lexChars cs)
 
+classifySymOp(op Str) =
+  match op
+    | "->" -> Arrow
+    | "|>" -> PipeForward
+    | ">>=" -> Bind
+    | ">>" -> ThenThen
+    | "<|>" -> Choice
+    | "::" -> ColonColon
+    | "<=" -> Le
+    | ">=" -> Ge
+    | "==" -> EqEq
+    | "!=" -> Neq
+    | "=" -> Eq
+    | "|" -> Bar
+    | ":" -> Colon
+    | "." -> Dot
+    | "+" -> Plus
+    | "-" -> Minus
+    | "*" -> Star
+    | "/" -> Slash
+    | "^" -> Caret
+    | "<" -> Lt
+    | ">" -> Gt
+    | _ -> SymOp op
+
+lexSymOp(cs List[Char]) =
+  match cs
+    | '-' :: '-' :: rest -> skipLineComment rest
+    | _ ->
+      chars = takeSymOp cs
+      rest = dropSymOp cs
+      tok = classifySymOp (strFromChars chars)
+      listAppend [tok] (lexChars rest)
+
 -- ---- Main lexer loop ---------------------------------------------------
 
 lexChars(cs List[Char]) =
@@ -334,7 +424,7 @@ lexChars(cs List[Char]) =
       else if charIsSpace c
         lexChars rest
       else if c == '-'
-        lexMinusOrArrow rest
+        lexSymOp cs
       else if isIdStart c
         lexId cs
       else if c == '_'
@@ -346,15 +436,15 @@ lexChars(cs List[Char]) =
       else if c == '\''
         lexCharLit rest
       else if c == '='
-        lexEqOrEqEq rest
+        lexSymOp cs
       else if c == '!'
-        lexNeq rest
+        lexSymOp cs
       else if c == '<'
-        lexLtOrLeOrChoice rest
+        lexSymOp cs
       else if c == '>'
-        lexGtOrGeOrBind rest
+        lexSymOp cs
       else if c == ':'
-        lexColonOrCons rest
+        lexSymOp cs
       else if c == '('
         listAppend [LParen] (lexChars rest)
       else if c == ')'
@@ -364,21 +454,33 @@ lexChars(cs List[Char]) =
       else if c == ']'
         listAppend [RBrack] (lexChars rest)
       else if c == '|'
-        lexBarOrPipeForward rest
+        lexSymOp cs
       else if c == '+'
-        listAppend [Plus] (lexChars rest)
+        lexSymOp cs
       else if c == '*'
-        listAppend [Star] (lexChars rest)
+        lexSymOp cs
       else if c == '/'
-        listAppend [Slash] (lexChars rest)
+        lexSymOp cs
       else if c == '^'
-        listAppend [Caret] (lexChars rest)
+        lexSymOp cs
       else if c == '.'
-        listAppend [Dot] (lexChars rest)
+        lexSymOp cs
       else if c == ','
         listAppend [Comma] (lexChars rest)
       else if c == '\\'
         listAppend [Backslash] (lexChars rest)
+      else if c == '$'
+        lexSymOp cs
+      else if c == '%'
+        lexSymOp cs
+      else if c == '&'
+        lexSymOp cs
+      else if c == '?'
+        lexSymOp cs
+      else if c == '@'
+        lexSymOp cs
+      else if c == '~'
+        lexSymOp cs
       else listAppend [TError c] (lexChars rest)
 
 -- Public entry point: convert source string to token list.
@@ -440,6 +542,7 @@ showToken(t Token) =
     | Ge       -> "Ge"
     | EqEq     -> "EqEq"
     | Neq      -> "Neq"
+    | SymOp op -> strConcat "SymOp:" op
     | Underscore -> "Underscore"
     | Newline  -> "Newline"
     | Indent   -> "Indent"
@@ -506,4 +609,6 @@ main =
   _ = checkTokens "22 infix" "infix" "KwInfix Eof"
   _ = checkTokens "23 infixl" "infixl" "KwInfixL Eof"
   _ = checkTokens "24 infixr" "infixr" "KwInfixR Eof"
+  _ = checkTokens "25 custom sym op percent" "a %% b" "Ident:a SymOp:%% Ident:b Eof"
+  _ = checkTokens "26 custom sym op compare" "x <=> y" "Ident:x SymOp:<=> Ident:y Eof"
   printfn "Done"

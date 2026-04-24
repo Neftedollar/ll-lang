@@ -138,6 +138,9 @@ env["LLLC_SELF_MAIN"] = self_main
 fixity_fixture = os.path.join(root_dir, "spec/examples/valid/27-fixity-decls.lll")
 with open(fixity_fixture, "r", encoding="utf-8") as f:
     fixity_source = f.read()
+custom_fixity_fixture = os.path.join(root_dir, "spec/examples/valid/28-custom-symbolic-fixity.lll")
+with open(custom_fixity_fixture, "r", encoding="utf-8") as f:
+    custom_fixity_source = f.read()
 p = subprocess.Popen(
     [lllc, "mcp"],
     stdin=subprocess.PIPE,
@@ -154,6 +157,7 @@ wire = "\n".join(
         json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}),
         json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "ffi_inspect", "arguments": {"path": os.path.join(root_dir, "spec/examples/valid/23-external-opaque.lll")}}}),
         json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "parse_source", "arguments": {"source": fixity_source}}}),
+        json.dumps({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "parse_source", "arguments": {"source": custom_fixity_source}}}),
     ]
 ) + "\n"
 
@@ -171,6 +175,7 @@ ok_init = False
 ok_tools = False
 ok_ffi = False
 ok_parse_fixity = False
+ok_parse_custom_fixity = False
 for line in stdout.splitlines():
     line = line.strip()
     if not line:
@@ -208,7 +213,23 @@ for line in stdout.splitlines():
             )
         ):
             ok_parse_fixity = True
-if not (ok_init and ok_tools and ok_ffi and ok_parse_fixity):
+    if obj.get("id") == 5 and "result" in obj:
+        res = obj["result"]
+        if (
+            isinstance(res, dict)
+            and res.get("ok") is True
+            and int(res.get("fixity_count", 0)) >= 3
+            and isinstance(res.get("fixities"), list)
+            and any(
+                isinstance(fx, dict)
+                and fx.get("assoc") == "infixl"
+                and int(fx.get("precedence", -1)) == 6
+                and fx.get("operator") == "%%"
+                for fx in res["fixities"]
+            )
+        ):
+            ok_parse_custom_fixity = True
+if not (ok_init and ok_tools and ok_ffi and ok_parse_fixity and ok_parse_custom_fixity):
     if stdout.strip():
         print(stdout, file=sys.stderr)
     if stderr.strip():

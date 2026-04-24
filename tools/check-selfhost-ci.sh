@@ -38,6 +38,11 @@ check_file() {
 check_invalid_file() {
   local file="$1"
   local expected_code="$2"
+  local e031_op="${3:-+}"
+  local e031_left_src="${4:-FxConflictA}"
+  local e031_right_src="${5:-FxConflictB}"
+  local e031_left_fixity="${6:-left,6}"
+  local e031_right_fixity="${7:-right,7}"
   local output
 
   echo "==> check invalid $file (expect $expected_code)"
@@ -48,12 +53,12 @@ check_invalid_file() {
   printf '%s' "$output" | grep -q "\"primary_error\":\"$expected_code " || fail "invalid fixture missing expected code $expected_code: $file"
   printf '%s' "$output" | grep -q '"secondary_count":0' || fail "invalid fixture produced non-deterministic secondary diagnostics: $file"
   if [[ "$expected_code" == "E031" ]]; then
-    printf '%s' "$output" | grep -Fq 'FixityConflict op:+' || fail "E031 missing operator context (+): $file"
-    printf '%s' "$output" | grep -Fq 'FxConflictA' || fail "E031 missing source module FxConflictA: $file"
-    printf '%s' "$output" | grep -Fq 'FxConflictB' || fail "E031 missing source module FxConflictB: $file"
-    printf '%s' "$output" | grep -Fq '(left,6)' || fail "E031 missing competing fixity (left,6): $file"
-    printf '%s' "$output" | grep -Fq '(right,7)' || fail "E031 missing competing fixity (right,7): $file"
-    printf '%s' "$output" | grep -Fq 'sources:FxConflictA(left,6) vs FxConflictB(right,7)' || fail "E031 is not deterministic/canonical: $file"
+    printf '%s' "$output" | grep -Fq "FixityConflict op:${e031_op}" || fail "E031 missing operator context (${e031_op}): $file"
+    printf '%s' "$output" | grep -Fq "${e031_left_src}" || fail "E031 missing source module ${e031_left_src}: $file"
+    printf '%s' "$output" | grep -Fq "${e031_right_src}" || fail "E031 missing source module ${e031_right_src}: $file"
+    printf '%s' "$output" | grep -Fq "(${e031_left_fixity})" || fail "E031 missing competing fixity (${e031_left_fixity}): $file"
+    printf '%s' "$output" | grep -Fq "(${e031_right_fixity})" || fail "E031 missing competing fixity (${e031_right_fixity}): $file"
+    printf '%s' "$output" | grep -Fq "sources:${e031_left_src}(${e031_left_fixity}) vs ${e031_right_src}(${e031_right_fixity})" || fail "E031 is not deterministic/canonical: $file"
   fi
 }
 
@@ -103,6 +108,7 @@ FILES=(
   "$ROOT_DIR/spec/examples/valid/23-external-opaque.lll"
   "$ROOT_DIR/spec/examples/valid/26-operators-precedence.lll"
   "$ROOT_DIR/spec/examples/valid/27-fixity-decls.lll"
+  "$ROOT_DIR/spec/examples/valid/28-custom-symbolic-fixity.lll"
   "$ROOT_DIR/stdlib/src/Operators.lll"
   "$ROOT_DIR/spec/examples/valid/30-file-io-external.lll"
   "$ROOT_DIR/spec/examples/valid/hello.lll"
@@ -118,14 +124,16 @@ INVALID_CASES=(
   "$ROOT_DIR/spec/examples/invalid/E028-invalid-fixity-precedence.lll|E028"
   "$ROOT_DIR/spec/examples/invalid/E029-duplicate-fixity.lll|E029"
   "$ROOT_DIR/spec/examples/invalid/E030-reserved-fixity-operator.lll|E030"
+  "$ROOT_DIR/spec/examples/invalid/E030-custom-fixity-too-long.lll|E030"
   "$ROOT_DIR/spec/examples/invalid/E031-fixity-conflict-imports.lll|E031"
   "$ROOT_DIR/spec/examples/invalid/E031-fixity-conflict-imports-swapped.lll|E031"
+  "$ROOT_DIR/spec/examples/invalid/E031-fixity-conflict-custom-imports.lll|E031|%%|FxCustomConflictA|FxCustomConflictB|left,6|right,7"
 )
 
 for case in "${INVALID_CASES[@]}"; do
-  IFS='|' read -r file expected_code <<<"$case"
+  IFS='|' read -r file expected_code e031_op e031_left_src e031_right_src e031_left_fixity e031_right_fixity <<<"$case"
   [[ -f "$file" ]] || fail "missing invalid fixture in self-host suite: $file"
-  check_invalid_file "$file" "$expected_code"
+  check_invalid_file "$file" "$expected_code" "$e031_op" "$e031_left_src" "$e031_right_src" "$e031_left_fixity" "$e031_right_fixity"
 done
 
 echo "check-selfhost-ci: OK (${#FILES[@]} valid files, ${#INVALID_CASES[@]} invalid files)"

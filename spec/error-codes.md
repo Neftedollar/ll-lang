@@ -92,11 +92,12 @@ Compact: `E029 4:1 DuplicateFixity op:+`
 Repair: keep a single fixity declaration per operator per module.
 
 ### E030 ReservedOperatorFixity
-Fixity declaration references a reserved/unsupported operator.
+Fixity declaration references a reserved/unsupported/unsafe operator shape.
 
-Compact: `E030 3:1 ReservedOperatorFixity op:=`
+Compact: `E030 3:1 ReservedOperatorFixity op:= reason:reserved-token`
 
-Repair: use one of the currently supported expression operators only.
+Repair: keep operator symbolic and non-reserved; avoid malformed (`?`), reserved
+single tokens (`=`, `|`, `:`, `.`), comment-like (`--`) and overlong forms.
 
 ## Invalid example convention
 

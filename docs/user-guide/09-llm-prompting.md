@@ -70,7 +70,7 @@ Each code maps to exactly one checker stage:
 | E027 | Fixity assoc | Fix malformed fixity declaration form          |
 | E028 | Fixity prec  | Keep precedence in range `1..9`                |
 | E029 | Fixity dup   | Keep one fixity declaration per operator       |
-| E030 | Fixity op    | Use only supported expression operators        |
+| E030 | Fixity op    | Keep operator symbolic, non-reserved, and safe |
 
 Because the number → meaning map is fixed, an LLM system prompt can ship
 with a cheat sheet ("if you see E00N, do X") and the model will apply
