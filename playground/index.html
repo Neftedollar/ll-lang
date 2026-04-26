@@ -416,7 +416,7 @@ main =
   adts: `module ADTs
 
 -- Algebraic data type
-Color = | Red | Green | Blue
+Color = Red | Green | Blue
 
 colorName(c Color) =
   match c
@@ -432,7 +432,7 @@ main =
   'pattern-match': `module Patterns
 
 -- Maybe-style option type
-Opt[A] = | Some A | None
+Opt A = Some A | None
 
 safeDiv(a Int)(b Int) =
   if b == 0
