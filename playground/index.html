@@ -431,18 +431,18 @@ main =
 `,
   'pattern-match': `module Patterns
 
--- Maybe-style option type
-Opt A = Some A | None
+-- User-defined option type with pattern matching
+Opt A = Just A | Empty
 
 safeDiv(a Int)(b Int) =
   if b == 0
-    None
-  else Some (a / b)
+    Empty
+  else Just (a / b)
 
 showOpt(o Opt[Int]) =
   match o
-    | Some x -> strConcat "Some(" (strConcat (intToStr x) ")")
-    | None -> "None"
+    | Just x -> strConcat "Just " (intToStr x)
+    | Empty -> "empty"
 
 main =
   _ = printfn (showOpt (safeDiv 10 2))

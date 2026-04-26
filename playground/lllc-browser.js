@@ -634,7 +634,7 @@ const LllcBrowser = (() => {
           body = parseExpr();
         }
         arms.push({ pat: finalPat, body });
-        skipNewlines();
+        while (at(T.NEWLINE)) advance();
       }
       if (at(T.DEDENT)) advance();
       return { kind: 'EMatch', scrut, arms };
@@ -690,9 +690,9 @@ const LllcBrowser = (() => {
         const nameToken = cur();
         const name = advance().value;
 
-        // Check if it's a type param list
+        // Check if it's a type param list (type vars can be IDENT or TYPEID, e.g. 'A', 'E')
         const tvars = [];
-        while (at(T.IDENT) && peek(1).type !== T.EQ) {
+        while (atAny(T.IDENT, T.TYPEID)) {
           tvars.push(advance().value);
         }
 
@@ -990,7 +990,7 @@ const LllcBrowser = (() => {
       case 'PCon': {
         const cond = `${scrut}?._tag === \`${pat.name}\``;
         const binds = pat.args.map((a, i) => {
-          if (a.kind === 'PVar') return [a.name, `(${scrut} as any)._${i}`];
+          if (a.kind === 'PVar') return [a.name, `${scrut}._${i}`];
           return null;
         }).filter(Boolean);
         return { cond, binds };
