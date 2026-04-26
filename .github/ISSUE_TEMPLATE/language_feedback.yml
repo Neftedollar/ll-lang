@@ -1,0 +1,85 @@
+name: Language Feedback
+description: Share feedback on ll-lang syntax, semantics, ergonomics, or language direction.
+title: "[Language Feedback]: "
+labels:
+  - beta-feedback
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for syntax, semantics, naming, or workflow ergonomics feedback. If you are reporting a defect, use the bug report form instead.
+  - type: dropdown
+    id: theme
+    attributes:
+      label: Feedback theme
+      description: What kind of language feedback is this?
+      options:
+        - Syntax ergonomics
+        - Type system / semantics
+        - Error messages
+        - Modules / project system
+        - Stdlib / builtins
+        - Target output expectations
+        - Learning curve / docs
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: strength
+    attributes:
+      label: Signal strength
+      description: How strong is the feedback?
+      options:
+        - Strong blocker - I would avoid the tool because of this
+        - Important friction - noticeable drag in real use
+        - Nice-to-have - useful polish
+    validations:
+      required: true
+  - type: textarea
+    id: situation
+    attributes:
+      label: What were you trying to do?
+      description: Describe the task or use case that surfaced this feedback.
+      placeholder: I was trying to model...
+    validations:
+      required: true
+  - type: textarea
+    id: pain
+    attributes:
+      label: What felt off?
+      description: Be specific about the syntax, semantics, or UX problem.
+      placeholder: Pattern matching felt awkward because...
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example code or comparison
+      description: Include a code sample, rough redesign, or comparison to another language if helpful.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: desired
+    attributes:
+      label: What would you prefer?
+      description: Describe the behavior, syntax, or documentation that would feel better.
+      placeholder: I expected...
+    validations:
+      required: true
+  - type: textarea
+    id: tradeoffs
+    attributes:
+      label: Tradeoffs to preserve
+      description: If we changed this, what should not get worse?
+      placeholder: Keep token efficiency / keep explicitness / keep...
+    validations:
+      required: false
+  - type: input
+    id: background
+    attributes:
+      label: Your background
+      description: Optional context on your language/tooling background.
+      placeholder: TypeScript + Rust engineer evaluating LLM tooling
+    validations:
+      required: false

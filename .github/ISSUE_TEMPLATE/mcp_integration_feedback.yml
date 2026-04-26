@@ -1,0 +1,88 @@
+name: MCP Integration Feedback
+description: Report setup friction or usability feedback for Claude, Cursor, Zed, or other MCP clients.
+title: "[MCP Feedback]: "
+labels:
+  - beta-feedback
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for feedback about ll-lang's MCP integration, editor wiring, tool responses, or agent workflows.
+  - type: dropdown
+    id: client
+    attributes:
+      label: Client
+      description: Where did you test the integration?
+      options:
+        - Claude Code
+        - Claude Desktop
+        - Cursor
+        - Zed
+        - VS Code
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: issue_type
+    attributes:
+      label: Type of feedback
+      description: What kind of MCP issue did you hit?
+      options:
+        - Install / first-run setup
+        - Config wiring
+        - Tool discovery
+        - Tool output quality
+        - Reliability / crashes
+        - Workflow ergonomics
+        - Docs gap
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What were you trying to do?
+      description: Describe the user flow or prompt sequence.
+      placeholder: I was trying to wire `lllc mcp` into Cursor and then ask it to...
+    validations:
+      required: true
+  - type: textarea
+    id: failure
+    attributes:
+      label: What went wrong?
+      description: Include errors, confusing behavior, or missing capabilities.
+      placeholder: The client connected, but the tool list...
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Config snippet
+      description: Paste the relevant MCP config if you can share it.
+      render: json
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots, or terminal output
+      description: Paste any supporting evidence.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: ideal
+    attributes:
+      label: What would a better experience look like?
+      description: Tell us what "fixed" means from your perspective.
+      placeholder: Setup should take less than 5 minutes and the agent should...
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, shell, ll-lang version/commit, client version, and model if relevant.
+      placeholder: macOS 15, zsh, ll-lang main@abc123, Cursor 0.49, Claude 3.7
+    validations:
+      required: true

@@ -17,10 +17,13 @@ CORPUS=(
   "spec/examples/valid/21-multi-param-types.lll"
   "spec/examples/valid/24-pipeline-v2.lll"
   "spec/examples/valid/25-llm-repair-workflow.lll"
-  "spec/examples/valid/26-operators-precedence.lll"
 )
 # Note: 09-lexer-real is currently excluded because self `check` diverges
 # (tracked by parity workstream #176).
+# Note: 26-operators-precedence.lll is excluded because the pinned bootstrap
+# binary (v1.2.2, released 2026-04-19) predates operator support added in
+# PR #178 (2026-04-20): legacy pipe `->`, choice `<|>`, and fixity table.
+# Stage0 fails on this file; self-hosted succeeds. Re-add once bootstrap >= v1.3.
 
 result_kind() {
   local file="$1"

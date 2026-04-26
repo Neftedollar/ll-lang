@@ -35,3 +35,17 @@ The script requires:
 ## Stage0-only evidence
 
 See [Stage0-Only Matrix](./stage0-only-matrix.md) for the explicit residual stage0 scope and planned removal path.
+
+## Landing page and homepage wiring evidence
+
+Verified on 2026-04-24 UTC:
+
+- Canonical landing page URL: `https://neftedollar.com/ll-lang/`
+- Canonical playground URL: `https://neftedollar.com/ll-lang/playground/`
+- GitHub Pages project URL `https://neftedollar.github.io/ll-lang/` redirects to the canonical custom-domain path above.
+- Repo metadata homepage for `Neftedollar/ll-lang` should point to the same canonical landing page URL.
+
+Required visual proof on the live page:
+
+- Hero media: `ll-lang` token-comparison GIF from `docs/assets/hero/hero-story.gif`
+- Social card: `ll-lang` OG image from `docs/assets/social/og.png`

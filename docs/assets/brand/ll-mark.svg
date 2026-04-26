@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="title desc">
+  <title id="title">ll-lang mark</title>
+  <desc id="desc">Rounded orange square with a minimal ll-lang glyph.</desc>
+  <rect width="120" height="120" rx="30" fill="#f46a1f"/>
+  <rect x="30" y="22" width="16" height="58" rx="8" fill="#fffaf1"/>
+  <rect x="54" y="22" width="16" height="58" rx="8" fill="#fffaf1"/>
+  <rect x="78" y="68" width="16" height="16" rx="8" fill="#fffaf1"/>
+</svg>
