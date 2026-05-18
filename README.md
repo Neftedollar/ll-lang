@@ -86,6 +86,12 @@ lllc run hello.lll
 
 Write ll-lang code and run it instantly — no install needed.
 
+### See it in action
+
+**[→ Watch the full self-host + multi-target demo on dev.to](https://dev.to/neftedollar/the-2600-line-compiler-that-compiles-itself-and-emits-f-typescript-python-java-and-c-49lh)**
+
+![Self-host cycle demo: bootstrap install, multi-target compile, and compiler self-check](docs/assets/demo/self-host-cycle.gif)
+
 ---
 
 ### From source (bootstrap path)

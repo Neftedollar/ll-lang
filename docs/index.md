@@ -20,6 +20,7 @@ hide:
       </p>
       <div class="ll-actions">
         <a class="md-button md-button--primary" href="https://github.com/Neftedollar/ll-lang">Open GitHub</a>
+        <a class="md-button" href="https://dev.to/neftedollar/the-2600-line-compiler-that-compiles-itself-and-emits-f-typescript-python-java-and-c-49lh">See it in action</a>
         <a class="md-button" href="why-ll-lang/">Why ll-lang</a>
         <a class="md-button" href="language-spec/">Read the spec</a>
         <a class="md-button" href="https://github.com/Neftedollar/ll-lang/discussions">Leave beta feedback →</a>
@@ -54,6 +55,32 @@ hide:
   <section class="ll-command-bar">
     <span class="ll-command-bar__label">Install a pinned bootstrap compiler</span>
     <code>./tools/bootstrap-self.sh install</code>
+  </section>
+
+  <section class="ll-section ll-section--contrast">
+    <div>
+      <div class="ll-section__eyebrow">See it in action</div>
+      <h2>A full self-host cycle now has a working demo.</h2>
+      <p>
+        The latest walkthrough shows one compact ll-lang source file compiling to
+        multiple targets, then the compiler checking its own source in the
+        self-hosted path.
+      </p>
+      <div class="ll-link-row">
+        <a href="https://dev.to/neftedollar/the-2600-line-compiler-that-compiles-itself-and-emits-f-typescript-python-java-and-c-49lh">Read the dev.to post</a>
+        <a href="https://github.com/Neftedollar/ll-lang/blob/main/tools/demo-self-host.sh">Open demo script</a>
+      </div>
+    </div>
+    <div class="ll-hero__media">
+      <img
+        class="ll-hero__gif"
+        src="assets/demo/self-host-cycle.gif"
+        alt="Animated terminal demo of bootstrap install, multi-target compile, and ll-lang self-host check"
+      />
+      <p class="ll-caption">
+        Roughly 24 seconds: install, compile to TypeScript and Python, then run the self-host check.
+      </p>
+    </div>
   </section>
 
   <section class="ll-section">
