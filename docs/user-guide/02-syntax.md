@@ -139,6 +139,20 @@ forms are rejected with `E030`. Diagnostics `E027`..`E031` cover assoc,
 precedence, duplicate declarations, reserved/unsafe operators, and import
 conflicts.
 
+Operator implementations are normal function declarations with a parenthesized
+symbolic head. Fixity stays separate:
+
+```lll
+infixl 6 %%
+
+(%%)(a Int)(b Int) Int = a + b
+
+sample = 2 %% 3
+```
+
+The declaration above binds the function name `%%`; backend emitters mangle the
+symbolic name to a target-safe identifier.
+
 ## `if` / `else`
 
 `if` is an expression — both arms must have the same type. Body is indented

@@ -1,0 +1,7 @@
+module Example.CustomOperatorBinding
+
+infixl 6 %%
+
+(%%)(a Int)(b Int) Int = a + b
+
+sample = 2 %% 3

@@ -75,6 +75,78 @@ Decl =
 -- Module
 Module = MkModule (List[Str]) (List[FixityDecl]) (List[Decl])
 
+-- ---- Core alias normalization ------------------------------------------
+-- Backends consume this normalized AST instead of hardcoding core aliases.
+
+normalizeExpr(e Expr) Expr =
+  match e
+    | EInt _ -> e
+    | EStr _ -> e
+    | EBool _ -> e
+    | EChar _ -> e
+    | EFloat _ -> e
+    | EVar _ -> e
+    | ECon _ -> e
+    | ENil -> e
+    | EApp f x ->
+      EApp (normalizeExpr f) (normalizeExpr x)
+    | EIf c t f ->
+      EIf (normalizeExpr c) (normalizeExpr t) (normalizeExpr f)
+    | EMatch scrut pats bodies ->
+      EMatch (normalizeExpr scrut) pats (normalizeExprList bodies)
+    | ELam x body ->
+      ELam x (normalizeExpr body)
+    | ELet x rhs body ->
+      ELet x (normalizeExpr rhs) (normalizeExpr body)
+    | ELetTuple a b rhs body ->
+      ELetTuple a b (normalizeExpr rhs) (normalizeExpr body)
+    | EList items ->
+      EList (normalizeExprList items)
+    | EBinOp op l r ->
+      nl = normalizeExpr l
+      nr = normalizeExpr r
+      if op == "|>"
+        EApp nr nl
+      else if op == ">>="
+        EApp (EApp (EVar "llMaybeBind") nl) nr
+      else if op == ">>"
+        EApp (EApp (EVar "llMaybeThen") nl) nr
+      else if op == "<|>"
+        EApp (EApp (EVar "llMaybeChoice") nl) nr
+      else
+        EBinOp op nl nr
+    | ETuple a b ->
+      ETuple (normalizeExpr a) (normalizeExpr b)
+    | ECons h t ->
+      ECons (normalizeExpr h) (normalizeExpr t)
+
+normalizeExprList(xs List[Expr]) =
+  match xs
+    | [] -> []
+    | x :: rest ->
+      normalizeExpr x :: normalizeExprList rest
+
+normalizeDecl(d Decl) Decl =
+  match d
+    | DFn name params ret body ->
+      DFn name params ret (normalizeExpr body)
+    | DLet name body ->
+      DLet name (normalizeExpr body)
+    | DExport inner ->
+      DExport (normalizeDecl inner)
+    | _ -> d
+
+normalizeModule(m Module) Module =
+  match m
+    | MkModule path fixities decls ->
+      MkModule path fixities (normalizeDeclList decls)
+
+normalizeDeclList(xs List[Decl]) =
+  match xs
+    | [] -> []
+    | x :: rest ->
+      normalizeDecl x :: normalizeDeclList rest
+
 -- ---- Token stream helpers ----------------------------------------------
 
 skipNewlines(toks List[Token]) =
@@ -119,22 +191,45 @@ skipBrackTypeBody(toks List[Token]) =
     | _ :: rest -> skipBrackTypeBody rest
     | [] -> []
 
--- Parse a single type expression (name or name[arg]).
-parseTypeExpr(toks List[Token]) =
+parseTypeAtom(toks List[Token]) =
   match toks
     | TypeId name :: rest ->
       rest2 = skipBrackTypeArgs rest
       (TyName name, rest2)
     | Ident name :: rest ->
       (TyName name, rest)
+    | LParen :: rest ->
+      let (inner, rest2) = parseTypeExpr rest
+      rest3 = match rest2
+        | RParen :: r -> r
+        | _ -> rest2
+      (inner, rest3)
     | _ -> (TyName "?", toks)
+
+parseTypeArrowTail(left TypeExpr)(toks List[Token]) =
+  match toks
+    | Arrow :: rest ->
+      let (right, rest2) = parseTypeExpr rest
+      (TyFn left right, rest2)
+    | _ -> (left, toks)
+
+-- Parse a type expression. Function arrows are right-associative.
+parseTypeExpr(toks List[Token]) =
+  let (atom, rest) = parseTypeAtom toks
+  parseTypeArrowTail atom rest
 
 -- Optional return type annotation before `=`.
 parseReturnType(toks List[Token]) =
   match toks
-    | TypeId name :: rest ->
-      rest2 = skipBrackTypeArgs rest
-      (Some (TyName name), rest2)
+    | TypeId _ :: _ ->
+      let (ty, rest) = parseTypeExpr toks
+      (Some ty, rest)
+    | Ident _ :: _ ->
+      let (ty, rest) = parseTypeExpr toks
+      (Some ty, rest)
+    | LParen :: _ ->
+      let (ty, rest) = parseTypeExpr toks
+      (Some ty, rest)
     | _ -> (None, toks)
 
 -- ---- Param group parsing -----------------------------------------------
@@ -143,23 +238,23 @@ parseReturnType(toks List[Token]) =
 parseParamGroups(toks List[Token]) =
   match toks
     | LParen :: RParen :: rest -> ([], rest)
-    | LParen :: Ident pname :: TypeId tname :: rest ->
-      rest2 = skipBrackTypeArgs rest
-      rest3 = match rest2
-        | RParen :: r -> r
-        | _ -> rest2
-      let (ps, rest4) = parseParamGroups rest3
-      (MkParam pname (TyName tname) :: ps, rest4)
-    | LParen :: Underscore :: Ident pname :: TypeId tname :: rest ->
-      rest2 = skipBrackTypeArgs rest
-      rest3 = match rest2
-        | RParen :: r -> r
-        | _ -> rest2
-      let (ps, rest4) = parseParamGroups rest3
-      (MkParam (strConcat "_" pname) (TyName tname) :: ps, rest4)
     | LParen :: Ident pname :: RParen :: rest ->
       let (ps, rest2) = parseParamGroups rest
       (MkParam pname (TyName "?") :: ps, rest2)
+    | LParen :: Ident pname :: rest ->
+      let (ty, rest2) = parseTypeExpr rest
+      rest3 = match rest2
+        | RParen :: r -> r
+        | _ -> rest2
+      let (ps, rest4) = parseParamGroups rest3
+      (MkParam pname ty :: ps, rest4)
+    | LParen :: Underscore :: Ident pname :: rest ->
+      let (ty, rest2) = parseTypeExpr rest
+      rest3 = match rest2
+        | RParen :: r -> r
+        | _ -> rest2
+      let (ps, rest4) = parseParamGroups rest3
+      (MkParam (strConcat "_" pname) ty :: ps, rest4)
     | _ -> ([], toks)
 
 -- ---- Type declaration parsing ------------------------------------------
@@ -587,9 +682,21 @@ parseFnBodyWithFixities(fixities List[FixityDecl])(prms List[Param])(toks List[T
 parseFnBody(prms List[Param])(toks List[Token]) =
   parseFnBodyWithFixities [] prms toks
 
-parseFnDeclWithFixities(fixities List[FixityDecl])(toks List[Token]) =
+parseFnHead(toks List[Token]) =
   match toks
-    | Ident name :: rest ->
+    | Ident name :: rest -> (name, rest)
+    | LParen :: t :: RParen :: rest ->
+      match tokenToFixityOp t
+        | Some op -> (op, rest)
+        | None -> ("?", rest)
+    | LParen :: RParen :: rest -> ("?", rest)
+    | LParen :: _ :: rest -> ("?", rest)
+    | _ -> ("?", toks)
+
+parseFnDeclWithFixities(fixities List[FixityDecl])(toks List[Token]) =
+  head = parseFnHead toks
+  match head
+    | (name, rest) ->
       let (prms, rest2) = parseParamGroups rest
       let (retTy, rest3) = parseReturnType rest2
       rest4 = match (skipNewlines rest3)
@@ -597,7 +704,6 @@ parseFnDeclWithFixities(fixities List[FixityDecl])(toks List[Token]) =
         | _ -> skipNewlines rest3
       let (body, rest5) = parseFnBodyWithFixities fixities prms rest4
       (DFn name prms retTy body, rest5)
-    | _ -> (DFn "?" [] None (EInt 0), toks)
 
 parseFnDecl(toks List[Token]) =
   parseFnDeclWithFixities [] toks
@@ -712,6 +818,14 @@ parseFixityDecl(toks List[Token]) =
     | KwInfix :: rest -> (DFixity FixityInvalid 99 "?", rest)
     | _ -> (DFixity FixityInvalid 99 "?", toks)
 
+isParenFnHeadStart(toks List[Token]) =
+  match toks
+    | LParen :: t :: RParen :: _ ->
+      match tokenToFixityOp t
+        | Some _ -> true
+        | None -> false
+    | _ -> false
+
 -- ---- Top-level declaration dispatch ------------------------------------
 
 parseOneDeclWithFixities(fixities List[FixityDecl])(toks List[Token]) =
@@ -719,6 +833,11 @@ parseOneDeclWithFixities(fixities List[FixityDecl])(toks List[Token]) =
     | TypeId _ :: _ -> parseTypeDecl toks
     | KwLet :: _ -> parseLetDeclWithFixities fixities toks
     | Ident _ :: _ -> parseFnDeclWithFixities fixities toks
+    | LParen :: _ ->
+      if isParenFnHeadStart toks
+        parseFnDeclWithFixities fixities toks
+      else
+        parseFnDeclWithFixities fixities toks
     | KwImport :: _ -> parseImportDecl toks
     | KwExternal :: _ -> parseExternalDecl toks
     | KwOpaque :: _ -> parseOpaqueDecl toks
@@ -747,6 +866,11 @@ parseDeclsWithFixities(fixities List[FixityDecl])(toks List[Token]) =
     | Ident _ :: _ ->
       let (d, rest) = parseFnDeclWithFixities fixities toks2
       d :: parseDeclsWithFixities fixities rest
+    | LParen :: _ ->
+      if isParenFnHeadStart toks2
+        let (d, rest) = parseFnDeclWithFixities fixities toks2
+        d :: parseDeclsWithFixities fixities rest
+      else []
     | KwImport :: _ ->
       let (d, rest) = parseImportDecl toks2
       d :: parseDeclsWithFixities fixities rest
@@ -1039,6 +1163,14 @@ main =
   _ = parserCheckModuleFnBody "5g module fixity changes expression parse" toks5g "calc" "EBinOp(* EBinOp(+ EVar a EVar b) EVar c)"
   toks5h = KwModule :: TypeId "M" :: Newline :: KwInfixL :: IntLit 6 :: SymOp "%%" :: Newline :: Ident "calc" :: LParen :: Ident "a" :: TypeId "Int" :: RParen :: LParen :: Ident "b" :: TypeId "Int" :: RParen :: Eq :: Ident "a" :: SymOp "%%" :: Ident "b" :: Eof :: []
   _ = parserCheckModuleFnBody "5h module custom sym fixity parse" toks5h "calc" "EBinOp(%% EVar a EVar b)"
+  toks5i = LParen :: SymOp "%%" :: RParen :: LParen :: Ident "a" :: TypeId "Int" :: RParen :: LParen :: Ident "b" :: TypeId "Int" :: RParen :: Eq :: Ident "a" :: Plus :: Ident "b" :: Eof :: []
+  _ = parserCheckDecl "5i custom operator binding decl" toks5i "DFn %% body=(EBinOp(+ EVar a EVar b))"
+  toks5j = KwModule :: TypeId "M" :: Newline :: KwInfixL :: IntLit 6 :: SymOp "%%" :: Newline :: LParen :: SymOp "%%" :: RParen :: LParen :: Ident "a" :: TypeId "Int" :: RParen :: LParen :: Ident "b" :: TypeId "Int" :: RParen :: Eq :: Ident "a" :: Plus :: Ident "b" :: Newline :: Ident "sample" :: Eq :: IntLit 2 :: SymOp "%%" :: IntLit 3 :: Eof :: []
+  _ = parserCheckModuleFnBody "5j module custom operator binding use" toks5j "sample" "EBinOp(%% EInt 2 EInt 3)"
+  toks5k = KwExport :: LParen :: SymOp "%%" :: RParen :: LParen :: Ident "a" :: TypeId "Int" :: RParen :: LParen :: Ident "b" :: TypeId "Int" :: RParen :: Eq :: Ident "a" :: Plus :: Ident "b" :: Eof :: []
+  _ = parserCheckDecl "5k export custom operator binding decl" toks5k "DExport(DFn %% body=(EBinOp(+ EVar a EVar b)))"
+  toks5l = LParen :: SymOp "%%" :: RParen :: LParen :: Ident "x" :: Ident "a" :: RParen :: LParen :: Ident "f" :: Ident "a" :: Arrow :: Ident "b" :: RParen :: Ident "b" :: Eq :: Ident "f" :: Ident "x" :: Eof :: []
+  _ = parserCheckDecl "5l custom operator binding fn type param" toks5l "DFn %% body=(EApp(EVar f EVar x))"
 
   -- 6. Int literal: 42
   _ = parserCheckExpr "6 EInt" (IntLit 42 :: Eof :: []) "EInt 42"

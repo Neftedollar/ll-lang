@@ -1,0 +1,26 @@
+module Std.Normalize
+
+import Std.Parser
+
+-- Pre-codegen normalization for core operator aliases.
+-- Backends should receive ordinary calls and target primitives, not aliases.
+
+normalizeCheck(label Str)(got Expr)(expected Str) =
+  rendered = showExpr (normalizeExpr got)
+  if rendered == expected
+    printfn (strConcat "OK " label)
+  else
+    printfn (strConcat "FAIL " (strConcat label (strConcat " expected=" (strConcat expected (strConcat " got=" rendered)))))
+
+main =
+  _ = normalizeCheck "1 pipe alias" (EBinOp "|>" (EInt 1) (EVar "inc")) "EApp(EVar inc EInt 1)"
+  nested = EBinOp "|>" (EBinOp "|>" (EVar "x") (EVar "f")) (EVar "g")
+  _ = normalizeCheck "2 nested pipe alias" nested "EApp(EVar g EApp(EVar f EVar x))"
+  _ = normalizeCheck "3 bind alias" (EBinOp ">>=" (EVar "m") (EVar "f")) "EApp(EApp(EVar llMaybeBind EVar m) EVar f)"
+  _ = normalizeCheck "4 then alias" (EBinOp ">>" (EVar "m") (EVar "n")) "EApp(EApp(EVar llMaybeThen EVar m) EVar n)"
+  _ = normalizeCheck "5 choice alias" (EBinOp "<|>" (EVar "a") (EVar "b")) "EApp(EApp(EVar llMaybeChoice EVar a) EVar b)"
+  _ = normalizeCheck "6 custom op remains binop" (EBinOp "%%" (EInt 2) (EInt 3)) "EBinOp(%% EInt 2 EInt 3)"
+  _ = normalizeCheck "7 plus remains binop" (EBinOp "+" (EInt 2) (EInt 3)) "EBinOp(+ EInt 2 EInt 3)"
+  _ = normalizeCheck "8 equality remains binop" (EBinOp "==" (EInt 2) (EInt 3)) "EBinOp(== EInt 2 EInt 3)"
+  _ = normalizeCheck "9 compare remains binop" (EBinOp "<" (EInt 2) (EInt 3)) "EBinOp(< EInt 2 EInt 3)"
+  printfn "Done"

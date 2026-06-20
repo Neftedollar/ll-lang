@@ -1,0 +1,3 @@
+module Invalid.ReservedOperatorBinding
+
+(=)(a Int)(b Int) Int = a

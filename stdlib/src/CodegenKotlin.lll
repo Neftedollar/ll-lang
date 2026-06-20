@@ -97,10 +97,78 @@ isKotlinKeyword(s Str) =
     | "while"       -> true
     | _             -> false
 
+isAsciiLetter(c Char) =
+  n = charToInt c
+  if n < 65
+    false
+  else if n <= 90
+    true
+  else if n < 97
+    false
+  else n <= 122
+
+isIdentStart(c Char) =
+  if isAsciiLetter c
+    true
+  else c == '_'
+
+isIdentCont(c Char) =
+  if isIdentStart c
+    true
+  else charIsDigit c
+
+isIdentTail(cs List[Char]) =
+  match cs
+    | [] -> true
+    | c :: rest ->
+      if isIdentCont c
+        isIdentTail rest
+      else false
+
+isIdentLike(s Str) =
+  match strChars s
+    | [] -> false
+    | c :: rest ->
+      if isIdentStart c
+        isIdentTail rest
+      else false
+
+mangleOpChars(cs List[Char]) =
+  match cs
+    | [] -> ""
+    | c :: rest ->
+      strConcat "_" (strConcat (intToStr (charToInt c)) (mangleOpChars rest))
+
+mangleOpIdent(s Str) =
+  strConcat "__ll_op" (mangleOpChars (strChars s))
+
 safeIdent(s Str) =
-  if isKotlinKeyword s
+  if isIdentLike s == false
+    mangleOpIdent s
+  else if isKotlinKeyword s
     strConcat "`" (strConcat s "`")
   else s
+
+isTargetInfixOp(op Str) =
+  if op == "+"
+    true
+  else if op == "-"
+    true
+  else if op == "*"
+    true
+  else if op == "/"
+    true
+  else if op == "=="
+    true
+  else if op == "!="
+    true
+  else if op == "<"
+    true
+  else if op == ">"
+    true
+  else if op == "<="
+    true
+  else op == ">="
 
 -- ---- String escaping -------------------------------------------------------
 
@@ -248,7 +316,10 @@ emitExpr(e Expr) =
     | EList items ->
       strConcat "listOf(" (strConcat (joinWith ", " (listMap emitExpr items)) ")")
     | EBinOp op l r ->
-      strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat op (strConcat " " (strConcat (emitExpr r) ")")))))
+      if isTargetInfixOp op
+        strConcat "(" (strConcat (emitExpr l) (strConcat " " (strConcat op (strConcat " " (strConcat (emitExpr r) ")")))))
+      else
+        strConcat (safeIdent op) (strConcat "(" (strConcat (emitExpr l) (strConcat ", " (strConcat (emitExpr r) ")"))))
     | ETuple a b ->
       strConcat "Pair(" (strConcat (emitExpr a) (strConcat ", " (strConcat (emitExpr b) ")")))
     | ECons h t ->

@@ -109,9 +109,12 @@ FILES=(
   "$ROOT_DIR/spec/examples/valid/26-operators-precedence.lll"
   "$ROOT_DIR/spec/examples/valid/27-fixity-decls.lll"
   "$ROOT_DIR/spec/examples/valid/28-custom-symbolic-fixity.lll"
+  "$ROOT_DIR/spec/examples/valid/29-custom-operator-binding.lll"
   "$ROOT_DIR/stdlib/src/Operators.lll"
+  "$ROOT_DIR/stdlib/src/Normalize.lll"
   "$ROOT_DIR/spec/examples/valid/30-file-io-external.lll"
   "$ROOT_DIR/spec/examples/valid/hello.lll"
+  "$ROOT_DIR/spec/examples/valid/32-pipe-operator-binding.lll"
 )
 
 for file in "${FILES[@]}"; do
@@ -125,6 +128,8 @@ INVALID_CASES=(
   "$ROOT_DIR/spec/examples/invalid/E029-duplicate-fixity.lll|E029"
   "$ROOT_DIR/spec/examples/invalid/E030-reserved-fixity-operator.lll|E030"
   "$ROOT_DIR/spec/examples/invalid/E030-custom-fixity-too-long.lll|E030"
+  "$ROOT_DIR/spec/examples/invalid/E030-reserved-operator-binding.lll|E030"
+  "$ROOT_DIR/spec/examples/invalid/E030-core-operator-binding.lll|E030"
   "$ROOT_DIR/spec/examples/invalid/E031-fixity-conflict-imports.lll|E031"
   "$ROOT_DIR/spec/examples/invalid/E031-fixity-conflict-imports-swapped.lll|E031"
   "$ROOT_DIR/spec/examples/invalid/E031-fixity-conflict-custom-imports.lll|E031|%%|FxCustomConflictA|FxCustomConflictB|left,6|right,7"
