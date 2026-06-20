@@ -1,0 +1,5 @@
+module Std.ParserSelfTest
+
+import Std.Parser
+
+main = parserSelfTests

@@ -1015,7 +1015,7 @@ parserCheckModuleFnBody(label Str)(toks List[Token])(fnName Str)(expected Str) =
 -- ---- Tests -------------------------------------------------------------
 -- Token lists are built with :: cons (no comma list syntax in ll-lang).
 
-main =
+parserSelfTests =
   -- 1. external decl: external httpGet(url Str) Str
   _ = parserCheckDecl "1 external fn" (KwExternal :: Ident "httpGet" :: LParen :: Ident "url" :: TypeId "Str" :: RParen :: TypeId "Str" :: Eof :: []) "DExternal httpGet"
   -- 2. external decl: external ping() Bool

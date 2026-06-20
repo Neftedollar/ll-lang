@@ -110,6 +110,7 @@ FILES=(
   "$ROOT_DIR/spec/examples/valid/27-fixity-decls.lll"
   "$ROOT_DIR/spec/examples/valid/28-custom-symbolic-fixity.lll"
   "$ROOT_DIR/stdlib/src/Operators.lll"
+  "$ROOT_DIR/stdlib/src/ParserSelfTest.lll"
   "$ROOT_DIR/spec/examples/valid/30-file-io-external.lll"
   "$ROOT_DIR/spec/examples/valid/hello.lll"
 )
